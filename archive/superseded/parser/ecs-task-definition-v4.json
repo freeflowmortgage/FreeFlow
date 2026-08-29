@@ -1,0 +1,45 @@
+{
+  "family": "freeflow-income-slicer-task",
+  "networkMode": "awsvpc",
+  "containerDefinitions": [
+    {
+      "name": "freeflow-slicer-service",
+      "image": "<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/freeflow-slicer:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "8080"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/freeflow-income-slicer",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "slicer"
+        }
+      },
+      "cpu": 2048,
+      "memory": 8192
+    }
+  ],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "2048",
+  "memory": "8192",
+  "executionRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/freeflowEcsTaskRole"
+}

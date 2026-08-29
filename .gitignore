@@ -1,0 +1,32 @@
+# Dependencies and build
+node_modules/
+.venv/
+.venv-b2b-test/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.turbo/
+.next/
+dist/
+build/
+*.tsbuildinfo
+
+# Secrets and local env
+.env
+.env.local
+.env.*.local
+.env.development
+.env.slicer
+!.env.example
+
+# Local parser / test artifacts
+test-docs/
+*.pdf
+!docs/**/*.md
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

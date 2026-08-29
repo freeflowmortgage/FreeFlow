@@ -1,0 +1,14 @@
+{
+  "name": "@mortgage-pos/mortgage-engine",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/calculateForm1084Income.ts",
+  "types": "./src/calculateForm1084Income.ts",
+  "dependencies": {
+    "decimal.js": "^10.4.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,48 @@
+# Use a lightweight, secure official Python 3.12-slim-bookworm baseline
+FROM python:3.12-slim-bookworm
+
+# Prevent Python from writing .pyc files and enable unbuffered stdout logging
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set secure working directory inside container
+WORKDIR /app
+
+# Install essential system-level dependencies for PDF rendering, compiling, and network diagnostics
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libmagic-dev \
+    poppler-utils \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy python requirements first to leverage Docker's caching layer
+COPY requirements.txt .
+
+# Install python packages + explicitly install gunicorn to support multi-worker process clustering
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Copy application files, including our newly optimized clustering and verification scripts
+COPY server.py .
+COPY pre_split_tax_returns-v4.py .
+COPY ai_pdf_converter.py .
+COPY gunicorn_conf.py .
+COPY entrypoint.sh .
+COPY test-tmpfs-isolation.sh .
+
+# Create a secure, non-privileged system user and group (Security best practice)
+RUN groupadd -g 8888 appgroup && \
+    useradd -u 8888 -g appgroup -s /bin/sh -m appuser && \
+    chown -R appuser:appgroup /app
+
+# Ensure shell scripts have correct execution permissions before dropping root privileges
+RUN chmod +x entrypoint.sh test-tmpfs-isolation.sh
+
+# Run container as our secure appuser
+USER appuser
+
+# Expose internal service port (matches our Fargate Task Definition and Gunicorn config)
+EXPOSE 8080
+
+# Execute the entrypoint script to perform ZDR RAM checks and launch Gunicorn
+ENTRYPOINT ["/app/entrypoint.sh"]

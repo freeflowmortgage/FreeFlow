@@ -1,0 +1,36 @@
+{
+  "name": "web",
+  "version": "7.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "next": "^14.2.4",
+    "lucide-react": "^0.378.0",
+    "decimal.js": "^10.4.3",
+    "stripe": "^15.12.0",
+    "@stripe/stripe-js": "^3.5.0",
+    "zod": "^3.23.8",
+    "axios": "^1.7.2",
+    "@prisma/client": "^5.14.0",
+    "@mortgage-pos/ui": "workspace:*",
+    "@mortgage-pos/database": "workspace:*",
+    "@mortgage-pos/mortgage-engine": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^20.14.2",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "autoprefixer": "^10.4.19",
+    "prisma": "^5.14.0"
+  }
+}
