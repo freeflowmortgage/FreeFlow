@@ -41,7 +41,7 @@ freeflow-income-suite/ (Monorepo Root)
 ├── packages/
 │   ├── database/                        # Database modeling and migration scripts
 │   │   ├── prisma/
-│   │   │   └── schema.prisma            # supabase-schema-v2.prisma: multi-tenant schema [cite: 131]
+│   │   │   └── schema.prisma            # supabase-schema-v4.prisma: multi-tenant schema [cite: 131]
 │   │   └── package.json
 │   └── mortgage-engine/                 # Shared deterministic GSE rules and unit tests [cite: 38]
 │       ├── src/
