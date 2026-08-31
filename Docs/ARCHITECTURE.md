@@ -1,6 +1,6 @@
 # FreeFlow B2B Income Suite Architecture
 
-*Document version: 4.1 — aligned to `b2b-income-monorepo-structure-v4.md` and the in-memory parser now running locally.*
+*Document version: 4.2 — aligned to the version 6 parser gateway and the in-memory parser running locally.*
 
 This is the live architecture note. Older playbooks (`ARCHITECTURE.md` v2, monorepo structure v2) described a retail POS + sandwich-PDF stack. Those are archived. The product is a **B2B income-underwriting utility only**.
 
@@ -46,7 +46,7 @@ Freeflow/
 │   ├── database/prisma/schema.prisma
 │   └── rules-engine/                  # Encompass field map + share-token rules
 ├── services/doc-parser/
-│   ├── src/server.py                  # POST /parse, POST /api/underwrite/process
+│   ├── src/server.py                  # v6 gateway: POST /parse, POST /api/underwrite/process
 │   ├── src/ai_pdf_converter.py        # pypdfium2 + RapidOCR, relative boxes [0,1]
 │   ├── src/pdf_splitter.py            # v5 See-Statement regex, in-memory only
 │   ├── Dockerfile                     # Python 3.12, no Poppler/Tesseract
@@ -56,7 +56,6 @@ Freeflow/
 │   ├── ARCHITECTURE.md                # This file
 │   ├── b2b-income-monorepo-structure-v4.md
 │   ├── UnderwriterSplitViewDemo-v7.tsx
-│   └── copy-assets-v7.sh
 ├── copy-assets-v5.sh                  # Hardened migrator (does not overlay live parser)
 ├── docker-compose.yml
 ├── pnpm-workspace.yaml
@@ -73,7 +72,11 @@ Canonical spec drop: `docs/b2b-income-monorepo-structure-v4.md`. Where that file
 
 - page indices, form labels, relative boxes `(x, y, w, h) ∈ [0, 1]`
 - confidences, flags, unresolved “See Statement” hits
+- v6 tenant/billing fields plus v5 compatibility fields consumed by Parser Lab
 - **no** sandwich PDF, **no** `sliced_pdf_payload_b64`
+
+`POST /api/underwrite/process` requires `x-tenant-id` and `x-underwriter-id`.
+The local `POST /parse` route remains header-optional for Parser Lab.
 
 Pipeline:
 
@@ -148,5 +151,7 @@ Update these when you next edit the v4 spec itself:
 - Renderer is **pypdfium2**, not pdf2image/Poppler.
 - OCR is **RapidOCR**, not Tesseract (`TESSDATA_PREFIX` in `.env.slicer` is leftover).
 - Container file is **`Dockerfile`**, not `Dockerfile-v2`.
-- Migrator on disk: `copy-assets-v5.sh` (hardened) and `docs/copy-assets-v7.sh` (still points at `apps/web` and old slicer names — do not run it against live parser src).
+- Migrator on disk: root `copy-assets-v5.sh` is canonical. Stale v7/v19
+  migrators are archived because they overwrite the in-memory parser with
+  incompatible Architecture drops.
 - Live local UI is **`apps/underwriting-console`**, not only `underwriter-portal`.
