@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardList, Eye, ShieldAlert } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ClipboardList, Eye, Monitor, MonitorX, ShieldAlert } from 'lucide-react';
 import { PdfCoordinateCanvas } from './PdfCoordinateCanvas';
 import { usePdfViewer, type SpatialCoordinates } from '../hooks/usePdfViewer';
+import { APPRAISAL_DOC_CHANNEL, type AppraisalDocMessage, type AppraisalDocSnapshot } from '../splitDocSync';
 
 type Severity = 'info' | 'warning' | 'error';
 type Program = 'CONV' | 'FHA' | 'VA';
@@ -337,6 +338,83 @@ export default function AppraisalReviewWorkspace() {
     triggerHighlight({ pageIndex: finding.pageIndex, box: finding.box });
   }
 
+  // ==================== DUAL-MONITOR APPRAISAL CANVAS (UW / QA) ====================
+  const [docPopout, setDocPopout] = useState(false);
+  const docChannelRef = useRef<BroadcastChannel | null>(null);
+  const docWinRef = useRef<Window | null>(null);
+
+  const docSnapshot = useMemo<AppraisalDocSnapshot>(
+    () => ({
+      loanId: useBlankForm ? '—' : SUBJECT.loanId,
+      borrower: useBlankForm ? '—' : SUBJECT.borrower,
+      programLabel: program === 'CONV' ? 'Conventional' : program === 'VA' ? 'VA NOV' : 'FHA',
+      currentPage,
+      zoomScale,
+      totalPages,
+      activeHighlight,
+      documentCategory: 'APPRAISAL_1004',
+      documentType: 'URAR',
+      // blob: URLs from the upload remain valid across same-origin windows
+      documentUrl: customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF),
+      mappedBoxes: useBlankForm ? [] : mappedBoxes,
+    }),
+    [useBlankForm, program, currentPage, zoomScale, totalPages, activeHighlight, customPdfUrl, mappedBoxes],
+  );
+  const docSnapshotRef = useRef(docSnapshot);
+  docSnapshotRef.current = docSnapshot;
+
+  useEffect(() => {
+    const channel = new BroadcastChannel(APPRAISAL_DOC_CHANNEL);
+    docChannelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<AppraisalDocMessage>) => {
+      const msg = event.data;
+      if (msg.type === 'doc-ready') {
+        setDocPopout(true);
+        channel.postMessage({ type: 'snapshot', snapshot: docSnapshotRef.current } satisfies AppraisalDocMessage);
+      } else if (msg.type === 'doc-closed') {
+        setDocPopout(false);
+      } else if (msg.type === 'nav') {
+        if (msg.action === 'next') nextPage();
+        else if (msg.action === 'prev') prevPage();
+        else if (msg.action === 'zoom-in') zoomIn();
+        else if (msg.action === 'zoom-out') zoomOut();
+        else resetZoom();
+      }
+    };
+    return () => {
+      channel.close();
+      docChannelRef.current = null;
+    };
+    // Viewer callbacks are stable useCallback references from usePdfViewer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!docPopout || !docChannelRef.current) return;
+    docChannelRef.current.postMessage({ type: 'snapshot', snapshot: docSnapshot } satisfies AppraisalDocMessage);
+  }, [docSnapshot, docPopout]);
+
+  useEffect(() => {
+    if (!docPopout) return;
+    const timer = setInterval(() => {
+      if (docWinRef.current && docWinRef.current.closed) setDocPopout(false);
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [docPopout]);
+
+  const openDocWindow = () => {
+    docWinRef.current = window.open(
+      `${window.location.pathname}#appraisal-doc`,
+      'freeflow-appraisal-pane',
+      'width=1280,height=960',
+    );
+  };
+
+  const bringBackDoc = () => {
+    docChannelRef.current?.postMessage({ type: 'close-doc' } satisfies AppraisalDocMessage);
+    setDocPopout(false);
+  };
+
   const header =
     program === 'VA'
       ? { kicker: 'VA SAR / LAPP', title: 'Notice of Value', sub: 'NOV checklist → sales comps → red flags & conditions' }
@@ -349,23 +427,26 @@ export default function AppraisalReviewWorkspace() {
       data-testid="appraisal-workspace"
       className="flex h-[calc(100vh-8.5rem)] min-h-[780px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900"
     >
-      <div className="flex h-full w-[46%] min-w-0 flex-col border-r border-slate-200 bg-slate-50">
-        <PdfCoordinateCanvas
-          currentPage={currentPage}
-          zoomScale={zoomScale}
-          activeHighlight={activeHighlight}
-          totalPages={totalPages}
-          onNextPage={nextPage}
-          onPrevPage={prevPage}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          onResetZoom={resetZoom}
-          documentCategory="APPRAISAL_1004"
-          documentType="URAR"
-          documentUrl={customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF)}
-          mappedBoxes={useBlankForm ? [] : mappedBoxes}
-        />
-      </div>
+      {/* Unmounted while the canvas lives in its own window (dual-monitor mode) */}
+      {!docPopout && (
+        <div className="flex h-full w-[46%] min-w-0 flex-col border-r border-slate-200 bg-slate-50">
+          <PdfCoordinateCanvas
+            currentPage={currentPage}
+            zoomScale={zoomScale}
+            activeHighlight={activeHighlight}
+            totalPages={totalPages}
+            onNextPage={nextPage}
+            onPrevPage={prevPage}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onResetZoom={resetZoom}
+            documentCategory="APPRAISAL_1004"
+            documentType="URAR"
+            documentUrl={customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF)}
+            mappedBoxes={useBlankForm ? [] : mappedBoxes}
+          />
+        </div>
+      )}
 
       <div className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-white">
         <header className="border-b border-slate-200 px-6 py-4">
@@ -376,6 +457,26 @@ export default function AppraisalReviewWorkspace() {
               <p className="mt-1 text-xs text-slate-500">{header.sub}</p>
             </div>
             <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+              {!docPopout ? (
+                <button
+                  type="button"
+                  onClick={openDocWindow}
+                  title="Open the appraisal canvas in a separate window for a second monitor"
+                  className="mr-2 flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-indigo-600 hover:text-indigo-800"
+                >
+                  <Monitor className="h-3.5 w-3.5" />
+                  Dual monitor
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={bringBackDoc}
+                  className="mr-2 flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white hover:bg-indigo-700"
+                >
+                  <MonitorX className="h-3.5 w-3.5" />
+                  Bring back
+                </button>
+              )}
               <label className="mr-2 flex cursor-pointer items-center rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-600 hover:text-emerald-800">
                 Upload PDF
                 <input

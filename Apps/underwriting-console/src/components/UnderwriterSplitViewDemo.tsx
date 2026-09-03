@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ShieldCheck,
   ArrowRight,
@@ -19,9 +19,12 @@ import {
   Home,
   PlusCircle,
   Trash2,
+  Monitor,
+  MonitorX,
 } from 'lucide-react';
 import type { LiveParseSession } from '../parseTypes';
 import { mapIncomeFields } from '../incomeFieldMap';
+import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfPagePreview from './PdfPagePreview';
 import { usePdfViewer } from '../hooks/usePdfViewer';
 import {
@@ -35,6 +38,7 @@ import {
   YearStack,
   chosenMonthly,
   corpBusinessAnnual,
+  corpMinorityAnnual,
   monthlyFromYears,
   schCAnnual,
   scheduleLQuickRatio,
@@ -97,6 +101,16 @@ interface RentalProperty {
   address: string;
   propertyType: 'SFR' | 'DUPLEX' | 'TRIPLEX' | 'FOURPLEX' | 'COMMERCIAL' | 'VACATION';
   isSubjectProperty: boolean;
+  /**
+   * Subject-property income method:
+   *  SCHEDULE_E  – returns history exists (refinance) → 1084 cash flow − proposed PITIA
+   *  MARKET_RENT – no history (purchase) → 75% of Form 1007/1025 gross market rent − proposed PITIA
+   */
+  subjectMethod: 'SCHEDULE_E' | 'MARKET_RENT';
+  /** Gross monthly market rent from Form 1007 / 1025 / lease (subject MARKET_RENT method) */
+  marketRent: number;
+  /** Borrower occupies one unit of a 2–4 unit subject primary — deficit routes to housing expense, not liabilities */
+  isPrimary2To4: boolean;
   /** Full monthly PITIA for the property. null = not yet available; UW must fill. */
   pitia: number | null;
   /** Where the PITIA figure came from */
@@ -115,6 +129,13 @@ interface RentalProperty {
 const ENCOMPASS_REO_PITIA: Record<string, number> = {
   '742 Evergreen Terrace, Springfield, IL': 1450,
 };
+
+/**
+ * Simulated Encompass proposed-loan PITIA for the subject property. The subject
+ * loan's proposed housing payment is always available from the loan file, so a
+ * property flagged as Subject uses this figure (not the REO section).
+ */
+const ENCOMPASS_SUBJECT_PROPOSED_PITIA = 2350;
 
 export default function UnderwriterSplitViewDemo({
   liveSession = null,
@@ -193,6 +214,9 @@ export default function UnderwriterSplitViewDemo({
         address: '742 Evergreen Terrace, Springfield, IL',
         propertyType: 'SFR',
         isSubjectProperty: false,
+        subjectMethod: 'SCHEDULE_E',
+        marketRent: 0,
+        isPrimary2To4: false,
         year1: { year: 2025, rentsReceived: 24000, insurance: 1200, mortgageInterest: 4800, taxes: 2900, depreciation: 3500, hoaDues: 0, totalExpenses: 14500, fairRentalDays: 0 },
         year2: { year: 2024, rentsReceived: 22800, insurance: 1150, mortgageInterest: 4900, taxes: 2800, depreciation: 3500, hoaDues: 0, totalExpenses: 14200, fairRentalDays: 0 },
       },
@@ -201,6 +225,9 @@ export default function UnderwriterSplitViewDemo({
         address: '1600 Pennsylvania Ave NW, Unit 4B, Washington, DC',
         propertyType: 'DUPLEX',
         isSubjectProperty: false,
+        subjectMethod: 'SCHEDULE_E',
+        marketRent: 3200,
+        isPrimary2To4: false,
         year1: { year: 2025, rentsReceived: 36000, insurance: 1800, mortgageInterest: 7200, taxes: 4300, depreciation: 5200, hoaDues: 2400, totalExpenses: 22700, fairRentalDays: 0 },
         year2: { year: 2024, rentsReceived: 34000, insurance: 1750, mortgageInterest: 7400, taxes: 4200, depreciation: 5200, hoaDues: 2400, totalExpenses: 22100, fairRentalDays: 0 },
       },
@@ -251,15 +278,21 @@ export default function UnderwriterSplitViewDemo({
     { year: 2024, line31: 98000, line13: 7200, line30: 2100, line44aMiles: 3800, line24bMeals: 1500 },
   ]);
   const [sCorpYears, setSCorpYears] = useState<[CorpYear, CorpYear]>([
-    { year: 2025, ordinaryIncome: 142000, depreciation: 18500, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000 },
-    { year: 2024, ordinaryIncome: 128000, depreciation: 16200, depletion: 0, mealsM1: 1900, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 45000 },
+    { year: 2025, ordinaryIncome: 142000, netRentalRealEstate: 12000, otherNetRental: 0, depreciation: 18500, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000, distributions: 62000 },
+    { year: 2024, ordinaryIncome: 128000, netRentalRealEstate: 9500, otherNetRental: 0, depreciation: 16200, depletion: 0, mealsM1: 1900, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 45000, distributions: 55000 },
   ]);
   const [partnershipYears, setPartnershipYears] = useState<[CorpYear, CorpYear]>([
-    { year: 2025, ordinaryIncome: 96000, depreciation: 12000, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0 },
-    { year: 2024, ordinaryIncome: 88000, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0 },
+    { year: 2025, ordinaryIncome: 96000, netRentalRealEstate: 18000, otherNetRental: 2400, depreciation: 12000, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0, distributions: 48000 },
+    { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
   ]);
+  /** GSE investor drives which K-1 Item J ending percentage qualifies: FNMA = % capital, Freddie Mac = % profit */
+  const [gseInvestor, setGseInvestor] = useState<'FNMA' | 'FREDDIE'>('FNMA');
+  /** S-Corp K-1: single end-of-year stock ownership percentage */
   const [sCorpShareholderPct, setSCorpShareholderPct] = useState<number>(35);
-  const [partnershipPct, setPartnershipPct] = useState<number>(50);
+  /** Partnership K-1 Item J END-of-year percentages (beginning % is never used to qualify) */
+  const [partnershipProfitPctEnd, setPartnershipProfitPctEnd] = useState<number>(50);
+  const [partnershipCapitalPctEnd, setPartnershipCapitalPctEnd] = useState<number>(50);
+  const partnershipPct = gseInvestor === 'FREDDIE' ? partnershipProfitPctEnd : partnershipCapitalPctEnd;
   const [sCorpL, setSCorpL] = useState<ScheduleL>({
     cash: 125000,
     receivables: 25000,
@@ -372,28 +405,62 @@ export default function UnderwriterSplitViewDemo({
   const partnershipLRatio = useMemo(() => scheduleLQuickRatio(partnershipL), [partnershipL]);
 
   const sCorpFlow = useMemo(() => {
-    const y1Biz = corpBusinessAnnual(sCorpYears[0], sCorpShareholderPct);
-    const y2Biz = corpBusinessAnnual(sCorpYears[1], sCorpShareholderPct);
+    const isMinority = sCorpShareholderPct < 25;
     const y1W2 = sCorpYears[0].w2Wages;
     const y2W2 = sCorpYears[1].w2Wages;
     const w2Monthly = monthlyFromYears(y1W2, y2W2, twoYearScorp);
+
+    if (isMinority) {
+      // <25% ownership: not self-employed. K-1 boxes 1/2/3 usable as ordinary income
+      // (no business add-backs, capped at distributions); Schedule L gate does not apply.
+      const m1 = corpMinorityAnnual(sCorpYears[0], sCorpShareholderPct);
+      const m2 = corpMinorityAnnual(sCorpYears[1], sCorpShareholderPct);
+      return {
+        y1: m1.capped + y1W2,
+        y2: m2.capped + y2W2,
+        w2Monthly,
+        dropped: false,
+        isMinority: true,
+        wasCapped: m1.wasCapped || m2.wasCapped,
+      };
+    }
+
+    const y1Biz = corpBusinessAnnual(sCorpYears[0], sCorpShareholderPct);
+    const y2Biz = corpBusinessAnnual(sCorpYears[1], sCorpShareholderPct);
     return {
       y1: y1Biz + y1W2,
       y2: y2Biz + y2W2,
       w2Monthly,
       dropped: !sCorpLRatio.passes,
+      isMinority: false,
+      wasCapped: false,
     };
   }, [sCorpYears, sCorpShareholderPct, twoYearScorp, sCorpLRatio.passes]);
 
   const partnershipFlow = useMemo(() => {
-    const y1 = corpBusinessAnnual(partnershipYears[0], partnershipPct);
-    const y2 = corpBusinessAnnual(partnershipYears[1], partnershipPct);
+    const isMinority = partnershipPct < 25;
     const gpMonthly = monthlyFromYears(
       partnershipYears[0].guaranteedPayments * (partnershipPct / 100),
       partnershipYears[1].guaranteedPayments * (partnershipPct / 100),
       twoYearPartnership,
     );
-    return { y1, y2, gpMonthly, dropped: !partnershipLRatio.passes };
+
+    if (isMinority) {
+      const m1 = corpMinorityAnnual(partnershipYears[0], partnershipPct);
+      const m2 = corpMinorityAnnual(partnershipYears[1], partnershipPct);
+      return {
+        y1: m1.capped,
+        y2: m2.capped,
+        gpMonthly,
+        dropped: false,
+        isMinority: true,
+        wasCapped: m1.wasCapped || m2.wasCapped,
+      };
+    }
+
+    const y1 = corpBusinessAnnual(partnershipYears[0], partnershipPct);
+    const y2 = corpBusinessAnnual(partnershipYears[1], partnershipPct);
+    return { y1, y2, gpMonthly, dropped: !partnershipLRatio.passes, isMinority: false, wasCapped: false };
   }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes]);
 
   // ── Rental Income (Schedule E Page 1 · Form 1084 / 1038 worksheet) ──────────
@@ -417,23 +484,73 @@ export default function UnderwriterSplitViewDemo({
     address: string;
     propertyType: string;
     isSubjectProperty: boolean;
+    subjectMethod: 'SCHEDULE_E' | 'MARKET_RENT';
+    isPrimary2To4: boolean;
     y1Annual: number;
     y2Annual: number;
     y1Monthly: number;
     y2Monthly: number;
     isDecline: boolean;
     declinePct: number;
-    /** 1084 monthly cash flow before PITIA (after decline / averaging logic) */
+    /** Monthly cash flow before PITIA (1084 decline-aware, or 75% market rent for subject purchases) */
     grossMonthly: number;
     /** PITIA applied (0 when missing) */
     pitiaApplied: number;
     pitiaMissing: boolean;
-    /** Net = grossMonthly − PITIA. Positive → income; negative → loss to DTI liabilities. */
+    /** Net = grossMonthly − PITIA */
     netMonthly: number;
     note: string;
   }
 
-  const rentalFlow = useMemo((): { properties: RentalPropertyResult[]; totalMonthly: number; anyPitiaMissing: boolean } => {
+  interface RentalRouting {
+    /** Positive rental income added to qualifying income */
+    incomeMonthly: number;
+    /** Net rental losses redirected as a proposed monthly liability on the 1003 */
+    liabilityDebtMonthly: number;
+    /** Subject 2–4 unit primary deficit applied to the primary housing expense */
+    housingExpenseAdjustment: number;
+  }
+
+  /**
+   * Route per-property nets the way the 1084 engine does:
+   *  - Non-subject (REO) properties aggregate together. A negative aggregate reduces
+   *    income directly on VA; Conventional/FHA/USDA clamp income at $0 and move the
+   *    loss to proposed liabilities.
+   *  - Subject property nets are handled individually: positive adds to income; a
+   *    deficit on a 2–4 unit primary adjusts the housing expense (not a liability),
+   *    while a subject investment deficit becomes a proposed liability.
+   */
+  function routeRentalNets(
+    nets: Array<{ net: number; isSubject: boolean; isPrimary2To4: boolean }>,
+    isVa: boolean,
+  ): RentalRouting {
+    let incomeMonthly = 0;
+    let liabilityDebtMonthly = 0;
+    let housingExpenseAdjustment = 0;
+
+    const nonSubjectTotal = nets.filter((n) => !n.isSubject).reduce((s, n) => s + n.net, 0);
+    if (nonSubjectTotal < 0) {
+      if (isVa) incomeMonthly += nonSubjectTotal;
+      else liabilityDebtMonthly += Math.abs(nonSubjectTotal);
+    } else {
+      incomeMonthly += nonSubjectTotal;
+    }
+
+    for (const n of nets.filter((x) => x.isSubject)) {
+      if (n.net > 0) incomeMonthly += n.net;
+      else if (n.isPrimary2To4) housingExpenseAdjustment += Math.abs(n.net);
+      else liabilityDebtMonthly += Math.abs(n.net);
+    }
+
+    return { incomeMonthly, liabilityDebtMonthly, housingExpenseAdjustment };
+  }
+
+  const rentalFlow = useMemo((): {
+    properties: RentalPropertyResult[];
+    routing: RentalRouting;
+    totalMonthly: number;
+    anyPitiaMissing: boolean;
+  } => {
     const loanProgram = borrowerMetadata.loanProgram as 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA';
     const isFha = loanProgram === 'FHA';
 
@@ -447,10 +564,16 @@ export default function UnderwriterSplitViewDemo({
       const isDecline = twoYearRental && y2Monthly > 0 && y1Monthly < y2Monthly;
       const declinePct = isDecline ? ((y2Monthly - y1Monthly) / Math.abs(y2Monthly)) * 100 : 0;
 
+      const useMarketRent = prop.isSubjectProperty && prop.subjectMethod === 'MARKET_RENT';
+
       let grossMonthly: number;
       let note: string;
 
-      if (!twoYearRental) {
+      if (useMarketRent) {
+        // Subject purchase / no Schedule E history: Form 1007/1025 gross market rent × 75%
+        grossMonthly = prop.marketRent * 0.75;
+        note = 'Subject property — 75% of gross market rent (Form 1007/1025, 25% vacancy factor).';
+      } else if (!twoYearRental) {
         grossMonthly = y1Monthly;
         note = 'One-year: most recent year 1084 cash flow ÷ rental months.';
       } else if (!isDecline) {
@@ -472,6 +595,10 @@ export default function UnderwriterSplitViewDemo({
         note = `Income declined ${declinePct.toFixed(1)}% — restricted to most recent (lower) year per guideline.`;
       }
 
+      if (prop.isSubjectProperty && !useMarketRent) {
+        note = `Subject property (refinance — Schedule E history) — ${note.charAt(0).toLowerCase()}${note.slice(1)} Proposed PITIA of the new loan applied.`;
+      }
+
       const pitiaMissing = prop.pitia === null;
       const pitiaApplied = prop.pitia ?? 0;
       const netMonthly = grossMonthly - pitiaApplied;
@@ -479,7 +606,13 @@ export default function UnderwriterSplitViewDemo({
       if (pitiaMissing) {
         note += ' PITIA not yet entered — net shown before housing expense.';
       } else if (netMonthly < 0) {
-        note += ` Net after PITIA is negative — treat ${Math.abs(netMonthly).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo as a liability in DTI.`;
+        if (prop.isSubjectProperty && prop.isPrimary2To4) {
+          note += ` Deficit of ${Math.abs(netMonthly).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo applies to the primary housing expense (2–4 unit primary), not consumer liabilities.`;
+        } else if (prop.isSubjectProperty) {
+          note += ` Subject investment deficit of ${Math.abs(netMonthly).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo maps to a proposed monthly liability.`;
+        } else {
+          note += ` Net after PITIA is negative — aggregates with other REO rentals (${loanProgram === 'VA' ? 'VA: reduces income directly' : 'clamped to $0 income; loss becomes a proposed liability'}).`;
+        }
       }
 
       return {
@@ -487,6 +620,8 @@ export default function UnderwriterSplitViewDemo({
         address: prop.address,
         propertyType: prop.propertyType,
         isSubjectProperty: prop.isSubjectProperty,
+        subjectMethod: prop.subjectMethod,
+        isPrimary2To4: prop.isPrimary2To4,
         y1Annual: cf1.adjusted,
         y2Annual: cf2.adjusted,
         y1Monthly,
@@ -501,30 +636,47 @@ export default function UnderwriterSplitViewDemo({
       };
     });
 
-    const totalMonthly = properties.reduce((sum, p) => sum + p.netMonthly, 0);
+    const routing = routeRentalNets(
+      properties.map((p) => ({ net: p.netMonthly, isSubject: p.isSubjectProperty, isPrimary2To4: p.isPrimary2To4 })),
+      loanProgram === 'VA',
+    );
     const anyPitiaMissing = properties.some((p) => p.pitiaMissing);
-    return { properties, totalMonthly, anyPitiaMissing };
+    return { properties, routing, totalMonthly: routing.incomeMonthly, anyPitiaMissing };
   }, [rentalProperties, twoYearRental, borrowerMetadata.loanProgram]);
 
   const rentalPicks = useMemo(() => {
-    const { totalMonthly } = rentalFlow;
-    // All-property alternates, each net of that property's PITIA
-    const sumNet = (pick: (y1: number, y2: number) => number) =>
-      rentalProperties.reduce((s, p) => {
-        const m1 = rentalAnnualCashFlow(p.year1).monthly;
-        const m2 = rentalAnnualCashFlow(p.year2).monthly;
-        return s + pick(m1, m2) - (p.pitia ?? 0);
-      }, 0);
-    const allY1 = sumNet((m1) => m1);
-    const avg24 = sumNet((m1, m2) => (m1 + m2) / 2);
-    const lower = sumNet((m1, m2) => Math.min(m1, m2));
+    const isVa = borrowerMetadata.loanProgram === 'VA';
+
+    // Per-property net under an alternate averaging method. Subject properties on the
+    // market-rent method are unaffected by averaging (75% of 1007/1025 market rent).
+    const netsFor = (pick: (y1: number, y2: number) => number) =>
+      rentalProperties.map((p) => {
+        const useMarketRent = p.isSubjectProperty && p.subjectMethod === 'MARKET_RENT';
+        const gross = useMarketRent
+          ? p.marketRent * 0.75
+          : pick(rentalAnnualCashFlow(p.year1).monthly, rentalAnnualCashFlow(p.year2).monthly);
+        return { net: gross - (p.pitia ?? 0), isSubject: p.isSubjectProperty, isPrimary2To4: p.isPrimary2To4 };
+      });
+
+    const routingByOption: Record<string, RentalRouting> = {
+      guideline: rentalFlow.routing,
+      y1: routeRentalNets(netsFor((m1) => m1), isVa),
+      ...(twoYearRental
+        ? {
+            avg24: routeRentalNets(netsFor((m1, m2) => (m1 + m2) / 2), isVa),
+            lower: routeRentalNets(netsFor((m1, m2) => Math.min(m1, m2)), isVa),
+          }
+        : {}),
+      not_used: { incomeMonthly: 0, liabilityDebtMonthly: 0, housingExpenseAdjustment: 0 },
+    };
+
     const options = [
-      { id: 'guideline', label: 'Guideline (per-property)', monthly: totalMonthly, formula: 'Decline-aware 1084 calc − PITIA' },
-      { id: 'y1', label: 'Most recent year all props', monthly: allY1, formula: 'Sum of Y1 monthly − PITIA' },
+      { id: 'guideline', label: 'Guideline (per-property)', monthly: routingByOption.guideline.incomeMonthly, formula: 'Decline-aware 1084 calc − PITIA' },
+      { id: 'y1', label: 'Most recent year all props', monthly: routingByOption.y1.incomeMonthly, formula: 'Sum of Y1 monthly − PITIA' },
       ...(twoYearRental
         ? [
-            { id: 'avg24', label: '24-month average all props', monthly: avg24, formula: '(Y1 + Y2) / 2 − PITIA per property' },
-            { id: 'lower', label: 'Lower of two years all props', monthly: lower, formula: 'Min(Y1, Y2) − PITIA per property' },
+            { id: 'avg24', label: '24-month average all props', monthly: routingByOption.avg24.incomeMonthly, formula: '(Y1 + Y2) / 2 − PITIA per property' },
+            { id: 'lower', label: 'Lower of two years all props', monthly: routingByOption.lower.incomeMonthly, formula: 'Min(Y1, Y2) − PITIA per property' },
           ]
         : []),
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
@@ -537,11 +689,14 @@ export default function UnderwriterSplitViewDemo({
         : twoYearRental
           ? 'Income is stable or increasing across all properties. 24-month average net of PITIA is the guideline pick.'
           : 'Single-year entry. Most recent year 1084 cash flow net of PITIA.';
+    if (rentalFlow.properties.some((p) => p.isSubjectProperty)) {
+      reason += ' Subject property routed separately: positive net adds to income; a deficit adjusts housing expense (2–4 unit primary) or maps to liabilities (investment).';
+    }
     if (rentalFlow.anyPitiaMissing) {
       reason += ' PITIA is missing on at least one property — totals are before full housing expense until the UW completes the PITIA box.';
     }
-    return { options, recommendedId: 'guideline', reason };
-  }, [rentalFlow, rentalProperties, twoYearRental]);
+    return { options, recommendedId: 'guideline', reason, routingByOption };
+  }, [rentalFlow, rentalProperties, twoYearRental, borrowerMetadata.loanProgram]);
 
   const w2BasePicks = useMemo(() => {
     const options = [
@@ -595,21 +750,29 @@ export default function UnderwriterSplitViewDemo({
 
   const sCorpPicks = useMemo(() => {
     const rec = seRecommend(sCorpFlow.y1, sCorpFlow.y2, twoYearScorp, sCorpFlow.dropped);
+    let reason = rec.reason;
+    if (sCorpFlow.isMinority) {
+      reason = `Ownership ${sCorpShareholderPct}% is under 25% — borrower is not self-employed. K-1 boxes 1/2/3 count as ordinary income with no business add-backs${sCorpFlow.wasCapped ? ', capped at distributions received' : ''}; the Schedule L liquidity test does not apply. ${rec.reason}`;
+    }
     return {
       options: seAvgOptions(sCorpFlow.y1, sCorpFlow.y2, twoYearScorp, sCorpFlow.dropped, sCorpFlow.w2Monthly),
       recommendedId: rec.id,
-      reason: rec.reason,
+      reason,
     };
-  }, [sCorpFlow, twoYearScorp]);
+  }, [sCorpFlow, twoYearScorp, sCorpShareholderPct]);
 
   const partnershipPicks = useMemo(() => {
     const rec = seRecommend(partnershipFlow.y1, partnershipFlow.y2, twoYearPartnership, partnershipFlow.dropped);
+    let reason = rec.reason;
+    if (partnershipFlow.isMinority) {
+      reason = `Ending ${gseInvestor === 'FREDDIE' ? 'profit' : 'capital'} % (${partnershipPct}%) is under 25% — borrower is not self-employed. K-1 boxes 1/2/3 + guaranteed payments count as ordinary income with no business add-backs${partnershipFlow.wasCapped ? ', capped at distributions received' : ''}; the Schedule L liquidity test does not apply. ${rec.reason}`;
+    }
     return {
       options: seAvgOptions(partnershipFlow.y1, partnershipFlow.y2, twoYearPartnership, partnershipFlow.dropped, partnershipFlow.gpMonthly),
       recommendedId: rec.id,
-      reason: rec.reason,
+      reason,
     };
-  }, [partnershipFlow, twoYearPartnership]);
+  }, [partnershipFlow, twoYearPartnership, gseInvestor, partnershipPct]);
 
   const w2BaseChosen = chosenMonthly(w2BasePicks.options, w2BaseChoice, w2BasePicks.recommendedId);
   const w2VarChosen = chosenMonthly(w2VarPicks.options, w2VarChoice, w2VarPicks.recommendedId);
@@ -656,19 +819,35 @@ export default function UnderwriterSplitViewDemo({
       });
     }
 
-    // Corporate Liquidity Deficit
-    if (!sCorpLRatio.passes) {
+    // Corporate Liquidity Deficit (only applies to self-employed 25%+ owners)
+    if (!sCorpLRatio.passes && !sCorpFlow.isMinority) {
       list.push({
         id: 'SCORP_LIQUIDITY',
         type: 'ERROR',
         message: `S-Corp Schedule L quick ratio ${sCorpLRatio.quickRatio.toFixed(2)} is below 1.0. Business income is excluded; officer W-2 still counts.`,
       });
     }
-    if (!partnershipLRatio.passes) {
+    if (!partnershipLRatio.passes && !partnershipFlow.isMinority) {
       list.push({
         id: 'PARTNERSHIP_LIQUIDITY',
         type: 'ERROR',
         message: `Partnership Schedule L quick ratio ${partnershipLRatio.quickRatio.toFixed(2)} is below 1.0. Ordinary income is excluded; guaranteed payments still count.`,
+      });
+    }
+
+    // Under-25% minority K-1 treatment notices
+    if (sCorpFlow.isMinority) {
+      list.push({
+        id: 'SCORP_MINORITY_K1',
+        type: 'WARNING',
+        message: `S-Corp ownership ${sCorpShareholderPct}% is under 25%: borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 (no business add-backs)${sCorpFlow.wasCapped ? ' and capped at distributions received' : ''}. Document a 2-year receipt history.`,
+      });
+    }
+    if (partnershipFlow.isMinority) {
+      list.push({
+        id: 'PARTNERSHIP_MINORITY_K1',
+        type: 'WARNING',
+        message: `Partnership ending ${gseInvestor === 'FREDDIE' ? 'profit' : 'capital'} percentage ${partnershipPct}% is under 25%: borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 + guaranteed payments (no business add-backs)${partnershipFlow.wasCapped ? ' and capped at distributions received' : ''}. Document a 2-year receipt history.`,
       });
     }
 
@@ -691,18 +870,37 @@ export default function UnderwriterSplitViewDemo({
       });
     }
 
-    // Rental net loss after PITIA
-    const lossProps = rentalFlow.properties.filter((p) => !p.pitiaMissing && p.netMonthly < 0);
-    if (lossProps.length > 0) {
+    // Non-subject (REO) rental net loss after PITIA
+    const reoLossProps = rentalFlow.properties.filter((p) => !p.isSubjectProperty && !p.pitiaMissing && p.netMonthly < 0);
+    if (reoLossProps.length > 0) {
+      const isVa = borrowerMetadata.loanProgram === 'VA';
       list.push({
         id: 'RENTAL_NET_LOSS',
         type: 'WARNING',
-        message: `Net rental loss after PITIA on: ${lossProps.map((p) => `${p.address} ($${Math.abs(p.netMonthly).toFixed(2)}/mo)`).join('; ')}. Per Form 1084 treatment, include the loss as a monthly liability in the DTI.`,
+        message: `Net rental loss after PITIA on: ${reoLossProps.map((p) => `${p.address} ($${Math.abs(p.netMonthly).toFixed(2)}/mo)`).join('; ')}. ${isVa ? 'VA: aggregated loss reduces gross qualifying income directly.' : 'Aggregated REO loss is clamped to $0 income and redirected as a proposed monthly liability on the 1003.'}`,
+      });
+    }
+
+    // Subject property deficits
+    const subjPrimaryDeficit = rentalFlow.properties.filter((p) => p.isSubjectProperty && p.isPrimary2To4 && !p.pitiaMissing && p.netMonthly < 0);
+    if (subjPrimaryDeficit.length > 0) {
+      list.push({
+        id: 'RENTAL_SUBJECT_PRIMARY_DEFICIT',
+        type: 'WARNING',
+        message: `Subject 2–4 unit primary residence rental deficit of $${subjPrimaryDeficit.reduce((s, p) => s + Math.abs(p.netMonthly), 0).toFixed(2)}/mo applies as an adjustment to the primary housing expense, bypassing consumer liability categorization.`,
+      });
+    }
+    const subjInvestDeficit = rentalFlow.properties.filter((p) => p.isSubjectProperty && !p.isPrimary2To4 && !p.pitiaMissing && p.netMonthly < 0);
+    if (subjInvestDeficit.length > 0) {
+      list.push({
+        id: 'RENTAL_SUBJECT_INVESTMENT_DEFICIT',
+        type: 'WARNING',
+        message: `Subject investment property net rental loss of $${subjInvestDeficit.reduce((s, p) => s + Math.abs(p.netMonthly), 0).toFixed(2)}/mo has been mapped as a proposed monthly liability debt.`,
       });
     }
 
     return list;
-  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow]);
+  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor]);
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
@@ -714,6 +912,167 @@ export default function UnderwriterSplitViewDemo({
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
   };
 
+  // ==================== DUAL-MONITOR DOCUMENT PANE (UW / QA) ====================
+  // "Dual monitor" pops the document canvas into its own browser window so the
+  // underwriter or QA reviewer can drag it to a second monitor. State stays in
+  // this window; the pane receives snapshots and sends interactions back over a
+  // BroadcastChannel, so highlights, year switches, and paging remain in sync.
+
+  const [docPopout, setDocPopout] = useState(false);
+  const docChannelRef = useRef<BroadcastChannel | null>(null);
+  const docWinRef = useRef<Window | null>(null);
+
+  const twoYearForCanvas =
+    activeTab === 'SCHEDULE_C'
+      ? twoYearSchC
+      : activeTab === 'SCORP'
+        ? twoYearScorp
+        : activeTab === 'PARTNERSHIP'
+          ? twoYearPartnership
+          : activeTab === 'SCHEDULE_E'
+            ? twoYearRental
+            : true;
+
+  const docSnapshot = useMemo<DocPaneSnapshot>(
+    () => ({
+      mode: isLive ? 'live' : 'demo',
+      loanId: borrowerMetadata.loanId,
+      borrowerName: borrowerMetadata.borrowerName,
+      activeTab,
+      yearIndex: canvasYearIndex,
+      twoYear: twoYearForCanvas,
+      selectedId: highlightFieldId,
+      schC: schCYears[canvasYearIndex],
+      corp: activeTab === 'PARTNERSHIP' ? partnershipYears[canvasYearIndex] : sCorpYears[canvasYearIndex],
+      scheduleL: activeTab === 'PARTNERSHIP' ? partnershipL : sCorpL,
+      showLiquidity: activeTab === 'SCORP' || activeTab === 'PARTNERSHIP',
+      paystub: {
+        employer: borrowerMetadata.currentEmployer,
+        borrower: borrowerMetadata.borrowerName,
+        hourly: currentHourlyRate,
+        hours: currentWeeklyHours,
+        periodPay: currentPeriodBasePay,
+        ytd: currentBaseYtd,
+      },
+      live:
+        isLive && liveSession
+          ? {
+              file: liveSession.file,
+              fileName: liveSession.fileName,
+              pageIndex: livePageIndex,
+              pageCount: liveSession.result.total_pages_scanned,
+              fields: mappedFields,
+            }
+          : null,
+    }),
+    [
+      isLive,
+      liveSession,
+      activeTab,
+      canvasYearIndex,
+      twoYearForCanvas,
+      highlightFieldId,
+      schCYears,
+      partnershipYears,
+      sCorpYears,
+      partnershipL,
+      sCorpL,
+      currentHourlyRate,
+      currentWeeklyHours,
+      currentPeriodBasePay,
+      currentBaseYtd,
+      livePageIndex,
+      mappedFields,
+    ],
+  );
+
+  const docSnapshotRef = useRef(docSnapshot);
+  docSnapshotRef.current = docSnapshot;
+  const handleInspectFieldRef = useRef(handleInspectField);
+  handleInspectFieldRef.current = handleInspectField;
+  const lastSentFileKeyRef = useRef<string | null>(null);
+
+  const sendDocSnapshot = (channel: BroadcastChannel, snapshot: DocPaneSnapshot) => {
+    // Attach the PDF File only when it changed — steady-state sync messages are a
+    // tiny JSON-like snapshot, so the pane never re-parses an unchanged document.
+    let outgoing = snapshot;
+    if (snapshot.live?.file) {
+      const key = `${snapshot.live.file.name}-${snapshot.live.file.size}-${snapshot.live.file.lastModified}`;
+      if (lastSentFileKeyRef.current === key) {
+        outgoing = { ...snapshot, live: { ...snapshot.live, file: null } };
+      } else {
+        lastSentFileKeyRef.current = key;
+      }
+    }
+    try {
+      channel.postMessage({ type: 'snapshot', snapshot: outgoing } satisfies SplitDocMessage);
+    } catch {
+      // File transfer can fail in older browsers — retry without the binary
+      lastSentFileKeyRef.current = null;
+      try {
+        channel.postMessage({
+          type: 'snapshot',
+          snapshot: { ...snapshot, live: snapshot.live ? { ...snapshot.live, file: null } : null },
+        } satisfies SplitDocMessage);
+      } catch {
+        // channel closed — popout effect will clean up
+      }
+    }
+  };
+
+  useEffect(() => {
+    const channel = new BroadcastChannel(SPLIT_DOC_CHANNEL);
+    docChannelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<SplitDocMessage>) => {
+      const msg = event.data;
+      if (msg.type === 'doc-ready') {
+        setDocPopout(true);
+        lastSentFileKeyRef.current = null; // new pane needs the full file once
+        sendDocSnapshot(channel, docSnapshotRef.current);
+      } else if (msg.type === 'doc-closed') {
+        setDocPopout(false);
+      } else if (msg.type === 'select-field') {
+        handleInspectFieldRef.current(msg.id);
+      } else if (msg.type === 'year-index') {
+        setCanvasYearIndex(msg.index);
+      } else if (msg.type === 'page-change') {
+        setLivePageIndex(msg.index);
+      }
+    };
+    return () => {
+      channel.close();
+      docChannelRef.current = null;
+    };
+  }, []);
+
+  // Push a fresh snapshot to the pane whenever synced state changes
+  useEffect(() => {
+    if (!docPopout || !docChannelRef.current) return;
+    sendDocSnapshot(docChannelRef.current, docSnapshot);
+  }, [docSnapshot, docPopout]);
+
+  // Fallback: detect the pane window being closed without a beforeunload message
+  useEffect(() => {
+    if (!docPopout) return;
+    const timer = setInterval(() => {
+      if (docWinRef.current && docWinRef.current.closed) setDocPopout(false);
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [docPopout]);
+
+  const openDocWindow = () => {
+    docWinRef.current = window.open(
+      `${window.location.pathname}#split-doc`,
+      'freeflow-doc-pane',
+      'width=1280,height=960',
+    );
+  };
+
+  const bringBackDoc = () => {
+    docChannelRef.current?.postMessage({ type: 'close-doc' } satisfies SplitDocMessage);
+    setDocPopout(false);
+  };
+
   const handleExportSync = () => {
     alert(
       `Payload Locked & Transmitted to Encompass eFolder successfully!\n\nStandard Fields Mapped:\n- Field 108 (W-2 base): $${form1084CashFlow.w2BaseMonthly.toFixed(2)}\n- Field 109 (W-2 variable): $${form1084CashFlow.w2VariableMonthly.toFixed(2)}\n- Field 110 (Schedule C): $${form1084CashFlow.qualifyingMonthlySelfEmployed.toFixed(2)}\n- Field 111 (S-Corp): $${form1084CashFlow.sCorpShareholderDraw.toFixed(2)}\n- Field 112 (Partnership): $${form1084CashFlow.partnershipMonthly.toFixed(2)}\n- Field 113 (Rental Income): $${form1084CashFlow.rentalMonthly.toFixed(2)}`,
@@ -721,12 +1080,12 @@ export default function UnderwriterSplitViewDemo({
   };
 
   const visibleWarnings = activeIncomeWarnings.filter((alert) => {
-    if (alert.id === 'SCORP_LIQUIDITY') return activeTab === 'SCORP' || activeTab === 'ENCOMPASS_SYNC';
-    if (alert.id === 'PARTNERSHIP_LIQUIDITY') return activeTab === 'PARTNERSHIP' || activeTab === 'ENCOMPASS_SYNC';
+    if (alert.id === 'SCORP_LIQUIDITY' || alert.id === 'SCORP_MINORITY_K1') return activeTab === 'SCORP' || activeTab === 'ENCOMPASS_SYNC';
+    if (alert.id === 'PARTNERSHIP_LIQUIDITY' || alert.id === 'PARTNERSHIP_MINORITY_K1') return activeTab === 'PARTNERSHIP' || activeTab === 'ENCOMPASS_SYNC';
     if (alert.id === 'TENURE_WARN' || alert.id === 'WAGE_DEFICIT_WARN' || alert.id === 'WAGE_VARIANCE_WARN') {
       return activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'W2_CONTINUITY' || activeTab === 'ENCOMPASS_SYNC';
     }
-    if (alert.id === 'RENTAL_PITIA_MISSING' || alert.id === 'RENTAL_NET_LOSS') {
+    if (alert.id.startsWith('RENTAL_')) {
       return activeTab === 'SCHEDULE_E' || activeTab === 'ENCOMPASS_SYNC';
     }
     return true;
@@ -759,6 +1118,9 @@ export default function UnderwriterSplitViewDemo({
       address: '',
       propertyType: 'SFR',
       isSubjectProperty: false,
+      subjectMethod: 'SCHEDULE_E',
+      marketRent: 0,
+      isPrimary2To4: false,
       pitia: null,
       pitiaSource: null,
       year1: emptyYear(2025),
@@ -777,11 +1139,23 @@ export default function UnderwriterSplitViewDemo({
         if (p.id !== id) return p;
         const next = { ...p, ...patch };
         // Address changed: re-check Encompass loan details for a PITIA unless the UW keyed one manually
-        if (patch.address !== undefined && next.pitiaSource !== 'UW') {
+        if (patch.address !== undefined && !next.isSubjectProperty && next.pitiaSource !== 'UW') {
           const encompassPitia = ENCOMPASS_REO_PITIA[patch.address];
           if (encompassPitia !== undefined) {
             next.pitia = encompassPitia;
             next.pitiaSource = 'ENCOMPASS';
+          }
+        }
+        // Subject flag toggled: swap the PITIA source unless the UW keyed one manually
+        if (patch.isSubjectProperty !== undefined && next.pitiaSource !== 'UW') {
+          if (patch.isSubjectProperty) {
+            // Subject loan's proposed PITIA is always on the loan file in Encompass
+            next.pitia = ENCOMPASS_SUBJECT_PROPOSED_PITIA;
+            next.pitiaSource = 'ENCOMPASS';
+          } else {
+            const encompassPitia = ENCOMPASS_REO_PITIA[next.address];
+            next.pitia = encompassPitia ?? null;
+            next.pitiaSource = encompassPitia !== undefined ? 'ENCOMPASS' : null;
           }
         }
         return next;
@@ -826,6 +1200,26 @@ export default function UnderwriterSplitViewDemo({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {!docPopout ? (
+            <button
+              type="button"
+              onClick={openDocWindow}
+              title="Open the document canvas in a separate window for a second monitor"
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+            >
+              <Monitor className="h-4 w-4" />
+              Dual monitor
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={bringBackDoc}
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+            >
+              <MonitorX className="h-4 w-4" />
+              Bring documents back
+            </button>
+          )}
           <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
             {parseBusy ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : <Upload className="h-4 w-4 text-emerald-600" />}
             {parseBusy ? 'Parsing…' : 'Load live PDF'}
@@ -863,7 +1257,10 @@ export default function UnderwriterSplitViewDemo({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         
         {/* ==================== LEFT PANEL: PDF COORDINATES VISUAL CANVAS ==================== */}
-        <div className="xl:col-span-4 space-y-4">
+        {/* Unmounted (not just hidden) while the canvas lives in its own window, so the
+            main window does no duplicate PDF/canvas rendering work in dual-monitor mode */}
+        {!docPopout && (
+        <div className="space-y-4 xl:col-span-4">
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <div className="flex items-center gap-2">
@@ -941,9 +1338,21 @@ export default function UnderwriterSplitViewDemo({
             </div>
           </div>
         </div>
+        )}
 
         {/* ==================== RIGHT PANEL: TAB-DRIVEN CALCULATION ENGINES ==================== */}
-        <div className="xl:col-span-8 space-y-6">
+        <div className={`space-y-6 ${docPopout ? 'xl:col-span-12' : 'xl:col-span-8'}`}>
+          {docPopout && (
+            <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs">
+              <span className="flex items-center gap-2 font-bold text-indigo-800">
+                <Monitor className="h-4 w-4" />
+                Document canvas is open in a second window — drag it to your other monitor. Highlights and paging stay in sync.
+              </span>
+              <button type="button" onClick={bringBackDoc} className="font-black uppercase text-indigo-700 hover:underline">
+                Bring back
+              </button>
+            </div>
+          )}
           
           {/* Main Workspace Navigation Tab Array */}
           <div className="flex flex-wrap gap-1 rounded-lg border-b border-slate-200 bg-white p-1.5 shadow-sm">
@@ -1275,13 +1684,18 @@ export default function UnderwriterSplitViewDemo({
               onChoice={setSCorpChoice}
               extra={
                 <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">
-                  Ownership %
+                  End-of-year stock ownership %
                   <input
                     type="number"
                     value={sCorpShareholderPct}
                     onChange={(event) => setSCorpShareholderPct(Number(event.target.value))}
-                    className="w-16 rounded border border-slate-300 px-2 py-1 font-mono text-sm"
+                    className={`w-16 rounded border px-2 py-1 font-mono text-sm ${sCorpShareholderPct < 25 ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
                   />
+                  {sCorpShareholderPct < 25 && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800">
+                      &lt;25% · not self-employed
+                    </span>
+                  )}
                 </label>
               }
             >
@@ -1303,7 +1717,12 @@ export default function UnderwriterSplitViewDemo({
                       }
                     />
                     <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
-                      Share of cash flow {usd(corpBusinessAnnual(row, sCorpShareholderPct) + row.w2Wages)}
+                      Share of cash flow{' '}
+                      {usd(
+                        (sCorpShareholderPct < 25
+                          ? corpMinorityAnnual(row, sCorpShareholderPct).capped
+                          : corpBusinessAnnual(row, sCorpShareholderPct)) + row.w2Wages,
+                      )}
                     </p>
                   </YearStack>
                 ))}
@@ -1327,15 +1746,48 @@ export default function UnderwriterSplitViewDemo({
               choiceId={partnershipChoice}
               onChoice={setPartnershipChoice}
               extra={
-                <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">
-                  Ownership %
-                  <input
-                    type="number"
-                    value={partnershipPct}
-                    onChange={(event) => setPartnershipPct(Number(event.target.value))}
-                    className="w-16 rounded border border-slate-300 px-2 py-1 font-mono text-sm"
-                  />
-                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* GSE selector: which K-1 Item J ENDING percentage qualifies */}
+                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setGseInvestor('FNMA')}
+                      className={`rounded-md px-2 py-1 text-[10px] font-black uppercase ${gseInvestor === 'FNMA' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+                    >
+                      FNMA · % capital
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGseInvestor('FREDDIE')}
+                      className={`rounded-md px-2 py-1 text-[10px] font-black uppercase ${gseInvestor === 'FREDDIE' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+                    >
+                      Freddie · % profit
+                    </button>
+                  </div>
+                  <label className={`flex items-center gap-1.5 text-[11px] font-semibold ${gseInvestor === 'FREDDIE' ? 'text-slate-900' : 'text-slate-400'}`}>
+                    Ending profit %
+                    <input
+                      type="number"
+                      value={partnershipProfitPctEnd}
+                      onChange={(event) => setPartnershipProfitPctEnd(Number(event.target.value))}
+                      className={`w-16 rounded border px-2 py-1 font-mono text-sm ${gseInvestor === 'FREDDIE' ? 'border-slate-400' : 'border-slate-200 text-slate-400'}`}
+                    />
+                  </label>
+                  <label className={`flex items-center gap-1.5 text-[11px] font-semibold ${gseInvestor === 'FNMA' ? 'text-slate-900' : 'text-slate-400'}`}>
+                    Ending capital %
+                    <input
+                      type="number"
+                      value={partnershipCapitalPctEnd}
+                      onChange={(event) => setPartnershipCapitalPctEnd(Number(event.target.value))}
+                      className={`w-16 rounded border px-2 py-1 font-mono text-sm ${gseInvestor === 'FNMA' ? 'border-slate-400' : 'border-slate-200 text-slate-400'}`}
+                    />
+                  </label>
+                  {partnershipPct < 25 && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800">
+                      &lt;25% · not self-employed
+                    </span>
+                  )}
+                </div>
               }
             >
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1356,7 +1808,12 @@ export default function UnderwriterSplitViewDemo({
                       }
                     />
                     <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
-                      Share of cash flow {usd(corpBusinessAnnual(row, partnershipPct))}
+                      Share of cash flow{' '}
+                      {usd(
+                        partnershipPct < 25
+                          ? corpMinorityAnnual(row, partnershipPct).capped
+                          : corpBusinessAnnual(row, partnershipPct),
+                      )}
                     </p>
                   </YearStack>
                 ))}
@@ -1463,6 +1920,11 @@ export default function UnderwriterSplitViewDemo({
                           </button>
                           Subject Property
                         </label>
+                        {prop.isSubjectProperty && (
+                          <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[9px] font-black uppercase text-white">
+                            Subject
+                          </span>
+                        )}
                         {/* Remove button */}
                         {rentalProperties.length > 1 && (
                           <button
@@ -1475,14 +1937,63 @@ export default function UnderwriterSplitViewDemo({
                         )}
                       </div>
 
+                      {/* Subject property method controls */}
+                      {prop.isSubjectProperty && (
+                        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2.5">
+                          <span className="font-mono text-[10px] font-black uppercase text-indigo-700 w-[4.5rem] shrink-0">Method</span>
+                          <div className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-1.5 py-1">
+                            <button
+                              type="button"
+                              onClick={() => patchRentalProperty(prop.id, { subjectMethod: 'SCHEDULE_E' })}
+                              className={`rounded-md px-2 py-1 text-[10px] font-black uppercase ${prop.subjectMethod === 'SCHEDULE_E' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                            >
+                              Schedule E history
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => patchRentalProperty(prop.id, { subjectMethod: 'MARKET_RENT' })}
+                              className={`rounded-md px-2 py-1 text-[10px] font-black uppercase ${prop.subjectMethod === 'MARKET_RENT' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                            >
+                              Market rent × 75%
+                            </button>
+                          </div>
+                          {prop.subjectMethod === 'MARKET_RENT' && (
+                            <label className="flex items-center gap-2 text-[10px] font-bold text-slate-600">
+                              Gross market rent (1007/1025)
+                              <input
+                                type="number"
+                                value={prop.marketRent}
+                                onChange={(e) => patchRentalProperty(prop.id, { marketRent: Number(e.target.value) })}
+                                className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-indigo-500"
+                              />
+                            </label>
+                          )}
+                          <label className="ml-auto flex items-center gap-1 text-[10px] font-bold text-slate-600 cursor-pointer">
+                            <button
+                              type="button"
+                              onClick={() => patchRentalProperty(prop.id, { isPrimary2To4: !prop.isPrimary2To4 })}
+                            >
+                              {prop.isPrimary2To4
+                                ? <CheckSquare className="h-4 w-4 text-indigo-600" />
+                                : <Square className="h-4 w-4 text-slate-300" />}
+                            </button>
+                            2–4 unit primary (borrower occupies)
+                          </label>
+                        </div>
+                      )}
+
                       {/* PITIA box — from Encompass loan details when available, else UW-entered */}
                       <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 ${
                         prop.pitia === null ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-white'
                       }`}>
                         <span className="font-mono text-[10px] font-black uppercase text-slate-500 w-[4.5rem] shrink-0">PITIA</span>
                         <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800">
-                          Full monthly housing expense
-                          <span className="ml-1 font-normal text-slate-400">· principal, interest, taxes, insurance, association dues</span>
+                          {prop.isSubjectProperty ? 'Proposed PITIA (subject loan)' : 'Full monthly housing expense'}
+                          <span className="ml-1 font-normal text-slate-400">
+                            {prop.isSubjectProperty
+                              ? '· proposed payment on the new loan'
+                              : '· principal, interest, taxes, insurance, association dues'}
+                          </span>
                         </span>
                         {prop.pitiaSource === 'ENCOMPASS' ? (
                           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-black uppercase text-indigo-700">
@@ -1508,8 +2019,15 @@ export default function UnderwriterSplitViewDemo({
                         />
                       </div>
 
-                      {/* Year columns */}
-                      <div className={`grid gap-4 ${twoYearRental ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1 max-w-sm'}`}>
+                      {/* Year columns (informational only when subject uses market rent) */}
+                      {prop.isSubjectProperty && prop.subjectMethod === 'MARKET_RENT' && (
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-500">
+                          Schedule E history below is informational — qualifying uses 75% of market rent
+                        </p>
+                      )}
+                      <div className={`grid gap-4 ${twoYearRental ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1 max-w-sm'} ${
+                        prop.isSubjectProperty && prop.subjectMethod === 'MARKET_RENT' ? 'opacity-50' : ''
+                      }`}>
                         {(['year1', ...(twoYearRental ? ['year2'] : [])] as ('year1' | 'year2')[]).map((yk) => {
                           const y = prop[yk];
                           const cf = rentalAnnualCashFlow(y);
@@ -1591,7 +2109,7 @@ export default function UnderwriterSplitViewDemo({
                         }`}>
                           <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 font-mono">
                             <span>
-                              1084 monthly&nbsp;
+                              {result.isSubjectProperty && result.subjectMethod === 'MARKET_RENT' ? '75% market rent' : '1084 monthly'}&nbsp;
                               <span className="font-black">{result.grossMonthly.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
                             </span>
                             <span>
@@ -1631,6 +2149,38 @@ export default function UnderwriterSplitViewDemo({
                 onSelect={setRentalChoice}
               />
 
+              {/* DTI routing summary for the chosen option */}
+              {(() => {
+                const routing = rentalPicks.routingByOption[rentalChosen.id] ?? rentalFlow.routing;
+                if (routing.liabilityDebtMonthly <= 0 && routing.housingExpenseAdjustment <= 0) return null;
+                return (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {routing.liabilityDebtMonthly > 0 && (
+                      <div className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs">
+                        <span className="font-bold text-rose-900">
+                          Proposed monthly liability (1003)
+                          <span className="block font-normal text-rose-700">Net rental losses redirected to DTI debts</span>
+                        </span>
+                        <span className="font-black font-mono text-base text-rose-800">
+                          {routing.liabilityDebtMonthly.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo
+                        </span>
+                      </div>
+                    )}
+                    {routing.housingExpenseAdjustment > 0 && (
+                      <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs">
+                        <span className="font-bold text-amber-900">
+                          Primary housing expense adjustment
+                          <span className="block font-normal text-amber-700">Subject 2–4 unit primary deficit</span>
+                        </span>
+                        <span className="font-black font-mono text-base text-amber-800">
+                          {routing.housingExpenseAdjustment.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Loan-program guidance note */}
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
                 <p className="font-black uppercase text-slate-800 text-[10px] tracking-wider">Loan-Program Guidelines Applied</p>
@@ -1646,6 +2196,9 @@ export default function UnderwriterSplitViewDemo({
                 {borrowerMetadata.loanProgram === 'USDA' && (
                   <p><strong>USDA / HB-1-3555 Ch. 9:</strong> Same two-year averaging rule as Conventional. Rental income from the subject property requires a two-year history unless the subject is a new purchase with a new rental agreement.</p>
                 )}
+                <p>
+                  <strong>Subject vs non-subject:</strong> Non-subject (REO) rentals use Schedule E history against the property's actual PITIA; an aggregate loss {borrowerMetadata.loanProgram === 'VA' ? 'reduces gross income directly (VA)' : 'is clamped to $0 income and redirected as a proposed liability'}. The subject property uses the proposed PITIA of the new loan — with Schedule E history on a refinance, or 75% of Form 1007/1025 market rent on a purchase. A subject deficit on a 2–4 unit primary adjusts the housing expense; a subject investment deficit maps to a proposed liability.
+                </p>
               </div>
             </div>
           )}
