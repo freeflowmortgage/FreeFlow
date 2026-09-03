@@ -19,12 +19,14 @@
     "zod": "^3.23.8",
     "axios": "^1.7.2",
     "@prisma/client": "^5.14.0",
+    "pdfkit": "^0.15.1",
     "@mortgage-pos/ui": "workspace:*",
     "@mortgage-pos/database": "workspace:*",
     "@mortgage-pos/mortgage-engine": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.4.5",
+    "@types/pdfkit": "^0.13.9",
     "@types/node": "^20.14.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

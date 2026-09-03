@@ -1,0 +1,134 @@
+// =============================================================================
+// PRISMA SCHEMA ADDITIONS FOR COGNITIVE APPRAISAL VALIDATION (HUD 4000.1 / VA)
+// =============================================================================
+// Paste these definitions directly into your existing schema:
+// packages/database/prisma/schema.prisma
+//
+// Then, synchronize your database by running:
+// pnpm --filter @mortgage-pos/database db:push
+// =============================================================================
+
+enum HousingProgram {
+  CONVENTIONAL
+  FHA
+  VA
+  USDA
+}
+
+enum PropertyType {
+  SINGLE_FAMILY
+  CONDO
+  MULTI_FAMILY
+  MANUFACTURED
+}
+
+enum OwnershipType {
+  FEE_SIMPLE
+  LEASEHOLD
+}
+
+enum ActionCategory {
+  REPAIR
+  INSPECTION
+  ADMIN
+  CRITICAL_DISCREPANCY
+}
+
+enum RuleSeverity {
+  CRITICAL_ERROR
+  WARNING
+  COMPLIANCE_INFO
+}
+
+enum AuthoritySource {
+  FHA_HUD_4000_1
+  VA_PAM_26_7_CH12
+  FANNIE_MAE_SEL_GUIDE
+  COMPLIANCE_GENERAL
+}
+
+model AppraisalAudit {
+  id                                 String              @id @default(uuid()) @db.Uuid
+  loanId                             String              @db.Uuid
+  loanApplication                    LoanApplication     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  
+  // Administrative Details
+  caseNumber                         String              @db.VarChar(100)
+  intendedUse                        String              @db.Text
+  highestAndBestUse                  Boolean             @default(true)
+  ownershipType                      OwnershipType       @default(FEE_SIMPLE)
+  remainingLeaseTermYears            Int?
+  loanMaturityDate                   DateTime            @db.Date
+  yearBuilt                          Int
+  
+  // Property Classification & Manufactured Fields
+  propertyType                       PropertyType        @default(SINGLE_FAMILY)
+  isManufacturedHousing              Boolean             @default(false)
+  hudCertificationPlatesPresent      Boolean             @default(false)
+  hudDataPlatePresent                Boolean             @default(false)
+  hasFoundationEngineersCertificate  Boolean             @default(false)
+  
+  // Physical Inspection Verifications
+  atticInspected                     Boolean             @default(false)
+  crawlspaceInspected                Boolean             @default(false)
+  utilitiesAreActive                 Boolean             @default(true)
+  septicWellVisualInspectionNoted    Boolean             @default(true)
+  peelingPaintDetected               Boolean             @default(false)
+  termiteActiveInfestationDetected   Boolean             @default(false)
+  wellWaterPotabilityTestCleared     Boolean?
+  
+  // 1004MC Market Statistics
+  neighborhoodTrend                  String              @db.VarChar(50) // INCREASING, STABLE, DECLINING
+  mcMedianPriceCurrentQuarter        Decimal             @db.Decimal(12, 2)
+  mcMedianPricePriorYearQuarter      Decimal             @db.Decimal(12, 2)
+  mcMonthsSupplyCurrentQuarter       Decimal             @db.Decimal(4, 1)
+  
+  // Structural Storage
+  extractedCompsGrid                 Json                // JSON containing the structured comparable sales adjustments
+  
+  // Automated Sign-off & Completion
+  isHumanVerified                    Boolean             @default(false)
+  verifiedAt                         DateTime?           @db.Timestamptz
+  verifiedByUserId                   String?             @db.Uuid
+  verifiedByUser                     User?               @relation("AppraisalVerifiedByUser", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  
+  // Child action items flagged by the rules engine
+  actionItems                        AppraisalActionItem[]
+
+  createdAt                          DateTime            @default(now()) @db.Timestamptz
+  updatedAt                          DateTime            @updatedAt @db.Timestamptz
+
+  @@index([loanId])
+  @@map("appraisal_audits")
+}
+
+model AppraisalActionItem {
+  id                            String              @id @default(uuid()) @db.Uuid
+  appraisalAuditId              String              @db.Uuid
+  appraisalAudit                AppraisalAudit      @relation(fields: [appraisalAuditId], references: [id], onDelete: Cascade)
+  
+  code                          String              @db.VarChar(100) // e.g., 'HUD_PRE_1978_LEAD_PAINT'
+  category                      ActionCategory      @default(REPAIR)
+  severity                      RuleSeverity        @default(CRITICAL_ERROR)
+  description                   String              @db.Text
+  sourceAuthority               AuthoritySource     @default(FHA_HUD_4000_1)
+  
+  // PDF Coordinate Mapping for Front-End Highlight box Rendering
+  coordinates                   Json?               // Structured as { pageIndex: Int, box: [x, y, w, h] }
+  
+  // Notice of Value (NOV) Condition text prefilled for SAR signing
+  autoPrefillNovConditionText   String?             @db.Text
+  
+  // Human Resolution Log
+  isCleared                     Boolean             @default(false)
+  clearedAt                     DateTime?           @db.Timestamptz
+  clearedByUserId               String?             @db.Uuid
+  clearedByUser                 User?               @relation("ActionItemClearedByUser", fields: [clearedByUserId], references: [id], onDelete: SetNull)
+  clearedNotes                  String?             @db.Text
+
+  createdAt                     DateTime            @default(now()) @db.Timestamptz
+  updatedAt                     DateTime            @updatedAt @db.Timestamptz
+
+  @@index([appraisalAuditId, isCleared])
+  @@map("appraisal_action_items")
+}

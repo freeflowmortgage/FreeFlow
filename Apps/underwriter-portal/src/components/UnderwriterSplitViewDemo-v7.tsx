@@ -4,8 +4,10 @@ import {
   ChevronRight, ArrowLeft, ShieldCheck, HelpCircle, Eye, 
   ExternalLink, Layers, RefreshCw, Trash2, ToggleLeft, ToggleRight,
   Database, Info, AlertTriangle, CheckCircle2, Share2, Lock, 
-  User, Key, Globe, AlertOctagon, ShieldAlert, Cpu
+  User, Key, Globe, AlertOctagon, ShieldAlert, Cpu, FileDown
 } from 'lucide-react';
+
+const DEMO_LOAN_ID = 'e1f82f80-df4f-4d56-a97e-12829a34b2cf';
 
 // Interfaces for W-2 Extraction and Underwriting Fraud audits
 interface W2OcrField {
@@ -235,6 +237,17 @@ export default function UnderwriterSplitViewDemoV7() {
         </div>
         
         <div className="flex items-center space-x-3 self-stretch md:self-auto justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              window.open(`/api/underwrite/summary-pdf?loanId=${DEMO_LOAN_ID}`, '_blank');
+            }}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 transition text-slate-200 rounded-lg text-xs font-bold flex items-center space-x-1.5 border border-slate-700"
+          >
+            <FileDown className="w-4 h-4 text-emerald-400" />
+            <span>Print 1084 Summary</span>
+          </button>
+
           {/* SECURE SHARE PORTAL BUTTON */}
           <button
             onClick={() => {

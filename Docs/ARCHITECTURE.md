@@ -29,17 +29,18 @@ Encompass eFolder is the system of record for original PDFs. FreeFlow streams or
 Freeflow/
 ├── apps/
 │   ├── underwriting-console/          # Local Vite console :3000 (Parser Lab + split v7)
-│   │   └── src/components/
-│   │       ├── UnderwriterSplitViewDemo-v7.tsx
-│   │       ├── AuditTrailTable.tsx
-│   │       ├── UsdaDistributionToggle.tsx
-│   │       └── ParserLab.tsx
+│   │   └── src/
+│   │       ├── components/            # Split v7, Audit, USDA, Parser Lab
+│   │       └── server/summaryPdfMiddleware.ts  # PDFKit 1084 summary (RAM stream)
 │   ├── underwriter-portal/            # Next.js B2B portal (billing, Encompass)
-│   │   └── src/components/UnderwriterSplitViewDemo-v7.tsx
+│   │   └── src/pages/api/underwrite/
+│   │       ├── summary-pdf.ts         # PDFKit 1084 income summary sheet
+│   │       └── process.ts             # Forwards bytes to live parser :8080
 │   └── web/                           # Leftover POS-era tree; not the live local UI
 ├── packages/
 │   ├── mortgage-engine/src/
 │   │   ├── calculateForm1084Income.ts # v9 (Architecture drop calculateForm1084Income-v9.ts)
+│   │   ├── generateIncomeSummaryPdf.ts # PDFKit draw instructions (no disk)
 │   │   ├── payload-guard.ts
 │   │   ├── usda-projected-income-engine-v2.ts
 │   │   └── usda-ssi-rules-engine.ts
@@ -55,8 +56,10 @@ Freeflow/
 ├── docs/
 │   ├── ARCHITECTURE.md                # This file
 │   ├── b2b-income-monorepo-structure-v4.md
-│   ├── UnderwriterSplitViewDemo-v7.tsx
-│   └── copy-assets-v7.sh
+│   ├── income-pdf-summary-spec.md     # 1084 summary sheet (PDFKit / ZDR stream)
+│   ├── summary-pdf-route.ts           # Drop source for the Next route
+│   ├── b2b-qa-sandbox-playbook.md     # QA phases (Phase 2 sandwich checks are obsolete)
+│   └── UnderwriterSplitViewDemo-v7.tsx
 ├── copy-assets-v5.sh                  # Hardened migrator (does not overlay live parser)
 ├── docker-compose.yml
 ├── pnpm-workspace.yaml
@@ -137,7 +140,9 @@ Do not treat MinIO/S3 in `.env.development` as a place to park tax PDFs in produ
 | Parser | http://127.0.0.1:8080/health |
 | Bulk PDF harness | `docs/bulk-accuracy-test-runner.sh` (needs `./test-docs/*.pdf`) |
 
-Parser Lab tab POSTs to `/parse`. Split View / Audit / USDA tabs are fixture UIs until they consume that JSON.
+Parser Lab tab POSTs to `/parse`. Split View **Print 1084 Summary** streams a PDFKit income sheet from RAM (`/api/underwrite/summary-pdf`). Audit / USDA tabs are fixture UIs until they consume parse JSON. Split View numbers are still demo fixtures.
+
+Do **not** use `ai_pdf_converter-v2.py` or `docs/underwrite-process-route-v2.ts` as live ingest. Those write `/tmp` PDFs and exec the old sandwich converter. Live ingest is FastAPI + the scripted `services/doc-parser/src/ai_pdf_converter.py`.
 
 ---
 
@@ -148,5 +153,20 @@ Update these when you next edit the v4 spec itself:
 - Renderer is **pypdfium2**, not pdf2image/Poppler.
 - OCR is **RapidOCR**, not Tesseract (`TESSDATA_PREFIX` in `.env.slicer` is leftover).
 - Container file is **`Dockerfile`**, not `Dockerfile-v2`.
-- Migrator on disk: `copy-assets-v5.sh` (hardened) and `docs/copy-assets-v7.sh` (still points at `apps/web` and old slicer names — do not run it against live parser src).
+- Migrator on disk: `copy-assets-v5.sh` (hardened) and `docs/copy-assets-v7.sh` (do not overlay converter-v2 / process-v2 onto live src).
 - Live local UI is **`apps/underwriting-console`**, not only `underwriter-portal`.
+- `docs/b2b-qa-sandbox-playbook.md` Phase 2 still asks for sandwich PDF / `sliced_pdf_payload_b64`. Those checks are obsolete.
+
+---
+
+## 9. Form 1084 income summary PDF
+
+This is a **generated worksheet**, not a filled FNMA 1084 AcroForm and not a sandwich of the borrower's tax PDF.
+
+| Path | Role |
+| --- | --- |
+| `packages/mortgage-engine/src/generateIncomeSummaryPdf.ts` | Draw instructions + demo fixture |
+| `apps/underwriting-console/src/server/summaryPdfMiddleware.ts` | Vite `:3000` stream (`GET /api/underwrite/summary-pdf`) |
+| `apps/underwriter-portal/src/pages/api/underwrite/summary-pdf.ts` | Next.js stream; Prisma when `DATABASE_URL` has a loan row |
+
+No write to `/tmp`. Converter stays `services/doc-parser/src/ai_pdf_converter.py` (pypdfium2 + RapidOCR).

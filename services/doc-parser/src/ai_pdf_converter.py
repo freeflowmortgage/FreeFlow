@@ -138,23 +138,13 @@ class AIPDFConverter:
                 native_mask = native_mask[:page_count]
                 native_texts = native_texts[:page_count]
             for index in range(page_count):
-                if native_mask[index]:
-                    pages.append(
-                        PageResult(
-                            index=index,
-                            width_px=0,
-                            height_px=0,
-                            is_native_text=True,
-                            plain_text=native_texts[index],
-                            mean_confidence=100.0,
-                        )
-                    )
-                    continue
-
-                ocr_count += 1
                 pdf_page = pdf[index]
                 try:
-                    pages.append(self._ocr_page(pdf_page, index))
+                    if native_mask[index]:
+                        pages.append(self._native_page(pdf_page, index, native_texts[index]))
+                    else:
+                        ocr_count += 1
+                        pages.append(self._ocr_page(pdf_page, index))
                 finally:
                     if hasattr(pdf_page, "close"):
                         pdf_page.close()
@@ -230,6 +220,86 @@ class AIPDFConverter:
             flags=page_flags,
         )
 
+    def _native_page(self, page: pdfium.PdfPage, index: int, plain_text: str) -> PageResult:
+        width_pt = float(page.get_width())
+        height_pt = float(page.get_height())
+        words = self._native_words(page, width_pt, height_pt)
+        return PageResult(
+            index=index,
+            width_px=int(width_pt),
+            height_px=int(height_pt),
+            is_native_text=True,
+            words=words,
+            plain_text=plain_text,
+            mean_confidence=100.0,
+        )
+
+    @staticmethod
+    def _native_words(page: pdfium.PdfPage, width: float, height: float) -> list[OcrWord]:
+        """Box every native text run (top-left, 0–1). PDF coords are bottom-left."""
+        if width <= 0 or height <= 0:
+            return []
+        textpage = page.get_textpage()
+        words: list[OcrWord] = []
+        try:
+            rect_count = textpage.count_rects() if hasattr(textpage, "count_rects") else 0
+            for i in range(rect_count):
+                left, bottom, right, top = textpage.get_rect(i)
+                snippet = textpage.get_text_bounded(left=left, bottom=bottom, right=right, top=top).strip()
+                if not snippet:
+                    continue
+                words.append(
+                    OcrWord(
+                        text=snippet,
+                        x=max(0.0, min(1.0, left / width)),
+                        y=max(0.0, min(1.0, (height - top) / height)),
+                        w=max(0.0, min(1.0, (right - left) / width)),
+                        h=max(0.0, min(1.0, (top - bottom) / height)),
+                        confidence=100.0,
+                    )
+                )
+            if words:
+                return words
+
+            char_count = textpage.count_chars() if hasattr(textpage, "count_chars") else 0
+            cluster: list[tuple[str, tuple[float, float, float, float]]] = []
+
+            def flush() -> None:
+                if not cluster:
+                    return
+                text = "".join(item[0] for item in cluster).strip()
+                if not text:
+                    cluster.clear()
+                    return
+                left = min(item[1][0] for item in cluster)
+                bottom = min(item[1][1] for item in cluster)
+                right = max(item[1][2] for item in cluster)
+                top = max(item[1][3] for item in cluster)
+                words.append(
+                    OcrWord(
+                        text=text,
+                        x=max(0.0, min(1.0, left / width)),
+                        y=max(0.0, min(1.0, (height - top) / height)),
+                        w=max(0.0, min(1.0, (right - left) / width)),
+                        h=max(0.0, min(1.0, (top - bottom) / height)),
+                        confidence=100.0,
+                    )
+                )
+                cluster.clear()
+
+            for i in range(char_count):
+                ch = textpage.get_text_range(i, i + 1)
+                box = textpage.get_charbox(i)
+                if ch.isspace() or ch in "\n\r\t":
+                    flush()
+                    continue
+                cluster.append((ch, box))
+            flush()
+        finally:
+            if hasattr(textpage, "close"):
+                textpage.close()
+        return words
+
     def deskew_image(self, image: np.ndarray) -> tuple[np.ndarray, float]:
         try:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -244,21 +314,21 @@ class AIPDFConverter:
                 if cv2.contourArea(contour) < 150:
                     continue
                 angles.append(self._normalize_min_area_angle(cv2.minAreaRect(contour)))
-
+                
             if not angles:
                 return image, 0.0
-
+                
             median_angle = float(np.median(angles))
             if abs(median_angle) > DESKEW_MAX_DEGREES or abs(median_angle) < 0.1:
                 return image, 0.0
-
+                
             height, width = image.shape[:2]
             matrix = cv2.getRotationMatrix2D((width // 2, height // 2), median_angle, 1.0)
             rotated = cv2.warpAffine(
                 image,
                 matrix,
                 (width, height),
-                flags=cv2.INTER_CUBIC,
+                flags=cv2.INTER_CUBIC, 
                 borderMode=cv2.BORDER_REPLICATE,
             )
             return rotated, median_angle

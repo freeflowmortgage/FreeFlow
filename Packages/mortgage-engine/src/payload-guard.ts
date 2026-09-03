@@ -1,4 +1,4 @@
-import { LoanProgram, WarningMessage, GeneratedCondition } from './calculateForm1084Income';
+import { LoanProgram, WarningMessage, GeneratedCondition } from './calculateForm1084Income-v5';
 
 export interface FhaCalculationSummary {
   qualifyingMonthlyIncome: number;

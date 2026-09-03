@@ -65,11 +65,9 @@ migrate_file "supabase-schema-v2.prisma" "packages/database/prisma/schema.prisma
 migrate_file "supabase-rls-policies.sql" "packages/database/prisma/supabase-rls-policies.sql" "PostgreSQL Row-Level Security Rules"
 
 echo -e "\n${CYAN}[2/5] Migrating Highly Decoupled Slicer Container Microservice...${NC}"
-migrate_file "Dockerfile-v2" "services/doc-parser/Dockerfile" "Non-Privileged Multi-Worker Dockerfile"
+# Do not overlay Dockerfile-v2, ai_pdf_converter-v2.py, or pre_split v4 onto live parser src.
 migrate_file "requirements.txt" "services/doc-parser/requirements.txt" "Python Dependency Requirements"
 migrate_file "server.py" "services/doc-parser/src/server.py" "Stateless FastAPI ZDR Server"
-migrate_file "ai_pdf_converter-v2.py" "services/doc-parser/src/ai_pdf_converter.py" "Pure In-Memory Computer Vision Core"
-migrate_file "pre_split_tax_returns-v4.py" "services/doc-parser/src/pdf_splitter.py" "Four-Pass Regex Tax Splitting Core"
 migrate_file "test-tmpfs-isolation.sh" "services/doc-parser/test-tmpfs-isolation.sh" "CISO-Ready ZDR Validator Tool"
 migrate_file "ecs-task-definition-v4.json" "services/doc-parser/ecs-task-definition-v4.json" "Fargate-Compliant Hardware isolation config"
 migrate_file "env.slicer-v2" "services/doc-parser/.env.slicer" "Decoupled Serverless Env (POS-Free)"
@@ -90,7 +88,8 @@ migrate_file "UnderwriterSplitViewDemo-v7.tsx" "apps/web/src/components/Underwri
 
 echo -e "\n${CYAN}[5/5] Migrating Backend Node.js API Gateways...${NC}"
 migrate_file "calculate.ts" "apps/web/src/pages/api/income/calculate.ts" "Client Formula Execution Route"
-migrate_file "underwrite-process-route-v2.ts" "apps/web/src/pages/api/underwrite/process.ts" "Document Process Router (v2)"
+# summary-pdf-route.ts drop stays in docs/. Live portal route is adapted (shared renderer + demo fallback).
+# Do not copy underwrite-process-route-v2.ts over live process.ts (disk + converter-v2).
 migrate_file "encompass-sync.ts" "apps/web/src/pages/api/underwrite/encompass-sync.ts" "LOS Folder EFolder Export Gateway"
 migrate_file "map-encompass-fields-v2.ts" "apps/web/src/pages/api/underwrite/map-encompass-fields.ts" "Encompass Field Serializer"
 migrate_file "encompass-fallback-queue.ts" "apps/web/src/pages/api/underwrite/encompass-fallback-queue.ts" "Fail-Safe Async Queue Dispatcher"

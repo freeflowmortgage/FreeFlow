@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "lint": "turbo lint"
+    "lint": "turbo lint",
+    "test:e2e": "pnpm --filter underwriting-console test:e2e"
   },
   "devDependencies": {
     "turbo": "^2.0.4",

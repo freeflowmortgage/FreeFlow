@@ -81,13 +81,12 @@ async def process_document(request: Request):
         kept = set(split_result.target_pages)
         page_payload = []
         for page in convert_result.pages:
-            if page.index not in kept and kept:
-                continue
             page_payload.append(
                 {
                     "index": page.index,
                     "formIds": split_result.classifications.get(page.index, []),
                     "isNativeText": page.is_native_text,
+                    "inKeepSet": page.index in kept,
                     "meanConfidence": page.mean_confidence,
                     "skewDegrees": page.skew_degrees,
                     "words": [word.to_dict() for word in page.words],

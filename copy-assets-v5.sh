@@ -140,8 +140,9 @@ migrate_file "UnderwriterSplitViewDemo-v5.tsx" "apps/underwriter-portal/src/comp
 migrate_file "payment-intent-succeeded-v4.json" "apps/underwriter-portal/src/pages/api/billing/payment-intent-succeeded-v4.json" "Stripe payment-intent fixture"
 
 echo -e "\n${CYAN}[5/5] Migrating Backend Node.js API Gateways...${NC}"
+migrate_file "summary-pdf-route.ts" "docs/summary-pdf-route.ts" "Income summary PDF drop (keep; live route is adapted)"
+# Do not copy underwrite-process-route-v2.ts onto portal process.ts — it execs converter-v2 and writes /tmp.
 migrate_file "calculate.ts" "apps/web/src/pages/api/income/calculate.ts" "Client Formula Execution Route"
-migrate_file "underwrite-process-route-v2.ts" "apps/web/src/pages/api/underwrite/process.ts" "Document Process Router (v2)" "underwrite-process-route.ts"
 migrate_file "encompass-sync.ts" "apps/web/src/pages/api/underwrite/encompass-sync.ts" "LOS Folder EFolder Export Gateway"
 migrate_file "map-encompass-fields-v2.ts" "apps/web/src/pages/api/underwrite/map-encompass-fields.ts" "Encompass Field Serializer" "map-encompass-fields.ts"
 migrate_file "encompass-fallback-queue.ts" "apps/web/src/pages/api/underwrite/encompass-fallback-queue.ts" "Fail-Safe Async Queue Dispatcher"
