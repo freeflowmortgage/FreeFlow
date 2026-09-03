@@ -331,13 +331,13 @@ export default function UnderwriterSplitViewDemo({
       return {
         options,
         recommendedId: id,
-        reason: `The four methods vary by ${baseWageReconciliation.maxVariancePct.toFixed(1)}%. Guideline uses the lower of hourly vs YTD until the gap is explained.`,
+        reason: `The four methods vary by ${baseWageReconciliation.maxVariancePct.toFixed(1)}%. Guideline uses Base Hourly, or Monthly salaried depending on the type, cite supported by ytd and historical earnings.`,
       };
     }
     return {
       options,
       recommendedId: 'period',
-      reason: 'Hourly, period, and YTD are within 10%. Guideline uses pay-period annualized as the current documented base.',
+      reason: 'Hourly, period, and YTD are within 10%. Guideline uses Base Hourly, or Monthly salaried depending on the type, cite supported by ytd and historical earnings.',
     };
   }, [baseWageReconciliation]);
 

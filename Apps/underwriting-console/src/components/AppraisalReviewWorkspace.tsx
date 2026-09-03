@@ -303,6 +303,7 @@ const CONDITIONS: Condition[] = [
 export default function AppraisalReviewWorkspace() {
   const [program, setProgram] = useState<Program>('FHA');
   const [useBlankForm, setUseBlankForm] = useState(false);
+  const [customPdfUrl, setCustomPdfUrl] = useState<string | null>(null);
   const {
     currentPage,
     zoomScale,
@@ -361,7 +362,7 @@ export default function AppraisalReviewWorkspace() {
           onResetZoom={resetZoom}
           documentCategory="APPRAISAL_1004"
           documentType="URAR"
-          documentUrl={useBlankForm ? BLANK_URAR_PDF : URAR_PDF}
+          documentUrl={customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF)}
           mappedBoxes={useBlankForm ? [] : mappedBoxes}
         />
       </div>
@@ -375,14 +376,32 @@ export default function AppraisalReviewWorkspace() {
               <p className="mt-1 text-xs text-slate-500">{header.sub}</p>
             </div>
             <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+              <label className="mr-2 flex cursor-pointer items-center rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-600 hover:text-emerald-800">
+                Upload PDF
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setCustomPdfUrl(URL.createObjectURL(file));
+                      setUseBlankForm(false);
+                    }
+                  }}
+                />
+              </label>
               <button
                 type="button"
-                onClick={() => setUseBlankForm(!useBlankForm)}
+                onClick={() => {
+                  setUseBlankForm(!useBlankForm);
+                  if (!useBlankForm) setCustomPdfUrl(null);
+                }}
                 className={`mr-2 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
-                  useBlankForm ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:text-indigo-800'
+                  useBlankForm && !customPdfUrl ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:text-indigo-800'
                 }`}
               >
-                {useBlankForm ? 'Using Blank Form' : 'Use Blank Form'}
+                {useBlankForm && !customPdfUrl ? 'Using Blank Form' : 'Use Blank Form'}
               </button>
               {(['CONV', 'FHA', 'VA'] as Program[]).map((item) => (
                 <button
