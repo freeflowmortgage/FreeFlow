@@ -11,12 +11,15 @@ export type IncomeFieldDef = {
   category: 'wages' | 'withholding' | 'income' | 'addback' | 'mileage' | 'rental' | 'property';
   patterns: RegExp[];
   /** How the value is extracted from a matched line. Defaults to 'money'. */
-  capture?: 'money' | 'integer' | 'text';
+  capture?: 'money' | 'integer' | 'text' | 'percent';
 };
 
 const MONEY = /(?:\$\s*)?(\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2})/;
 // Last standalone integer on the line (values sit at the right edge on tax forms)
 const TRAILING_INT = /(\d{1,3}(?:,\d{3})+|\d+)\s*$/;
+// All percentage tokens on a line. K-1 Item J prints Beginning then Ending columns,
+// so the LAST match is the end-of-year percentage used to qualify.
+const PERCENT = /(\d{1,3}(?:\.\d+)?)\s*%/g;
 
 export const W2_FIELD_DEFS: IncomeFieldDef[] = [
   {
@@ -214,6 +217,10 @@ export const SCHEDULE_E_DEFS: IncomeFieldDef[] = [
   },
 ];
 
+/**
+ * Schedule K-1 (Form 1120-S) capture set: income boxes 1–3, distributions
+ * (Box 16 code D), and the shareholder's END-of-year stock ownership percentage.
+ */
 export const SCORP_DEFS: IncomeFieldDef[] = [
   {
     id: 'scorp-ord',
@@ -224,8 +231,51 @@ export const SCORP_DEFS: IncomeFieldDef[] = [
     category: 'income',
     patterns: [/ordinary business income/i, /box\s*1\b.{0,40}ordinary/i],
   },
+  {
+    id: 'scorp-rre',
+    form: 'Form 1120-S',
+    boxLabel: 'Box 2',
+    fieldLabel: 'Net Rental Real Estate Income',
+    lineNum: 'Box 2',
+    category: 'income',
+    patterns: [/net rental real estate/i, /box\s*2\b.{0,40}rental/i],
+  },
+  {
+    id: 'scorp-onr',
+    form: 'Form 1120-S',
+    boxLabel: 'Box 3',
+    fieldLabel: 'Other Net Rental Income',
+    lineNum: 'Box 3',
+    category: 'income',
+    patterns: [/other net rental income/i, /box\s*3\b.{0,40}rental/i],
+  },
+  {
+    id: 'scorp-dist',
+    form: 'Form 1120-S',
+    boxLabel: 'Box 16D',
+    fieldLabel: 'Distributions (Box 16 Code D)',
+    lineNum: 'Box 16D',
+    category: 'income',
+    patterns: [/box\s*16\b.{0,60}(distribution|code\s*d)/i, /\bdistributions?\b.{0,40}\d/i],
+  },
+  {
+    id: 'scorp-own-pct',
+    form: 'Form 1120-S',
+    boxLabel: 'Item',
+    fieldLabel: 'End-of-Year Stock Ownership %',
+    lineNum: 'Ownership %',
+    category: 'income',
+    capture: 'percent',
+    patterns: [/percentage of stock ownership/i, /current year allocation percentage/i, /stock ownership.{0,40}%/i],
+  },
 ];
 
+/**
+ * Schedule K-1 (Form 1065) capture set: income boxes 1–4, distributions (Box 19
+ * code A), and BOTH Item J end-of-year percentages — Freddie Mac qualifies on the
+ * ending PROFIT %, FNMA on the ending CAPITAL %. Beginning-of-year figures are
+ * never used; the percent capture takes the last (Ending column) value on the line.
+ */
 export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
   {
     id: 'pt-ord',
@@ -235,6 +285,62 @@ export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
     lineNum: 'Box 1',
     category: 'income',
     patterns: [/ordinary business income/i, /box\s*1\b.{0,40}ordinary/i],
+  },
+  {
+    id: 'pt-rre',
+    form: 'Form 1065',
+    boxLabel: 'Box 2',
+    fieldLabel: 'Net Rental Real Estate Income',
+    lineNum: 'Box 2',
+    category: 'income',
+    patterns: [/net rental real estate/i, /box\s*2\b.{0,40}rental/i],
+  },
+  {
+    id: 'pt-onr',
+    form: 'Form 1065',
+    boxLabel: 'Box 3',
+    fieldLabel: 'Other Net Rental Income',
+    lineNum: 'Box 3',
+    category: 'income',
+    patterns: [/other net rental income/i, /box\s*3\b.{0,40}rental/i],
+  },
+  {
+    id: 'pt-gp',
+    form: 'Form 1065',
+    boxLabel: 'Box 4',
+    fieldLabel: 'Guaranteed Payments',
+    lineNum: 'Box 4',
+    category: 'income',
+    patterns: [/guaranteed payments?/i, /box\s*4\b.{0,40}guaranteed/i],
+  },
+  {
+    id: 'pt-dist',
+    form: 'Form 1065',
+    boxLabel: 'Box 19A',
+    fieldLabel: 'Distributions (Box 19 Code A)',
+    lineNum: 'Box 19A',
+    category: 'income',
+    patterns: [/box\s*19\b.{0,60}(distribution|code\s*a)/i, /\bdistributions?\b.{0,40}\d/i],
+  },
+  {
+    id: 'pt-profit-pct',
+    form: 'Form 1065',
+    boxLabel: 'Item J',
+    fieldLabel: 'End-of-Year Profit % (Freddie Mac)',
+    lineNum: 'Item J · Profit',
+    category: 'income',
+    capture: 'percent',
+    patterns: [/\bprofit\b.{0,60}%/i],
+  },
+  {
+    id: 'pt-capital-pct',
+    form: 'Form 1065',
+    boxLabel: 'Item J',
+    fieldLabel: 'End-of-Year Capital % (FNMA)',
+    lineNum: 'Item J · Capital',
+    category: 'income',
+    capture: 'percent',
+    patterns: [/\bcapital\b.{0,60}%/i],
   },
 ];
 
@@ -398,6 +504,16 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
             def.id === 'ent2-type' && PROPERTY_TYPE_CODES[numeric]
               ? `${numeric} — ${PROPERTY_TYPE_CODES[numeric]}`
               : numeric.toLocaleString('en-US');
+        } else if (capture === 'percent') {
+          // Take the LAST percentage on the line — K-1 Item J lists Beginning
+          // then Ending columns, and only the end-of-year figure qualifies.
+          const percentMatches = [...line.text.matchAll(PERCENT)];
+          if (percentMatches.length === 0) continue;
+          const lastMatch = percentMatches[percentMatches.length - 1];
+          numeric = Number(lastMatch[1]);
+          if (!Number.isFinite(numeric) || numeric > 100) continue;
+          located = amountBox(line, lastMatch as RegExpMatchArray);
+          value = `${numeric}% (ending)`;
         } else {
           // text capture: everything after the matched label on the line
           const labelMatch = line.text.match(matchedPattern);

@@ -34,6 +34,7 @@ export interface ScheduleCEntry {
 export interface Form1120SEntry {
   year: number;
   monthsInBusiness?: number;
+  /** END-of-year stock ownership percentage from the K-1 (never the beginning figure) */
   ownershipPercentage: number;
   w2WagesFromBusiness?: number;
   k1OrdinaryIncome?: number;
@@ -50,6 +51,10 @@ export interface Form1120SEntry {
 export interface Form1065Entry {
   year: number;
   monthsInBusiness?: number;
+  /**
+   * END-of-year percentage from K-1 Item J (never the beginning figure).
+   * Freddie Mac qualifies on the ending PROFIT %; FNMA on the ending CAPITAL %.
+   */
   ownershipPercentage: number;
   k1OrdinaryIncome?: number;
   k1NetRentalRealEstate?: number;
@@ -285,6 +290,20 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
           message: `S-Corporation Year ${entry.year}: Borrower has ownership of ${entry.ownershipPercentage}%, but hasStableDistributions is false. K-1 ordinary income has been capped at the lesser of corporate share ($${borrowerShareOfAdjustments.toFixed(2)}) or actual distributions received ($${distributions.toFixed(2)}).`
         });
       }
+    } else if (entry.ownershipPercentage > 0) {
+      // Under 25%: borrower is NOT self-employed. K-1 boxes 1/2/3 remain usable as
+      // ordinary income — no business-level non-cash add-backs, no liquidity test —
+      // capped at actual distributions received unless a stable history is documented.
+      const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
+      const minorityK1Income = ordinary.add(rentalRealEstate).add(otherRental).mul(shareFactor);
+      k1EligibleIncome = entry.hasStableDistributions
+        ? minorityK1Income
+        : Decimal.min(minorityK1Income, distributions);
+      warnings.push({
+        code: 'SCORP_MINORITY_K1_INCOME',
+        severity: 'WARNING',
+        message: `S-Corporation Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) with no business add-backs${entry.hasStableDistributions ? '' : `, capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history.`
+      });
     }
 
     const totalCombined = w2.add(k1EligibleIncome);
@@ -336,6 +355,21 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
           message: `Partnership Year ${entry.year}: Borrower has ownership of ${entry.ownershipPercentage}%, but hasStableDistributions is false. K-1 ordinary income has been capped at the lesser of corporate share ($${borrowerShareOfAdjustments.toFixed(2)}) or actual distributions received ($${distributions.toFixed(2)}).`
         });
       }
+    } else if (entry.ownershipPercentage > 0) {
+      // Under 25%: borrower is NOT self-employed. K-1 boxes 1/2/3 remain usable as
+      // ordinary income (guaranteed payments are added separately below) — no
+      // business add-backs, no liquidity test — capped at distributions received
+      // unless a stable history is documented.
+      const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
+      const minorityK1Income = ordinary.add(rentalRealEstate).add(otherRental).mul(shareFactor);
+      k1EligibleIncome = entry.hasStableDistributions
+        ? minorityK1Income
+        : Decimal.min(minorityK1Income, distributions);
+      warnings.push({
+        code: 'PARTNERSHIP_MINORITY_K1_INCOME',
+        severity: 'WARNING',
+        message: `Partnership Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${entry.hasStableDistributions ? '' : ` and capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
+      });
     }
 
     const totalCombined = k1EligibleIncome.add(guaranteed);
