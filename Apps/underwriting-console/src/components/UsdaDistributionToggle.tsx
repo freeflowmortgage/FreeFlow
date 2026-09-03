@@ -120,7 +120,7 @@ export default function UsdaDistributionToggle() {
   }, [distributions, householdBaseEarnings, countyMedianLimit]);
 
   return (
-    <div className="bg-slate-950 text-slate-100 p-6 rounded-2xl border border-slate-900 font-sans max-w-4xl mx-auto space-y-6 shadow-2xl">
+    <div className="bg-white text-slate-800 p-6 rounded-2xl border border-slate-900 font-sans max-w-4xl mx-auto space-y-6 shadow-2xl">
       
       {/* HEADER LOGO PANEL */}
       <div className="flex justify-between items-center border-b border-slate-900 pb-4">
@@ -141,7 +141,7 @@ export default function UsdaDistributionToggle() {
       </div>
 
       {/* COMPLIANCE INTRO */}
-      <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-900/60 text-xs text-slate-400 leading-relaxed">
+      <div className="bg-slate-50 p-4 rounded-xl border border-slate-900/60 text-xs text-slate-400 leading-relaxed">
         <span className="font-bold text-white uppercase tracking-wider block mb-1">USDA HB-1-3555 CHAPTER 9 COMPLIANCE SHIELD</span>
         Standard guidelines mandate including 100% of retirement distributions in the Annual Household Eligibility Cap unless the distribution is verified by the underwriter as an irregular, non-recurring lump-sum. Toggle the status below to dynamically audit and sync the loan file.
       </div>
@@ -149,7 +149,7 @@ export default function UsdaDistributionToggle() {
       {/* DUAL DISPLAY CARDS: REPAYMENT VS ELIGIBILITY */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Track 1: Repayment Income */}
-        <div className="p-5 bg-slate-900/20 border border-slate-900 rounded-xl relative space-y-2">
+        <div className="p-5 bg-slate-50 border border-slate-900 rounded-xl relative space-y-2">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Track 1: Repayment Income (DTI)</span>
           <span className="text-3xl font-black text-white block">
             ${calculation.repaymentIncomeMonthly.toLocaleString()}<span className="text-xs font-normal text-slate-500"> / mo</span>
@@ -193,7 +193,7 @@ export default function UsdaDistributionToggle() {
           {distributions.map((dist) => (
             <div 
               key={dist.id} 
-              className={`p-4 bg-slate-900/30 rounded-xl border transition-all duration-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${
+              className={`p-4 bg-slate-50 rounded-xl border transition-all duration-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${
                 dist.isRecurring ? 'border-slate-900' : 'border-indigo-500/20 bg-indigo-500/5'
               }`}
             >
@@ -214,7 +214,7 @@ export default function UsdaDistributionToggle() {
                 onClick={() => handleToggleRecurrency(dist.id)}
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all duration-200 flex items-center space-x-1 border ${
                   dist.isRecurring
-                    ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-850'
+                    ? 'bg-white border-slate-200 text-slate-400 hover:text-slate-950 hover:bg-slate-850'
                     : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400 shadow-sm shadow-indigo-500/10'
                 }`}
               >
@@ -233,13 +233,13 @@ export default function UsdaDistributionToggle() {
           
           <div className="space-y-2.5">
             {calculation.conditions.map((cond, idx) => (
-              <div key={idx} className="p-4 bg-slate-900/10 border border-slate-900 rounded-xl space-y-2">
+              <div key={idx} className="p-4 bg-white/10 border border-slate-900 rounded-xl space-y-2">
                 <div className="flex items-center space-x-2 text-xs font-bold text-white">
                   <FileText className="w-4 h-4 text-indigo-400" />
                   <span>{cond.title}</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">{cond.description}</p>
-                <div className="inline-flex items-center space-x-1.5 px-2 py-0.5 bg-slate-900 text-[9px] font-mono font-bold text-slate-400 rounded border border-slate-850">
+                <div className="inline-flex items-center space-x-1.5 px-2 py-0.5 bg-white text-[9px] font-mono font-bold text-slate-400 rounded border border-slate-200">
                   <span>REQUIRED DOC:</span>
                   <span className="text-indigo-400">{cond.docType}</span>
                 </div>

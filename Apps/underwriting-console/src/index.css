@@ -1,3 +1,23 @@
+:root {
+  --ff-canvas: #f8fafc;
+  --ff-ink: #0f172a;
+  --ff-muted: #475569;
+  --ff-accent: #059669;
+  --ff-accent-strong: #047857;
+  --ff-card: #ffffff;
+  --ff-line: #e2e8f0;
+}
+
+html.dark {
+  --ff-canvas: #070a13;
+  --ff-ink: #f1f5f9;
+  --ff-muted: #94a3b8;
+  --ff-accent: #34d399;
+  --ff-accent-strong: #10b981;
+  --ff-card: #151f32;
+  --ff-line: #1e293b;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -10,5 +30,7 @@ body,
 
 body {
   margin: 0;
-  background: #070a13;
+  background: var(--ff-canvas);
+  color: var(--ff-ink);
+  font-family: Roboto, 'Liberation Sans', system-ui, sans-serif;
 }
