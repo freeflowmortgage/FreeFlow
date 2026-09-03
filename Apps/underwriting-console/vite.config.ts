@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { parseMiddleware } from './src/server/parseMiddleware';
 import { summaryPdfMiddleware } from './src/server/summaryPdfMiddleware';
+import { intakeDeliverMiddleware } from './src/server/intakeDeliverMiddleware';
 
 export default defineConfig({
   plugins: [
@@ -11,6 +12,7 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use(parseMiddleware());
         server.middlewares.use(summaryPdfMiddleware());
+        server.middlewares.use(intakeDeliverMiddleware());
       },
     },
   ],

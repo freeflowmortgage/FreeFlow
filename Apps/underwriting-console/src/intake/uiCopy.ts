@@ -544,16 +544,16 @@ export function localizedDocumentPlan(answers: IntakeAnswers, lang: IntakeLang):
 export function localizedCompletion(answers: IntakeAnswers, lang: IntakeLang): string {
   const name = firstName(answers);
   if (lang === 'es-US') {
-    return `${name}, la solicitud URLA está completa en esta sesión. Descargue el JSON del 1003 para su oficial — FreeFlow no guarda una copia. Luego obtendrán el crédito, enviarán divulgaciones y recolectarán los documentos.`;
+    return `${name}, su solicitud está completa — se entregó de forma segura a su prestamista y FreeFlow no guarda ninguna copia. Su oficial de préstamos se comunicará pronto. No necesita descargar ni enviar nada más por ahora.`;
   }
   if (lang === 'vi-VN') {
-    return `${name}, hồ sơ đã được mở. Tiếp theo nhân viên tín dụng sẽ kéo tín dụng, gửi công bố qua email, và nhờ bạn tải lên giấy tờ vừa liệt kê. Kiểm tra hộp thư — không cần làm gì thêm trong khung chat này.`;
+    return `${name}, hồ sơ của bạn đã hoàn tất và được gửi an toàn đến bên cho vay — FreeFlow không lưu bản sao. Nhân viên tín dụng sẽ sớm liên hệ. Bạn không cần tải xuống hay gửi thêm gì lúc này.`;
   }
   if (lang === 'zh-CN') {
-    return `${name}，申请已启动。接下来贷款顾问会拉取征信、把披露文件发到您邮箱，并请您上传刚才列出的材料。请留意收件箱——此聊天无需再操作。`;
+    return `${name}，您的申请已完成并已安全送达贷款机构——FreeFlow 不保留任何副本。贷款顾问会尽快与您联系。您现在无需下载或提交任何其他材料。`;
   }
   if (lang === 'ko-KR') {
-    return `${name}님, 신청이 시작되었습니다. 다음으로 담당자가 신용조회를 하고, 고지서를 이메일로 보내며, 방금 안내한 서류를 업로드해 달라고 요청합니다. 받은편지함을 확인하세요. 이 채팅에서는 더 할 일이 없습니다.`;
+    return `${name}님, 신청이 완료되어 대출 기관에 안전하게 전달되었습니다. FreeFlow는 사본을 보관하지 않습니다. 담당자가 곧 연락드릴 예정이며, 지금은 다운로드하거나 제출할 것이 없습니다.`;
   }
-  return `${name}, the Uniform Residential Loan Application is complete in this session. Download the 1003 JSON for your loan officer — FreeFlow does not keep a copy. Next they will pull credit, send disclosures, and collect the documents we listed.`;
+  return `${name}, your application is complete — it has been securely delivered to your lender, and FreeFlow keeps no copy. Your loan officer will reach out shortly. There is nothing for you to download or send right now.`;
 }
