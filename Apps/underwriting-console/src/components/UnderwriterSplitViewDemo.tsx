@@ -106,7 +106,7 @@ export default function UnderwriterSplitViewDemo({
 
   const availableTabs = useMemo(() => {
     const allTabs = [
-      ['PAYSTUB_RECONCILIATION', 'W-2 paystub', ClipboardList],
+      ['PAYSTUB_RECONCILIATION', 'Base Income', ClipboardList],
       ['W2_CONTINUITY', 'W-2 variable', Calendar],
       ['SCHEDULE_C', 'Schedule C', FileSpreadsheet],
       ['SCORP', 'S-Corp 1120-S', FileSpreadsheet],
@@ -166,6 +166,7 @@ export default function UnderwriterSplitViewDemo({
   const [currentBaseYtd, setCurrentBaseYtd] = useState<number>(54000.00); // 8 months elapsed (Wage deficit trigger!)
   const [currentBonusYtd, setCurrentBonusYtd] = useState<number>(12500.00);
   const [currentOtYtd, setCurrentOtYtd] = useState<number>(4200.00);
+  const [currentOtherYtd, setCurrentOtherYtd] = useState<number>(0.00);
 
   const [schCYears, setSchCYears] = useState<[SchCYear, SchCYear]>([
     { year: 2025, line31: 115000, line13: 8500, line30: 2400, line44aMiles: 4500, line24bMeals: 1800 },
@@ -242,7 +243,7 @@ export default function UnderwriterSplitViewDemo({
     const hourlyMethod = (currentHourlyRate * currentWeeklyHours * 52) / 12; // Standard Hourly Pay Rate Method
     const periodAnnualizedMethod = (currentPeriodBasePay * 24) / 12; // Semi-monthly Pay Period Annualized Method
     const ytdAverageMethod = currentBaseYtd / 7.5; // August 15 represents 7.5 elapsed months of the year
-    const priorYearW2Average = 85000 / 12; // Static baseline reference
+    const priorYearW2Average = prevEmployerW2.box1Wages / 12; // Dynamic previous year W-2 base
 
     return {
       hourlyMethod,
@@ -251,7 +252,7 @@ export default function UnderwriterSplitViewDemo({
       priorYearW2Average,
       maxVariancePct: Math.abs(((hourlyMethod - ytdAverageMethod) / hourlyMethod) * 100)
     };
-  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd]);
+  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box1Wages]);
 
   // B. Variable Income Rolling & Continuity (Job Transition Adapter) [cite: 177]
   const variableContinuityCalculations = useMemo(() => {
@@ -323,6 +324,7 @@ export default function UnderwriterSplitViewDemo({
       { id: 'period', label: 'Pay period annualized', monthly: baseWageReconciliation.periodAnnualizedMethod, formula: '(Period pay × 24) / 12' },
       { id: 'ytd', label: 'YTD average', monthly: baseWageReconciliation.ytdAverageMethod, formula: 'YTD base / 7.5 months elapsed' },
       { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: '2025 W-2 Box 1 / 12' },
+      { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
     if (baseWageReconciliation.maxVariancePct > 10) {
       const id = baseWageReconciliation.hourlyMethod <= baseWageReconciliation.ytdAverageMethod ? 'hourly' : 'ytd';
@@ -345,6 +347,7 @@ export default function UnderwriterSplitViewDemo({
     const options = [
       { id: 'current', label: 'Current job only', monthly: current, formula: `(Bonus YTD + OT YTD) / ${monthsAtCurrentJob} months` },
       { id: 'avg24', label: '24-month merged', monthly: merged, formula: `(Current variable + prior W-2 bonus/OT) / ${monthsAtCurrentJob + 12} months` },
+      { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
     if (monthsAtCurrentJob < 12) {
       return {
@@ -650,7 +653,7 @@ export default function UnderwriterSplitViewDemo({
               </div>
 
               {/* Core interactive variable modification boxes */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
                 <div>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Hourly Rate of Pay</label>
                   <input
@@ -704,6 +707,26 @@ export default function UnderwriterSplitViewDemo({
                     <Eye className="h-3 w-3" /> Inspect Coordinates
                   </button>
                 </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 1</label>
+                  <input
+                    type="number"
+                    value={prevEmployerW2.box1Wages}
+                    onChange={(e) => setPrevEmployerW2({ ...prevEmployerW2, box1Wages: Number(e.target.value) })}
+                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Other Income YTD</label>
+                  <input
+                    type="number"
+                    value={currentOtherYtd}
+                    onChange={(e) => setCurrentOtherYtd(Number(e.target.value))}
+                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
               </div>
 
               <IncomeChoicePanel
@@ -713,6 +736,17 @@ export default function UnderwriterSplitViewDemo({
                 selectedId={w2BaseChoice}
                 onSelect={setW2BaseChoice}
               />
+
+              {/* Other Income Warning Panel */}
+              {currentOtherYtd > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-xs leading-relaxed text-amber-800">
+                  <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold uppercase block tracking-wider text-amber-950">Other Income Detected</span>
+                    Other income of ${currentOtherYtd.toLocaleString()} found. Please validate the continuance of this other income type (e.g., probability of continued receipt for at least 3 years) per guidelines.
+                  </div>
+                </div>
+              )}
 
               {/* Critical Wage Deficit Alert Panel */}
               {currentBaseYtd < 50000.00 && (

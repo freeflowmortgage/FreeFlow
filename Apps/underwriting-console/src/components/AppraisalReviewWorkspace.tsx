@@ -36,6 +36,7 @@ type Condition = {
 };
 
 const URAR_PDF = '/fixtures/urar-1004.pdf';
+const BLANK_URAR_PDF = '/fixtures/urar-1004.pdf?blank=true';
 
 const SUBJECT = {
   loanId: 'LN-2026-9043',
@@ -301,6 +302,7 @@ const CONDITIONS: Condition[] = [
 
 export default function AppraisalReviewWorkspace() {
   const [program, setProgram] = useState<Program>('FHA');
+  const [useBlankForm, setUseBlankForm] = useState(false);
   const {
     currentPage,
     zoomScale,
@@ -359,8 +361,8 @@ export default function AppraisalReviewWorkspace() {
           onResetZoom={resetZoom}
           documentCategory="APPRAISAL_1004"
           documentType="URAR"
-          documentUrl={URAR_PDF}
-          mappedBoxes={mappedBoxes}
+          documentUrl={useBlankForm ? BLANK_URAR_PDF : URAR_PDF}
+          mappedBoxes={useBlankForm ? [] : mappedBoxes}
         />
       </div>
 
@@ -373,6 +375,15 @@ export default function AppraisalReviewWorkspace() {
               <p className="mt-1 text-xs text-slate-500">{header.sub}</p>
             </div>
             <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setUseBlankForm(!useBlankForm)}
+                className={`mr-2 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
+                  useBlankForm ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:text-indigo-800'
+                }`}
+              >
+                {useBlankForm ? 'Using Blank Form' : 'Use Blank Form'}
+              </button>
               {(['CONV', 'FHA', 'VA'] as Program[]).map((item) => (
                 <button
                   key={item}
@@ -388,50 +399,50 @@ export default function AppraisalReviewWorkspace() {
             </div>
           </div>
           <dl className="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
-            <Meta label="Loan" value={SUBJECT.loanId} />
-            <Meta label="Borrower" value={SUBJECT.borrower} />
-            <Meta label="Appraised" value={`$${SUBJECT.value.toLocaleString()}`} />
-            <Meta label="Case" value={SUBJECT.caseNumber} />
+            <Meta label="Loan" value={useBlankForm ? '—' : SUBJECT.loanId} />
+            <Meta label="Borrower" value={useBlankForm ? '—' : SUBJECT.borrower} />
+            <Meta label="Appraised" value={useBlankForm ? '—' : `$${SUBJECT.value.toLocaleString()}`} />
+            <Meta label="Case" value={useBlankForm ? '—' : SUBJECT.caseNumber} />
           </dl>
           <p className="mt-3 text-xs text-slate-600">
-            {SUBJECT.address} · {SUBJECT.gla.toLocaleString()} sf · built {SUBJECT.yearBuilt} · {SUBJECT.appraiser}
+            {useBlankForm ? 'No subject data loaded' : `${SUBJECT.address} · ${SUBJECT.gla.toLocaleString()} sf · built ${SUBJECT.yearBuilt} · ${SUBJECT.appraiser}`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
             <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-800">
-              {program === 'VA' ? `${novFails} NOV items open` : `${errors} exceptions`}
+              {useBlankForm ? '0 exceptions' : program === 'VA' ? `${novFails} NOV items open` : `${errors} exceptions`}
             </span>
-            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">{warnings} title / contract flags</span>
+            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">{useBlankForm ? '0' : warnings} title / contract flags</span>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">Native PDF mapped</span>
           </div>
         </header>
 
         <div className="space-y-6 px-6 py-5">
           {program === 'VA' ? (
-            <NovChecklist items={NOV_CHECKLIST} onInspect={inspect} />
+            <NovChecklist items={useBlankForm ? [] : NOV_CHECKLIST} onInspect={inspect} />
           ) : (
-            <FindingsList findings={visibleFindings} activeHighlight={activeHighlight} onInspect={inspect} />
+            <FindingsList findings={useBlankForm ? [] : visibleFindings} activeHighlight={activeHighlight} onInspect={inspect} />
           )}
 
-          <SalesCompAnalysis />
+          {!useBlankForm && <SalesCompAnalysis />}
 
           {program === 'FHA' ? (
             <ConditionsPanel
               title="Writes to HUD-92800.5B (CCDE)"
               intro="Each mapped finding below becomes a Conditional Commitment item the DE underwriter would lock."
-              conditions={conditions}
+              conditions={useBlankForm ? [] : conditions}
             />
           ) : program === 'VA' ? (
             <ConditionsPanel
               title="Red flags & NOV conditions"
               intro="Failed MPR items and commentary keywords prefill the Notice of Value. Clear the checklist before lock & sync."
-              conditions={conditions}
+              conditions={useBlankForm ? [] : conditions}
               nov
             />
           ) : (
             <ConditionsPanel
               title="Conditions this file would write"
               intro="GSE CU / 1004MC and commentary flags for the underwriter."
-              conditions={conditions}
+              conditions={useBlankForm ? [] : conditions}
             />
           )}
 

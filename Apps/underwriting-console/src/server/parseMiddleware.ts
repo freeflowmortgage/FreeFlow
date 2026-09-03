@@ -99,10 +99,9 @@ async function extractNativePages(bytes: Buffer): Promise<ParsePage[]> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const task = pdfjs.getDocument({
     data: new Uint8Array(bytes),
-    disableWorker: true,
     isEvalSupported: false,
     useSystemFonts: true,
-  });
+  } as any);
   const pdf = await task.promise;
   const pages: ParsePage[] = [];
   try {
@@ -183,7 +182,7 @@ async function tryPythonParse(bytes: Buffer, name: string): Promise<ParseRespons
         'Content-Type': 'application/pdf',
         'X-Document-Title': name,
       },
-      body: bytes,
+      body: new Uint8Array(bytes),
       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) return null;
@@ -221,7 +220,8 @@ export function parseMiddleware(): Connect.NextHandleFunction {
     }
 
     if (path === '/fixtures/urar-1004.pdf' && req.method === 'GET') {
-      void urarPdf.then((bytes) => {
+      const isBlank = (req.url || '').includes('blank=true');
+      void (isBlank ? generateUrarPdf(true) : urarPdf).then((bytes) => {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'inline; filename="LN-2026-9043-URAR-1004.pdf"');

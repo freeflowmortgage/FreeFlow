@@ -348,6 +348,9 @@ export function seAvgOptions(
       { id: 'lower', label: 'Lower of the two years', monthly: Math.min(y1, y2) / 12, formula: 'Min(Year 1, Year 2) / 12' },
     );
   }
+  
+  options.push({ id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' });
+
   if (dropped) {
     return [
       {
