@@ -4,7 +4,7 @@ import PDFDocument from 'pdfkit';
 import {
   DEMO_INCOME_SUMMARY,
   renderIncomeSummaryPdf,
-} from '../../../../packages/mortgage-engine/src/generateIncomeSummaryPdf';
+} from '../../../../Packages/mortgage-engine/src/generateIncomeSummaryPdf';
 
 function loanIdFromRequest(req: IncomingMessage): string | null {
   const host = req.headers.host || 'localhost';
