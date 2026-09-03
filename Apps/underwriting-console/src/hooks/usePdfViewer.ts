@@ -13,6 +13,8 @@ export interface UsePdfViewerReturn {
   nextPage: () => void;
   prevPage: () => void;
   setPage: (page: number) => void;
+  /** Sync the pager with the actual page count of a loaded document. */
+  setTotalPages: (pages: number) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
@@ -30,7 +32,13 @@ export function usePdfViewer(initialTotalPages: number = 3): UsePdfViewerReturn 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [zoomScale, setZoomScale] = useState<number>(1.0);
   const [activeHighlight, setActiveHighlight] = useState<SpatialCoordinates | null>(null);
-  const [totalPages] = useState<number>(initialTotalPages);
+  const [totalPages, setTotalPagesState] = useState<number>(initialTotalPages);
+
+  const setTotalPages = useCallback((pages: number) => {
+    const next = Math.max(1, Math.floor(pages));
+    setTotalPagesState(next);
+    setCurrentPage((prev) => Math.min(prev, next));
+  }, []);
 
   const nextPage = useCallback(() => {
     setCurrentPage((prev) => Math.min(prev + 1, totalPages));
@@ -76,6 +84,7 @@ export function usePdfViewer(initialTotalPages: number = 3): UsePdfViewerReturn 
     nextPage,
     prevPage,
     setPage,
+    setTotalPages,
     zoomIn,
     zoomOut,
     resetZoom,

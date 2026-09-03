@@ -1,18 +1,21 @@
-# Drop-in blank appraisal form
+# Drop-in appraisal document
 
-Place a real blank URAR 1004 PDF here named `1004urar.pdf` (also accepted:
-`urar-1004.pdf` or `1004.pdf`) and the appraisal demo will serve it instead of
-the generated facsimile, auto-filled with the demo subject data
-(Sarah K. Vance · 742 Whispering Pines Dr, Austin TX).
+Place a URAR 1004 PDF here named `1004urar.pdf` (also accepted: `urar-1004.pdf`
+or `1004.pdf`) and the appraisal demo serves it instead of the generated
+facsimile. Two modes:
 
-Requirements:
+- **Blank with fillable AcroForm text fields** — auto-filled with the demo
+  subject data (Sarah K. Vance · 742 Whispering Pines Dr, Austin TX). Field
+  *names* are matched against keywords (borrower, address, city, state, zip,
+  value, appraiser, license, year built, GLA, …) in `src/appraisalDemoFill.ts`.
+- **Already filled out (or a flat scan)** — served exactly as dropped, so a
+  1004 you completed by hand becomes the demo document.
 
-- The PDF must have fillable AcroForm text fields — filling matches field
-  *names* against keywords (borrower, address, city, state, zip, value,
-  appraiser, license, year built, GLA, …) in `src/appraisalDemoFill.ts`.
-- Flat/scanned blanks have no fields to fill; those are ignored and the
-  generated facsimile is served instead (a console warning is logged).
+When a drop-in document is active the workspace shows a "Custom 1004 from
+fixtures" badge and hides the facsimile-coordinate finding highlights (they
+only line up with the generated layout). The pager follows the document's real
+page count.
 
 The same auto-fill also runs in the browser for any fillable PDF selected via
-the appraisal workspace's Upload PDF button, so you can test a blank without
-committing it.
+the appraisal workspace's Upload PDF button, so you can test without
+committing a file.

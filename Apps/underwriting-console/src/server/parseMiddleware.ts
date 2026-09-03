@@ -6,7 +6,7 @@ import { generateIncomeSmokePdf } from './generateIncomeSmokePdf';
 import { generateUrarPdf } from './generateUrarPdf';
 import { generatePaystubPdf } from './generatePaystubPdf';
 import { fillK1Partnership, fillK1SCorp, fillScheduleC, fillScheduleE, fillW2, num } from './demoDocs';
-import { fillDroppedUrarBlank } from './fillDroppedUrar';
+import { droppedUrarExists, loadDroppedUrar } from './fillDroppedUrar';
 
 const PYTHON_PARSE = 'http://127.0.0.1:8080/parse';
 const PYTHON_HEALTH = 'http://127.0.0.1:8080/health';
@@ -224,10 +224,11 @@ export function parseMiddleware(): Connect.NextHandleFunction {
 
     if (path === '/fixtures/urar-1004.pdf' && req.method === 'GET') {
       const isBlank = (req.url || '').includes('blank=true');
-      // A real blank 1004 dropped into public/fixtures/blank/ takes precedence
-      // over the generated facsimile when its AcroForm fields can be filled.
-      void fillDroppedUrarBlank(isBlank)
-        .then((dropped) => dropped ?? (isBlank ? generateUrarPdf(true) : urarPdf))
+      // A real 1004 dropped into public/fixtures/blank/ takes precedence over
+      // the generated facsimile: fillable blanks get demo data written in,
+      // already-completed PDFs are served as dropped.
+      void loadDroppedUrar(isBlank)
+        .then((dropped) => dropped?.bytes ?? (isBlank ? generateUrarPdf(true) : urarPdf))
         .then((bytes) => {
           res.statusCode = 200;
           res.setHeader('Content-Type', 'application/pdf');
@@ -236,6 +237,15 @@ export function parseMiddleware(): Connect.NextHandleFunction {
         }).catch((error) => {
           sendJson(res, 500, { detail: error instanceof Error ? error.message : 'URAR fixture failed.' });
         });
+      return;
+    }
+
+    if (path === '/fixtures/urar-1004.meta.json' && req.method === 'GET') {
+      // Lets the appraisal workspace know a user document replaced the
+      // facsimile (its coordinate overlays only fit the generated layout).
+      void droppedUrarExists()
+        .then((custom) => sendJson(res, 200, { custom }))
+        .catch(() => sendJson(res, 200, { custom: false }));
       return;
     }
 

@@ -306,6 +306,21 @@ export default function AppraisalReviewWorkspace() {
   const [useBlankForm, setUseBlankForm] = useState(false);
   const [customPdfUrl, setCustomPdfUrl] = useState<string | null>(null);
   const [uploadFillNote, setUploadFillNote] = useState<string | null>(null);
+  /** True when a user 1004 dropped into public/fixtures/blank replaces the facsimile. */
+  const [droppedDoc, setDroppedDoc] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/fixtures/urar-1004.meta.json')
+      .then((res) => (res.ok ? res.json() : { custom: false }))
+      .then((meta: { custom?: boolean }) => {
+        if (!cancelled) setDroppedDoc(Boolean(meta.custom));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * Uploaded blank appraisal forms with fillable AcroForm fields get the demo
@@ -339,6 +354,7 @@ export default function AppraisalReviewWorkspace() {
     zoomIn,
     zoomOut,
     resetZoom,
+    setTotalPages,
     triggerHighlight,
     clearHighlight,
   } = usePdfViewer(3);
@@ -352,6 +368,13 @@ export default function AppraisalReviewWorkspace() {
     [program],
   );
   const mappedBoxes = visibleFindings.map((finding) => ({ pageIndex: finding.pageIndex, box: finding.box }));
+  /**
+   * Uploaded or dropped-in documents have their own layout, so the facsimile's
+   * coordinate overlays (finding boxes, tap-to-highlight) are suppressed.
+   */
+  const customDoc = Boolean(customPdfUrl) || droppedDoc;
+  const canvasBoxes = useBlankForm || customDoc ? [] : mappedBoxes;
+  const canvasHighlight = customDoc ? null : activeHighlight;
   const errors = visibleFindings.filter((finding) => finding.severity === 'error').length;
   const warnings = visibleFindings.filter((finding) => finding.severity === 'warning').length;
   const novFails = NOV_CHECKLIST.filter((item) => item.status === 'fail').length;
@@ -375,14 +398,14 @@ export default function AppraisalReviewWorkspace() {
       currentPage,
       zoomScale,
       totalPages,
-      activeHighlight,
+      activeHighlight: canvasHighlight,
       documentCategory: 'APPRAISAL_1004',
       documentType: 'URAR',
       // blob: URLs from the upload remain valid across same-origin windows
       documentUrl: customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF),
-      mappedBoxes: useBlankForm ? [] : mappedBoxes,
+      mappedBoxes: canvasBoxes,
     }),
-    [useBlankForm, program, currentPage, zoomScale, totalPages, activeHighlight, customPdfUrl, mappedBoxes],
+    [useBlankForm, program, currentPage, zoomScale, totalPages, canvasHighlight, customPdfUrl, canvasBoxes],
   );
   const docSnapshotRef = useRef(docSnapshot);
   docSnapshotRef.current = docSnapshot;
@@ -457,7 +480,7 @@ export default function AppraisalReviewWorkspace() {
           <PdfCoordinateCanvas
             currentPage={currentPage}
             zoomScale={zoomScale}
-            activeHighlight={activeHighlight}
+            activeHighlight={canvasHighlight}
             totalPages={totalPages}
             onNextPage={nextPage}
             onPrevPage={prevPage}
@@ -467,7 +490,8 @@ export default function AppraisalReviewWorkspace() {
             documentCategory="APPRAISAL_1004"
             documentType="URAR"
             documentUrl={customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF)}
-            mappedBoxes={useBlankForm ? [] : mappedBoxes}
+            mappedBoxes={canvasBoxes}
+            onPageCount={setTotalPages}
           />
         </div>
       )}
@@ -516,6 +540,14 @@ export default function AppraisalReviewWorkspace() {
               {uploadFillNote && (
                 <span className="mr-2 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                   {uploadFillNote}
+                </span>
+              )}
+              {droppedDoc && !customPdfUrl && (
+                <span
+                  className="mr-2 rounded bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700"
+                  title="Serving the 1004 from public/fixtures/blank. Facsimile coordinate highlights are off for custom documents."
+                >
+                  Custom 1004 from fixtures
                 </span>
               )}
               <button
