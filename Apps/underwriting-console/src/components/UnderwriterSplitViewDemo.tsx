@@ -77,15 +77,19 @@ type IncomeTab =
   | 'SCHEDULE_E'
   | 'ENCOMPASS_SYNC';
 
-// ── Rental Income (Schedule E Page 1) ─────────────────────────────────────────
+// ── Rental Income (Schedule E Page 1 · Form 1084 / 1038 worksheet) ────────────
 
-/** One year of data for a single rental property */
+/** One year of Schedule E data for a single rental property (full 1084 line set) */
 interface RentalPropertyYear {
   year: number;
-  rentsReceived: number;   // Line 3
-  totalExpenses: number;   // Line 20
-  depreciation: number;    // Line 18
-  fairRentalDays: number;  // Line 2  (0 = full year / 365)
+  rentsReceived: number;    // Line 3  – gross rents
+  insurance: number;        // Line 9  – add-back
+  mortgageInterest: number; // Line 12 – add-back
+  taxes: number;            // Line 16 – add-back
+  depreciation: number;     // Line 18 – add-back
+  hoaDues: number;          // Line 19 – HOA / association dues add-back (when in PITIA)
+  totalExpenses: number;    // Line 20 – total expenses (includes lines 5–19)
+  fairRentalDays: number;   // Line 2  – (0 = full year / 365)
 }
 
 interface RentalProperty {
@@ -93,11 +97,24 @@ interface RentalProperty {
   address: string;
   propertyType: 'SFR' | 'DUPLEX' | 'TRIPLEX' | 'FOURPLEX' | 'COMMERCIAL' | 'VACATION';
   isSubjectProperty: boolean;
+  /** Full monthly PITIA for the property. null = not yet available; UW must fill. */
+  pitia: number | null;
+  /** Where the PITIA figure came from */
+  pitiaSource: 'ENCOMPASS' | 'UW' | null;
   /** Most recent year entry (always required) */
   year1: RentalPropertyYear;
   /** Prior year entry (used when twoYears === true) */
   year2: RentalPropertyYear;
 }
+
+/**
+ * Simulated Encompass loan-detail REO section: address → full monthly PITIA.
+ * When loan details arrive from Encompass with a PITIA for the property, the box
+ * is prefilled; otherwise it stays blank for the underwriter to complete.
+ */
+const ENCOMPASS_REO_PITIA: Record<string, number> = {
+  '742 Evergreen Terrace, Springfield, IL': 1450,
+};
 
 export default function UnderwriterSplitViewDemo({
   liveSession = null,
@@ -169,27 +186,35 @@ export default function UnderwriterSplitViewDemo({
   const [twoYearRental, setTwoYearRental] = useState(true);
   const [rentalChoice, setRentalChoice] = useState<string | null>(null);
 
-  const makeRentalY = (year: number, rents: number, expenses: number, depreciation: number, days = 0): RentalPropertyYear =>
-    ({ year, rentsReceived: rents, totalExpenses: expenses, depreciation, fairRentalDays: days });
-
-  const [rentalProperties, setRentalProperties] = useState<RentalProperty[]>([
-    {
-      id: 'prop-1',
-      address: '742 Evergreen Terrace, Springfield, IL',
-      propertyType: 'SFR',
-      isSubjectProperty: false,
-      year1: makeRentalY(2025, 24000, 12000, 3500),
-      year2: makeRentalY(2024, 22800, 11600, 3500),
-    },
-    {
-      id: 'prop-2',
-      address: '1600 Pennsylvania Ave NW, Unit 4B, Washington, DC',
-      propertyType: 'DUPLEX',
-      isSubjectProperty: false,
-      year1: makeRentalY(2025, 36000, 18500, 5200),
-      year2: makeRentalY(2024, 34000, 17800, 5200),
-    },
-  ]);
+  const [rentalProperties, setRentalProperties] = useState<RentalProperty[]>(() => {
+    const props: Array<Omit<RentalProperty, 'pitia' | 'pitiaSource'>> = [
+      {
+        id: 'prop-1',
+        address: '742 Evergreen Terrace, Springfield, IL',
+        propertyType: 'SFR',
+        isSubjectProperty: false,
+        year1: { year: 2025, rentsReceived: 24000, insurance: 1200, mortgageInterest: 4800, taxes: 2900, depreciation: 3500, hoaDues: 0, totalExpenses: 14500, fairRentalDays: 0 },
+        year2: { year: 2024, rentsReceived: 22800, insurance: 1150, mortgageInterest: 4900, taxes: 2800, depreciation: 3500, hoaDues: 0, totalExpenses: 14200, fairRentalDays: 0 },
+      },
+      {
+        id: 'prop-2',
+        address: '1600 Pennsylvania Ave NW, Unit 4B, Washington, DC',
+        propertyType: 'DUPLEX',
+        isSubjectProperty: false,
+        year1: { year: 2025, rentsReceived: 36000, insurance: 1800, mortgageInterest: 7200, taxes: 4300, depreciation: 5200, hoaDues: 2400, totalExpenses: 22700, fairRentalDays: 0 },
+        year2: { year: 2024, rentsReceived: 34000, insurance: 1750, mortgageInterest: 7400, taxes: 4200, depreciation: 5200, hoaDues: 2400, totalExpenses: 22100, fairRentalDays: 0 },
+      },
+    ];
+    // Prefill PITIA from Encompass loan details when the REO section has the property
+    return props.map((p) => {
+      const encompassPitia = ENCOMPASS_REO_PITIA[p.address];
+      return {
+        ...p,
+        pitia: encompassPitia ?? null,
+        pitiaSource: encompassPitia !== undefined ? ('ENCOMPASS' as const) : null,
+      };
+    });
+  });
 
   const [w2BaseChoice, setW2BaseChoice] = useState<string | null>(null);
   const [w2VarChoice, setW2VarChoice] = useState<string | null>(null);
@@ -371,14 +396,20 @@ export default function UnderwriterSplitViewDemo({
     return { y1, y2, gpMonthly, dropped: !partnershipLRatio.passes };
   }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes]);
 
-  // ── Rental Income (Schedule E Page 1) ──────────────────────────────────────
+  // ── Rental Income (Schedule E Page 1 · Form 1084 / 1038 worksheet) ──────────
 
-  /** Net annual rental cash flow for a single year entry */
+  /**
+   * Full Form 1084 / 1038 adjusted annual rental cash flow for one year:
+   *   Line 3 Rents − Line 20 Total Expenses
+   *   + Line 9 Insurance + Line 12 Mortgage Interest + Line 16 Taxes
+   *   + Line 18 Depreciation + Line 19 HOA Dues
+   * divided by months in service (Line 2 fair rental days).
+   */
   function rentalAnnualCashFlow(y: RentalPropertyYear) {
     const months = y.fairRentalDays > 0 ? Math.max(1, Math.min(12, Math.ceil(y.fairRentalDays / 30))) : 12;
-    // Net = Rents - Expenses + Depreciation add-back; then scale to full year
-    const net = y.rentsReceived - y.totalExpenses + y.depreciation;
-    return { net, months, monthly: net / months };
+    const addBacks = y.insurance + y.mortgageInterest + y.taxes + y.depreciation + y.hoaDues;
+    const adjusted = y.rentsReceived - y.totalExpenses + addBacks;
+    return { adjusted, addBacks, months, monthly: adjusted / months };
   }
 
   interface RentalPropertyResult {
@@ -392,11 +423,17 @@ export default function UnderwriterSplitViewDemo({
     y2Monthly: number;
     isDecline: boolean;
     declinePct: number;
-    qualifyingMonthly: number;
+    /** 1084 monthly cash flow before PITIA (after decline / averaging logic) */
+    grossMonthly: number;
+    /** PITIA applied (0 when missing) */
+    pitiaApplied: number;
+    pitiaMissing: boolean;
+    /** Net = grossMonthly − PITIA. Positive → income; negative → loss to DTI liabilities. */
+    netMonthly: number;
     note: string;
   }
 
-  const rentalFlow = useMemo((): { properties: RentalPropertyResult[]; totalMonthly: number } => {
+  const rentalFlow = useMemo((): { properties: RentalPropertyResult[]; totalMonthly: number; anyPitiaMissing: boolean } => {
     const loanProgram = borrowerMetadata.loanProgram as 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA';
     const isFha = loanProgram === 'FHA';
 
@@ -406,39 +443,43 @@ export default function UnderwriterSplitViewDemo({
 
       const y1Monthly = cf1.monthly;
       const y2Monthly = cf2.monthly;
-      const y1Annual = cf1.net;
-      const y2Annual = cf2.net;
 
       const isDecline = twoYearRental && y2Monthly > 0 && y1Monthly < y2Monthly;
       const declinePct = isDecline ? ((y2Monthly - y1Monthly) / Math.abs(y2Monthly)) * 100 : 0;
 
-      let qualifyingMonthly: number;
+      let grossMonthly: number;
       let note: string;
 
       if (!twoYearRental) {
-        // Single-year: use most recent
-        qualifyingMonthly = y1Monthly;
-        note = 'One-year: most recent year cash flow ÷ 12 (or ÷ rental months).';
+        grossMonthly = y1Monthly;
+        note = 'One-year: most recent year 1084 cash flow ÷ rental months.';
       } else if (!isDecline) {
-        // Two-year stable or increasing → 24-month average
-        qualifyingMonthly = (y1Monthly + y2Monthly) / 2;
+        grossMonthly = (y1Monthly + y2Monthly) / 2;
         note = 'Two-year average: income stable or increasing.';
       } else if (isFha && prop.propertyType === 'FOURPLEX') {
-        // FHA multi-family tiered decline logic (HUD 4000.1)
         if (declinePct <= 5) {
-          qualifyingMonthly = (y1Monthly + y2Monthly) / 2;
+          grossMonthly = (y1Monthly + y2Monthly) / 2;
           note = `FHA multi-family: decline ${declinePct.toFixed(1)}% ≤ 5% — 24-month average used.`;
         } else if (declinePct <= 20) {
-          qualifyingMonthly = y1Monthly;
+          grossMonthly = y1Monthly;
           note = `FHA multi-family: decline ${declinePct.toFixed(1)}% (5–20%) — restricted to most recent year.`;
         } else {
-          qualifyingMonthly = 0;
+          grossMonthly = 0;
           note = `FHA multi-family: decline ${declinePct.toFixed(1)}% > 20% — income disqualified per HUD 4000.1.`;
         }
       } else {
-        // Conventional/VA/USDA or non-FHA-multifamily: use lower of two years
-        qualifyingMonthly = y1Monthly; // y1 is already lower since isDecline === true
+        grossMonthly = y1Monthly; // y1 is the lower year since isDecline === true
         note = `Income declined ${declinePct.toFixed(1)}% — restricted to most recent (lower) year per guideline.`;
+      }
+
+      const pitiaMissing = prop.pitia === null;
+      const pitiaApplied = prop.pitia ?? 0;
+      const netMonthly = grossMonthly - pitiaApplied;
+
+      if (pitiaMissing) {
+        note += ' PITIA not yet entered — net shown before housing expense.';
+      } else if (netMonthly < 0) {
+        note += ` Net after PITIA is negative — treat ${Math.abs(netMonthly).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo as a liability in DTI.`;
       }
 
       return {
@@ -446,45 +487,59 @@ export default function UnderwriterSplitViewDemo({
         address: prop.address,
         propertyType: prop.propertyType,
         isSubjectProperty: prop.isSubjectProperty,
-        y1Annual,
-        y2Annual,
+        y1Annual: cf1.adjusted,
+        y2Annual: cf2.adjusted,
         y1Monthly,
         y2Monthly,
         isDecline,
         declinePct,
-        qualifyingMonthly,
+        grossMonthly,
+        pitiaApplied,
+        pitiaMissing,
+        netMonthly,
         note,
       };
     });
 
-    const totalMonthly = properties.reduce((sum, p) => sum + p.qualifyingMonthly, 0);
-    return { properties, totalMonthly };
+    const totalMonthly = properties.reduce((sum, p) => sum + p.netMonthly, 0);
+    const anyPitiaMissing = properties.some((p) => p.pitiaMissing);
+    return { properties, totalMonthly, anyPitiaMissing };
   }, [rentalProperties, twoYearRental, borrowerMetadata.loanProgram]);
 
   const rentalPicks = useMemo(() => {
     const { totalMonthly } = rentalFlow;
-    const allY1 = rentalProperties.reduce((s, p) => s + rentalAnnualCashFlow(p.year1).monthly, 0);
-    const allY2 = rentalProperties.reduce((s, p) => s + rentalAnnualCashFlow(p.year2).monthly, 0);
-    const avg24 = (allY1 + allY2) / 2;
+    // All-property alternates, each net of that property's PITIA
+    const sumNet = (pick: (y1: number, y2: number) => number) =>
+      rentalProperties.reduce((s, p) => {
+        const m1 = rentalAnnualCashFlow(p.year1).monthly;
+        const m2 = rentalAnnualCashFlow(p.year2).monthly;
+        return s + pick(m1, m2) - (p.pitia ?? 0);
+      }, 0);
+    const allY1 = sumNet((m1) => m1);
+    const avg24 = sumNet((m1, m2) => (m1 + m2) / 2);
+    const lower = sumNet((m1, m2) => Math.min(m1, m2));
     const options = [
-      { id: 'guideline', label: 'Guideline (per-property)', monthly: totalMonthly, formula: 'Decline-aware per-property calc' },
-      { id: 'y1', label: 'Most recent year all props', monthly: allY1, formula: 'Sum of Y1 monthly for all properties' },
+      { id: 'guideline', label: 'Guideline (per-property)', monthly: totalMonthly, formula: 'Decline-aware 1084 calc − PITIA' },
+      { id: 'y1', label: 'Most recent year all props', monthly: allY1, formula: 'Sum of Y1 monthly − PITIA' },
       ...(twoYearRental
         ? [
-            { id: 'avg24', label: '24-month average all props', monthly: avg24, formula: '(Sum Y1 + Sum Y2) / 2' },
-            { id: 'lower', label: 'Lower of two years all props', monthly: Math.min(allY1, allY2), formula: 'Min(Sum Y1, Sum Y2)' },
+            { id: 'avg24', label: '24-month average all props', monthly: avg24, formula: '(Y1 + Y2) / 2 − PITIA per property' },
+            { id: 'lower', label: 'Lower of two years all props', monthly: lower, formula: 'Min(Y1, Y2) − PITIA per property' },
           ]
         : []),
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
     const hasAnyDecline = rentalFlow.properties.some((p) => p.isDecline && p.declinePct >= 20);
-    const reason = hasAnyDecline
+    let reason = hasAnyDecline
       ? 'One or more properties experienced a critical decline (≥20%). Review the per-property breakdown for disqualified properties.'
       : rentalFlow.properties.some((p) => p.isDecline)
         ? 'Declining income detected on one or more properties. Guideline restricts to most recent year for those properties.'
         : twoYearRental
-          ? 'Income is stable or increasing across all properties. 24-month average is the guideline pick.'
-          : 'Single-year entry. Most recent year ÷ 12 (or rental months).';
+          ? 'Income is stable or increasing across all properties. 24-month average net of PITIA is the guideline pick.'
+          : 'Single-year entry. Most recent year 1084 cash flow net of PITIA.';
+    if (rentalFlow.anyPitiaMissing) {
+      reason += ' PITIA is missing on at least one property — totals are before full housing expense until the UW completes the PITIA box.';
+    }
     return { options, recommendedId: 'guideline', reason };
   }, [rentalFlow, rentalProperties, twoYearRental]);
 
@@ -626,8 +681,28 @@ export default function UnderwriterSplitViewDemo({
       });
     }
 
+    // Rental PITIA missing (Encompass loan details did not include the property)
+    if (rentalFlow.anyPitiaMissing) {
+      const missing = rentalFlow.properties.filter((p) => p.pitiaMissing).map((p) => p.address || 'Unnamed property');
+      list.push({
+        id: 'RENTAL_PITIA_MISSING',
+        type: 'WARNING',
+        message: `PITIA not available from Encompass loan details for: ${missing.join('; ')}. Underwriter must enter the full monthly housing expense before final rental income can qualify.`,
+      });
+    }
+
+    // Rental net loss after PITIA
+    const lossProps = rentalFlow.properties.filter((p) => !p.pitiaMissing && p.netMonthly < 0);
+    if (lossProps.length > 0) {
+      list.push({
+        id: 'RENTAL_NET_LOSS',
+        type: 'WARNING',
+        message: `Net rental loss after PITIA on: ${lossProps.map((p) => `${p.address} ($${Math.abs(p.netMonthly).toFixed(2)}/mo)`).join('; ')}. Per Form 1084 treatment, include the loss as a monthly liability in the DTI.`,
+      });
+    }
+
     return list;
-  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation]);
+  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow]);
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
@@ -651,6 +726,9 @@ export default function UnderwriterSplitViewDemo({
     if (alert.id === 'TENURE_WARN' || alert.id === 'WAGE_DEFICIT_WARN' || alert.id === 'WAGE_VARIANCE_WARN') {
       return activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'W2_CONTINUITY' || activeTab === 'ENCOMPASS_SYNC';
     }
+    if (alert.id === 'RENTAL_PITIA_MISSING' || alert.id === 'RENTAL_NET_LOSS') {
+      return activeTab === 'SCHEDULE_E' || activeTab === 'ENCOMPASS_SYNC';
+    }
     return true;
   });
 
@@ -665,13 +743,26 @@ export default function UnderwriterSplitViewDemo({
   };
 
   function addRentalProperty() {
+    const emptyYear = (year: number): RentalPropertyYear => ({
+      year,
+      rentsReceived: 0,
+      insurance: 0,
+      mortgageInterest: 0,
+      taxes: 0,
+      depreciation: 0,
+      hoaDues: 0,
+      totalExpenses: 0,
+      fairRentalDays: 0,
+    });
     const newProp: RentalProperty = {
       id: `prop-${Date.now()}`,
       address: '',
       propertyType: 'SFR',
       isSubjectProperty: false,
-      year1: { year: 2025, rentsReceived: 0, totalExpenses: 0, depreciation: 0, fairRentalDays: 0 },
-      year2: { year: 2024, rentsReceived: 0, totalExpenses: 0, depreciation: 0, fairRentalDays: 0 },
+      pitia: null,
+      pitiaSource: null,
+      year1: emptyYear(2025),
+      year2: emptyYear(2024),
     };
     setRentalProperties((prev) => [...prev, newProp]);
   }
@@ -681,7 +772,31 @@ export default function UnderwriterSplitViewDemo({
   }
 
   function patchRentalProperty(id: string, patch: Partial<Omit<RentalProperty, 'year1' | 'year2'>>) {
-    setRentalProperties((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    setRentalProperties((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p, ...patch };
+        // Address changed: re-check Encompass loan details for a PITIA unless the UW keyed one manually
+        if (patch.address !== undefined && next.pitiaSource !== 'UW') {
+          const encompassPitia = ENCOMPASS_REO_PITIA[patch.address];
+          if (encompassPitia !== undefined) {
+            next.pitia = encompassPitia;
+            next.pitiaSource = 'ENCOMPASS';
+          }
+        }
+        return next;
+      }),
+    );
+  }
+
+  function setRentalPitia(id: string, raw: string) {
+    setRentalProperties((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        if (raw.trim() === '') return { ...p, pitia: null, pitiaSource: null };
+        return { ...p, pitia: Number(raw), pitiaSource: 'UW' as const };
+      }),
+    );
   }
 
   function patchRentalYear(id: string, yearKey: 'year1' | 'year2', patch: Partial<RentalPropertyYear>) {
@@ -1266,7 +1381,7 @@ export default function UnderwriterSplitViewDemo({
                     Rental Income · Schedule E Page 1
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    Form 1084 / Fannie SEL 2014-07 · Net Rental Cash Flow = Rents Received − Total Expenses + Depreciation Add-Back
+                    Form 1084 / 1038 worksheet · Rents (L3) − Total Expenses (L20) + Insurance (L9) + Mortgage Interest (L12) + Taxes (L16) + Depreciation (L18) + HOA (L19) ÷ rental months − PITIA
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1299,7 +1414,7 @@ export default function UnderwriterSplitViewDemo({
               <div className="space-y-4">
                 {rentalProperties.map((prop, propIdx) => {
                   const result = rentalFlow.properties.find((r) => r.id === prop.id);
-                  const disqualified = result ? result.qualifyingMonthly === 0 && result.isDecline : false;
+                  const disqualified = result ? result.grossMonthly === 0 && result.isDecline : false;
                   const declining = result ? result.isDecline : false;
 
                   return (
@@ -1360,6 +1475,39 @@ export default function UnderwriterSplitViewDemo({
                         )}
                       </div>
 
+                      {/* PITIA box — from Encompass loan details when available, else UW-entered */}
+                      <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 ${
+                        prop.pitia === null ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-white'
+                      }`}>
+                        <span className="font-mono text-[10px] font-black uppercase text-slate-500 w-[4.5rem] shrink-0">PITIA</span>
+                        <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800">
+                          Full monthly housing expense
+                          <span className="ml-1 font-normal text-slate-400">· principal, interest, taxes, insurance, association dues</span>
+                        </span>
+                        {prop.pitiaSource === 'ENCOMPASS' ? (
+                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-black uppercase text-indigo-700">
+                            From Encompass
+                          </span>
+                        ) : prop.pitiaSource === 'UW' ? (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600">
+                            UW entered
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800">
+                            Not in Encompass — UW entry required
+                          </span>
+                        )}
+                        <input
+                          type="number"
+                          value={prop.pitia ?? ''}
+                          placeholder="—"
+                          onChange={(e) => setRentalPitia(prop.id, e.target.value)}
+                          className={`w-28 shrink-0 rounded-md border px-2 py-1.5 text-right font-mono text-sm font-bold outline-none focus:border-indigo-500 ${
+                            prop.pitia === null ? 'border-amber-400 bg-white text-amber-900' : 'border-slate-300 bg-white text-slate-950'
+                          }`}
+                        />
+                      </div>
+
                       {/* Year columns */}
                       <div className={`grid gap-4 ${twoYearRental ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1 max-w-sm'}`}>
                         {(['year1', ...(twoYearRental ? ['year2'] : [])] as ('year1' | 'year2')[]).map((yk) => {
@@ -1381,11 +1529,15 @@ export default function UnderwriterSplitViewDemo({
                                 />
                               </div>
 
-                              {/* Line fields */}
+                              {/* Line fields — full Form 1084 Schedule E line set */}
                               {[
                                 { line: 'Line 3', label: 'Rents received', key: 'rentsReceived' as const, hint: 'Gross rental income' },
-                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'Deducted on Sch E' },
+                                { line: 'Line 9', label: 'Insurance', key: 'insurance' as const, hint: 'Add-back' },
+                                { line: 'Line 12', label: 'Mortgage interest', key: 'mortgageInterest' as const, hint: 'Add-back' },
+                                { line: 'Line 16', label: 'Taxes', key: 'taxes' as const, hint: 'Add-back' },
                                 { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const, hint: 'Add-back' },
+                                { line: 'Line 19', label: 'HOA dues', key: 'hoaDues' as const, hint: 'Add-back if in PITIA' },
+                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'Sum of lines 5–19' },
                                 { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const, hint: '0 = full year' },
                               ].map(({ line, label, key, hint }) => (
                                 <div key={key} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2.5 py-2">
@@ -1403,34 +1555,56 @@ export default function UnderwriterSplitViewDemo({
                                 </div>
                               ))}
 
-                              {/* Annual CF summary */}
-                              <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-xs">
-                                <span className="text-slate-500 font-semibold">
-                                  Annual cash flow
-                                  {y.fairRentalDays > 0 && <span className="ml-1 text-slate-400">({cf.months} rental months)</span>}
-                                </span>
-                                <span className={`font-black font-mono ${cf.net < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
-                                  {cf.net.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                                </span>
+                              {/* Annual 1084 adjusted cash flow summary */}
+                              <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs space-y-1">
+                                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                  <span>Add-backs (L9 + L12 + L16 + L18 + L19)</span>
+                                  <span className="font-mono font-bold text-slate-500">
+                                    +{cf.addBacks.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-500 font-semibold">
+                                    1084 adjusted annual cash flow
+                                    {y.fairRentalDays > 0 && <span className="ml-1 text-slate-400">({cf.months} rental months)</span>}
+                                  </span>
+                                  <span className={`font-black font-mono ${cf.adjusted < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
+                                    {cf.adjusted.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           );
                         })}
                       </div>
 
-                      {/* Per-property result */}
+                      {/* Per-property result: 1084 gross − PITIA = net */}
                       {result && (
-                        <div className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs border ${
+                        <div className={`rounded-lg px-3 py-2 text-xs border space-y-1.5 ${
                           disqualified
                             ? 'bg-rose-100 border-rose-300 text-rose-800'
-                            : declining
-                              ? 'bg-amber-50 border-amber-300 text-amber-800'
-                              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                            : result.netMonthly < 0 && !result.pitiaMissing
+                              ? 'bg-rose-50 border-rose-200 text-rose-800'
+                              : declining || result.pitiaMissing
+                                ? 'bg-amber-50 border-amber-300 text-amber-800'
+                                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
                         }`}>
-                          <span className="font-semibold">{result.note}</span>
-                          <span className="font-black font-mono text-sm">
-                            Qualifying: {result.qualifyingMonthly.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo
-                          </span>
+                          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 font-mono">
+                            <span>
+                              1084 monthly&nbsp;
+                              <span className="font-black">{result.grossMonthly.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
+                            </span>
+                            <span>
+                              − PITIA&nbsp;
+                              <span className="font-black">
+                                {result.pitiaMissing ? '(pending)' : result.pitiaApplied.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                              </span>
+                            </span>
+                            <span className="font-black text-sm">
+                              = Net {result.netMonthly.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo
+                            </span>
+                          </div>
+                          <p className="font-semibold">{result.note}</p>
                         </div>
                       )}
                     </div>

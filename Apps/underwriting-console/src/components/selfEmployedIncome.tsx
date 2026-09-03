@@ -681,12 +681,17 @@ export function DemoDocumentCanvas({
 
   if (isRental) {
     const schedELines: FacsimileLine[] = [
-      { id: `sche-addr-${yk}`, line: 'Header', label: 'Property address', value: '742 Evergreen Terrace' },
+      { id: `sche-addr-${yk}`, line: 'Line 1a', label: 'Physical address of property', value: '742 Evergreen Terrace' },
+      { id: `sche-type-${yk}`, line: 'Line 1b', label: 'Type of property', value: '1 — Single Family' },
       { id: `sche-l2-${yk}`, line: 'Line 2', label: 'Fair rental days', value: '365' },
       { id: `sche-l3-${yk}`, line: 'Line 3', label: 'Rents received', value: usd(24000) },
-      { id: `sche-l18-${yk}`, line: 'Line 18', label: 'Depreciation expense (add-back)', value: usd(3500) },
-      { id: `sche-l20-${yk}`, line: 'Line 20', label: 'Total expenses', value: usd(12000) },
-      { id: `sche-l21-${yk}`, line: 'Line 21', label: 'Net income / (loss)', value: usd(24000 - 12000) },
+      { id: `sche-l9-${yk}`, line: 'Line 9', label: 'Insurance (add-back)', value: usd(1200) },
+      { id: `sche-l12-${yk}`, line: 'Line 12', label: 'Mortgage interest (add-back)', value: usd(4800) },
+      { id: `sche-l16-${yk}`, line: 'Line 16', label: 'Taxes (add-back)', value: usd(2900) },
+      { id: `sche-l18-${yk}`, line: 'Line 18', label: 'Depreciation (add-back)', value: usd(3500) },
+      { id: `sche-l19-${yk}`, line: 'Line 19', label: 'Other — HOA dues (add-back if in PITIA)', value: usd(0) },
+      { id: `sche-l20-${yk}`, line: 'Line 20', label: 'Total expenses', value: usd(14500) },
+      { id: `sche-l21-${yk}`, line: 'Line 21', label: 'Net income / (loss)', value: usd(24000 - 14500) },
     ];
     return (
       <div className="space-y-2">
