@@ -662,6 +662,7 @@ export function DemoDocumentCanvas({
   const yk = yearIndex === 0 ? 'y1' : 'y2';
   const year = tab === 'SCHEDULE_C' ? schC.year : corp.year;
   const isWage = tab === 'PAYSTUB_RECONCILIATION' || tab === 'W2_CONTINUITY' || tab === 'ENCOMPASS_SYNC';
+  const isRental = tab === 'SCHEDULE_E';
 
   if (isWage) {
     return (
@@ -675,6 +676,47 @@ export function DemoDocumentCanvas({
         selectedId={selectedId}
         onSelect={onSelect}
       />
+    );
+  }
+
+  if (isRental) {
+    const schedELines: FacsimileLine[] = [
+      { id: `sche-addr-${yk}`, line: 'Header', label: 'Property address', value: '742 Evergreen Terrace' },
+      { id: `sche-l2-${yk}`, line: 'Line 2', label: 'Fair rental days', value: '365' },
+      { id: `sche-l3-${yk}`, line: 'Line 3', label: 'Rents received', value: usd(24000) },
+      { id: `sche-l18-${yk}`, line: 'Line 18', label: 'Depreciation expense (add-back)', value: usd(3500) },
+      { id: `sche-l20-${yk}`, line: 'Line 20', label: 'Total expenses', value: usd(12000) },
+      { id: `sche-l21-${yk}`, line: 'Line 21', label: 'Net income / (loss)', value: usd(24000 - 12000) },
+    ];
+    return (
+      <div className="space-y-2">
+        {twoYear ? (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => onYearIndex(0)}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${yearIndex === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              Year 1
+            </button>
+            <button
+              type="button"
+              onClick={() => onYearIndex(1)}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${yearIndex === 1 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              Year 2
+            </button>
+          </div>
+        ) : null}
+        <FacsimileSheet
+          form="Schedule E (Form 1040) – Supplemental Income"
+          year={yearIndex === 0 ? 2025 : 2024}
+          entity="742 Evergreen Terrace, Springfield, IL · Rental"
+          lines={schedELines}
+          selectedId={selectedId}
+          onSelect={onSelect}
+        />
+      </div>
     );
   }
 

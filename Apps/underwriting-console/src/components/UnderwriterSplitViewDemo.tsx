@@ -16,6 +16,9 @@ import {
   Lock,
   Upload,
   Loader2,
+  Home,
+  PlusCircle,
+  Trash2,
 } from 'lucide-react';
 import type { LiveParseSession } from '../parseTypes';
 import { mapIncomeFields } from '../incomeFieldMap';
@@ -71,7 +74,30 @@ type IncomeTab =
   | 'SCHEDULE_C'
   | 'SCORP'
   | 'PARTNERSHIP'
+  | 'SCHEDULE_E'
   | 'ENCOMPASS_SYNC';
+
+// ── Rental Income (Schedule E Page 1) ─────────────────────────────────────────
+
+/** One year of data for a single rental property */
+interface RentalPropertyYear {
+  year: number;
+  rentsReceived: number;   // Line 3
+  totalExpenses: number;   // Line 20
+  depreciation: number;    // Line 18
+  fairRentalDays: number;  // Line 2  (0 = full year / 365)
+}
+
+interface RentalProperty {
+  id: string;
+  address: string;
+  propertyType: 'SFR' | 'DUPLEX' | 'TRIPLEX' | 'FOURPLEX' | 'COMMERCIAL' | 'VACATION';
+  isSubjectProperty: boolean;
+  /** Most recent year entry (always required) */
+  year1: RentalPropertyYear;
+  /** Prior year entry (used when twoYears === true) */
+  year2: RentalPropertyYear;
+}
 
 export default function UnderwriterSplitViewDemo({
   liveSession = null,
@@ -111,6 +137,7 @@ export default function UnderwriterSplitViewDemo({
       ['SCHEDULE_C', 'Schedule C', FileSpreadsheet],
       ['SCORP', 'S-Corp 1120-S', FileSpreadsheet],
       ['PARTNERSHIP', 'Partnership 1065', FileSpreadsheet],
+      ['SCHEDULE_E', 'Rental Income', Home],
       ['ENCOMPASS_SYNC', 'Encompass', Lock],
     ] as const;
 
@@ -123,6 +150,7 @@ export default function UnderwriterSplitViewDemo({
       if (id === 'SCHEDULE_C') return forms.has('Schedule C');
       if (id === 'SCORP') return forms.has('Form 1120-S');
       if (id === 'PARTNERSHIP') return forms.has('Form 1065');
+      if (id === 'SCHEDULE_E') return forms.has('Schedule E');
       return false;
     });
   }, [isLive, mappedFields]);
@@ -138,6 +166,31 @@ export default function UnderwriterSplitViewDemo({
   const [twoYearSchC, setTwoYearSchC] = useState(true);
   const [twoYearScorp, setTwoYearScorp] = useState(true);
   const [twoYearPartnership, setTwoYearPartnership] = useState(true);
+  const [twoYearRental, setTwoYearRental] = useState(true);
+  const [rentalChoice, setRentalChoice] = useState<string | null>(null);
+
+  const makeRentalY = (year: number, rents: number, expenses: number, depreciation: number, days = 0): RentalPropertyYear =>
+    ({ year, rentsReceived: rents, totalExpenses: expenses, depreciation, fairRentalDays: days });
+
+  const [rentalProperties, setRentalProperties] = useState<RentalProperty[]>([
+    {
+      id: 'prop-1',
+      address: '742 Evergreen Terrace, Springfield, IL',
+      propertyType: 'SFR',
+      isSubjectProperty: false,
+      year1: makeRentalY(2025, 24000, 12000, 3500),
+      year2: makeRentalY(2024, 22800, 11600, 3500),
+    },
+    {
+      id: 'prop-2',
+      address: '1600 Pennsylvania Ave NW, Unit 4B, Washington, DC',
+      propertyType: 'DUPLEX',
+      isSubjectProperty: false,
+      year1: makeRentalY(2025, 36000, 18500, 5200),
+      year2: makeRentalY(2024, 34000, 17800, 5200),
+    },
+  ]);
+
   const [w2BaseChoice, setW2BaseChoice] = useState<string | null>(null);
   const [w2VarChoice, setW2VarChoice] = useState<string | null>(null);
   const [schCChoice, setSchCChoice] = useState<string | null>(null);
@@ -318,6 +371,123 @@ export default function UnderwriterSplitViewDemo({
     return { y1, y2, gpMonthly, dropped: !partnershipLRatio.passes };
   }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes]);
 
+  // ── Rental Income (Schedule E Page 1) ──────────────────────────────────────
+
+  /** Net annual rental cash flow for a single year entry */
+  function rentalAnnualCashFlow(y: RentalPropertyYear) {
+    const months = y.fairRentalDays > 0 ? Math.max(1, Math.min(12, Math.ceil(y.fairRentalDays / 30))) : 12;
+    // Net = Rents - Expenses + Depreciation add-back; then scale to full year
+    const net = y.rentsReceived - y.totalExpenses + y.depreciation;
+    return { net, months, monthly: net / months };
+  }
+
+  interface RentalPropertyResult {
+    id: string;
+    address: string;
+    propertyType: string;
+    isSubjectProperty: boolean;
+    y1Annual: number;
+    y2Annual: number;
+    y1Monthly: number;
+    y2Monthly: number;
+    isDecline: boolean;
+    declinePct: number;
+    qualifyingMonthly: number;
+    note: string;
+  }
+
+  const rentalFlow = useMemo((): { properties: RentalPropertyResult[]; totalMonthly: number } => {
+    const loanProgram = borrowerMetadata.loanProgram as 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA';
+    const isFha = loanProgram === 'FHA';
+
+    const properties: RentalPropertyResult[] = rentalProperties.map((prop) => {
+      const cf1 = rentalAnnualCashFlow(prop.year1);
+      const cf2 = rentalAnnualCashFlow(prop.year2);
+
+      const y1Monthly = cf1.monthly;
+      const y2Monthly = cf2.monthly;
+      const y1Annual = cf1.net;
+      const y2Annual = cf2.net;
+
+      const isDecline = twoYearRental && y2Monthly > 0 && y1Monthly < y2Monthly;
+      const declinePct = isDecline ? ((y2Monthly - y1Monthly) / Math.abs(y2Monthly)) * 100 : 0;
+
+      let qualifyingMonthly: number;
+      let note: string;
+
+      if (!twoYearRental) {
+        // Single-year: use most recent
+        qualifyingMonthly = y1Monthly;
+        note = 'One-year: most recent year cash flow ÷ 12 (or ÷ rental months).';
+      } else if (!isDecline) {
+        // Two-year stable or increasing → 24-month average
+        qualifyingMonthly = (y1Monthly + y2Monthly) / 2;
+        note = 'Two-year average: income stable or increasing.';
+      } else if (isFha && prop.propertyType === 'FOURPLEX') {
+        // FHA multi-family tiered decline logic (HUD 4000.1)
+        if (declinePct <= 5) {
+          qualifyingMonthly = (y1Monthly + y2Monthly) / 2;
+          note = `FHA multi-family: decline ${declinePct.toFixed(1)}% ≤ 5% — 24-month average used.`;
+        } else if (declinePct <= 20) {
+          qualifyingMonthly = y1Monthly;
+          note = `FHA multi-family: decline ${declinePct.toFixed(1)}% (5–20%) — restricted to most recent year.`;
+        } else {
+          qualifyingMonthly = 0;
+          note = `FHA multi-family: decline ${declinePct.toFixed(1)}% > 20% — income disqualified per HUD 4000.1.`;
+        }
+      } else {
+        // Conventional/VA/USDA or non-FHA-multifamily: use lower of two years
+        qualifyingMonthly = y1Monthly; // y1 is already lower since isDecline === true
+        note = `Income declined ${declinePct.toFixed(1)}% — restricted to most recent (lower) year per guideline.`;
+      }
+
+      return {
+        id: prop.id,
+        address: prop.address,
+        propertyType: prop.propertyType,
+        isSubjectProperty: prop.isSubjectProperty,
+        y1Annual,
+        y2Annual,
+        y1Monthly,
+        y2Monthly,
+        isDecline,
+        declinePct,
+        qualifyingMonthly,
+        note,
+      };
+    });
+
+    const totalMonthly = properties.reduce((sum, p) => sum + p.qualifyingMonthly, 0);
+    return { properties, totalMonthly };
+  }, [rentalProperties, twoYearRental, borrowerMetadata.loanProgram]);
+
+  const rentalPicks = useMemo(() => {
+    const { totalMonthly } = rentalFlow;
+    const allY1 = rentalProperties.reduce((s, p) => s + rentalAnnualCashFlow(p.year1).monthly, 0);
+    const allY2 = rentalProperties.reduce((s, p) => s + rentalAnnualCashFlow(p.year2).monthly, 0);
+    const avg24 = (allY1 + allY2) / 2;
+    const options = [
+      { id: 'guideline', label: 'Guideline (per-property)', monthly: totalMonthly, formula: 'Decline-aware per-property calc' },
+      { id: 'y1', label: 'Most recent year all props', monthly: allY1, formula: 'Sum of Y1 monthly for all properties' },
+      ...(twoYearRental
+        ? [
+            { id: 'avg24', label: '24-month average all props', monthly: avg24, formula: '(Sum Y1 + Sum Y2) / 2' },
+            { id: 'lower', label: 'Lower of two years all props', monthly: Math.min(allY1, allY2), formula: 'Min(Sum Y1, Sum Y2)' },
+          ]
+        : []),
+      { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
+    ];
+    const hasAnyDecline = rentalFlow.properties.some((p) => p.isDecline && p.declinePct >= 20);
+    const reason = hasAnyDecline
+      ? 'One or more properties experienced a critical decline (≥20%). Review the per-property breakdown for disqualified properties.'
+      : rentalFlow.properties.some((p) => p.isDecline)
+        ? 'Declining income detected on one or more properties. Guideline restricts to most recent year for those properties.'
+        : twoYearRental
+          ? 'Income is stable or increasing across all properties. 24-month average is the guideline pick.'
+          : 'Single-year entry. Most recent year ÷ 12 (or rental months).';
+    return { options, recommendedId: 'guideline', reason };
+  }, [rentalFlow, rentalProperties, twoYearRental]);
+
   const w2BasePicks = useMemo(() => {
     const options = [
       { id: 'hourly', label: 'Hourly rate', monthly: baseWageReconciliation.hourlyMethod, formula: '(Rate × hours × 52) / 12' },
@@ -391,6 +561,7 @@ export default function UnderwriterSplitViewDemo({
   const schCChosen = chosenMonthly(schCPicks.options, schCChoice, schCPicks.recommendedId);
   const sCorpChosen = chosenMonthly(sCorpPicks.options, sCorpChoice, sCorpPicks.recommendedId);
   const partnershipChosen = chosenMonthly(partnershipPicks.options, partnershipChoice, partnershipPicks.recommendedId);
+  const rentalChosen = chosenMonthly(rentalPicks.options, rentalChoice, rentalPicks.recommendedId);
 
   const form1084CashFlow = {
     qualifyingMonthlySelfEmployed: schCChosen.monthly,
@@ -398,7 +569,14 @@ export default function UnderwriterSplitViewDemo({
     partnershipMonthly: partnershipChosen.monthly,
     w2BaseMonthly: w2BaseChosen.monthly,
     w2VariableMonthly: w2VarChosen.monthly,
-    finalTotalQualifyingMonthly: schCChosen.monthly + sCorpChosen.monthly + partnershipChosen.monthly + w2BaseChosen.monthly + w2VarChosen.monthly,
+    rentalMonthly: rentalChosen.monthly,
+    finalTotalQualifyingMonthly:
+      schCChosen.monthly +
+      sCorpChosen.monthly +
+      partnershipChosen.monthly +
+      w2BaseChosen.monthly +
+      w2VarChosen.monthly +
+      rentalChosen.monthly,
   };
 
   // Core Orchestrated Warnings
@@ -463,7 +641,7 @@ export default function UnderwriterSplitViewDemo({
 
   const handleExportSync = () => {
     alert(
-      `Payload Locked & Transmitted to Encompass eFolder successfully!\n\nStandard Fields Mapped:\n- Field 108 (W-2 base): $${form1084CashFlow.w2BaseMonthly.toFixed(2)}\n- Field 109 (W-2 variable): $${form1084CashFlow.w2VariableMonthly.toFixed(2)}\n- Field 110 (Schedule C): $${form1084CashFlow.qualifyingMonthlySelfEmployed.toFixed(2)}\n- Field 111 (S-Corp): $${form1084CashFlow.sCorpShareholderDraw.toFixed(2)}\n- Field 112 (Partnership): $${form1084CashFlow.partnershipMonthly.toFixed(2)}`,
+      `Payload Locked & Transmitted to Encompass eFolder successfully!\n\nStandard Fields Mapped:\n- Field 108 (W-2 base): $${form1084CashFlow.w2BaseMonthly.toFixed(2)}\n- Field 109 (W-2 variable): $${form1084CashFlow.w2VariableMonthly.toFixed(2)}\n- Field 110 (Schedule C): $${form1084CashFlow.qualifyingMonthlySelfEmployed.toFixed(2)}\n- Field 111 (S-Corp): $${form1084CashFlow.sCorpShareholderDraw.toFixed(2)}\n- Field 112 (Partnership): $${form1084CashFlow.partnershipMonthly.toFixed(2)}\n- Field 113 (Rental Income): $${form1084CashFlow.rentalMonthly.toFixed(2)}`,
     );
   };
 
@@ -475,6 +653,40 @@ export default function UnderwriterSplitViewDemo({
     }
     return true;
   });
+
+  // ── Rental Property helpers ─────────────────────────────────────────────────
+  const PROPERTY_TYPE_LABELS: Record<RentalProperty['propertyType'], string> = {
+    SFR: 'SFR',
+    DUPLEX: 'Duplex',
+    TRIPLEX: 'Triplex',
+    FOURPLEX: 'Fourplex',
+    COMMERCIAL: 'Commercial',
+    VACATION: 'Vacation',
+  };
+
+  function addRentalProperty() {
+    const newProp: RentalProperty = {
+      id: `prop-${Date.now()}`,
+      address: '',
+      propertyType: 'SFR',
+      isSubjectProperty: false,
+      year1: { year: 2025, rentsReceived: 0, totalExpenses: 0, depreciation: 0, fairRentalDays: 0 },
+      year2: { year: 2024, rentsReceived: 0, totalExpenses: 0, depreciation: 0, fairRentalDays: 0 },
+    };
+    setRentalProperties((prev) => [...prev, newProp]);
+  }
+
+  function removeRentalProperty(id: string) {
+    setRentalProperties((prev) => prev.filter((p) => p.id !== id));
+  }
+
+  function patchRentalProperty(id: string, patch: Partial<Omit<RentalProperty, 'year1' | 'year2'>>) {
+    setRentalProperties((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  function patchRentalYear(id: string, yearKey: 'year1' | 'year2', patch: Partial<RentalPropertyYear>) {
+    setRentalProperties((prev) => prev.map((p) => (p.id === id ? { ...p, [yearKey]: { ...p[yearKey], ...patch } } : p)));
+  }
 
   return (
     <div className="mx-auto max-w-7xl p-6 font-sans space-y-6 text-slate-800 bg-slate-50 min-h-screen">
@@ -1043,6 +1255,227 @@ export default function UnderwriterSplitViewDemo({
             </SelfEmployedPanel>
           )}
           
+          {/* ==================== TAB: RENTAL INCOME (SCHEDULE E PAGE 1) ==================== */}
+          {activeTab === 'SCHEDULE_E' && (
+            <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              {/* Header */}
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                    <Home className="h-5 w-5 text-indigo-600" />
+                    Rental Income · Schedule E Page 1
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Form 1084 / Fannie SEL 2014-07 · Net Rental Cash Flow = Rents Received − Total Expenses + Depreciation Add-Back
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Loan Program Badge */}
+                  <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-[10px] font-black uppercase text-indigo-700">
+                    {borrowerMetadata.loanProgram} Rules
+                  </span>
+                  {/* 1 / 2 year toggle */}
+                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setTwoYearRental(false)}
+                      className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${!twoYearRental ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+                    >
+                      1 year
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTwoYearRental(true)}
+                      className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${twoYearRental ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+                    >
+                      2 years
+                    </button>
+                    <span className="hidden text-[10px] text-slate-500 sm:inline">2 yrs required unless 5+ yr history</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-property entries */}
+              <div className="space-y-4">
+                {rentalProperties.map((prop, propIdx) => {
+                  const result = rentalFlow.properties.find((r) => r.id === prop.id);
+                  const disqualified = result ? result.qualifyingMonthly === 0 && result.isDecline : false;
+                  const declining = result ? result.isDecline : false;
+
+                  return (
+                    <div
+                      key={prop.id}
+                      className={`rounded-xl border p-4 space-y-4 ${
+                        disqualified
+                          ? 'border-rose-300 bg-rose-50/40'
+                          : declining
+                            ? 'border-amber-300 bg-amber-50/40'
+                            : 'border-slate-200 bg-slate-50/50'
+                      }`}
+                    >
+                      {/* Property header row */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-slate-200 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600">
+                          Property {propIdx + 1}
+                        </span>
+                        {/* Address */}
+                        <input
+                          type="text"
+                          value={prop.address}
+                          placeholder="Property address"
+                          onChange={(e) => patchRentalProperty(prop.id, { address: e.target.value })}
+                          className="flex-1 min-w-[200px] rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                        />
+                        {/* Type selector */}
+                        <select
+                          value={prop.propertyType}
+                          onChange={(e) => patchRentalProperty(prop.id, { propertyType: e.target.value as RentalProperty['propertyType'] })}
+                          className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                        >
+                          {Object.entries(PROPERTY_TYPE_LABELS).map(([k, v]) => (
+                            <option key={k} value={k}>{v}</option>
+                          ))}
+                        </select>
+                        {/* Subject property toggle */}
+                        <label className="flex items-center gap-1 text-[10px] font-bold text-slate-600 cursor-pointer">
+                          <button
+                            type="button"
+                            onClick={() => patchRentalProperty(prop.id, { isSubjectProperty: !prop.isSubjectProperty })}
+                          >
+                            {prop.isSubjectProperty
+                              ? <CheckSquare className="h-4 w-4 text-indigo-600" />
+                              : <Square className="h-4 w-4 text-slate-300" />}
+                          </button>
+                          Subject Property
+                        </label>
+                        {/* Remove button */}
+                        {rentalProperties.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeRentalProperty(prop.id)}
+                            className="ml-auto rounded-md p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-100"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Year columns */}
+                      <div className={`grid gap-4 ${twoYearRental ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-1 max-w-sm'}`}>
+                        {(['year1', ...(twoYearRental ? ['year2'] : [])] as ('year1' | 'year2')[]).map((yk) => {
+                          const y = prop[yk];
+                          const cf = rentalAnnualCashFlow(y);
+                          const isY1 = yk === 'year1';
+                          return (
+                            <div key={yk} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <h5 className="text-[10px] font-black uppercase text-slate-700 tracking-wider">
+                                  {isY1 ? 'Most Recent Year' : 'Prior Year'}
+                                </h5>
+                                {/* Year input */}
+                                <input
+                                  type="number"
+                                  value={y.year}
+                                  onChange={(e) => patchRentalYear(prop.id, yk, { year: Number(e.target.value) })}
+                                  className="w-20 rounded border border-slate-200 px-2 py-1 text-right font-mono text-xs font-bold focus:outline-none focus:border-indigo-500"
+                                />
+                              </div>
+
+                              {/* Line fields */}
+                              {[
+                                { line: 'Line 3', label: 'Rents received', key: 'rentsReceived' as const, hint: 'Gross rental income' },
+                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'Deducted on Sch E' },
+                                { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const, hint: 'Add-back' },
+                                { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const, hint: '0 = full year' },
+                              ].map(({ line, label, key, hint }) => (
+                                <div key={key} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2.5 py-2">
+                                  <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">{line}</span>
+                                  <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
+                                    {label}
+                                    <span className="ml-1 font-normal text-slate-400">· {hint}</span>
+                                  </span>
+                                  <input
+                                    type="number"
+                                    value={y[key]}
+                                    onChange={(e) => patchRentalYear(prop.id, yk, { [key]: Number(e.target.value) })}
+                                    className="w-28 shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                              ))}
+
+                              {/* Annual CF summary */}
+                              <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-xs">
+                                <span className="text-slate-500 font-semibold">
+                                  Annual cash flow
+                                  {y.fairRentalDays > 0 && <span className="ml-1 text-slate-400">({cf.months} rental months)</span>}
+                                </span>
+                                <span className={`font-black font-mono ${cf.net < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
+                                  {cf.net.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Per-property result */}
+                      {result && (
+                        <div className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs border ${
+                          disqualified
+                            ? 'bg-rose-100 border-rose-300 text-rose-800'
+                            : declining
+                              ? 'bg-amber-50 border-amber-300 text-amber-800'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        }`}>
+                          <span className="font-semibold">{result.note}</span>
+                          <span className="font-black font-mono text-sm">
+                            Qualifying: {result.qualifyingMonthly.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add property button */}
+              <button
+                type="button"
+                onClick={addRentalProperty}
+                className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition w-full justify-center"
+              >
+                <PlusCircle className="h-4 w-4" />
+                Add Rental Property
+              </button>
+
+              {/* Aggregate choice panel */}
+              <IncomeChoicePanel
+                options={rentalPicks.options}
+                recommendedId={rentalPicks.recommendedId}
+                reason={rentalPicks.reason}
+                selectedId={rentalChoice}
+                onSelect={setRentalChoice}
+              />
+
+              {/* Loan-program guidance note */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
+                <p className="font-black uppercase text-slate-800 text-[10px] tracking-wider">Loan-Program Guidelines Applied</p>
+                {borrowerMetadata.loanProgram === 'FHA' && (
+                  <p><strong>FHA / HUD 4000.1:</strong> Multi-family subject-property decline ≤ 5% → 24-month avg; 5–20% → most recent year; &gt;20% → disqualified. One-year tax return acceptable only if property owned &lt; 12 months.</p>
+                )}
+                {borrowerMetadata.loanProgram === 'CONVENTIONAL' && (
+                  <p><strong>Conventional / Fannie Mae SEL 2014-07:</strong> Two-year Schedule E required. Declining income → use lower year. Depreciation add-back always applied. Vacancy factor not deducted on investment properties using tax returns.</p>
+                )}
+                {borrowerMetadata.loanProgram === 'VA' && (
+                  <p><strong>VA / VA Lender's Handbook Ch. 4:</strong> Two-year average when income stable/increasing; otherwise lower year. Depreciation add-back applies. Property must have 12-month history of rental receipts.</p>
+                )}
+                {borrowerMetadata.loanProgram === 'USDA' && (
+                  <p><strong>USDA / HB-1-3555 Ch. 9:</strong> Same two-year averaging rule as Conventional. Rental income from the subject property requires a two-year history unless the subject is a new purchase with a new rental agreement.</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ==================== TAB 4: ENCOMPASS SYNC INTERFACE ==================== */}
           {activeTab === 'ENCOMPASS_SYNC' && (
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
@@ -1054,7 +1487,7 @@ export default function UnderwriterSplitViewDemo({
                 <p className="text-xs text-slate-400 mt-1">Locks and writes-back processed values to standard Ellie Mae/ICE field registries</p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 text-xs md:grid-cols-2 xl:grid-cols-5">
+              <div className="grid grid-cols-1 gap-4 text-xs md:grid-cols-2 xl:grid-cols-3">
                 <div className="rounded-lg border bg-slate-50 p-4">
                   <span className="text-[10px] font-black uppercase text-slate-400">Field 108</span>
                   <span className="mt-0.5 block text-[11px] text-slate-500">W-2 base · {w2BaseChosen.label}</span>
@@ -1079,6 +1512,11 @@ export default function UnderwriterSplitViewDemo({
                   <span className="text-[10px] font-black uppercase text-slate-400">Field 112</span>
                   <span className="mt-0.5 block text-[11px] text-slate-500">Partnership · {partnershipChosen.label}</span>
                   <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.partnershipMonthly)}/mo</span>
+                </div>
+                <div className="rounded-lg border bg-slate-50 p-4 ring-2 ring-indigo-200">
+                  <span className="text-[10px] font-black uppercase text-slate-400">Field 113</span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">Rental Income · {rentalChosen.label}</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.rentalMonthly)}/mo</span>
                 </div>
               </div>
 
