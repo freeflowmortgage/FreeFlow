@@ -305,6 +305,30 @@ export default function AppraisalReviewWorkspace() {
   const [program, setProgram] = useState<Program>('FHA');
   const [useBlankForm, setUseBlankForm] = useState(false);
   const [customPdfUrl, setCustomPdfUrl] = useState<string | null>(null);
+  const [uploadFillNote, setUploadFillNote] = useState<string | null>(null);
+
+  /**
+   * Uploaded blank appraisal forms with fillable AcroForm fields get the demo
+   * subject data written into them (best-effort keyword match) so a dropped-in
+   * blank 1004 renders as a completed appraisal. Flat PDFs display as-is.
+   */
+  async function handleUploadedPdf(file: File) {
+    setUseBlankForm(false);
+    setUploadFillNote(null);
+    try {
+      const { fillAppraisalPdfWithDemoData } = await import('../appraisalDemoFill');
+      const filled = await fillAppraisalPdfWithDemoData(await file.arrayBuffer());
+      if (filled) {
+        const blob = new Blob([filled.bytes as BlobPart], { type: 'application/pdf' });
+        setCustomPdfUrl(URL.createObjectURL(blob));
+        setUploadFillNote(`Demo data filled into ${filled.filledCount} of ${filled.fieldCount} form fields`);
+        return;
+      }
+    } catch {
+      /* fall through to raw display */
+    }
+    setCustomPdfUrl(URL.createObjectURL(file));
+  }
   const {
     currentPage,
     zoomScale,
@@ -485,18 +509,23 @@ export default function AppraisalReviewWorkspace() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      setCustomPdfUrl(URL.createObjectURL(file));
-                      setUseBlankForm(false);
-                    }
+                    if (file) void handleUploadedPdf(file);
                   }}
                 />
               </label>
+              {uploadFillNote && (
+                <span className="mr-2 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                  {uploadFillNote}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   setUseBlankForm(!useBlankForm);
-                  if (!useBlankForm) setCustomPdfUrl(null);
+                  if (!useBlankForm) {
+                    setCustomPdfUrl(null);
+                    setUploadFillNote(null);
+                  }
                 }}
                 className={`mr-2 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
                   useBlankForm && !customPdfUrl ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:text-indigo-800'

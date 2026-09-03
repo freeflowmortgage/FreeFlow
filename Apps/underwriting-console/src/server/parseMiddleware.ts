@@ -4,6 +4,9 @@ import { mapIncomeFields } from '../incomeFieldMap';
 import type { ParsePage, ParseResponse, ParseWord } from '../parseTypes';
 import { generateIncomeSmokePdf } from './generateIncomeSmokePdf';
 import { generateUrarPdf } from './generateUrarPdf';
+import { generatePaystubPdf } from './generatePaystubPdf';
+import { fillK1Partnership, fillK1SCorp, fillScheduleC, fillScheduleE, fillW2, num } from './demoDocs';
+import { fillDroppedUrarBlank } from './fillDroppedUrar';
 
 const PYTHON_PARSE = 'http://127.0.0.1:8080/parse';
 const PYTHON_HEALTH = 'http://127.0.0.1:8080/health';
@@ -221,14 +224,57 @@ export function parseMiddleware(): Connect.NextHandleFunction {
 
     if (path === '/fixtures/urar-1004.pdf' && req.method === 'GET') {
       const isBlank = (req.url || '').includes('blank=true');
-      void (isBlank ? generateUrarPdf(true) : urarPdf).then((bytes) => {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'inline; filename="LN-2026-9043-URAR-1004.pdf"');
-        res.end(bytes);
-      }).catch((error) => {
-        sendJson(res, 500, { detail: error instanceof Error ? error.message : 'URAR fixture failed.' });
-      });
+      // A real blank 1004 dropped into public/fixtures/blank/ takes precedence
+      // over the generated facsimile when its AcroForm fields can be filled.
+      void fillDroppedUrarBlank(isBlank)
+        .then((dropped) => dropped ?? (isBlank ? generateUrarPdf(true) : urarPdf))
+        .then((bytes) => {
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', 'inline; filename="LN-2026-9043-URAR-1004.pdf"');
+          res.end(bytes);
+        }).catch((error) => {
+          sendJson(res, 500, { detail: error instanceof Error ? error.message : 'URAR fixture failed.' });
+        });
+      return;
+    }
+
+    if (path.startsWith('/fixtures/docs/') && req.method === 'GET') {
+      const params = new URLSearchParams((req.url || '').split('?')[1] ?? '');
+      const kind = path.slice('/fixtures/docs/'.length).replace(/\.pdf$/, '');
+      const producers: Record<string, () => Promise<Uint8Array>> = {
+        paystub: () =>
+          generatePaystubPdf({
+            employer: params.get('employer') || 'Apex Technology Partners LLC',
+            borrower: params.get('borrower') || 'Sarah K. Vance',
+            hourly: num(params, 'hourly', 45),
+            hours: num(params, 'hours', 40),
+            periodPay: num(params, 'period', 3600),
+            ytdBase: num(params, 'ytdBase', 54000),
+            ytdBonus: num(params, 'ytdBonus', 12500),
+            ytdOt: num(params, 'ytdOt', 4200),
+          }),
+        w2: () => fillW2(params),
+        'schedule-e': () => fillScheduleE(params),
+        'schedule-c': () => fillScheduleC(params),
+        'k1-1065': () => fillK1Partnership(params),
+        'k1-1120s': () => fillK1SCorp(params),
+      };
+      const producer = producers[kind];
+      if (!producer) {
+        sendJson(res, 404, { detail: `Unknown demo document '${kind}'.` });
+        return;
+      }
+      void producer()
+        .then((bytes) => {
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', `inline; filename="${kind}-demo.pdf"`);
+          res.end(bytes);
+        })
+        .catch((error) => {
+          sendJson(res, 500, { detail: error instanceof Error ? error.message : 'Demo document failed.' });
+        });
       return;
     }
 

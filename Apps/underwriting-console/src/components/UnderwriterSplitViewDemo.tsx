@@ -26,6 +26,7 @@ import type { LiveParseSession } from '../parseTypes';
 import { mapIncomeFields } from '../incomeFieldMap';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfPagePreview from './PdfPagePreview';
+import FixturePdfViewer from './FixturePdfViewer';
 import { usePdfViewer } from '../hooks/usePdfViewer';
 import {
   CorpLines,
@@ -201,6 +202,8 @@ export default function UnderwriterSplitViewDemo({
   }, [availableTabs, activeTab]);
 
   const [canvasYearIndex, setCanvasYearIndex] = useState<0 | 1>(0);
+  /** Left-pane document style: interactive facsimile or the real filled source PDF. */
+  const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('facsimile');
   const [twoYearSchC, setTwoYearSchC] = useState(true);
   const [twoYearScorp, setTwoYearScorp] = useState(true);
   const [twoYearPartnership, setTwoYearPartnership] = useState(true);
@@ -1177,6 +1180,126 @@ export default function UnderwriterSplitViewDemo({
     setRentalProperties((prev) => prev.map((p) => (p.id === id ? { ...p, [yearKey]: { ...p[yearKey], ...patch } } : p)));
   }
 
+  /**
+   * URL of the real filled source document for the active tab. The dev server
+   * fills official IRS blanks (or draws a pay stub) with these live values, so
+   * the PDF always matches the reconciliation math on screen.
+   */
+  const fixturePdf = useMemo<{ url: string; label: string } | null>(() => {
+    const q = (pairs: Record<string, string | number>) =>
+      new URLSearchParams(Object.entries(pairs).map(([k, v]) => [k, String(v)])).toString();
+    switch (activeTab) {
+      case 'PAYSTUB_RECONCILIATION':
+      case 'ENCOMPASS_SYNC':
+        return {
+          label: 'Earnings statement',
+          url: `/fixtures/docs/paystub.pdf?${q({
+            employer: borrowerMetadata.currentEmployer,
+            borrower: borrowerMetadata.borrowerName,
+            hourly: currentHourlyRate,
+            hours: currentWeeklyHours,
+            period: currentPeriodBasePay,
+            ytdBase: currentBaseYtd,
+            ytdBonus: currentBonusYtd,
+            ytdOt: currentOtYtd,
+          })}`,
+        };
+      case 'W2_CONTINUITY':
+        return {
+          label: `Form W-2 (${prevEmployerW2.year})`,
+          url: `/fixtures/docs/w2.pdf?${q({
+            employer: prevEmployerW2.employerName,
+            ein: prevEmployerW2.ein,
+            year: prevEmployerW2.year,
+            box1: prevEmployerW2.box1Wages,
+            bonus: prevEmployerW2.box12Bonus,
+            ot: prevEmployerW2.box14Overtime,
+          })}`,
+        };
+      case 'SCHEDULE_E': {
+        const yearKey = canvasYearIndex === 0 ? 'year1' : 'year2';
+        const props: Record<string, string | number> = { year: canvasYearIndex === 0 ? 2025 : 2024 };
+        (['a', 'b'] as const).forEach((prefix, i) => {
+          const y = rentalProperties[i]?.[yearKey];
+          if (!y) return;
+          props[`${prefix}Rents`] = y.rentsReceived;
+          props[`${prefix}Insurance`] = y.insurance;
+          props[`${prefix}Interest`] = y.mortgageInterest;
+          props[`${prefix}Taxes`] = y.taxes;
+          props[`${prefix}Depreciation`] = y.depreciation;
+          props[`${prefix}Hoa`] = y.hoaDues;
+          props[`${prefix}Total`] = y.totalExpenses;
+        });
+        return {
+          label: `Schedule E (${props.year})`,
+          url: `/fixtures/docs/schedule-e.pdf?${q(props)}`,
+        };
+      }
+      case 'SCHEDULE_C': {
+        const y = schCYears[canvasYearIndex];
+        return {
+          label: `Schedule C (${y.year})`,
+          url: `/fixtures/docs/schedule-c.pdf?${q({
+            line31: y.line31,
+            line13: y.line13,
+            line30: y.line30,
+            miles: y.line44aMiles,
+            meals: y.line24bMeals,
+          })}`,
+        };
+      }
+      case 'SCORP': {
+        const y = sCorpYears[canvasYearIndex];
+        return {
+          label: `Schedule K-1 1120-S (${y.year})`,
+          url: `/fixtures/docs/k1-1120s.pdf?${q({
+            ordinary: y.ordinaryIncome,
+            rental: y.netRentalRealEstate,
+            otherRental: y.otherNetRental,
+            distributions: y.distributions,
+            ownershipPct: sCorpShareholderPct,
+          })}`,
+        };
+      }
+      case 'PARTNERSHIP': {
+        const y = partnershipYears[canvasYearIndex];
+        return {
+          label: `Schedule K-1 1065 (${y.year})`,
+          url: `/fixtures/docs/k1-1065.pdf?${q({
+            ordinary: y.ordinaryIncome,
+            rental: y.netRentalRealEstate,
+            otherRental: y.otherNetRental,
+            guaranteed: y.guaranteedPayments,
+            distributions: y.distributions,
+            profitPct: partnershipProfitPctEnd,
+            capitalPct: partnershipCapitalPctEnd,
+          })}`,
+        };
+      }
+      default:
+        return null;
+    }
+  }, [
+    activeTab,
+    canvasYearIndex,
+    borrowerMetadata.currentEmployer,
+    borrowerMetadata.borrowerName,
+    currentHourlyRate,
+    currentWeeklyHours,
+    currentPeriodBasePay,
+    currentBaseYtd,
+    currentBonusYtd,
+    currentOtYtd,
+    prevEmployerW2,
+    rentalProperties,
+    schCYears,
+    sCorpYears,
+    partnershipYears,
+    sCorpShareholderPct,
+    partnershipProfitPctEnd,
+    partnershipCapitalPctEnd,
+  ]);
+
   return (
     <div className="mx-auto max-w-7xl p-6 font-sans space-y-6 text-slate-800 bg-slate-50 min-h-screen">
       
@@ -1267,15 +1390,39 @@ export default function UnderwriterSplitViewDemo({
                 <Layers className="h-5 w-5 text-indigo-600" />
                 <h2 className="font-extrabold text-slate-900 text-sm">PDF Coordinate Canvas View</h2>
               </div>
-              <span className="rounded bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-500">
-                {activeTab === 'SCHEDULE_C'
-                  ? 'Schedule C'
-                  : activeTab === 'SCORP'
-                    ? 'Form 1120-S'
-                    : activeTab === 'PARTNERSHIP'
-                      ? 'Form 1065'
-                      : 'Paystub'}
-              </span>
+              <div className="flex items-center gap-2">
+                {!isLive && fixturePdf && (
+                  <div className="flex rounded-md border border-slate-200 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setDocMode('facsimile')}
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${docMode === 'facsimile' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                    >
+                      Facsimile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocMode('pdf')}
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${docMode === 'pdf' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                    >
+                      Source PDF
+                    </button>
+                  </div>
+                )}
+                <span className="rounded bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-500">
+                  {activeTab === 'SCHEDULE_C'
+                    ? 'Schedule C'
+                    : activeTab === 'SCORP'
+                      ? 'Form 1120-S'
+                      : activeTab === 'PARTNERSHIP'
+                        ? 'Form 1065'
+                        : activeTab === 'SCHEDULE_E'
+                          ? 'Schedule E'
+                          : activeTab === 'W2_CONTINUITY'
+                            ? 'Form W-2'
+                            : 'Paystub'}
+                </span>
+              </div>
             </div>
 
             {isLive && liveSession ? (
@@ -1288,6 +1435,25 @@ export default function UnderwriterSplitViewDemo({
                 onSelectField={setHighlightFieldId}
                 onPageChange={setLivePageIndex}
               />
+            ) : docMode === 'pdf' && fixturePdf ? (
+              <div className="space-y-2">
+                {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'PARTNERSHIP') &&
+                  (activeTab === 'SCHEDULE_E' || (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : twoYearPartnership)) && (
+                    <div className="flex gap-1">
+                      {[0, 1].map((i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setCanvasYearIndex(i as 0 | 1)}
+                          className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${canvasYearIndex === i ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                        >
+                          Year {i + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                <FixturePdfViewer url={fixturePdf.url} label={fixturePdf.label} />
+              </div>
             ) : (
               <DemoDocumentCanvas
                 tab={activeTab}
