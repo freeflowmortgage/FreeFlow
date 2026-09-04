@@ -14,13 +14,16 @@ export type SchCYear = {
 
 export type CorpYear = {
   year: number;
-  ordinaryIncome: number;
+  ordinaryIncome: number;        // K-1 Box 1
+  netRentalRealEstate: number;   // K-1 Box 2
+  otherNetRental: number;        // K-1 Box 3
   depreciation: number;
   depletion: number;
   mealsM1: number;
-  guaranteedPayments: number;
+  guaranteedPayments: number;    // K-1 Box 4 (1065 only)
   otherNoncash: number;
   w2Wages: number;
+  distributions: number;         // K-1 Box 19A (1065) / Box 16D (1120-S)
 };
 
 export type ScheduleL = {
@@ -50,8 +53,30 @@ export function schCAnnual(row: SchCYear) {
 }
 
 export function corpBusinessAnnual(row: CorpYear, ownershipPct: number) {
-  const business = row.ordinaryIncome + row.depreciation + row.depletion + row.mealsM1 + row.otherNoncash + row.guaranteedPayments;
+  const business =
+    row.ordinaryIncome +
+    row.netRentalRealEstate +
+    row.otherNetRental +
+    row.depreciation +
+    row.depletion +
+    row.mealsM1 +
+    row.otherNoncash +
+    row.guaranteedPayments;
   return business * (ownershipPct / 100);
+}
+
+/**
+ * Under-25% ownership: borrower is not self-employed. Usable income is limited to
+ * the K-1 income boxes (1, 2, 3 and guaranteed payments) with NO business-level
+ * non-cash add-backs, capped at actual distributions received when distributions
+ * are documented (> 0).
+ */
+export function corpMinorityAnnual(row: CorpYear, ownershipPct: number) {
+  const k1Income =
+    (row.ordinaryIncome + row.netRentalRealEstate + row.otherNetRental + row.guaranteedPayments) *
+    (ownershipPct / 100);
+  const capped = row.distributions > 0 ? Math.min(k1Income, row.distributions) : k1Income;
+  return { k1Income, capped, wasCapped: row.distributions > 0 && k1Income > row.distributions };
 }
 
 export function monthlyFromYears(year1: number, year2: number, twoYears: boolean) {
@@ -144,6 +169,7 @@ export function FacsimileSheet({
   lines,
   selectedId,
   onSelect,
+  fillHeight = false,
 }: {
   form: string;
   year: number;
@@ -151,9 +177,11 @@ export function FacsimileSheet({
   lines: FacsimileLine[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Expand to the viewport height (popped-out dual-monitor document pane) */
+  fillHeight?: boolean;
 }) {
   return (
-    <div className="h-[540px] overflow-auto rounded-lg border border-slate-300 bg-[#f8f6f1] p-4 shadow-inner">
+    <div className={`${fillHeight ? 'h-[calc(100vh-170px)]' : 'h-[540px]'} overflow-auto rounded-lg border border-slate-300 bg-[#f8f6f1] p-4 shadow-inner`}>
       <div className="min-h-full rounded border-2 border-slate-900 bg-white p-4 text-slate-900">
         <div className="mb-3 flex items-start justify-between border-b-2 border-slate-900 pb-2">
           <div>
@@ -483,6 +511,7 @@ export function PaystubFacsimile({
   ytd,
   selectedId,
   onSelect,
+  fillHeight = false,
 }: {
   employer: string;
   borrower: string;
@@ -492,6 +521,7 @@ export function PaystubFacsimile({
   ytd: number;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  fillHeight?: boolean;
 }) {
   const lines: FacsimileLine[] = [
     { id: 'ps-emp-name', line: 'Employer', label: 'Employer name', value: employer },
@@ -509,6 +539,7 @@ export function PaystubFacsimile({
       lines={lines}
       selectedId={selectedId}
       onSelect={onSelect}
+      fillHeight={fillHeight}
     />
   );
 }
@@ -615,12 +646,23 @@ export function CorpLines({
   return (
     <>
       <LineRow line="K-1 1" label="Ordinary business income" value={row.ordinaryIncome} selected={selectedId === id('ord')} onSelect={() => onSelect(id('ord'))} onChange={(n) => onChange({ ordinaryIncome: n })} />
+      <LineRow line="K-1 2" label="Net rental real estate" value={row.netRentalRealEstate} selected={selectedId === id('rre')} onSelect={() => onSelect(id('rre'))} onChange={(n) => onChange({ netRentalRealEstate: n })} />
+      <LineRow line="K-1 3" label="Other net rental income" value={row.otherNetRental} selected={selectedId === id('onr')} onSelect={() => onSelect(id('onr'))} onChange={(n) => onChange({ otherNetRental: n })} />
       {kind === 'partnership' ? (
         <LineRow line="K-1 4" label="Guaranteed payments" value={row.guaranteedPayments} selected={selectedId === id('gp')} onSelect={() => onSelect(id('gp'))} onChange={(n) => onChange({ guaranteedPayments: n })} />
       ) : (
         <LineRow line="W-2" label="Officer W-2 wages" hint="counts even if liquidity fails" value={row.w2Wages} selected={selectedId === id('w2')} onSelect={() => onSelect(id('w2'))} onChange={(n) => onChange({ w2Wages: n })} />
       )}
-      <LineRow line="4562" label="Depreciation" hint="add-back × ownership" value={row.depreciation} selected={selectedId === id('dep')} onSelect={() => onSelect(id('dep'))} onChange={(n) => onChange({ depreciation: n })} />
+      <LineRow
+        line={kind === 'partnership' ? 'K-1 19A' : 'K-1 16D'}
+        label="Distributions received"
+        hint="caps K-1 income unless stable history"
+        value={row.distributions}
+        selected={selectedId === id('dist')}
+        onSelect={() => onSelect(id('dist'))}
+        onChange={(n) => onChange({ distributions: n })}
+      />
+      <LineRow line="4562" label="Depreciation" hint="add-back × ownership (≥25% only)" value={row.depreciation} selected={selectedId === id('dep')} onSelect={() => onSelect(id('dep'))} onChange={(n) => onChange({ depreciation: n })} />
       <LineRow line="M-1" label="Non-deductible meals" hint="add-back" value={row.mealsM1} selected={selectedId === id('meals')} onSelect={() => onSelect(id('meals'))} onChange={(n) => onChange({ mealsM1: n })} />
       <LineRow line="Other" label="Other non-cash" value={row.otherNoncash} selected={selectedId === id('other')} onSelect={() => onSelect(id('other'))} onChange={(n) => onChange({ otherNoncash: n })} />
     </>
@@ -639,6 +681,7 @@ export function DemoDocumentCanvas({
   scheduleL,
   showLiquidity,
   paystub,
+  fillHeight = false,
 }: {
   tab: string;
   yearIndex: 0 | 1;
@@ -658,10 +701,12 @@ export function DemoDocumentCanvas({
     periodPay: number;
     ytd: number;
   };
+  fillHeight?: boolean;
 }) {
   const yk = yearIndex === 0 ? 'y1' : 'y2';
   const year = tab === 'SCHEDULE_C' ? schC.year : corp.year;
   const isWage = tab === 'PAYSTUB_RECONCILIATION' || tab === 'W2_CONTINUITY' || tab === 'ENCOMPASS_SYNC';
+  const isRental = tab === 'SCHEDULE_E';
 
   if (isWage) {
     return (
@@ -674,7 +719,55 @@ export function DemoDocumentCanvas({
         ytd={paystub.ytd}
         selectedId={selectedId}
         onSelect={onSelect}
+        fillHeight={fillHeight}
       />
+    );
+  }
+
+  if (isRental) {
+    const schedELines: FacsimileLine[] = [
+      { id: `sche-addr-${yk}`, line: 'Line 1a', label: 'Physical address of property', value: '742 Evergreen Terrace' },
+      { id: `sche-type-${yk}`, line: 'Line 1b', label: 'Type of property', value: '1 — Single Family' },
+      { id: `sche-l2-${yk}`, line: 'Line 2', label: 'Fair rental days', value: '365' },
+      { id: `sche-l3-${yk}`, line: 'Line 3', label: 'Rents received', value: usd(24000) },
+      { id: `sche-l9-${yk}`, line: 'Line 9', label: 'Insurance (add-back)', value: usd(1200) },
+      { id: `sche-l12-${yk}`, line: 'Line 12', label: 'Mortgage interest (add-back)', value: usd(4800) },
+      { id: `sche-l16-${yk}`, line: 'Line 16', label: 'Taxes (add-back)', value: usd(2900) },
+      { id: `sche-l18-${yk}`, line: 'Line 18', label: 'Depreciation (add-back)', value: usd(3500) },
+      { id: `sche-l19-${yk}`, line: 'Line 19', label: 'Other — HOA dues (add-back if in PITIA)', value: usd(0) },
+      { id: `sche-l20-${yk}`, line: 'Line 20', label: 'Total expenses', value: usd(14500) },
+      { id: `sche-l21-${yk}`, line: 'Line 21', label: 'Net income / (loss)', value: usd(24000 - 14500) },
+    ];
+    return (
+      <div className="space-y-2">
+        {twoYear ? (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => onYearIndex(0)}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${yearIndex === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              Year 1
+            </button>
+            <button
+              type="button"
+              onClick={() => onYearIndex(1)}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${yearIndex === 1 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              Year 2
+            </button>
+          </div>
+        ) : null}
+        <FacsimileSheet
+          form="Schedule E (Form 1040) – Supplemental Income"
+          year={yearIndex === 0 ? 2025 : 2024}
+          entity="742 Evergreen Terrace, Springfield, IL · Rental"
+          lines={schedELines}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          fillHeight={fillHeight}
+        />
+      </div>
     );
   }
 
@@ -686,19 +779,23 @@ export function DemoDocumentCanvas({
     { id: `schc-l24b-${yk}`, line: 'Line 24b', label: 'Meals (deductible 50%)', value: usd(schC.line24bMeals) },
   ];
 
+  const corpPrefix = tab === 'PARTNERSHIP' ? 'k1' : 'scorp';
   const corpLines: FacsimileLine[] = [
-    { id: `${tab === 'PARTNERSHIP' ? 'k1' : 'scorp'}-ord-${yk}`, line: 'K-1 Box 1', label: 'Ordinary business income', value: usd(corp.ordinaryIncome) },
+    { id: `${corpPrefix}-ord-${yk}`, line: 'K-1 Box 1', label: 'Ordinary business income', value: usd(corp.ordinaryIncome) },
+    { id: `${corpPrefix}-rre-${yk}`, line: 'K-1 Box 2', label: 'Net rental real estate', value: usd(corp.netRentalRealEstate) },
+    { id: `${corpPrefix}-onr-${yk}`, line: 'K-1 Box 3', label: 'Other net rental income', value: usd(corp.otherNetRental) },
     tab === 'PARTNERSHIP'
       ? { id: `k1-gp-${yk}`, line: 'K-1 Box 4', label: 'Guaranteed payments', value: usd(corp.guaranteedPayments) }
       : { id: `scorp-w2-${yk}`, line: 'W-2', label: 'Officer wages', value: usd(corp.w2Wages) },
-    { id: `${tab === 'PARTNERSHIP' ? 'k1' : 'scorp'}-dep-${yk}`, line: 'Form 4562', label: 'Depreciation', value: usd(corp.depreciation) },
-    { id: `${tab === 'PARTNERSHIP' ? 'k1' : 'scorp'}-meals-${yk}`, line: 'M-1', label: 'Non-deductible meals', value: usd(corp.mealsM1) },
+    { id: `${corpPrefix}-dist-${yk}`, line: tab === 'PARTNERSHIP' ? 'K-1 Box 19A' : 'K-1 Box 16D', label: 'Distributions', value: usd(corp.distributions) },
+    { id: `${corpPrefix}-dep-${yk}`, line: 'Form 4562', label: 'Depreciation', value: usd(corp.depreciation) },
+    { id: `${corpPrefix}-meals-${yk}`, line: 'M-1', label: 'Non-deductible meals', value: usd(corp.mealsM1) },
     { id: `schl-cash`, line: 'Sch L · L1', label: 'Cash', value: usd(scheduleL.cash) },
     { id: `schl-receivables`, line: 'Sch L · L2a', label: 'Receivables', value: usd(scheduleL.receivables) },
     { id: `schl-accountsPayable`, line: 'Sch L · L16', label: 'Accounts payable', value: usd(scheduleL.accountsPayable) },
   ];
 
-  const lines = tab === 'SCHEDULE_C' ? schCLines : showLiquidity ? corpLines : corpLines.slice(0, 4);
+  const lines = tab === 'SCHEDULE_C' ? schCLines : showLiquidity ? corpLines : corpLines.slice(0, 7);
 
   return (
     <div className="space-y-2">
@@ -727,6 +824,7 @@ export function DemoDocumentCanvas({
         lines={lines}
         selectedId={selectedId}
         onSelect={onSelect}
+        fillHeight={fillHeight}
       />
     </div>
   );

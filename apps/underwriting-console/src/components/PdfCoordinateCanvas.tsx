@@ -24,6 +24,8 @@ interface PdfCoordinateCanvasProps {
   documentType?: string;
   documentUrl?: string;
   mappedBoxes?: SpatialCoordinates[];
+  /** Reports the loaded document's real page count (native PDFs only). */
+  onPageCount?: (pages: number) => void;
 }
 
 const RENDER_WIDTH = 640;
@@ -49,12 +51,14 @@ function NativePdfPage({
   zoomScale,
   activeHighlight,
   mappedBoxes = [],
+  onPageCount,
 }: {
   url: string;
   pageNumber: number;
   zoomScale: number;
   activeHighlight: SpatialCoordinates | null;
   mappedBoxes?: SpatialCoordinates[];
+  onPageCount?: (pages: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -82,6 +86,7 @@ function NativePdfPage({
         }
         pdfRef.current = pdf;
         setReady(true);
+        onPageCount?.(pdf.numPages);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -216,6 +221,7 @@ export const PdfCoordinateCanvas: React.FC<PdfCoordinateCanvasProps> = ({
   documentType,
   documentUrl,
   mappedBoxes = [],
+  onPageCount,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -320,6 +326,7 @@ export const PdfCoordinateCanvas: React.FC<PdfCoordinateCanvasProps> = ({
             zoomScale={zoomScale}
             activeHighlight={activeHighlight}
             mappedBoxes={mappedBoxes}
+            onPageCount={onPageCount}
           />
         ) : (
           <div

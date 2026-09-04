@@ -21,6 +21,7 @@ const PRODUCTS: {
   line: string;
   points: string[];
   view: ConsoleView;
+  demoHash: string;
   testId: string;
   icon: typeof Calculator;
 }[] = [
@@ -28,9 +29,10 @@ const PRODUCTS: {
     id: 'income',
     kicker: 'Credit and income',
     title: 'Income intelligence',
-    line: 'W-2, paystubs, Form 1040, and Fannie Mae 1084 — mapped to the boxes underwriters actually use.',
-    points: ['W-2 boxes 1–6 with withholding math', 'Schedule C / E add-backs', 'Source PDF coordinates on every figure'],
+    line: 'W-2, paystubs, Form 1040, Schedule E rentals, and Fannie Mae 1084 — mapped to the boxes underwriters actually use.',
+    points: ['W-2 boxes 1–6 with withholding math', 'Schedule C / E / K-1 add-backs and PITIA netting', 'Dual-monitor split view for UW + QA desks'],
     view: 'split',
+    demoHash: 'demo-income',
     testId: 'enter-workspace',
     icon: Calculator,
   },
@@ -38,9 +40,10 @@ const PRODUCTS: {
     id: '1003',
     kicker: 'Origination',
     title: 'AI 1003',
-    line: 'Voice URLA with FreeFlow, our house-robot intake specialist. Brokers capture a MISMO-ready 1003 in the borrower’s language.',
+    line: 'Voice URLA with FreeFlow, our friendly cottage intake specialist. Brokers capture a MISMO-ready 1003 in the borrower’s language — speech-first on mobile.',
     points: ['English, Spanish, Vietnamese, Chinese, Korean', 'Live FNMA 1003 / Freddie 65 panel', 'Export a session for Encompass'],
     view: 'intake',
+    demoHash: 'demo-1003',
     testId: 'service-1003',
     icon: MessageSquare,
   },
@@ -51,9 +54,17 @@ const PRODUCTS: {
     line: 'URAR 1004 and 1004MC QA for credit executives who still sign the file. Tap a finding, land on the form.',
     points: ['Subject, comps, and condition checkpoints', 'Page-accurate highlight boxes', 'FHA / VA case alignment'],
     view: 'appraisal',
+    demoHash: 'demo-appraisal',
     testId: 'service-appraisal',
     icon: Building2,
   },
+];
+
+const OUTCOMES: { metric: string; label: string }[] = [
+  { metric: 'Minutes, not days', label: 'from PDF upload to defensible 1084 cash flow' },
+  { metric: 'One click', label: 'from any figure back to the source box on the page' },
+  { metric: 'Zero retention', label: 'borrower documents never persist on FreeFlow servers' },
+  { metric: '5 languages', label: 'AI 1003 intake with live MISMO-ready output' },
 ];
 
 const AUDIENCES = [
@@ -95,13 +106,21 @@ export default function B2BLanding({
               AI 1003
             </a>
           </nav>
-          <button
-            type="button"
-            onClick={() => onOpenService('split')}
-            className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-          >
-            Open workspace
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href="mailto:sales@freeflowmortgage.com?subject=FreeFlow%20walkthrough"
+              className="hidden rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 md:inline-block"
+            >
+              Book a walkthrough
+            </a>
+            <button
+              type="button"
+              onClick={() => onOpenService('split')}
+              className="rounded-full bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 hover:from-emerald-700 hover:to-emerald-600"
+            >
+              Open workspace
+            </button>
+          </div>
         </div>
       </header>
 
@@ -111,28 +130,34 @@ export default function B2BLanding({
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">FreeFlow Mortgage Solutions</p>
             <h1 className="mt-4 max-w-xl text-4xl font-extrabold tracking-tight text-slate-950 md:text-6xl md:leading-[1.05]">
-              Underwriting software built for the people who sign the loan.
+              Close more loans.
+              <span className="block bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
+                Defend every number.
+              </span>
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-slate-600">
-              Banks, brokers, and credit executives use FreeFlow to read the source file — W-2s, 1040s, and appraisals —
-              map agency income fields, and deliver a 1003 that is ready for Encompass.
+              FreeFlow turns tax returns, paystubs, and appraisals into agency-ready income and collateral decisions —
+              with the source box one click away and zero borrower data retained. Built for banks, brokers, and the
+              credit executives who sign the file.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
+              <a
+                href="mailto:sales@freeflowmortgage.com?subject=FreeFlow%20walkthrough"
+                className="rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition hover:shadow-emerald-600/50"
+              >
+                Book a 20-minute walkthrough
+              </a>
               <button
                 type="button"
                 onClick={() => onOpenService('split')}
-                className="rounded-full bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"
+                className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
               >
-                Review income files
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenService('intake')}
-                className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800 hover:border-emerald-400"
-              >
-                Meet FreeFlow on the 1003
+                Try the live demo
               </button>
             </div>
+            <p className="mt-4 text-xs font-semibold text-slate-400">
+              No sandbox sign-up · every demo below runs in your browser right now
+            </p>
           </div>
           <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
             <div className="flex items-center gap-4">
@@ -142,7 +167,7 @@ export default function B2BLanding({
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">AI specialist</p>
                 <p className="text-xl font-extrabold tracking-tight text-slate-950">FreeFlow</p>
-                <p className="mt-1 text-sm text-slate-500">House-robot intake mascot for the AI 1003. Professional, on-brand, and built for broker conversations.</p>
+                <p className="mt-1 text-sm text-slate-500">Our friendly cottage guide for the AI 1003 — approachable for borrowers, precise for brokers.</p>
               </div>
             </div>
             <dl className="mt-8 grid grid-cols-2 gap-4 text-sm">
@@ -173,7 +198,18 @@ export default function B2BLanding({
           <span>Fannie Mae Form 1084</span>
           <span>URAR 1004 / 1004MC</span>
           <span>W-2 withholding audit</span>
-          <span>Schedule C / E cash flow</span>
+          <span>Schedule C / E / K-1 cash flow</span>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 pt-16">
+        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-emerald-50/60 p-8 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+          {OUTCOMES.map((item) => (
+            <div key={item.metric}>
+              <p className="text-2xl font-extrabold tracking-tight text-emerald-700">{item.metric}</p>
+              <p className="mt-1 text-sm leading-snug text-slate-600">{item.label}</p>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -190,31 +226,51 @@ export default function B2BLanding({
           {PRODUCTS.map((product) => {
             const Icon = product.icon;
             return (
-              <li key={product.id}>
-                <button
-                  type="button"
-                  data-testid={product.testId}
-                  onClick={() => onOpenService(product.view)}
-                  className="group flex h-full w-full flex-col rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-400 hover:shadow-[0_20px_50px_rgba(5,150,105,0.12)]"
-                >
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <span className="mt-6 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-700">{product.kicker}</span>
-                  <span className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-xl font-extrabold tracking-tight text-slate-950">{product.title}</span>
-                    <ArrowUpRight className="h-4 w-4 text-slate-300 transition group-hover:text-emerald-600" />
-                  </span>
-                  <span className="mt-2 text-sm leading-relaxed text-slate-600">{product.line}</span>
-                  <ul className="mt-5 space-y-2">
-                    {product.points.map((point) => (
-                      <li key={point} className="flex items-start gap-2 text-sm text-slate-700">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                        {point}
-                      </li>
-                    ))}
-                  </ul>
-                </button>
+              <li key={product.id} className="flex">
+                <div className="group flex h-full w-full flex-col rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-400 hover:shadow-[0_20px_50px_rgba(5,150,105,0.12)]">
+                  <button
+                    type="button"
+                    data-testid={product.testId}
+                    onClick={() => onOpenService(product.view)}
+                    className="flex flex-1 flex-col text-left"
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className="mt-6 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-700">{product.kicker}</span>
+                    <span className="mt-2 flex items-center justify-between gap-2">
+                      <span className="text-xl font-extrabold tracking-tight text-slate-950">{product.title}</span>
+                      <ArrowUpRight className="h-4 w-4 text-slate-300 transition group-hover:text-emerald-600" />
+                    </span>
+                    <span className="mt-2 text-sm leading-relaxed text-slate-600">{product.line}</span>
+                    <ul className="mt-5 space-y-2">
+                      {product.points.map((point) => (
+                        <li key={point} className="flex items-start gap-2 text-sm text-slate-700">
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </button>
+                  <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => onOpenService(product.view)}
+                      className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                    >
+                      Open in workspace
+                    </button>
+                    <a
+                      href={`#${product.demoHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid={`${product.testId}-solo-demo`}
+                      className="text-xs font-bold text-emerald-700 hover:underline"
+                    >
+                      Launch solo demo ↗
+                    </a>
+                  </div>
+                </div>
               </li>
             );
           })}
@@ -227,9 +283,9 @@ export default function B2BLanding({
             <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-400">AI 1003</p>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight md:text-4xl">Meet FreeFlow, your URLA specialist.</h2>
             <p className="mt-4 text-slate-300 leading-relaxed">
-              FreeFlow is a house built as a cartoon robot — the branded intake voice for brokers who cannot afford a
-              clumsy chatbot. It walks the borrower through occupancy, income, and liabilities while the live 1003
-              fills on the right.
+              FreeFlow is a cheerful little cottage with a voice — the branded intake guide for brokers who cannot
+              afford a clumsy chatbot. It walks the borrower through occupancy, income, and liabilities while the live
+              1003 fills on the right. On mobile it opens speech-first, so borrowers just talk.
             </p>
             <ul className="mt-6 space-y-3 text-sm text-slate-200">
               <li className="flex gap-2">
@@ -322,6 +378,36 @@ export default function B2BLanding({
                 Appraisal findings jump the underwriter to the URAR page instead of a comments dump.
               </li>
             </ul>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 px-8 py-14 text-center text-white shadow-[0_30px_80px_rgba(15,23,42,0.35)]">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_55%)]" />
+          <div className="relative">
+            <h2 className="mx-auto max-w-2xl text-3xl font-extrabold tracking-tight md:text-4xl">
+              Put FreeFlow in front of your credit desk this week.
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-slate-300">
+              A 20-minute walkthrough covers income, AI 1003, and appraisal review on your own scenarios — no data
+              leaves the room.
+            </p>
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <a
+                href="mailto:sales@freeflowmortgage.com?subject=FreeFlow%20walkthrough"
+                className="rounded-full bg-emerald-500 px-6 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-400"
+              >
+                Book a walkthrough
+              </a>
+              <button
+                type="button"
+                onClick={() => onOpenService('split')}
+                className="rounded-full border border-white/25 bg-white/5 px-6 py-3 text-sm font-bold text-white hover:bg-white/10"
+              >
+                Explore the workspace
+              </button>
+            </div>
           </div>
         </div>
       </section>

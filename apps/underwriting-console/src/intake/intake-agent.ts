@@ -19,6 +19,9 @@ export interface IntakeAnswers {
   dependentAges?: string;
   currentAddress?: string;
   yearsAtAddress?: string;
+  /** Two-year residence history: prior address when the current one is under 2 years */
+  previousAddress?: string;
+  yearsAtPreviousAddress?: string;
   housingStatus?: 'OWN' | 'RENT' | 'RENT_FREE';
   monthlyHousing?: string;
   hasCoborrower?: boolean;
@@ -44,6 +47,8 @@ export interface IntakeAnswers {
   secondEmployer?: string;
   secondMonthlyIncome?: string;
   previousEmployer?: string;
+  /** Two-year employment history: years at the prior employer */
+  previousEmployerYears?: string;
   hasOtherIncome?: boolean;
   otherIncomeType?: string;
   otherIncomeMonthly?: string;
@@ -96,6 +101,11 @@ export interface IntakeAnswers {
   addAnotherOccupant?: boolean;
   acknowledgedUrla?: boolean;
   acknowledgedDocPlan?: boolean;
+  /** Client-API integration consents captured at wrap-up */
+  creditPullConsent?: boolean;
+  /** SOFT = soft tri-merge (no score impact) now; HARD = full pull now; NONE = LO follows up */
+  creditPullType?: 'SOFT' | 'HARD' | 'NONE';
+  assetLinkConsent?: 'PLAID' | 'STATEMENTS';
 }
 
 export interface AgentTurn {
@@ -304,6 +314,23 @@ export function getNextTurn(answers: IntakeAnswers): AgentTurn | { done: true } 
       prompt: 'How many years have you lived there?',
       kind: 'number',
       placeholder: '3',
+      helper: 'The URLA needs a two-year residence history. If this address is newer, we will ask for the prior one.',
+    };
+  }
+  if (Number(answers.yearsAtAddress) < 2 && blank(answers.previousAddress)) {
+    return {
+      id: 'previousAddress',
+      prompt: 'You have been there under two years — what was your previous street address, city, state, and ZIP?',
+      kind: 'text',
+      placeholder: '200 Oak Ave, Mesa, AZ 85201',
+    };
+  }
+  if (Number(answers.yearsAtAddress) < 2 && !blank(answers.previousAddress) && blank(answers.yearsAtPreviousAddress)) {
+    return {
+      id: 'yearsAtPreviousAddress',
+      prompt: 'How many years were you at that previous address?',
+      kind: 'number',
+      placeholder: '2',
     };
   }
   if (!answers.housingStatus) {
@@ -506,13 +533,32 @@ export function getNextTurn(answers: IntakeAnswers): AgentTurn | { done: true } 
       placeholder: '1200',
     };
   }
-  if (answers.employmentType === 'W2' && yearsAtCurrentJob(answers) < 2 && blank(answers.previousEmployer)) {
-    return {
-      id: 'previousEmployer',
-      prompt: 'You have under two years at this job. Who was the previous employer?',
-      kind: 'text',
-      placeholder: 'Prior employer name',
-    };
+  {
+    // Two-year employment history applies to W-2 (time on the job) AND
+    // self-employed borrowers (time owning the business).
+    const underTwoYears =
+      answers.employmentType === 'W2'
+        ? yearsAtCurrentJob(answers) < 2
+        : answers.employmentType === 'SELF_EMPLOYED' && yearsInBusiness(answers) < 2;
+    if (underTwoYears && blank(answers.previousEmployer)) {
+      return {
+        id: 'previousEmployer',
+        prompt:
+          answers.employmentType === 'SELF_EMPLOYED'
+            ? 'The business is under two years old, so we need the rest of your two-year work history. Who was your employer before this business?'
+            : 'You have under two years at this job. Who was the previous employer?',
+        kind: 'text',
+        placeholder: 'Prior employer name',
+      };
+    }
+    if (underTwoYears && !blank(answers.previousEmployer) && blank(answers.previousEmployerYears)) {
+      return {
+        id: 'previousEmployerYears',
+        prompt: 'How many years were you with that previous employer?',
+        kind: 'number',
+        placeholder: '3',
+      };
+    }
   }
   if (answers.hasOtherIncome == null) {
     return {
@@ -879,13 +925,34 @@ export function getNextTurn(answers: IntakeAnswers): AgentTurn | { done: true } 
     };
   }
 
-  if (!answers.acknowledgedDocPlan) {
+  // Wrap-up: client-API integration consents. The document checklist is NOT read
+  // to the borrower — it rides along to the client as a pre-underwriting checklist.
+  if (answers.creditPullType == null) {
     return {
-      id: 'acknowledgedDocPlan',
-      prompt: buildDocumentPlan(answers),
+      id: 'creditPullType',
+      prompt:
+        'Almost done. To review your options, your lender needs a look at your credit. Would you like to start with a soft credit check — it does not affect your score and does not notify other lenders — or authorize the full credit report now? A full tri-merge report is required before final approval either way.',
       kind: 'choice',
-      helper: 'This checklist is based on typical Fannie/Freddie, FHA, VA, and USDA documentation — your LO still signs off.',
-      choices: [{ id: 'got_it', label: 'Got it — continue' }],
+      helper:
+        'Credit runs through your lender’s credit vendor (e.g. CredCo) — FreeFlow never sees or stores the report. Soft checks do not trigger competitor marketing calls.',
+      choices: [
+        { id: 'SOFT', label: 'Soft check now (no score impact)' },
+        { id: 'HARD', label: 'Run the full credit report now' },
+        { id: 'NONE', label: 'Not yet — my loan officer can call me' },
+      ],
+    };
+  }
+  if (answers.assetLinkConsent == null) {
+    return {
+      id: 'assetLinkConsent',
+      prompt:
+        'Last question: for your bank and asset verification, would you like to securely connect your accounts online (takes about two minutes, no paper statements), or send statements to your loan officer instead?',
+      kind: 'choice',
+      helper: 'Online connection uses your lender’s verification service (e.g. Plaid). Credentials go to the bank, never to FreeFlow or your lender.',
+      choices: [
+        { id: 'PLAID', label: 'Connect my accounts online' },
+        { id: 'STATEMENTS', label: 'I’ll send statements' },
+      ],
     };
   }
 
@@ -919,6 +986,9 @@ export function applyAnswer(answers: IntakeAnswers, turnId: string, raw: string)
     'secondEmployer',
     'secondMonthlyIncome',
     'previousEmployer',
+    'previousEmployerYears',
+    'previousAddress',
+    'yearsAtPreviousAddress',
     'otherIncomeType',
     'otherIncomeMonthly',
     'checkingBalance',
@@ -1019,6 +1089,16 @@ export function applyAnswer(answers: IntakeAnswers, turnId: string, raw: string)
     case 'acknowledgedDocPlan':
       next.acknowledgedDocPlan = true;
       break;
+    case 'creditPullConsent':
+      next.creditPullConsent = yes;
+      break;
+    case 'creditPullType':
+      next.creditPullType = value === 'SOFT' || value === 'HARD' ? value : 'NONE';
+      next.creditPullConsent = value === 'SOFT' || value === 'HARD';
+      break;
+    case 'assetLinkConsent':
+      next.assetLinkConsent = value === 'PLAID' ? 'PLAID' : 'STATEMENTS';
+      break;
     case 'program':
       if (value === 'UNSURE') next.program = 'UNSURE';
       else if (value === 'FHA' || value === 'VA' || value === 'USDA' || value === 'CONVENTIONAL') next.program = value;
@@ -1106,16 +1186,55 @@ export function toApplyBody(answers: IntakeAnswers): ApplyBody {
     letLoDecide,
     formData: {
       retention: 'zero-data-retention',
-      custody: 'in-browser-session-until-export',
+      custody: 'in-browser-session-until-delivery',
       form: 'FNMA 1003 / URLA',
       ...answers,
-      documentPlan: buildDocumentPlan(answers),
+      /**
+       * Client-facing pre-underwriting checklist. Deliberately NOT read to the
+       * borrower in chat — the LO / processor works this list, the borrower just
+       * gets asked for documents when the lender is ready.
+       */
+      preUnderwritingChecklist: buildDocumentPlan(answers),
+      /** Client-API integration handoffs actioned by the lender's systems on receipt */
+      integrations: {
+        creditReport: {
+          provider: 'CREDCO',
+          method: 'CLIENT_API',
+          borrowerConsent: answers.creditPullConsent === true,
+          pullType: answers.creditPullType ?? 'NONE',
+          action:
+            answers.creditPullType === 'SOFT'
+              ? 'QUEUE_SOFT_TRI_MERGE'
+              : answers.creditPullType === 'HARD'
+                ? 'QUEUE_TRI_MERGE_PULL'
+                : 'LO_MUST_OBTAIN_CONSENT',
+        },
+        assetVerification: {
+          provider: answers.assetLinkConsent === 'PLAID' ? 'PLAID' : 'MANUAL_STATEMENTS',
+          method: answers.assetLinkConsent === 'PLAID' ? 'CLIENT_API' : 'DOCUMENT_COLLECTION',
+          borrowerConsent: answers.assetLinkConsent === 'PLAID',
+          action: answers.assetLinkConsent === 'PLAID' ? 'SEND_PLAID_LINK_INVITE' : 'REQUEST_TWO_MONTHS_STATEMENTS',
+        },
+      },
+      delivery: {
+        format: 'MISMO_3_4_XML',
+        transport: 'CLIENT_API',
+        retention: 'ZDR_RELAY_ONLY',
+      },
     },
   };
 }
 
 export function completionSummary(answers: IntakeAnswers) {
-  return `${firstName(answers)}, the Uniform Residential Loan Application is complete in this session. Download the 1003 JSON for your loan officer — FreeFlow does not keep a copy. Next they will pull credit, send disclosures, and collect the documents we listed.`;
+  const creditNote =
+    answers.creditPullType === 'SOFT'
+      ? ' after the soft credit check you authorized runs (no score impact)'
+      : answers.creditPullType === 'HARD'
+        ? ' after the credit report you authorized runs'
+        : '';
+  return `${firstName(answers)}, that completes your application — thank you. I have securely delivered the MISMO 1003 to your lender, and FreeFlow keeps no copy. Your loan officer will reach out shortly${creditNote}${
+    answers.assetLinkConsent === 'PLAID' ? ', and you will receive a secure link to connect your bank accounts' : ''
+  }. Nothing else is needed from you right now.`;
 }
 
 /** Core URLA slots used for the live-form progress bar (conditionals still asked in chat). */

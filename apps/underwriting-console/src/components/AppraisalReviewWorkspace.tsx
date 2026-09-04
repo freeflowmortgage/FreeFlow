@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardList, Eye, ShieldAlert } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ClipboardList, Eye, Monitor, MonitorX, ShieldAlert } from 'lucide-react';
 import { PdfCoordinateCanvas } from './PdfCoordinateCanvas';
 import { usePdfViewer, type SpatialCoordinates } from '../hooks/usePdfViewer';
+import { APPRAISAL_DOC_CHANNEL, type AppraisalDocMessage, type AppraisalDocSnapshot } from '../splitDocSync';
 
 type Severity = 'info' | 'warning' | 'error';
 type Program = 'CONV' | 'FHA' | 'VA';
@@ -304,6 +305,45 @@ export default function AppraisalReviewWorkspace() {
   const [program, setProgram] = useState<Program>('FHA');
   const [useBlankForm, setUseBlankForm] = useState(false);
   const [customPdfUrl, setCustomPdfUrl] = useState<string | null>(null);
+  const [uploadFillNote, setUploadFillNote] = useState<string | null>(null);
+  /** True when a user 1004 dropped into public/fixtures/blank replaces the facsimile. */
+  const [droppedDoc, setDroppedDoc] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/fixtures/urar-1004.meta.json')
+      .then((res) => (res.ok ? res.json() : { custom: false }))
+      .then((meta: { custom?: boolean }) => {
+        if (!cancelled) setDroppedDoc(Boolean(meta.custom));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Uploaded blank appraisal forms with fillable AcroForm fields get the demo
+   * subject data written into them (best-effort keyword match) so a dropped-in
+   * blank 1004 renders as a completed appraisal. Flat PDFs display as-is.
+   */
+  async function handleUploadedPdf(file: File) {
+    setUseBlankForm(false);
+    setUploadFillNote(null);
+    try {
+      const { fillAppraisalPdfWithDemoData } = await import('../appraisalDemoFill');
+      const filled = await fillAppraisalPdfWithDemoData(await file.arrayBuffer());
+      if (filled) {
+        const blob = new Blob([filled.bytes as BlobPart], { type: 'application/pdf' });
+        setCustomPdfUrl(URL.createObjectURL(blob));
+        setUploadFillNote(`Demo data filled into ${filled.filledCount} of ${filled.fieldCount} form fields`);
+        return;
+      }
+    } catch {
+      /* fall through to raw display */
+    }
+    setCustomPdfUrl(URL.createObjectURL(file));
+  }
   const {
     currentPage,
     zoomScale,
@@ -314,6 +354,7 @@ export default function AppraisalReviewWorkspace() {
     zoomIn,
     zoomOut,
     resetZoom,
+    setTotalPages,
     triggerHighlight,
     clearHighlight,
   } = usePdfViewer(3);
@@ -327,6 +368,13 @@ export default function AppraisalReviewWorkspace() {
     [program],
   );
   const mappedBoxes = visibleFindings.map((finding) => ({ pageIndex: finding.pageIndex, box: finding.box }));
+  /**
+   * Uploaded or dropped-in documents have their own layout, so the facsimile's
+   * coordinate overlays (finding boxes, tap-to-highlight) are suppressed.
+   */
+  const customDoc = Boolean(customPdfUrl) || droppedDoc;
+  const canvasBoxes = useBlankForm || customDoc ? [] : mappedBoxes;
+  const canvasHighlight = customDoc ? null : activeHighlight;
   const errors = visibleFindings.filter((finding) => finding.severity === 'error').length;
   const warnings = visibleFindings.filter((finding) => finding.severity === 'warning').length;
   const novFails = NOV_CHECKLIST.filter((item) => item.status === 'fail').length;
@@ -336,6 +384,83 @@ export default function AppraisalReviewWorkspace() {
     if (!finding) return;
     triggerHighlight({ pageIndex: finding.pageIndex, box: finding.box });
   }
+
+  // ==================== DUAL-MONITOR APPRAISAL CANVAS (UW / QA) ====================
+  const [docPopout, setDocPopout] = useState(false);
+  const docChannelRef = useRef<BroadcastChannel | null>(null);
+  const docWinRef = useRef<Window | null>(null);
+
+  const docSnapshot = useMemo<AppraisalDocSnapshot>(
+    () => ({
+      loanId: useBlankForm ? '—' : SUBJECT.loanId,
+      borrower: useBlankForm ? '—' : SUBJECT.borrower,
+      programLabel: program === 'CONV' ? 'Conventional' : program === 'VA' ? 'VA NOV' : 'FHA',
+      currentPage,
+      zoomScale,
+      totalPages,
+      activeHighlight: canvasHighlight,
+      documentCategory: 'APPRAISAL_1004',
+      documentType: 'URAR',
+      // blob: URLs from the upload remain valid across same-origin windows
+      documentUrl: customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF),
+      mappedBoxes: canvasBoxes,
+    }),
+    [useBlankForm, program, currentPage, zoomScale, totalPages, canvasHighlight, customPdfUrl, canvasBoxes],
+  );
+  const docSnapshotRef = useRef(docSnapshot);
+  docSnapshotRef.current = docSnapshot;
+
+  useEffect(() => {
+    const channel = new BroadcastChannel(APPRAISAL_DOC_CHANNEL);
+    docChannelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<AppraisalDocMessage>) => {
+      const msg = event.data;
+      if (msg.type === 'doc-ready') {
+        setDocPopout(true);
+        channel.postMessage({ type: 'snapshot', snapshot: docSnapshotRef.current } satisfies AppraisalDocMessage);
+      } else if (msg.type === 'doc-closed') {
+        setDocPopout(false);
+      } else if (msg.type === 'nav') {
+        if (msg.action === 'next') nextPage();
+        else if (msg.action === 'prev') prevPage();
+        else if (msg.action === 'zoom-in') zoomIn();
+        else if (msg.action === 'zoom-out') zoomOut();
+        else resetZoom();
+      }
+    };
+    return () => {
+      channel.close();
+      docChannelRef.current = null;
+    };
+    // Viewer callbacks are stable useCallback references from usePdfViewer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!docPopout || !docChannelRef.current) return;
+    docChannelRef.current.postMessage({ type: 'snapshot', snapshot: docSnapshot } satisfies AppraisalDocMessage);
+  }, [docSnapshot, docPopout]);
+
+  useEffect(() => {
+    if (!docPopout) return;
+    const timer = setInterval(() => {
+      if (docWinRef.current && docWinRef.current.closed) setDocPopout(false);
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [docPopout]);
+
+  const openDocWindow = () => {
+    docWinRef.current = window.open(
+      `${window.location.pathname}#appraisal-doc`,
+      'freeflow-appraisal-pane',
+      'width=1280,height=960',
+    );
+  };
+
+  const bringBackDoc = () => {
+    docChannelRef.current?.postMessage({ type: 'close-doc' } satisfies AppraisalDocMessage);
+    setDocPopout(false);
+  };
 
   const header =
     program === 'VA'
@@ -349,23 +474,27 @@ export default function AppraisalReviewWorkspace() {
       data-testid="appraisal-workspace"
       className="flex h-[calc(100vh-8.5rem)] min-h-[780px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900"
     >
-      <div className="flex h-full w-[46%] min-w-0 flex-col border-r border-slate-200 bg-slate-50">
-        <PdfCoordinateCanvas
-          currentPage={currentPage}
-          zoomScale={zoomScale}
-          activeHighlight={activeHighlight}
-          totalPages={totalPages}
-          onNextPage={nextPage}
-          onPrevPage={prevPage}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          onResetZoom={resetZoom}
-          documentCategory="APPRAISAL_1004"
-          documentType="URAR"
-          documentUrl={customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF)}
-          mappedBoxes={useBlankForm ? [] : mappedBoxes}
-        />
-      </div>
+      {/* Unmounted while the canvas lives in its own window (dual-monitor mode) */}
+      {!docPopout && (
+        <div className="flex h-full w-[46%] min-w-0 flex-col border-r border-slate-200 bg-slate-50">
+          <PdfCoordinateCanvas
+            currentPage={currentPage}
+            zoomScale={zoomScale}
+            activeHighlight={canvasHighlight}
+            totalPages={totalPages}
+            onNextPage={nextPage}
+            onPrevPage={prevPage}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onResetZoom={resetZoom}
+            documentCategory="APPRAISAL_1004"
+            documentType="URAR"
+            documentUrl={customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF)}
+            mappedBoxes={canvasBoxes}
+            onPageCount={setTotalPages}
+          />
+        </div>
+      )}
 
       <div className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-white">
         <header className="border-b border-slate-200 px-6 py-4">
@@ -376,6 +505,26 @@ export default function AppraisalReviewWorkspace() {
               <p className="mt-1 text-xs text-slate-500">{header.sub}</p>
             </div>
             <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+              {!docPopout ? (
+                <button
+                  type="button"
+                  onClick={openDocWindow}
+                  title="Open the appraisal canvas in a separate window for a second monitor"
+                  className="mr-2 flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-indigo-600 hover:text-indigo-800"
+                >
+                  <Monitor className="h-3.5 w-3.5" />
+                  Dual monitor
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={bringBackDoc}
+                  className="mr-2 flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white hover:bg-indigo-700"
+                >
+                  <MonitorX className="h-3.5 w-3.5" />
+                  Bring back
+                </button>
+              )}
               <label className="mr-2 flex cursor-pointer items-center rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-600 hover:text-emerald-800">
                 Upload PDF
                 <input
@@ -384,18 +533,31 @@ export default function AppraisalReviewWorkspace() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                      setCustomPdfUrl(URL.createObjectURL(file));
-                      setUseBlankForm(false);
-                    }
+                    if (file) void handleUploadedPdf(file);
                   }}
                 />
               </label>
+              {uploadFillNote && (
+                <span className="mr-2 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                  {uploadFillNote}
+                </span>
+              )}
+              {droppedDoc && !customPdfUrl && (
+                <span
+                  className="mr-2 rounded bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700"
+                  title="Serving the 1004 from public/fixtures/blank. Facsimile coordinate highlights are off for custom documents."
+                >
+                  Custom 1004 from fixtures
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   setUseBlankForm(!useBlankForm);
-                  if (!useBlankForm) setCustomPdfUrl(null);
+                  if (!useBlankForm) {
+                    setCustomPdfUrl(null);
+                    setUploadFillNote(null);
+                  }
                 }}
                 className={`mr-2 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
                   useBlankForm && !customPdfUrl ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:text-indigo-800'
