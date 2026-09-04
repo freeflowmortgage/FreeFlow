@@ -13,7 +13,7 @@ export type MappedIncomeField = {
   entityId?: string;
   /** Legacy field definition ID before entity scoping. */
   sourceFieldId?: string;
-  form: 'W-2' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065';
+  form: 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
   boxLabel: string;
   fieldLabel: string;
   lineNum: string;

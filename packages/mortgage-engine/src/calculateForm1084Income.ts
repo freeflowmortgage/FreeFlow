@@ -19,7 +19,25 @@ export interface GeneratedCondition {
 // 1. COMPLEX VARIABLE, MILITARY, AND TAX-EXEMPT INCOME INPUT INTERFACES
 // ────────────────────────────────────────────────────────────────────────
 
-export type W2EmploymentRole = 'CURRENT' | 'CONCURRENT' | 'PRIOR';
+export type GseInvestor = 'FNMA' | 'FREDDIE';
+
+/** CURRENT/PRIMARY and CONCURRENT/SECONDARY are aliases. PRIOR is historical only. */
+export type W2EmploymentRole = 'CURRENT' | 'CONCURRENT' | 'PRIOR' | 'PRIMARY' | 'SECONDARY';
+
+/** Schedule L current-asset / current-liability inputs for the ≥25% liquidity test. */
+export interface ScheduleLLiquidityInput {
+  cash?: number;
+  securities?: number;
+  accountsReceivable?: number;
+  allowanceForBadDebts?: number;
+  taxExemptSecurities?: number;
+  otherCurrentAssets?: number;
+  accountsPayable?: number;
+  notesPayableLt1Yr?: number;
+  otherCurrentLiabilities?: number;
+  /** If set, used as the denominator instead of summing payable lines. */
+  currentLiabilities?: number;
+}
 
 export interface W2EmployerEntry {
   /** Stable source-system identifier. Do not derive this from the employer name. */
@@ -74,6 +92,8 @@ export interface Form1120SEntry {
   mealsExclusion?: number;
   k1Distributions?: number;
   hasStableDistributions?: boolean;
+  /** When present and ownership ≥ 25%, quick ratio < 1.0 zeroes K-1 (W-2 still counts). */
+  scheduleL?: ScheduleLLiquidityInput;
 }
 
 export interface Form1065Entry {
@@ -87,6 +107,10 @@ export interface Form1065Entry {
    * Freddie Mac qualifies on the ending PROFIT %; FNMA on the ending CAPITAL %.
    */
   ownershipPercentage: number;
+  /** K-1 Item J ending profit % — Freddie Mac qualifying figure when both percents are present. */
+  profitPercentageEnd?: number;
+  /** K-1 Item J ending capital % — FNMA qualifying figure when both percents are present. */
+  capitalPercentageEnd?: number;
   k1OrdinaryIncome?: number;
   k1NetRentalRealEstate?: number;
   k1OtherNetRentalIncome?: number;
@@ -97,6 +121,8 @@ export interface Form1065Entry {
   mealsExclusion?: number;
   k1Distributions?: number;
   hasStableDistributions?: boolean;
+  /** When present and ownership ≥ 25%, quick ratio < 1.0 zeroes K-1 (guaranteed payments still count). */
+  scheduleL?: ScheduleLLiquidityInput;
 }
 
 export interface Form1120Entry {
@@ -174,12 +200,18 @@ export interface ScheduleEPage1PropertyInput {
   propertyType: 'RENTAL' | 'ROYALTY'; // Distinguish between rental real estate and royalties
   rentsReceived?: number;             // Line 3 (Rents Received)
   royaltiesReceived?: number;         // Line 4 (Royalties Received)
+  insurance?: number;                 // Line 9 — 1038 add-back
+  mortgageInterest?: number;          // Line 12 — 1038 add-back
+  taxes?: number;                     // Line 16 — 1038 add-back
   depreciation?: number;              // Line 18 (Depreciation Expense - Rental)
   depletion?: number;                 // Line 18 (Depletion Expense - Royalty)
-  totalExpenses?: number;             // Line 20 (Total Expenses)
+  hoaDues?: number;                   // Line 19 — 1038 add-back when included in PITIA
+  totalExpenses?: number;             // Line 20 (Total Expenses) — do not rebuild; add back from it
   netIncomeLoss?: number;             // Line 21 (Net Income/Loss)
+  /** UW extraordinary / other allowed add-back (not an IRS line). */
+  extraordinaryAddBack?: number;
   hasThreeYearRoyaltyContinuance?: boolean; // Underwriter verified continuance of royalties
-  isMultiFamilySubjectToFhaDecline?: boolean; // Trigger FHA declining multi-family property checks
+  isMultiFamilySubjectToFhaDecline?: boolean; // Trigger FHA declining 2–4 unit property checks
   fairRentalDays?: number;            // Line 2 (Fair Rental Days)
   fairRentalDaysOverride?: number;    // Underwriter Days Rented Override
 }
@@ -200,6 +232,8 @@ export interface SubjectPropertyRentalInput {
 
 export interface UnifiedIncomeCalculationPayload {
   loanProgram: LoanProgram;
+  /** Selects K-1 Item J ending profit % (Freddie) vs ending capital % (FNMA) for Form 1065. */
+  gseInvestor?: GseInvestor;
   w2Employers?: W2EmployerEntry[];
   scheduleC?: ScheduleCEntry[];
   scheduleF?: ScheduleFEntry[];
@@ -228,30 +262,91 @@ function getMonthsInService(entry: ScheduleEPage1PropertyInput): number {
   return 12; // Default to standard 12 months if no days rented is specified
 }
 
+function isActiveW2Role(role: W2EmploymentRole): boolean {
+  return role !== 'PRIOR';
+}
+
+function resolve1065Ownership(entry: Form1065Entry, gse: GseInvestor): number {
+  if (gse === 'FREDDIE' && entry.profitPercentageEnd != null) return entry.profitPercentageEnd;
+  if (gse === 'FNMA' && entry.capitalPercentageEnd != null) return entry.capitalPercentageEnd;
+  return entry.ownershipPercentage;
+}
+
+export function scheduleLQuickRatioFromInput(sheet?: ScheduleLLiquidityInput): {
+  ratio: Decimal;
+  assets: Decimal;
+  liabilities: Decimal;
+} | null {
+  if (!sheet) return null;
+  const hasAny =
+    sheet.cash != null ||
+    sheet.securities != null ||
+    sheet.accountsReceivable != null ||
+    sheet.allowanceForBadDebts != null ||
+    sheet.taxExemptSecurities != null ||
+    sheet.otherCurrentAssets != null ||
+    sheet.accountsPayable != null ||
+    sheet.notesPayableLt1Yr != null ||
+    sheet.otherCurrentLiabilities != null ||
+    sheet.currentLiabilities != null;
+  if (!hasAny) return null;
+
+  const assets = new Decimal(sheet.cash || 0)
+    .add(sheet.securities || 0)
+    .add(new Decimal(sheet.accountsReceivable || 0).sub(sheet.allowanceForBadDebts || 0))
+    .add(sheet.taxExemptSecurities || 0)
+    .add(sheet.otherCurrentAssets || 0);
+  const liabilities =
+    sheet.currentLiabilities != null
+      ? new Decimal(sheet.currentLiabilities)
+      : new Decimal(sheet.accountsPayable || 0)
+          .add(sheet.notesPayableLt1Yr || 0)
+          .add(sheet.otherCurrentLiabilities || 0);
+  if (liabilities.eq(0)) {
+    return { ratio: assets.gt(0) ? new Decimal(999) : new Decimal(0), assets, liabilities };
+  }
+  return { ratio: assets.div(liabilities), assets, liabilities };
+}
+
 interface ComputedPropertyCashFlow {
   totalAnnualCashFlow: Decimal;
   monthsInService: number;
   monthlyAverage: Decimal;
+  addBacks: Decimal;
 }
 
-function getMonthlyPropertyCashFlow(entry: ScheduleEPage1PropertyInput): ComputedPropertyCashFlow {
+/**
+ * FNMA Form 1038 / 1038A rental cash flow.
+ * Prefer Line 21 net, then add back Lines 9, 12, 16, 18, 19 plus any UW extraordinary box.
+ * Do not rebuild total expenses from those lines — Line 20 is used only when Line 21 is absent
+ * (L3 − L20 + the same add-backs).
+ */
+export function computeRental1038CashFlow(entry: ScheduleEPage1PropertyInput): ComputedPropertyCashFlow {
+  const insurance = new Decimal(entry.insurance || 0);
+  const mortgageInterest = new Decimal(entry.mortgageInterest || 0);
+  const taxes = new Decimal(entry.taxes || 0);
   const depr = new Decimal(entry.depreciation || 0);
+  const hoa = new Decimal(entry.hoaDues || 0);
+  const extraordinary = new Decimal(entry.extraordinaryAddBack || 0);
+  const addBacks = insurance.add(mortgageInterest).add(taxes).add(depr).add(hoa).add(extraordinary);
+
   let totalAnnual: Decimal;
   if (entry.netIncomeLoss !== undefined && entry.netIncomeLoss !== null) {
-    totalAnnual = new Decimal(entry.netIncomeLoss).add(depr);
+    totalAnnual = new Decimal(entry.netIncomeLoss).add(addBacks);
   } else {
-    const rents = new Decimal(entry.rentsReceived || 0);
-    const expenses = new Decimal(entry.totalExpenses || 0);
-    totalAnnual = rents.sub(expenses).add(depr);
+    totalAnnual = new Decimal(entry.rentsReceived || 0).sub(entry.totalExpenses || 0).add(addBacks);
   }
   const months = getMonthsInService(entry);
-  const average = totalAnnual.div(months);
-  
   return {
     totalAnnualCashFlow: totalAnnual,
     monthsInService: months,
-    monthlyAverage: average
+    monthlyAverage: totalAnnual.div(months),
+    addBacks,
   };
+}
+
+function getMonthlyPropertyCashFlow(entry: ScheduleEPage1PropertyInput): ComputedPropertyCashFlow {
+  return computeRental1038CashFlow(entry);
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -299,7 +394,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       employerName: entry.employerName,
       ein: entry.ein ?? null,
       role: entry.role,
-      isActiveEmployment: entry.role !== 'PRIOR',
+      isActiveEmployment: isActiveW2Role(entry.role),
       year: entry.year,
       monthsWorked: entry.monthsWorked ?? null,
       annualBaseIncome: base.toNumber(),
@@ -393,11 +488,21 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const amort = new Decimal(entry.amortization || 0);
     const meals = new Decimal(entry.mealsExclusion || 0);
     const distributions = new Decimal(entry.k1Distributions || 0);
+    const liquidity = scheduleLQuickRatioFromInput(entry.scheduleL);
+    const passesLiquidity = liquidity ? liquidity.ratio.gte(1.0) : true;
 
     let k1EligibleIncome = new Decimal(0);
 
     // FNMA S-Corp Liquidity Exception & Stable Distribution Triggers
     if (entry.ownershipPercentage >= 25) {
+      if (liquidity && !passesLiquidity) {
+        k1EligibleIncome = new Decimal(0);
+        warnings.push({
+          code: 'SCORP_LIQUIDITY_FAILED',
+          severity: 'WARNING',
+          message: `S-Corporation Year ${entry.year}: Schedule L quick ratio is ${liquidity.ratio.toFixed(2)} (< 1.0). Business income locked out ($0.00). Officer W-2 wages still qualify.`
+        });
+      } else {
       const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
       const totalCorpAdjustments = ordinary
         .add(rentalRealEstate)
@@ -418,6 +523,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
           severity: 'WARNING',
           message: `S-Corporation Year ${entry.year}: Borrower has ownership of ${entry.ownershipPercentage}%, but hasStableDistributions is false. K-1 ordinary income has been capped at the lesser of corporate share ($${borrowerShareOfAdjustments.toFixed(2)}) or actual distributions received ($${distributions.toFixed(2)}).`
         });
+      }
       }
     } else if (entry.ownershipPercentage > 0) {
       // Under 25%: borrower is NOT self-employed. K-1 boxes 1/2/3 remain usable as
@@ -445,14 +551,18 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       year: entry.year,
       w2WagesFromBusiness: w2.toNumber(),
       k1EligibleIncome: k1EligibleIncome.toNumber(),
-      totalCombinedQualifying: totalCombined.toNumber()
+      totalCombinedQualifying: totalCombined.toNumber(),
+      quickRatio: entry.ownershipPercentage >= 25 && liquidity ? liquidity.ratio.toDecimalPlaces(2).toNumber() : null,
+      passesLiquidity: entry.ownershipPercentage >= 25 && liquidity ? passesLiquidity : null
     };
   });
 
   // ──────────────────────────────────────────────────────────────────────
   // C. FORM 1065 - PARTNERSHIP INCOME
   // ──────────────────────────────────────────────────────────────────────
+  const gseInvestor: GseInvestor = payload.gseInvestor === 'FREDDIE' ? 'FREDDIE' : 'FNMA';
   const form1065Breakdown = (payload.form1065 || []).map((entry) => {
+    const ownershipPercentage = resolve1065Ownership(entry, gseInvestor);
     const ordinary = new Decimal(entry.k1OrdinaryIncome || 0);
     const rentalRealEstate = new Decimal(entry.k1NetRentalRealEstate || 0);
     const otherRental = new Decimal(entry.k1OtherNetRentalIncome || 0);
@@ -462,11 +572,21 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const amort = new Decimal(entry.amortization || 0);
     const meals = new Decimal(entry.mealsExclusion || 0);
     const distributions = new Decimal(entry.k1Distributions || 0);
+    const liquidity = scheduleLQuickRatioFromInput(entry.scheduleL);
+    const passesLiquidity = liquidity ? liquidity.ratio.gte(1.0) : true;
 
     let k1EligibleIncome = new Decimal(0);
 
-    if (entry.ownershipPercentage >= 25) {
-      const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
+    if (ownershipPercentage >= 25) {
+      if (liquidity && !passesLiquidity) {
+        k1EligibleIncome = new Decimal(0);
+        warnings.push({
+          code: 'PARTNERSHIP_LIQUIDITY_FAILED',
+          severity: 'WARNING',
+          message: `Partnership Year ${entry.year}: Schedule L quick ratio is ${liquidity.ratio.toFixed(2)} (< 1.0). Business income locked out ($0.00). Guaranteed payments still qualify.`
+        });
+      } else {
+      const shareFactor = new Decimal(ownershipPercentage).div(100);
       const totalPartnershipAdjustments = ordinary
         .add(rentalRealEstate)
         .add(otherRental)
@@ -484,15 +604,16 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
         warnings.push({
           code: 'PARTNERSHIP_DISTRIBUTION_LIMITATION_ACTIVE',
           severity: 'WARNING',
-          message: `Partnership Year ${entry.year}: Borrower has ownership of ${entry.ownershipPercentage}%, but hasStableDistributions is false. K-1 ordinary income has been capped at the lesser of corporate share ($${borrowerShareOfAdjustments.toFixed(2)}) or actual distributions received ($${distributions.toFixed(2)}).`
+          message: `Partnership Year ${entry.year}: Borrower has ownership of ${ownershipPercentage}%, but hasStableDistributions is false. K-1 ordinary income has been capped at the lesser of corporate share ($${borrowerShareOfAdjustments.toFixed(2)}) or actual distributions received ($${distributions.toFixed(2)}).`
         });
       }
-    } else if (entry.ownershipPercentage > 0) {
+      }
+    } else if (ownershipPercentage > 0) {
       // Under 25%: borrower is NOT self-employed. K-1 boxes 1/2/3 remain usable as
       // ordinary income (guaranteed payments are added separately below) — no
       // business add-backs, no liquidity test — capped at distributions received
       // unless a stable history is documented.
-      const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
+      const shareFactor = new Decimal(ownershipPercentage).div(100);
       const minorityK1Income = ordinary.add(rentalRealEstate).add(otherRental).mul(shareFactor);
       k1EligibleIncome = entry.hasStableDistributions
         ? minorityK1Income
@@ -500,7 +621,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       warnings.push({
         code: 'PARTNERSHIP_MINORITY_K1_INCOME',
         severity: 'WARNING',
-        message: `Partnership Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${entry.hasStableDistributions ? '' : ` and capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
+        message: `Partnership Year ${entry.year}: Ownership ${ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${entry.hasStableDistributions ? '' : ` and capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
       });
     }
 
@@ -512,9 +633,12 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       businessName: entry.businessName ?? null,
       ein: entry.ein ?? null,
       year: entry.year,
+      ownershipPercentage,
       guaranteedPayments: guaranteed.toNumber(),
       k1EligibleIncome: k1EligibleIncome.toNumber(),
-      totalCombinedQualifying: totalCombined.toNumber()
+      totalCombinedQualifying: totalCombined.toNumber(),
+      quickRatio: ownershipPercentage >= 25 && liquidity ? liquidity.ratio.toDecimalPlaces(2).toNumber() : null,
+      passesLiquidity: ownershipPercentage >= 25 && liquidity ? passesLiquidity : null
     };
   });
 
@@ -771,11 +895,11 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
             });
           }
         } else {
-          finalPropertyMonthly = monthly1;
+          finalPropertyMonthly = monthly1.add(monthly2).div(2);
           warnings.push({
-            code: 'RENTAL_INCOME_DECLINE_RESTRICTED',
+            code: 'RENTAL_INCOME_DECLINE_WARN',
             severity: 'WARNING',
-            message: `Rental income for property ${address} declined by ${declinePercent.toFixed(1)}% year-over-year. Qualifying cash flow restricted to lower most recent period ($${finalPropertyMonthly.toFixed(2)}/mo).`
+            message: `Rental income for property ${address} declined by ${declinePercent.toFixed(1)}% year-over-year. Two years in file — 24-month average used ($${finalPropertyMonthly.toFixed(2)}/mo). Decline is a warning only and does not switch the guideline pick to the lower year.`
           });
         }
       } else {
@@ -793,6 +917,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
   });
 
   const scheduleEPropertiesBreakdown = (payload.scheduleEProperties || []).map((entry) => {
+    const flow = getMonthlyPropertyCashFlow(entry);
     const net = new Decimal(entry.netIncomeLoss || 0);
     const depr = new Decimal(entry.depreciation || 0);
     const depl = new Decimal(entry.depletion || 0);
@@ -813,8 +938,8 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       }
       addFlowToYear(entry.year, totalPropertyFlow);
     } else {
-      totalPropertyFlow = net.add(depr);
-      calculatedMonths = getMonthsInService(entry);
+      totalPropertyFlow = flow.totalAnnualCashFlow;
+      calculatedMonths = flow.monthsInService;
     }
 
     return {
@@ -825,6 +950,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       netIncomeLoss: net.toNumber(),
       depreciation: depr.toNumber(),
       depletion: depl.toNumber(),
+      addBacks: flow.addBacks.toNumber(),
       fairRentalDays: entry.fairRentalDays !== undefined ? entry.fairRentalDays : null,
       fairRentalDaysOverride: entry.fairRentalDaysOverride !== undefined ? entry.fairRentalDaysOverride : null,
       monthsInService: calculatedMonths

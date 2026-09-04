@@ -1,6 +1,6 @@
 import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord } from './parseTypes';
 
-export type IncomeForm = 'W-2' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065';
+export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
 
 export type IncomeFieldDef = {
   id: string;
@@ -316,6 +316,15 @@ export const SCHEDULE_E_DEFS: IncomeFieldDef[] = [
     category: 'rental',
     patterns: [/line\s*20\b.{0,80}(total )?expenses/i, /total expenses.{0,40}\d/i],
   },
+  {
+    id: 'ent2-net',
+    form: 'Schedule E',
+    boxLabel: 'Line 21',
+    fieldLabel: 'Net Income or (Loss) (Line 21)',
+    lineNum: 'Line 21',
+    category: 'rental',
+    patterns: [/line\s*21\b.{0,80}(net income|total)/i, /net income or \(loss\).{0,40}\d/i, /\b21\b\s+total.{0,40}\d/i],
+  },
 ];
 
 /**
@@ -445,8 +454,91 @@ export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
   },
 ];
 
+export const PAYSTUB_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'ps-hourly-rate',
+    form: 'Paystub',
+    boxLabel: 'Rate',
+    fieldLabel: 'Hourly Rate of Pay',
+    lineNum: 'Rate',
+    category: 'wages',
+    patterns: [/hourly\s+(rate|pay)/i, /rate\s+of\s+pay/i],
+  },
+  {
+    id: 'ps-current-base',
+    form: 'Paystub',
+    boxLabel: 'Current',
+    fieldLabel: 'Current Period Base Pay',
+    lineNum: 'Current',
+    category: 'wages',
+    patterns: [/current\s+(period|earnings|pay)/i, /this\s+period/i],
+  },
+  {
+    id: 'ps-base-ytd',
+    form: 'Paystub',
+    boxLabel: 'YTD',
+    fieldLabel: 'Base Wages YTD',
+    lineNum: 'YTD',
+    category: 'wages',
+    patterns: [/year[- ]to[- ]date/i, /\bytd\b.{0,20}(base|gross|wages)/i],
+  },
+];
+
+export const WVOE_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'wvoe-base',
+    form: 'WVOE',
+    boxLabel: 'Base',
+    fieldLabel: 'WVOE Base Pay',
+    lineNum: 'Base',
+    category: 'wages',
+    patterns: [/base\s+pay/i, /current\s+base/i],
+  },
+  {
+    id: 'wvoe-bonus',
+    form: 'WVOE',
+    boxLabel: 'Bonus',
+    fieldLabel: 'WVOE Bonus History',
+    lineNum: 'Bonus',
+    category: 'wages',
+    patterns: [/bonus/i, /commission/i],
+  },
+  {
+    id: 'wvoe-ot',
+    form: 'WVOE',
+    boxLabel: 'OT',
+    fieldLabel: 'WVOE Overtime History',
+    lineNum: 'OT',
+    category: 'wages',
+    patterns: [/overtime/i],
+  },
+];
+
+export const FORM_1120_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'c1120-taxable',
+    form: 'Form 1120',
+    boxLabel: 'Line 30',
+    fieldLabel: 'Taxable Income',
+    lineNum: 'Line 30',
+    category: 'income',
+    patterns: [/taxable income/i],
+  },
+  {
+    id: 'c1120-tax',
+    form: 'Form 1120',
+    boxLabel: 'Line 31',
+    fieldLabel: 'Total Tax',
+    lineNum: 'Line 31',
+    category: 'income',
+    patterns: [/total tax/i],
+  },
+];
+
 export const INCOME_FIELD_DEFS: IncomeFieldDef[] = [
   ...W2_FIELD_DEFS,
+  ...PAYSTUB_DEFS,
+  ...WVOE_DEFS,
   ...SCHEDULE_B_DEFS,
   ...SCHEDULE_C_DEFS,
   ...SCHEDULE_D_DEFS,
@@ -454,6 +546,7 @@ export const INCOME_FIELD_DEFS: IncomeFieldDef[] = [
   ...SCHEDULE_F_DEFS,
   ...SCORP_DEFS,
   ...PARTNERSHIP_DEFS,
+  ...FORM_1120_DEFS,
 ];
 
 type LineCluster = {

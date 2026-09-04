@@ -134,12 +134,12 @@ describe('FreeFlow Math Engine v7 - FHA Declining Multi-Family Rental Income', (
       ]
     };
 
-    // Decline is 15.0%. Since it's Conventional, it uses the standard declining rental check.
-    // Expected Qualifying Monthly = 10,200 / 12 = $850.00/mo
+    // Decline is 15.0%. Two years in file → 24-month average (warning only).
+    // Y1 = 10,200 / 12 = 850; Y2 = 12,000 / 12 = 1,000; avg = 925
     const result = calculateUnifiedIncome(payload);
 
-    expect(result.summary.qualifyingMonthlyIncome).toBe(850.00);
-    const restrictedWarning = result.warnings.find(w => w.code === 'RENTAL_INCOME_DECLINE_RESTRICTED');
+    expect(result.summary.qualifyingMonthlyIncome).toBe(925.00);
+    const restrictedWarning = result.warnings.find(w => w.code === 'RENTAL_INCOME_DECLINE_WARN');
     expect(restrictedWarning).toBeDefined();
   });
 

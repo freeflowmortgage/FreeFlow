@@ -11,7 +11,6 @@ import {
   Eye,
   Activity,
   AlertCircle,
-  Calendar,
   Link,
   Lock,
   Upload,
@@ -32,14 +31,18 @@ import FixturePdfViewer from './FixturePdfViewer';
 import { usePdfViewer } from '../hooks/usePdfViewer';
 import {
   CorpLines,
+  CCorpLines,
   DemoDocumentCanvas,
+  EMPTY_PNL,
   IncomeChoicePanel,
   InspectNote,
   LiquidityBlock,
+  ProfitLossBlock,
   SchCLines,
   SelfEmployedPanel,
   YearStack,
   chosenMonthly,
+  cCorpBusinessAnnual,
   corpBusinessAnnual,
   corpMinorityAnnual,
   monthlyFromYears,
@@ -48,10 +51,13 @@ import {
   seAvgOptions,
   seRecommend,
   usd,
+  type CCorpYear,
   type CorpYear,
   type SchCYear,
   type ScheduleL,
+  type YtdPnl,
 } from './selfEmployedIncome';
+import { computeRental1038CashFlow } from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
 
@@ -80,8 +86,10 @@ interface W2Employer {
   employerName: string;
   ein: string;
   employmentStartDate: string;
-  role: 'PRIMARY' | 'CONCURRENT';
+  role: 'PRIMARY' | 'SECONDARY';
   monthsAtJob: number;
+  payFrequency: 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
+  wageDocSource: 'PAYSTUB' | 'WVOE';
   hourlyRate: number;
   weeklyHours: number;
   currentPeriodBasePay: number;
@@ -89,6 +97,16 @@ interface W2Employer {
   bonusYtd: number;
   overtimeYtd: number;
   otherYtd: number;
+  wvoeBonus: number;
+  wvoeOvertime: number;
+  wvoeOther: number;
+  wvoeMonths: number;
+  w2Year1Box1: number;
+  w2Year1Bonus: number;
+  w2Year1Ot: number;
+  w2Year2Box1: number;
+  w2Year2Bonus: number;
+  w2Year2Ot: number;
 }
 
 interface BusinessEntity<TYear> {
@@ -101,11 +119,18 @@ interface BusinessEntity<TYear> {
 interface SCorpEntity extends BusinessEntity<CorpYear> {
   ownershipPct: number;
   scheduleL: ScheduleL;
+  hasStableDistributions: boolean;
 }
 
 interface PartnershipEntity extends BusinessEntity<CorpYear> {
   profitPctEnd: number;
   capitalPctEnd: number;
+  scheduleL: ScheduleL;
+  hasStableDistributions: boolean;
+}
+
+interface CCorpEntity extends BusinessEntity<CCorpYear> {
+  ownershipPct: number;
   scheduleL: ScheduleL;
 }
 
@@ -132,9 +157,9 @@ type SplitViewSource = 'demo' | 'live';
 
 type IncomeTab =
   | 'PAYSTUB_RECONCILIATION'
-  | 'W2_CONTINUITY'
   | 'SCHEDULE_C'
   | 'SCORP'
+  | 'CCORP'
   | 'PARTNERSHIP'
   | 'SCHEDULE_F'
   | 'ASSET_INCOME'
@@ -153,6 +178,8 @@ interface RentalPropertyYear {
   depreciation: number;     // Line 18 – add-back
   hoaDues: number;          // Line 19 – HOA / association dues add-back (when in PITIA)
   totalExpenses: number;    // Line 20 – total expenses (includes lines 5–19)
+  netIncomeLoss: number | null; // Line 21 – prefer this when parsed; null reconstructs from L3 − L20
+  extraordinaryAddBack: number; // UW extraordinary / other allowed add-back (not an IRS line)
   fairRentalDays: number;   // Line 2  – (0 = full year / 365)
 }
 
@@ -231,9 +258,9 @@ export default function UnderwriterSplitViewDemo({
   const availableTabs = useMemo(() => {
     const allTabs = [
       ['PAYSTUB_RECONCILIATION', 'Base Income', ClipboardList],
-      ['W2_CONTINUITY', 'W-2 variable', Calendar],
       ['SCHEDULE_C', 'Schedule C', FileSpreadsheet],
       ['SCORP', 'S-Corp 1120-S', FileSpreadsheet],
+      ['CCORP', 'C-Corp 1120', FileSpreadsheet],
       ['PARTNERSHIP', 'Partnership 1065', FileSpreadsheet],
       ['SCHEDULE_F', 'Schedule F', Tractor],
       ['ASSET_INCOME', 'Interest / gains', Coins],
@@ -241,21 +268,30 @@ export default function UnderwriterSplitViewDemo({
       ['ENCOMPASS_SYNC', 'Encompass', Lock],
     ] as const;
 
-    if (!isLive) return allTabs; // Demo mode shows all tabs
+    if (!isLive) return allTabs; // Demo mode shows all tabs for walkthrough
 
-    const forms = new Set(mappedFields.map((f) => f.form));
+    const formTokens = [
+      ...mappedFields.map((f) => f.form),
+      ...(liveSession?.result.pages.flatMap((page) => page.formIds) ?? []),
+      ...Object.keys(liveSession?.result.classifications ?? {}),
+    ];
+    const hasDoc = (...patterns: RegExp[]) => formTokens.some((token) => patterns.some((pattern) => pattern.test(token)));
+
     return allTabs.filter(([id]) => {
       if (id === 'ENCOMPASS_SYNC') return true;
-      if (id === 'PAYSTUB_RECONCILIATION' || id === 'W2_CONTINUITY') return forms.has('W-2');
-      if (id === 'SCHEDULE_C') return forms.has('Schedule C');
-      if (id === 'SCORP') return forms.has('Form 1120-S');
-      if (id === 'PARTNERSHIP') return forms.has('Form 1065');
-      if (id === 'SCHEDULE_F') return forms.has('Schedule F');
-      if (id === 'ASSET_INCOME') return forms.has('Schedule B') || forms.has('Schedule D');
-      if (id === 'SCHEDULE_E') return forms.has('Schedule E');
+      if (id === 'PAYSTUB_RECONCILIATION') {
+        return hasDoc(/W-?2/i, /Paystub/i, /pay stub/i, /Earnings statement/i, /WVOE/i, /Verification of Employment/i);
+      }
+      if (id === 'SCHEDULE_C') return hasDoc(/Schedule C/i);
+      if (id === 'SCORP') return hasDoc(/1120-?S/i, /S-Corporation/i);
+      if (id === 'CCORP') return hasDoc(/1120 \(C-Corporation/i, /C-Corporation Return/i) && !hasDoc(/1120-?S/i);
+      if (id === 'PARTNERSHIP') return hasDoc(/Form 1065/i, /K-1 \(1065\)/i);
+      if (id === 'SCHEDULE_F') return hasDoc(/Schedule F/i);
+      if (id === 'ASSET_INCOME') return hasDoc(/Schedule B/i, /Schedule D/i);
+      if (id === 'SCHEDULE_E') return hasDoc(/Schedule E/i);
       return false;
     });
-  }, [isLive, mappedFields]);
+  }, [isLive, mappedFields, liveSession]);
 
   // Ensure active tab is valid
   React.useEffect(() => {
@@ -266,13 +302,14 @@ export default function UnderwriterSplitViewDemo({
 
   const [canvasYearIndex, setCanvasYearIndex] = useState<0 | 1>(0);
   /** Left-pane document style: interactive facsimile or the real filled source PDF. */
-  const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('facsimile');
-  const [twoYearSchC, setTwoYearSchC] = useState(true);
-  const [twoYearScorp, setTwoYearScorp] = useState(true);
-  const [twoYearPartnership, setTwoYearPartnership] = useState(true);
-  const [twoYearScheduleF, setTwoYearScheduleF] = useState(true);
-  const [twoYearAssetIncome, setTwoYearAssetIncome] = useState(true);
-  const [twoYearRental, setTwoYearRental] = useState(true);
+  const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('pdf');
+  const [twoYearSchC, setTwoYearSchC] = useState(false);
+  const [twoYearScorp, setTwoYearScorp] = useState(false);
+  const [twoYearCCorp, setTwoYearCCorp] = useState(false);
+  const [twoYearPartnership, setTwoYearPartnership] = useState(false);
+  const [twoYearScheduleF, setTwoYearScheduleF] = useState(false);
+  const [twoYearAssetIncome, setTwoYearAssetIncome] = useState(false);
+  const [twoYearRental, setTwoYearRental] = useState(false);
   const [rentalChoice, setRentalChoice] = useState<string | null>(null);
 
   const [rentalProperties, setRentalProperties] = useState<RentalProperty[]>(() => {
@@ -285,8 +322,8 @@ export default function UnderwriterSplitViewDemo({
         subjectMethod: 'SCHEDULE_E',
         marketRent: 0,
         isPrimary2To4: false,
-        year1: { year: 2025, rentsReceived: 24000, insurance: 1200, mortgageInterest: 4800, taxes: 2900, depreciation: 3500, hoaDues: 0, totalExpenses: 14500, fairRentalDays: 0 },
-        year2: { year: 2024, rentsReceived: 22800, insurance: 1150, mortgageInterest: 4900, taxes: 2800, depreciation: 3500, hoaDues: 0, totalExpenses: 14200, fairRentalDays: 0 },
+        year1: { year: 2025, rentsReceived: 24000, insurance: 1200, mortgageInterest: 4800, taxes: 2900, depreciation: 3500, hoaDues: 0, totalExpenses: 14500, netIncomeLoss: 9500, extraordinaryAddBack: 0, fairRentalDays: 0 },
+        year2: { year: 2024, rentsReceived: 22800, insurance: 1150, mortgageInterest: 4900, taxes: 2800, depreciation: 3500, hoaDues: 0, totalExpenses: 14200, netIncomeLoss: 8600, extraordinaryAddBack: 0, fairRentalDays: 0 },
       },
       {
         id: 'prop-2',
@@ -296,8 +333,8 @@ export default function UnderwriterSplitViewDemo({
         subjectMethod: 'SCHEDULE_E',
         marketRent: 3200,
         isPrimary2To4: false,
-        year1: { year: 2025, rentsReceived: 36000, insurance: 1800, mortgageInterest: 7200, taxes: 4300, depreciation: 5200, hoaDues: 2400, totalExpenses: 22700, fairRentalDays: 0 },
-        year2: { year: 2024, rentsReceived: 34000, insurance: 1750, mortgageInterest: 7400, taxes: 4200, depreciation: 5200, hoaDues: 2400, totalExpenses: 22100, fairRentalDays: 0 },
+        year1: { year: 2025, rentsReceived: 36000, insurance: 1800, mortgageInterest: 7200, taxes: 4300, depreciation: 5200, hoaDues: 2400, totalExpenses: 22700, netIncomeLoss: 13300, extraordinaryAddBack: 0, fairRentalDays: 0 },
+        year2: { year: 2024, rentsReceived: 34000, insurance: 1750, mortgageInterest: 7400, taxes: 4200, depreciation: 5200, hoaDues: 2400, totalExpenses: 22100, netIncomeLoss: 11900, extraordinaryAddBack: 0, fairRentalDays: 0 },
       },
     ];
     // Prefill PITIA from Encompass loan details when the REO section has the property
@@ -315,6 +352,7 @@ export default function UnderwriterSplitViewDemo({
   const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
   const [schCChoices, setSchCChoices] = useState<Record<string, string | null>>({});
   const [sCorpChoices, setSCorpChoices] = useState<Record<string, string | null>>({});
+  const [cCorpChoices, setCCorpChoices] = useState<Record<string, string | null>>({});
   const [partnershipChoices, setPartnershipChoices] = useState<Record<string, string | null>>({});
   const [scheduleFChoices, setScheduleFChoices] = useState<Record<string, string | null>>({});
 
@@ -340,6 +378,8 @@ export default function UnderwriterSplitViewDemo({
       employmentStartDate: '2025-12-15',
       role: 'PRIMARY',
       monthsAtJob: 8,
+      payFrequency: 'SEMIMONTHLY',
+      wageDocSource: 'PAYSTUB',
       hourlyRate: 45,
       weeklyHours: 40,
       currentPeriodBasePay: 3600,
@@ -347,14 +387,26 @@ export default function UnderwriterSplitViewDemo({
       bonusYtd: 12500,
       overtimeYtd: 4200,
       otherYtd: 0,
+      wvoeBonus: 18000,
+      wvoeOvertime: 6000,
+      wvoeOther: 0,
+      wvoeMonths: 12,
+      w2Year1Box1: 78500,
+      w2Year1Bonus: 18000,
+      w2Year1Ot: 6000,
+      w2Year2Box1: 74200,
+      w2Year2Bonus: 15000,
+      w2Year2Ot: 4800,
     },
     {
       id: 'w2-meridian',
       employerName: 'Meridian Health Systems',
       ein: '52-7654321',
       employmentStartDate: '2024-03-01',
-      role: 'CONCURRENT',
+      role: 'SECONDARY',
       monthsAtJob: 29,
+      payFrequency: 'BIWEEKLY',
+      wageDocSource: 'WVOE',
       hourlyRate: 22,
       weeklyHours: 12,
       currentPeriodBasePay: 528,
@@ -362,6 +414,16 @@ export default function UnderwriterSplitViewDemo({
       bonusYtd: 0,
       overtimeYtd: 0,
       otherYtd: 0,
+      wvoeBonus: 0,
+      wvoeOvertime: 0,
+      wvoeOther: 0,
+      wvoeMonths: 24,
+      w2Year1Box1: 11440,
+      w2Year1Bonus: 0,
+      w2Year1Ot: 0,
+      w2Year2Box1: 10920,
+      w2Year2Bonus: 0,
+      w2Year2Ot: 0,
     },
   ]);
   const [activeW2EmployerId, setActiveW2EmployerId] = useState('w2-apex');
@@ -433,6 +495,7 @@ export default function UnderwriterSplitViewDemo({
   const [sCorpEntities, setSCorpEntities] = useState<SCorpEntity[]>([
     {
       id: 'scorp-apex', businessName: 'Apex Advisory Holdings', ein: '74-9876543', ownershipPct: 35,
+      hasStableDistributions: true,
       scheduleL: baseSCorpScheduleL,
       years: [
         { year: 2025, ordinaryIncome: 142000, netRentalRealEstate: 12000, otherNetRental: 0, depreciation: 18500, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000, distributions: 62000 },
@@ -457,7 +520,7 @@ export default function UnderwriterSplitViewDemo({
   const [partnershipEntities, setPartnershipEntities] = useState<PartnershipEntity[]>([
     {
       id: 'partnership-horizon', businessName: 'Horizon Property Partners', ein: '52-2468101',
-      profitPctEnd: 50, capitalPctEnd: 50, scheduleL: basePartnershipScheduleL,
+      profitPctEnd: 50, capitalPctEnd: 50, hasStableDistributions: true, scheduleL: basePartnershipScheduleL,
       years: [
         { year: 2025, ordinaryIncome: 96000, netRentalRealEstate: 18000, otherNetRental: 2400, depreciation: 12000, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0, distributions: 48000 },
         { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
@@ -496,6 +559,37 @@ export default function UnderwriterSplitViewDemo({
     setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id
       ? { ...entity, scheduleL: typeof value === 'function' ? value(entity.scheduleL) : value } : entity));
 
+  const baseCCorpScheduleL: ScheduleL = {
+    cash: 180000, receivables: 42000, allowance: 4000, taxExempt: 0,
+    otherCurrentAssets: 12000, accountsPayable: 55000, notesLt1Yr: 22000, otherCurrentLiab: 8000,
+  };
+  const [cCorpEntities, setCCorpEntities] = useState<CCorpEntity[]>([
+    {
+      id: 'ccorp-summit', businessName: 'Summit Manufacturing Inc', ein: '36-5551212', ownershipPct: 40,
+      scheduleL: baseCCorpScheduleL,
+      years: [
+        { year: 2025, taxableIncome: 210000, totalTaxPaid: 44100, depreciation: 28000, depletion: 0, amortization: 4000, mealsM1: 1800, nol: 0, w2Wages: 72000, dividends: 8000 },
+        { year: 2024, taxableIncome: 188000, totalTaxPaid: 39480, depreciation: 25100, depletion: 0, amortization: 3600, mealsM1: 1600, nol: 0, w2Wages: 68000, dividends: 6500 },
+      ],
+    },
+  ]);
+  const [activeCCorpId, setActiveCCorpId] = useState('ccorp-summit');
+  const activeCCorp = cCorpEntities.find((entry) => entry.id === activeCCorpId) ?? cCorpEntities[0];
+  const cCorpYears = activeCCorp.years;
+  const setCCorpYears = (update: React.SetStateAction<[CCorpYear, CCorpYear]>) =>
+    setCCorpEntities((entities) => entities.map((entity) => entity.id === activeCCorp.id
+      ? { ...entity, years: typeof update === 'function' ? update(entity.years) : update } : entity));
+  const cCorpChoice = cCorpChoices[activeCCorp.id] ?? null;
+  const setCCorpChoice = (value: string | null) =>
+    setCCorpChoices((choices) => ({ ...choices, [activeCCorp.id]: value }));
+  const cCorpOwnershipPct = activeCCorp.ownershipPct;
+  const setCCorpOwnershipPct = (value: number) =>
+    setCCorpEntities((entities) => entities.map((entity) => entity.id === activeCCorp.id ? { ...entity, ownershipPct: value } : entity));
+  const cCorpL = activeCCorp.scheduleL;
+  const setCCorpL = (value: React.SetStateAction<ScheduleL>) =>
+    setCCorpEntities((entities) => entities.map((entity) => entity.id === activeCCorp.id
+      ? { ...entity, scheduleL: typeof value === 'function' ? value(entity.scheduleL) : value } : entity));
+
   const [scheduleFEntities, setScheduleFEntities] = useState<Array<BusinessEntity<ScheduleFYear>>>([
     {
       id: 'farm-vance', businessName: 'Vance Family Farm', ein: '74-1122334',
@@ -521,6 +615,22 @@ export default function UnderwriterSplitViewDemo({
   ]);
   const [assetIncomeIncluded, setAssetIncomeIncluded] = useState(false);
   const [loanProgram, setLoanProgram] = useState<'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA'>('CONVENTIONAL');
+  const [schCPnl, setSchCPnl] = useState<YtdPnl>(EMPTY_PNL);
+  const [sCorpPnl, setSCorpPnl] = useState<YtdPnl>(EMPTY_PNL);
+  const [cCorpPnl, setCCorpPnl] = useState<YtdPnl>(EMPTY_PNL);
+  const [partnershipPnl, setPartnershipPnl] = useState<YtdPnl>(EMPTY_PNL);
+
+  const governmentTwoYear = loanProgram === 'FHA' || loanProgram === 'VA' || loanProgram === 'USDA';
+  const twoYearCaption = loanProgram === 'CONVENTIONAL' ? 'FNMA/Freddie default: 1 year' : 'FHA/VA default: 2 years';
+
+  useEffect(() => {
+    setTwoYearRental(governmentTwoYear);
+    setTwoYearSchC(governmentTwoYear);
+    setTwoYearScorp(governmentTwoYear);
+    setTwoYearCCorp(governmentTwoYear);
+    setTwoYearPartnership(governmentTwoYear);
+    setTwoYearScheduleF(governmentTwoYear);
+  }, [governmentTwoYear]);
 
   useEffect(() => {
     if (!isLive || !liveSession) return;
@@ -566,11 +676,16 @@ export default function UnderwriterSplitViewDemo({
   // ==================== 5. COMPLEX CALCULATORS & MATHEMATICAL MODELS ====================
 
   // A. 4-Way Base Wage Reconciliation [cite: 177]
+  const payPeriodsPerYear =
+    activeW2Employer.payFrequency === 'WEEKLY' ? 52
+      : activeW2Employer.payFrequency === 'BIWEEKLY' ? 26
+        : activeW2Employer.payFrequency === 'MONTHLY' ? 12
+          : 24;
   const baseWageReconciliation = useMemo(() => {
     const hourlyMethod = (currentHourlyRate * currentWeeklyHours * 52) / 12; // Standard Hourly Pay Rate Method
-    const periodAnnualizedMethod = (currentPeriodBasePay * 24) / 12; // Semi-monthly Pay Period Annualized Method
+    const periodAnnualizedMethod = (currentPeriodBasePay * payPeriodsPerYear) / 12;
     const ytdAverageMethod = currentBaseYtd / 7.5; // August 15 represents 7.5 elapsed months of the year
-    const priorYearW2Average = prevEmployerW2.box1Wages / 12; // Dynamic previous year W-2 base
+    const priorYearW2Average = (activeW2Employer.w2Year1Box1 || prevEmployerW2.box1Wages) / 12;
 
     return {
       hourlyMethod,
@@ -579,26 +694,27 @@ export default function UnderwriterSplitViewDemo({
       priorYearW2Average,
       maxVariancePct: Math.abs(((hourlyMethod - ytdAverageMethod) / hourlyMethod) * 100)
     };
-  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box1Wages]);
+  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box1Wages, payPeriodsPerYear, activeW2Employer.w2Year1Box1]);
 
   // B. Variable Income Rolling & Continuity (Job Transition Adapter) [cite: 177]
   const variableContinuityCalculations = useMemo(() => {
-    // Current Job Bonus + Overtime YTD [cite: 177]
-    const currentBonusOtTotal = currentBonusYtd + currentOtYtd;
-    const currentMonthlyVariableAvg = currentBonusOtTotal / monthsAtCurrentJob;
+    const fromWvoe = activeW2Employer.wageDocSource === 'WVOE';
+    const currentBonusOtTotal = fromWvoe
+      ? activeW2Employer.wvoeBonus + activeW2Employer.wvoeOvertime
+      : currentBonusYtd + currentOtYtd;
+    const currentMonths = fromWvoe ? Math.max(activeW2Employer.wvoeMonths, 1) : monthsAtCurrentJob;
+    const currentMonthlyVariableAvg = currentBonusOtTotal / currentMonths;
 
-    // Previous Job W-2 Bonus + Overtime [cite: 177]
     const previousBonusOtTotal = prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime;
-    const previousMonthlyVariableAvg = previousBonusOtTotal / 12; // Standard 12-month average for complete prior tax year
+    const previousMonthlyVariableAvg = previousBonusOtTotal / 12;
 
-    // 24-Month Weighted Rolling Variable Average [cite: 177]
     const aggregatedVariableTotal = mergePreviousEmployerVariable
       ? currentBonusOtTotal + previousBonusOtTotal
       : currentBonusOtTotal;
 
     const totalRollingMonths = mergePreviousEmployerVariable
-      ? monthsAtCurrentJob + 12 // Current months + complete prior W-2 year
-      : monthsAtCurrentJob;
+      ? currentMonths + 12
+      : currentMonths;
 
     const qualifyingRollingVariableAvg = aggregatedVariableTotal / totalRollingMonths;
 
@@ -609,7 +725,7 @@ export default function UnderwriterSplitViewDemo({
       aggregatedVariableTotal,
       totalRollingMonths
     };
-  }, [currentBonusYtd, currentOtYtd, monthsAtCurrentJob, mergePreviousEmployerVariable, prevEmployerW2]);
+  }, [currentBonusYtd, currentOtYtd, monthsAtCurrentJob, mergePreviousEmployerVariable, prevEmployerW2, activeW2Employer.wageDocSource, activeW2Employer.wvoeBonus, activeW2Employer.wvoeOvertime, activeW2Employer.wvoeMonths]);
 
   const schCFlow = useMemo(() => {
     const y1 = schCAnnual(schCYears[0]);
@@ -655,17 +771,19 @@ export default function UnderwriterSplitViewDemo({
       };
     }
 
-    const y1Biz = corpBusinessAnnual(sCorpYears[0], sCorpShareholderPct);
-    const y2Biz = corpBusinessAnnual(sCorpYears[1], sCorpShareholderPct);
+    const y1BizRaw = corpBusinessAnnual(sCorpYears[0], sCorpShareholderPct);
+    const y2BizRaw = corpBusinessAnnual(sCorpYears[1], sCorpShareholderPct);
+    const y1Biz = activeSCorp.hasStableDistributions ? y1BizRaw : Math.min(y1BizRaw, sCorpYears[0].distributions);
+    const y2Biz = activeSCorp.hasStableDistributions ? y2BizRaw : Math.min(y2BizRaw, sCorpYears[1].distributions);
     return {
       y1: y1Biz + y1W2,
       y2: y2Biz + y2W2,
       w2Monthly,
       dropped: !sCorpLRatio.passes,
       isMinority: false,
-      wasCapped: false,
+      wasCapped: y1Biz < y1BizRaw || y2Biz < y2BizRaw,
     };
-  }, [sCorpYears, sCorpShareholderPct, twoYearScorp, sCorpLRatio.passes]);
+  }, [sCorpYears, sCorpShareholderPct, twoYearScorp, sCorpLRatio.passes, activeSCorp.hasStableDistributions]);
 
   const partnershipFlow = useMemo(() => {
     const isMinority = partnershipPct < 25;
@@ -688,10 +806,33 @@ export default function UnderwriterSplitViewDemo({
       };
     }
 
-    const y1 = corpBusinessAnnual(partnershipYears[0], partnershipPct);
-    const y2 = corpBusinessAnnual(partnershipYears[1], partnershipPct);
-    return { y1, y2, gpMonthly, dropped: !partnershipLRatio.passes, isMinority: false, wasCapped: false };
-  }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes]);
+    const y1Raw = corpBusinessAnnual(partnershipYears[0], partnershipPct);
+    const y2Raw = corpBusinessAnnual(partnershipYears[1], partnershipPct);
+    const y1 = activePartnership.hasStableDistributions ? y1Raw : Math.min(y1Raw, partnershipYears[0].distributions);
+    const y2 = activePartnership.hasStableDistributions ? y2Raw : Math.min(y2Raw, partnershipYears[1].distributions);
+    return {
+      y1,
+      y2,
+      gpMonthly,
+      dropped: !partnershipLRatio.passes,
+      isMinority: false,
+      wasCapped: y1 < y1Raw || y2 < y2Raw,
+    };
+  }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes, activePartnership.hasStableDistributions]);
+
+  const cCorpLRatio = useMemo(() => scheduleLQuickRatio(cCorpL), [cCorpL]);
+  const cCorpFlow = useMemo(() => {
+    const y1 = cCorpBusinessAnnual(cCorpYears[0], cCorpOwnershipPct, cCorpLRatio.passes);
+    const y2 = cCorpBusinessAnnual(cCorpYears[1], cCorpOwnershipPct, cCorpLRatio.passes);
+    const w2Monthly = monthlyFromYears(cCorpYears[0].w2Wages + cCorpYears[0].dividends, cCorpYears[1].w2Wages + cCorpYears[1].dividends, twoYearCCorp);
+    return {
+      y1,
+      y2,
+      w2Monthly,
+      dropped: cCorpOwnershipPct >= 25 && !cCorpLRatio.passes,
+      isMinority: cCorpOwnershipPct < 25,
+    };
+  }, [cCorpYears, cCorpOwnershipPct, cCorpLRatio.passes, twoYearCCorp]);
 
   const scheduleFAnnual = (year: ScheduleFYear) =>
     year.netFarmProfitLoss +
@@ -740,27 +881,49 @@ export default function UnderwriterSplitViewDemo({
           : ratio.passes ? corpBusinessAnnual(entity.years[1], pct) : entity.years[1].guaranteedPayments * (pct / 100);
         return sum + monthlyFromYears(first, second, twoYearPartnership);
       }, 0);
-    return { scheduleC, scheduleF, sCorp, partnership };
+    const cCorp = cCorpEntities
+      .filter((entity) => entity.id !== activeCCorp.id)
+      .reduce((sum, entity) => {
+        const ratio = scheduleLQuickRatio(entity.scheduleL);
+        const first = cCorpBusinessAnnual(entity.years[0], entity.ownershipPct, ratio.passes);
+        const second = cCorpBusinessAnnual(entity.years[1], entity.ownershipPct, ratio.passes);
+        return sum + monthlyFromYears(first, second, twoYearCCorp);
+      }, 0);
+    return { scheduleC, scheduleF, sCorp, partnership, cCorp };
   }, [
     schCEntities, activeSchC.id, twoYearSchC, scheduleFEntities, activeScheduleF.id, twoYearScheduleF,
     sCorpEntities, activeSCorp.id, twoYearScorp, partnershipEntities, activePartnership.id,
-    gseInvestor, twoYearPartnership,
+    gseInvestor, twoYearPartnership, cCorpEntities, activeCCorp.id, twoYearCCorp,
   ]);
 
   // ── Rental Income (Schedule E Page 1 · Form 1084 / 1038 worksheet) ──────────
 
   /**
-   * Full Form 1084 / 1038 adjusted annual rental cash flow for one year:
-   *   Line 3 Rents − Line 20 Total Expenses
-   *   + Line 9 Insurance + Line 12 Mortgage Interest + Line 16 Taxes
-   *   + Line 18 Depreciation + Line 19 HOA Dues
-   * divided by months in service (Line 2 fair rental days).
+   * FNMA Form 1038 / 1038A: prefer Line 21, then add back 9/12/16/18/19 + UW extraordinary.
+   * Line 20 is not rebuilt — used only when Line 21 is absent (L3 − L20 + the same add-backs).
    */
   function rentalAnnualCashFlow(y: RentalPropertyYear) {
-    const months = y.fairRentalDays > 0 ? Math.max(1, Math.min(12, Math.ceil(y.fairRentalDays / 30))) : 12;
-    const addBacks = y.insurance + y.mortgageInterest + y.taxes + y.depreciation + y.hoaDues;
-    const adjusted = y.rentsReceived - y.totalExpenses + addBacks;
-    return { adjusted, addBacks, months, monthly: adjusted / months };
+    const flow = computeRental1038CashFlow({
+      year: y.year,
+      propertyAddress: '',
+      propertyType: 'RENTAL',
+      rentsReceived: y.rentsReceived,
+      totalExpenses: y.totalExpenses,
+      netIncomeLoss: y.netIncomeLoss ?? undefined,
+      insurance: y.insurance,
+      mortgageInterest: y.mortgageInterest,
+      taxes: y.taxes,
+      depreciation: y.depreciation,
+      hoaDues: y.hoaDues,
+      extraordinaryAddBack: y.extraordinaryAddBack,
+      fairRentalDays: y.fairRentalDays,
+    });
+    return {
+      adjusted: flow.totalAnnualCashFlow.toNumber(),
+      addBacks: flow.addBacks.toNumber(),
+      months: flow.monthsInService,
+      monthly: flow.monthlyAverage.toNumber(),
+    };
   }
 
   interface RentalPropertyResult {
@@ -849,6 +1012,7 @@ export default function UnderwriterSplitViewDemo({
       const declinePct = isDecline ? ((y2Monthly - y1Monthly) / Math.abs(y2Monthly)) * 100 : 0;
 
       const useMarketRent = prop.isSubjectProperty && prop.subjectMethod === 'MARKET_RENT';
+      const isTwoToFour = prop.propertyType === 'DUPLEX' || prop.propertyType === 'TRIPLEX' || prop.propertyType === 'FOURPLEX';
 
       let grossMonthly: number;
       let note: string;
@@ -859,24 +1023,24 @@ export default function UnderwriterSplitViewDemo({
         note = 'Subject property — 75% of gross market rent (Form 1007/1025, 25% vacancy factor).';
       } else if (!twoYearRental) {
         grossMonthly = y1Monthly;
-        note = 'One-year: most recent year 1084 cash flow ÷ rental months.';
-      } else if (!isDecline) {
-        grossMonthly = (y1Monthly + y2Monthly) / 2;
-        note = 'Two-year average: income stable or increasing.';
-      } else if (isFha && prop.propertyType === 'FOURPLEX') {
+        note = 'One-year: most recent year 1038 cash flow ÷ rental months.';
+      } else if (isFha && isTwoToFour && isDecline) {
         if (declinePct <= 5) {
           grossMonthly = (y1Monthly + y2Monthly) / 2;
-          note = `FHA multi-family: decline ${declinePct.toFixed(1)}% ≤ 5% — 24-month average used.`;
+          note = `FHA 2–4 unit: decline ${declinePct.toFixed(1)}% ≤ 5% — 24-month average used.`;
         } else if (declinePct <= 20) {
           grossMonthly = y1Monthly;
-          note = `FHA multi-family: decline ${declinePct.toFixed(1)}% (5–20%) — restricted to most recent year.`;
+          note = `FHA 2–4 unit: decline ${declinePct.toFixed(1)}% (5–20%) — restricted to most recent year per HUD 4000.1.`;
         } else {
           grossMonthly = 0;
-          note = `FHA multi-family: decline ${declinePct.toFixed(1)}% > 20% — income disqualified per HUD 4000.1.`;
+          note = `FHA 2–4 unit: decline ${declinePct.toFixed(1)}% > 20% — income disqualified per HUD 4000.1.`;
         }
+      } else if (isDecline) {
+        grossMonthly = (y1Monthly + y2Monthly) / 2;
+        note = `Income declined ${declinePct.toFixed(1)}% — 24-month average used (warning only).`;
       } else {
-        grossMonthly = y1Monthly; // y1 is the lower year since isDecline === true
-        note = `Income declined ${declinePct.toFixed(1)}% — restricted to most recent (lower) year per guideline.`;
+        grossMonthly = (y1Monthly + y2Monthly) / 2;
+        note = 'Two years in file — 24-month average.';
       }
 
       if (prop.isSubjectProperty && !useMarketRent) {
@@ -967,12 +1131,12 @@ export default function UnderwriterSplitViewDemo({
     ];
     const hasAnyDecline = rentalFlow.properties.some((p) => p.isDecline && p.declinePct >= 20);
     let reason = hasAnyDecline
-      ? 'One or more properties experienced a critical decline (≥20%). Review the per-property breakdown for disqualified properties.'
+      ? 'One or more properties declined. Two years in file uses a 24-month average except FHA 2–4 unit HUD 4000.1 bands (5–20% most recent year; >20% $0).'
       : rentalFlow.properties.some((p) => p.isDecline)
-        ? 'Declining income detected on one or more properties. Guideline restricts to most recent year for those properties.'
+        ? 'Declining income detected. Guideline keeps the 24-month average (warning only) except FHA 2–4 unit HUD 4000.1 bands.'
         : twoYearRental
-          ? 'Income is stable or increasing across all properties. 24-month average net of PITIA is the guideline pick.'
-          : 'Single-year entry. Most recent year 1084 cash flow net of PITIA.';
+          ? 'Two years in file — 24-month average net of PITIA is the guideline pick.'
+          : 'Single-year entry. Most recent year 1038 cash flow net of PITIA.';
     if (rentalFlow.properties.some((p) => p.isSubjectProperty)) {
       reason += ' Subject property routed separately: positive net adds to income; a deficit adjusts housing expense (2–4 unit primary) or maps to liabilities (investment).';
     }
@@ -1028,12 +1192,12 @@ export default function UnderwriterSplitViewDemo({
   }, [variableContinuityCalculations.currentMonthlyVariableAvg, currentBonusYtd, currentOtYtd, prevEmployerW2.box12Bonus, prevEmployerW2.box14Overtime, monthsAtCurrentJob]);
 
   const schCPicks = useMemo(() => {
-    const rec = seRecommend(schCFlow.y1, schCFlow.y2, twoYearSchC);
+    const rec = seRecommend(schCFlow.y1, schCFlow.y2, twoYearSchC, false, loanProgram);
     return { options: seAvgOptions(schCFlow.y1, schCFlow.y2, twoYearSchC), recommendedId: rec.id, reason: rec.reason };
-  }, [schCFlow, twoYearSchC]);
+  }, [schCFlow, twoYearSchC, loanProgram]);
 
   const sCorpPicks = useMemo(() => {
-    const rec = seRecommend(sCorpFlow.y1, sCorpFlow.y2, twoYearScorp, sCorpFlow.dropped);
+    const rec = seRecommend(sCorpFlow.y1, sCorpFlow.y2, twoYearScorp, sCorpFlow.dropped, loanProgram);
     let reason = rec.reason;
     if (sCorpFlow.isMinority) {
       reason = `Ownership ${sCorpShareholderPct}% is under 25% — borrower is not self-employed. K-1 boxes 1/2/3 count as ordinary income with no business add-backs${sCorpFlow.wasCapped ? ', capped at distributions received' : ''}; the Schedule L liquidity test does not apply. ${rec.reason}`;
@@ -1043,10 +1207,23 @@ export default function UnderwriterSplitViewDemo({
       recommendedId: rec.id,
       reason,
     };
-  }, [sCorpFlow, twoYearScorp, sCorpShareholderPct]);
+  }, [sCorpFlow, twoYearScorp, sCorpShareholderPct, loanProgram]);
+
+  const cCorpPicks = useMemo(() => {
+    const rec = seRecommend(cCorpFlow.y1, cCorpFlow.y2, twoYearCCorp, cCorpFlow.dropped, loanProgram);
+    let reason = rec.reason;
+    if (cCorpFlow.isMinority) {
+      reason = `Ownership ${cCorpOwnershipPct}% is under 25% — only officer W-2 and documented dividends qualify. ${rec.reason}`;
+    }
+    return {
+      options: seAvgOptions(cCorpFlow.y1, cCorpFlow.y2, twoYearCCorp, cCorpFlow.dropped, cCorpFlow.w2Monthly),
+      recommendedId: rec.id,
+      reason,
+    };
+  }, [cCorpFlow, twoYearCCorp, cCorpOwnershipPct, loanProgram]);
 
   const partnershipPicks = useMemo(() => {
-    const rec = seRecommend(partnershipFlow.y1, partnershipFlow.y2, twoYearPartnership, partnershipFlow.dropped);
+    const rec = seRecommend(partnershipFlow.y1, partnershipFlow.y2, twoYearPartnership, partnershipFlow.dropped, loanProgram);
     let reason = rec.reason;
     if (partnershipFlow.isMinority) {
       reason = `Ending ${gseInvestor === 'FREDDIE' ? 'profit' : 'capital'} % (${partnershipPct}%) is under 25% — borrower is not self-employed. K-1 boxes 1/2/3 + guaranteed payments count as ordinary income with no business add-backs${partnershipFlow.wasCapped ? ', capped at distributions received' : ''}; the Schedule L liquidity test does not apply. ${rec.reason}`;
@@ -1056,16 +1233,16 @@ export default function UnderwriterSplitViewDemo({
       recommendedId: rec.id,
       reason,
     };
-  }, [partnershipFlow, twoYearPartnership, gseInvestor, partnershipPct]);
+  }, [partnershipFlow, twoYearPartnership, gseInvestor, partnershipPct, loanProgram]);
 
   const scheduleFPicks = useMemo(() => {
-    const rec = seRecommend(scheduleFFlow.y1, scheduleFFlow.y2, twoYearScheduleF);
+    const rec = seRecommend(scheduleFFlow.y1, scheduleFFlow.y2, twoYearScheduleF, false, loanProgram);
     return {
       options: seAvgOptions(scheduleFFlow.y1, scheduleFFlow.y2, twoYearScheduleF),
       recommendedId: rec.id,
       reason: `Schedule F farm cash flow uses net profit or loss adjusted for documented non-cash and nonrecurring items. ${rec.reason}`,
     };
-  }, [scheduleFFlow, twoYearScheduleF]);
+  }, [scheduleFFlow, twoYearScheduleF, loanProgram]);
 
   const assetIncomeAnnual = useMemo(
     () => assetIncomeYears.map((entry) => entry.interestIncome + entry.dividendIncome + entry.capitalGainsNetLoss) as [number, number],
@@ -1096,6 +1273,7 @@ export default function UnderwriterSplitViewDemo({
   const w2VarChosen = chosenMonthly(w2VarPicks.options, w2VarChoice, w2VarPicks.recommendedId);
   const schCChosen = chosenMonthly(schCPicks.options, schCChoice, schCPicks.recommendedId);
   const sCorpChosen = chosenMonthly(sCorpPicks.options, sCorpChoice, sCorpPicks.recommendedId);
+  const cCorpChosen = chosenMonthly(cCorpPicks.options, cCorpChoice, cCorpPicks.recommendedId);
   const partnershipChosen = chosenMonthly(partnershipPicks.options, partnershipChoice, partnershipPicks.recommendedId);
   const scheduleFChosen = chosenMonthly(scheduleFPicks.options, scheduleFChoice, scheduleFPicks.recommendedId);
   const assetIncomeChosen = chosenMonthly(
@@ -1108,6 +1286,7 @@ export default function UnderwriterSplitViewDemo({
   const form1084CashFlow = {
     qualifyingMonthlySelfEmployed: schCChosen.monthly + additionalBusinessMonthly.scheduleC,
     sCorpShareholderDraw: sCorpChosen.monthly + additionalBusinessMonthly.sCorp,
+    cCorpMonthly: cCorpChosen.monthly + additionalBusinessMonthly.cCorp,
     partnershipMonthly: partnershipChosen.monthly + additionalBusinessMonthly.partnership,
     scheduleFMonthly: scheduleFChosen.monthly + additionalBusinessMonthly.scheduleF,
     assetIncomeMonthly: assetIncomeChosen.monthly,
@@ -1117,9 +1296,11 @@ export default function UnderwriterSplitViewDemo({
     finalTotalQualifyingMonthly:
       schCChosen.monthly +
       sCorpChosen.monthly +
+      cCorpChosen.monthly +
       partnershipChosen.monthly +
       additionalBusinessMonthly.scheduleC +
       additionalBusinessMonthly.sCorp +
+      additionalBusinessMonthly.cCorp +
       additionalBusinessMonthly.partnership +
       scheduleFChosen.monthly +
       additionalBusinessMonthly.scheduleF +
@@ -1278,6 +1459,9 @@ export default function UnderwriterSplitViewDemo({
 
   const handleInspectField = (fieldId: string) => {
     setHighlightFieldId(fieldId);
+    setDocMode('pdf');
+    const live = mappedFields.find((field) => field.id === fieldId || field.sourceFieldId === fieldId);
+    if (live) setLivePageIndex(live.pageIndex);
     const target = fieldCoordinatesMapping.find((f) => f.id === fieldId);
     if (target) setActivePdfPage(target.boxCoordinates.page);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
@@ -1299,8 +1483,10 @@ export default function UnderwriterSplitViewDemo({
       ...entries,
       {
         id, employerName: `New Employer ${entries.length + 1}`, ein: '', employmentStartDate: '',
-        role: 'CONCURRENT', monthsAtJob: 12, hourlyRate: 0, weeklyHours: 40,
-        currentPeriodBasePay: 0, baseYtd: 0, bonusYtd: 0, overtimeYtd: 0, otherYtd: 0,
+        role: 'SECONDARY', monthsAtJob: 12, payFrequency: 'SEMIMONTHLY', wageDocSource: 'PAYSTUB',
+        hourlyRate: 0, weeklyHours: 40, currentPeriodBasePay: 0, baseYtd: 0, bonusYtd: 0, overtimeYtd: 0, otherYtd: 0,
+        wvoeBonus: 0, wvoeOvertime: 0, wvoeOther: 0, wvoeMonths: 12,
+        w2Year1Box1: 0, w2Year1Bonus: 0, w2Year1Ot: 0, w2Year2Box1: 0, w2Year2Bonus: 0, w2Year2Ot: 0,
       },
     ]);
     setActiveW2EmployerId(id);
@@ -1332,7 +1518,7 @@ export default function UnderwriterSplitViewDemo({
     });
     setSCorpEntities((entities) => [...entities, {
       id, businessName: `New S-Corporation ${entities.length + 1}`, ein: '', ownershipPct: 100,
-      scheduleL: { ...baseSCorpScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
+      hasStableDistributions: true, scheduleL: { ...baseSCorpScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
     }]);
     setActiveSCorpId(id);
   };
@@ -1345,9 +1531,22 @@ export default function UnderwriterSplitViewDemo({
     });
     setPartnershipEntities((entities) => [...entities, {
       id, businessName: `New Partnership ${entities.length + 1}`, ein: '', profitPctEnd: 100, capitalPctEnd: 100,
-      scheduleL: { ...basePartnershipScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
+      hasStableDistributions: true, scheduleL: { ...basePartnershipScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
     }]);
     setActivePartnershipId(id);
+  };
+
+  const addCCorpEntity = () => {
+    const id = `ccorp-${crypto.randomUUID()}`;
+    const emptyYear = (year: number): CCorpYear => ({
+      year, taxableIncome: 0, totalTaxPaid: 0, depreciation: 0, depletion: 0, amortization: 0,
+      mealsM1: 0, nol: 0, w2Wages: 0, dividends: 0,
+    });
+    setCCorpEntities((entities) => [...entities, {
+      id, businessName: `New C-Corporation ${entities.length + 1}`, ein: '', ownershipPct: 100,
+      scheduleL: { ...baseCCorpScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
+    }]);
+    setActiveCCorpId(id);
   };
 
   const addScheduleFEntity = () => {
@@ -1377,6 +1576,8 @@ export default function UnderwriterSplitViewDemo({
       ? twoYearSchC
       : activeTab === 'SCORP'
         ? twoYearScorp
+        : activeTab === 'CCORP'
+          ? twoYearCCorp
         : activeTab === 'PARTNERSHIP'
           ? twoYearPartnership
           : activeTab === 'SCHEDULE_F'
@@ -1535,7 +1736,7 @@ export default function UnderwriterSplitViewDemo({
     if (alert.id === 'SCORP_LIQUIDITY' || alert.id === 'SCORP_MINORITY_K1') return activeTab === 'SCORP' || activeTab === 'ENCOMPASS_SYNC';
     if (alert.id === 'PARTNERSHIP_LIQUIDITY' || alert.id === 'PARTNERSHIP_MINORITY_K1') return activeTab === 'PARTNERSHIP' || activeTab === 'ENCOMPASS_SYNC';
     if (alert.id === 'TENURE_WARN' || alert.id === 'WAGE_DEFICIT_WARN' || alert.id === 'WAGE_VARIANCE_WARN') {
-      return activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'W2_CONTINUITY' || activeTab === 'ENCOMPASS_SYNC';
+      return activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC';
     }
     if (alert.id.startsWith('RENTAL_')) {
       return activeTab === 'SCHEDULE_E' || activeTab === 'ENCOMPASS_SYNC';
@@ -1563,6 +1764,8 @@ export default function UnderwriterSplitViewDemo({
       depreciation: 0,
       hoaDues: 0,
       totalExpenses: 0,
+      netIncomeLoss: null,
+      extraordinaryAddBack: 0,
       fairRentalDays: 0,
     });
     const newProp: RentalProperty = {
@@ -1651,18 +1854,6 @@ export default function UnderwriterSplitViewDemo({
             ytdBase: currentBaseYtd,
             ytdBonus: currentBonusYtd,
             ytdOt: currentOtYtd,
-          })}`,
-        };
-      case 'W2_CONTINUITY':
-        return {
-          label: `Form W-2 (${prevEmployerW2.year})`,
-          url: `/fixtures/docs/w2.pdf?${q({
-            employer: prevEmployerW2.employerName,
-            ein: prevEmployerW2.ein,
-            year: prevEmployerW2.year,
-            box1: prevEmployerW2.box1Wages,
-            bonus: prevEmployerW2.box12Bonus,
-            ot: prevEmployerW2.box14Overtime,
           })}`,
         };
       case 'SCHEDULE_E': {
@@ -1889,9 +2080,9 @@ export default function UnderwriterSplitViewDemo({
                             ? 'Schedule F'
                             : activeTab === 'ASSET_INCOME'
                               ? 'Schedules B / D'
-                          : activeTab === 'W2_CONTINUITY'
-                            ? 'Form W-2'
-                            : 'Paystub'}
+                            : activeTab === 'CCORP'
+                              ? 'Form 1120'
+                          : 'Paystub'}
                 </span>
               </div>
             </div>
@@ -1908,8 +2099,8 @@ export default function UnderwriterSplitViewDemo({
               />
             ) : docMode === 'pdf' && fixturePdf ? (
               <div className="space-y-2">
-                {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'PARTNERSHIP') &&
-                  (activeTab === 'SCHEDULE_E' || (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : twoYearPartnership)) && (
+                {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
+                  (activeTab === 'SCHEDULE_E' || (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : activeTab === 'CCORP' ? twoYearCCorp : twoYearPartnership)) && (
                     <div className="flex gap-1">
                       {[0, 1].map((i) => (
                         <button
@@ -1923,7 +2114,21 @@ export default function UnderwriterSplitViewDemo({
                       ))}
                     </div>
                   )}
-                <FixturePdfViewer url={fixturePdf.url} label={fixturePdf.label} />
+                <FixturePdfViewer
+                  url={fixturePdf.url}
+                  label={fixturePdf.label}
+                  boxes={fieldCoordinatesMapping
+                    .filter((field) => activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC')
+                    .map((field) => ({
+                      id: field.id,
+                      x: field.boxCoordinates.x,
+                      y: field.boxCoordinates.y,
+                      width: field.boxCoordinates.width,
+                      height: field.boxCoordinates.height,
+                      selected: highlightFieldId === field.id,
+                    }))}
+                  onSelect={handleInspectField}
+                />
               </div>
             ) : activeTab === 'SCHEDULE_F' ? (
               <div className="h-[540px] overflow-auto rounded-lg border border-slate-300 bg-[#f8f6f1] p-4 shadow-inner">
@@ -1968,14 +2173,20 @@ export default function UnderwriterSplitViewDemo({
                 yearIndex={canvasYearIndex}
                 onYearIndex={setCanvasYearIndex}
                 twoYear={
-                  activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : twoYearPartnership
+                  activeTab === 'SCHEDULE_C'
+                    ? twoYearSchC
+                    : activeTab === 'SCORP'
+                      ? twoYearScorp
+                      : activeTab === 'CCORP'
+                        ? twoYearCCorp
+                        : twoYearPartnership
                 }
                 selectedId={highlightFieldId}
                 onSelect={handleInspectField}
                 schC={schCYears[canvasYearIndex]}
                 corp={activeTab === 'PARTNERSHIP' ? partnershipYears[canvasYearIndex] : sCorpYears[canvasYearIndex]}
-                scheduleL={activeTab === 'PARTNERSHIP' ? partnershipL : sCorpL}
-                showLiquidity={activeTab === 'SCORP' || activeTab === 'PARTNERSHIP'}
+                scheduleL={activeTab === 'PARTNERSHIP' ? partnershipL : activeTab === 'CCORP' ? cCorpL : sCorpL}
+                showLiquidity={activeTab === 'SCORP' || activeTab === 'PARTNERSHIP' || activeTab === 'CCORP'}
                 paystub={{
                   employer: borrowerMetadata.currentEmployer,
                   borrower: borrowerMetadata.borrowerName,
@@ -2080,7 +2291,7 @@ export default function UnderwriterSplitViewDemo({
                 onAdd={addW2Employer}
                 onRemove={removeW2Employer}
               />
-              <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 text-xs md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 text-xs md:grid-cols-5">
                 <label className="font-bold text-slate-500">
                   Employer name
                   <input
@@ -2105,7 +2316,31 @@ export default function UnderwriterSplitViewDemo({
                     className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
                   >
                     <option value="PRIMARY">Primary current employer</option>
-                    <option value="CONCURRENT">Concurrent employer</option>
+                    <option value="SECONDARY">Secondary employer</option>
+                  </select>
+                </label>
+                <label className="font-bold text-slate-500">
+                  Pay frequency
+                  <select
+                    value={activeW2Employer.payFrequency}
+                    onChange={(event) => patchW2Employer({ payFrequency: event.target.value as W2Employer['payFrequency'] })}
+                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
+                  >
+                    <option value="WEEKLY">Weekly</option>
+                    <option value="BIWEEKLY">Biweekly</option>
+                    <option value="SEMIMONTHLY">Semi-monthly</option>
+                    <option value="MONTHLY">Monthly</option>
+                  </select>
+                </label>
+                <label className="font-bold text-slate-500">
+                  Wage source
+                  <select
+                    value={activeW2Employer.wageDocSource}
+                    onChange={(event) => patchW2Employer({ wageDocSource: event.target.value as W2Employer['wageDocSource'] })}
+                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
+                  >
+                    <option value="PAYSTUB">Paystub + W-2 (current YTD)</option>
+                    <option value="WVOE">WVOE (historical variable)</option>
                   </select>
                 </label>
               </div>
@@ -2216,12 +2451,8 @@ export default function UnderwriterSplitViewDemo({
                   </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* ==================== TAB 2: VARIABLE & JOB CONTINUITY PORTAL ==================== */}
-          {activeTab === 'W2_CONTINUITY' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-6">
+              {/* Variable income stays on the Base Income tab */}
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">Variable Income Continuity & Rolling Average</h3>
@@ -2237,15 +2468,6 @@ export default function UnderwriterSplitViewDemo({
                   <span className="text-[10px] font-extrabold text-indigo-950 uppercase">Merge Prior Job History (24-Mo Rolling)</span>
                 </div>
               </div>
-
-              <IncomeEntitySelector
-                label="Employer / W-2"
-                entities={asEntityOptions(w2Employers)}
-                activeId={activeW2Employer.id}
-                onSelect={setActiveW2EmployerId}
-                onAdd={addW2Employer}
-                onRemove={removeW2Employer}
-              />
 
               {/* Tenure configuration inputs */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
@@ -2364,6 +2586,7 @@ export default function UnderwriterSplitViewDemo({
                 setTwoYearSchC(next);
                 if (!next) setCanvasYearIndex(0);
               }}
+              twoYearCaption={twoYearCaption}
               choiceOptions={schCPicks.options}
               recommendedId={schCPicks.recommendedId}
               reason={schCPicks.reason}
@@ -2411,6 +2634,7 @@ export default function UnderwriterSplitViewDemo({
                   </YearStack>
                 ))}
               </div>
+              <ProfitLossBlock pnl={schCPnl} onChange={setSchCPnl} loanProgram={loanProgram} />
             </SelfEmployedPanel>
           )}
 
@@ -2423,6 +2647,7 @@ export default function UnderwriterSplitViewDemo({
                 setTwoYearScorp(next);
                 if (!next) setCanvasYearIndex(0);
               }}
+              twoYearCaption={twoYearCaption}
               choiceOptions={sCorpPicks.options}
               recommendedId={sCorpPicks.recommendedId}
               reason={sCorpPicks.reason}
@@ -2442,6 +2667,20 @@ export default function UnderwriterSplitViewDemo({
                       &lt;25% · not self-employed
                     </span>
                   )}
+                  <label className="ml-2 flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={activeSCorp.hasStableDistributions}
+                      onChange={(event) =>
+                        setSCorpEntities((entities) =>
+                          entities.map((entity) =>
+                            entity.id === activeSCorp.id ? { ...entity, hasStableDistributions: event.target.checked } : entity,
+                          ),
+                        )
+                      }
+                    />
+                    Stable distribution history
+                  </label>
                 </label>
               }
             >
@@ -2489,6 +2728,76 @@ export default function UnderwriterSplitViewDemo({
                 ))}
               </div>
               <LiquidityBlock sheet={sCorpL} onChange={setSCorpL} selectedId={highlightFieldId} onSelect={handleInspectField} />
+              <ProfitLossBlock pnl={sCorpPnl} onChange={setSCorpPnl} loanProgram={loanProgram} />
+            </SelfEmployedPanel>
+          )}
+
+          {activeTab === 'CCORP' && (
+            <SelfEmployedPanel
+              title="C-Corp · Form 1120"
+              subtitle="Taxable income less tax, plus non-cash add-backs, times ownership. Schedule L quick ratio ≥ 1.0 required at ≥25%. W-2 and dividends still count if liquidity fails."
+              twoYears={twoYearCCorp}
+              onTwoYears={(next) => {
+                setTwoYearCCorp(next);
+                if (!next) setCanvasYearIndex(0);
+              }}
+              twoYearCaption={twoYearCaption}
+              choiceOptions={cCorpPicks.options}
+              recommendedId={cCorpPicks.recommendedId}
+              reason={cCorpPicks.reason}
+              choiceId={cCorpChoice}
+              onChoice={setCCorpChoice}
+              extra={
+                <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+                  Ownership %
+                  <input
+                    type="number"
+                    value={cCorpOwnershipPct}
+                    onChange={(event) => setCCorpOwnershipPct(Number(event.target.value))}
+                    className={`w-16 rounded border px-2 py-1 font-mono text-sm ${cCorpOwnershipPct < 25 ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
+                  />
+                </label>
+              }
+            >
+              <IncomeEntitySelector
+                label="C-Corporation"
+                entities={asEntityOptions(cCorpEntities)}
+                activeId={activeCCorp.id}
+                onSelect={setActiveCCorpId}
+                onAdd={addCCorpEntity}
+                onUpdate={(id, patch) => setCCorpEntities((entities) => entities.map((entity) =>
+                  entity.id === id ? { ...entity, businessName: patch.name ?? entity.businessName, ein: patch.ein ?? entity.ein } : entity,
+                ))}
+                onRemove={(id) => {
+                  const remaining = cCorpEntities.filter((entity) => entity.id !== id);
+                  setCCorpEntities(remaining);
+                  setActiveCCorpId(remaining[0].id);
+                }}
+              />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {cCorpYears.slice(0, twoYearCCorp ? 2 : 1).map((row, index) => (
+                  <YearStack key={row.year} title={`${row.year} Form 1120`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
+                    <CCorpLines
+                      row={row}
+                      yearKey={index === 0 ? 'y1' : 'y2'}
+                      selectedId={highlightFieldId}
+                      onSelect={handleInspectField}
+                      onChange={(patch) =>
+                        setCCorpYears((prev) => {
+                          const next: [CCorpYear, CCorpYear] = [...prev];
+                          next[index] = { ...next[index], ...patch };
+                          return next;
+                        })
+                      }
+                    />
+                    <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
+                      Qualifying cash flow {usd(cCorpBusinessAnnual(row, cCorpOwnershipPct, cCorpLRatio.passes))}
+                    </p>
+                  </YearStack>
+                ))}
+              </div>
+              <LiquidityBlock sheet={cCorpL} onChange={setCCorpL} selectedId={highlightFieldId} onSelect={handleInspectField} />
+              <ProfitLossBlock pnl={cCorpPnl} onChange={setCCorpPnl} loanProgram={loanProgram} />
             </SelfEmployedPanel>
           )}
 
@@ -2501,6 +2810,7 @@ export default function UnderwriterSplitViewDemo({
                 setTwoYearPartnership(next);
                 if (!next) setCanvasYearIndex(0);
               }}
+              twoYearCaption={twoYearCaption}
               choiceOptions={partnershipPicks.options}
               recommendedId={partnershipPicks.recommendedId}
               reason={partnershipPicks.reason}
@@ -2548,6 +2858,22 @@ export default function UnderwriterSplitViewDemo({
                       &lt;25% · not self-employed
                     </span>
                   )}
+                  <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={activePartnership.hasStableDistributions}
+                      onChange={(event) =>
+                        setPartnershipEntities((entities) =>
+                          entities.map((entity) =>
+                            entity.id === activePartnership.id
+                              ? { ...entity, hasStableDistributions: event.target.checked }
+                              : entity,
+                          ),
+                        )
+                      }
+                    />
+                    Stable distribution history
+                  </label>
                 </div>
               }
             >
@@ -2600,6 +2926,7 @@ export default function UnderwriterSplitViewDemo({
                 selectedId={highlightFieldId}
                 onSelect={handleInspectField}
               />
+              <ProfitLossBlock pnl={partnershipPnl} onChange={setPartnershipPnl} loanProgram={loanProgram} />
             </SelfEmployedPanel>
           )}
 
@@ -2612,6 +2939,7 @@ export default function UnderwriterSplitViewDemo({
                 setTwoYearScheduleF(next);
                 if (!next) setCanvasYearIndex(0);
               }}
+              twoYearCaption={twoYearCaption}
               choiceOptions={scheduleFPicks.options}
               recommendedId={scheduleFPicks.recommendedId}
               reason={scheduleFPicks.reason}
@@ -2740,7 +3068,7 @@ export default function UnderwriterSplitViewDemo({
                     Rental Income · Schedule E Page 1
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    Form 1084 / 1038 worksheet · Rents (L3) − Total Expenses (L20) + Insurance (L9) + Mortgage Interest (L12) + Taxes (L16) + Depreciation (L18) + HOA (L19) ÷ rental months − PITIA
+                    Form 1038 / 1038A · Line 21 net + Insurance (L9) + Mortgage interest (L12) + Taxes (L16) + Depreciation (L18) + HOA (L19) + UW extraordinary ÷ rental months (L2) − PITIA
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2764,7 +3092,7 @@ export default function UnderwriterSplitViewDemo({
                     >
                       2 years
                     </button>
-                    <span className="hidden text-[10px] text-slate-500 sm:inline">2 yrs required unless 5+ yr history</span>
+                    <span className="hidden text-[10px] text-slate-500 sm:inline">{twoYearCaption}</span>
                   </div>
                 </div>
               </div>
@@ -2957,7 +3285,7 @@ export default function UnderwriterSplitViewDemo({
                                 { line: 'Line 16', label: 'Taxes', key: 'taxes' as const, hint: 'Add-back' },
                                 { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const, hint: 'Add-back' },
                                 { line: 'Line 19', label: 'HOA dues', key: 'hoaDues' as const, hint: 'Add-back if in PITIA' },
-                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'Sum of lines 5–19' },
+                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'As listed — do not rebuild' },
                                 { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const, hint: '0 = full year' },
                               ].map(({ line, label, key, hint }) => (
                                 <div key={key} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2.5 py-2">
@@ -2975,17 +3303,49 @@ export default function UnderwriterSplitViewDemo({
                                 </div>
                               ))}
 
-                              {/* Annual 1084 adjusted cash flow summary */}
+                              <div className="flex items-center gap-2 rounded border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
+                                <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">Line 21</span>
+                                <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
+                                  Net income / (loss)
+                                  <span className="ml-1 font-normal text-slate-400">· prefer parsed L21; blank reconstructs L3 − L20</span>
+                                </span>
+                                <input
+                                  type="number"
+                                  value={y.netIncomeLoss ?? ''}
+                                  placeholder="—"
+                                  onChange={(e) =>
+                                    patchRentalYear(prop.id, yk, {
+                                      netIncomeLoss: e.target.value.trim() === '' ? null : Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-28 shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2 rounded border border-amber-100 bg-amber-50/60 px-2.5 py-2">
+                                <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-amber-700">UW</span>
+                                <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
+                                  Extraordinary / other add-back
+                                  <span className="ml-1 font-normal text-slate-400">· not an IRS line</span>
+                                </span>
+                                <input
+                                  type="number"
+                                  value={y.extraordinaryAddBack}
+                                  onChange={(e) => patchRentalYear(prop.id, yk, { extraordinaryAddBack: Number(e.target.value) })}
+                                  className="w-28 shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-indigo-500"
+                                />
+                              </div>
+
+                              {/* Annual 1038 adjusted cash flow summary */}
                               <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs space-y-1">
                                 <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                  <span>Add-backs (L9 + L12 + L16 + L18 + L19)</span>
+                                  <span>Add-backs (L9 + L12 + L16 + L18 + L19 + UW extra)</span>
                                   <span className="font-mono font-bold text-slate-500">
                                     +{cf.addBacks.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between">
                                   <span className="text-slate-500 font-semibold">
-                                    1084 adjusted annual cash flow
+                                    1038 adjusted annual cash flow
                                     {y.fairRentalDays > 0 && <span className="ml-1 text-slate-400">({cf.months} rental months)</span>}
                                   </span>
                                   <span className={`font-black font-mono ${cf.adjusted < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
@@ -3087,16 +3447,16 @@ export default function UnderwriterSplitViewDemo({
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
                 <p className="font-black uppercase text-slate-800 text-[10px] tracking-wider">Loan-Program Guidelines Applied</p>
                 {borrowerMetadata.loanProgram === 'FHA' && (
-                  <p><strong>FHA / HUD 4000.1:</strong> Multi-family subject-property decline ≤ 5% → 24-month avg; 5–20% → most recent year; &gt;20% → disqualified. One-year tax return acceptable only if property owned &lt; 12 months.</p>
+                  <p><strong>FHA / HUD 4000.1:</strong> Default two years. 2–4 unit decline ≤ 5% → 24-month avg; 5–20% → most recent year; &gt;20% → disqualified. Other rental types use the 24-month average with a decline warning only.</p>
                 )}
                 {borrowerMetadata.loanProgram === 'CONVENTIONAL' && (
-                  <p><strong>Conventional / Fannie Mae SEL 2014-07:</strong> Two-year Schedule E required. Declining income → use lower year. Depreciation add-back always applied. Vacancy factor not deducted on investment properties using tax returns.</p>
+                  <p><strong>Conventional / FNMA 1038:</strong> Default one year. Two years in file → 24-month average. Decline is a warning and does not switch to the lower year. Add back L9/L12/L16/L18/L19 from Line 20; do not rebuild expenses.</p>
                 )}
                 {borrowerMetadata.loanProgram === 'VA' && (
-                  <p><strong>VA / VA Lender's Handbook Ch. 4:</strong> Two-year average when income stable/increasing; otherwise lower year. Depreciation add-back applies. Property must have 12-month history of rental receipts.</p>
+                  <p><strong>VA:</strong> Default two years. Two years in file → 24-month average. Decline warns only. Depreciation and PITIA add-backs apply.</p>
                 )}
                 {borrowerMetadata.loanProgram === 'USDA' && (
-                  <p><strong>USDA / HB-1-3555 Ch. 9:</strong> Same two-year averaging rule as Conventional. Rental income from the subject property requires a two-year history unless the subject is a new purchase with a new rental agreement.</p>
+                  <p><strong>USDA:</strong> Default two years. Two years in file → 24-month average. Subject purchase with a new rental agreement may use 75% of market rent.</p>
                 )}
                 <p>
                   <strong>Subject vs non-subject:</strong> Non-subject (REO) rentals use Schedule E history against the property's actual PITIA; an aggregate loss {borrowerMetadata.loanProgram === 'VA' ? 'reduces gross income directly (VA)' : 'is clamped to $0 income and redirected as a proposed liability'}. The subject property uses the proposed PITIA of the new loan — with Schedule E history on a refinance, or 75% of Form 1007/1025 market rent on a purchase. A subject deficit on a 2–4 unit primary adjusts the housing expense; a subject investment deficit maps to a proposed liability.
@@ -3136,6 +3496,11 @@ export default function UnderwriterSplitViewDemo({
                   <span className="text-[10px] font-black uppercase text-slate-400">Field 111</span>
                   <span className="mt-0.5 block text-[11px] text-slate-500">S-Corp · {sCorpChosen.label}</span>
                   <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.sCorpShareholderDraw)}/mo</span>
+                </div>
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <span className="text-[10px] font-black uppercase text-slate-400">Form 1120</span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">C-Corp · {cCorpChosen.label}</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.cCorpMonthly)}/mo</span>
                 </div>
                 <div className="rounded-lg border bg-slate-50 p-4">
                   <span className="text-[10px] font-black uppercase text-slate-400">Field 112</span>

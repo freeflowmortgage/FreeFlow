@@ -30,6 +30,8 @@ const CLASSIFIERS: Array<[string, RegExp]> = [
   ['Form 8825 (Corporate Rentals)', /Form 8825.*Rental Real Estate Income and Expenses/i],
   ['Form 4562 (Depreciation)', /Form 4562/i],
   ['W-2', /Wage and Tax Statement|Form\s+W-?2|W-2\s+Wage/i],
+  ['Paystub', /earnings statement|pay\s*stub|paystub|payroll statement|year[- ]to[- ]date/i],
+  ['WVOE', /written verification of employment|verification of employment|the work number|\bWVOE\b/i],
 ];
 
 function pathOf(req: IncomingMessage): string {

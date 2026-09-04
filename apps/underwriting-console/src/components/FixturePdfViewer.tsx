@@ -12,7 +12,17 @@ const RENDER_WIDTH = 860;
  * fixture URL. The URL carries the live workspace values as query params, so
  * the document re-renders whenever the underwriter edits a figure.
  */
-export default function FixturePdfViewer({ url, label }: { url: string; label: string }) {
+export default function FixturePdfViewer({
+  url,
+  label,
+  boxes = [],
+  onSelect,
+}: {
+  url: string;
+  label: string;
+  boxes?: Array<{ id: string; x: number; y: number; width: number; height: number; selected: boolean }>;
+  onSelect?: (id: string) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -115,6 +125,25 @@ export default function FixturePdfViewer({ url, label }: { url: string; label: s
           </p>
         )}
         <canvas ref={canvasRef} className="block h-auto w-full" />
+        {boxes.map((box) => (
+          <button
+            key={box.id}
+            type="button"
+            title={box.id}
+            className={`absolute box-border rounded-sm ${
+              box.selected
+                ? 'z-10 border-2 border-emerald-600 bg-emerald-400/30 ring-2 ring-emerald-500/40'
+                : 'border border-emerald-500/80 bg-emerald-400/15 hover:bg-emerald-400/25'
+            }`}
+            style={{
+              left: `${box.x}%`,
+              top: `${box.y}%`,
+              width: `${Math.max(box.width, 1.2)}%`,
+              height: `${Math.max(box.height, 1.1)}%`,
+            }}
+            onClick={() => onSelect?.(box.id)}
+          />
+        ))}
       </div>
     </div>
   );

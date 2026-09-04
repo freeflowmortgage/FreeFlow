@@ -37,6 +37,123 @@ export type ScheduleL = {
   otherCurrentLiab: number;
 };
 
+export type YtdPnl = {
+  received: boolean;
+  throughDate: string;
+  netProfit: number;
+  depreciation: number;
+  otherAddbacks: number;
+};
+
+export const EMPTY_PNL: YtdPnl = {
+  received: false,
+  throughDate: '',
+  netProfit: 0,
+  depreciation: 0,
+  otherAddbacks: 0,
+};
+
+export type CCorpYear = {
+  year: number;
+  taxableIncome: number;
+  totalTaxPaid: number;
+  depreciation: number;
+  depletion: number;
+  amortization: number;
+  mealsM1: number;
+  nol: number;
+  w2Wages: number;
+  dividends: number;
+};
+
+export function cCorpBusinessAnnual(row: CCorpYear, ownershipPct: number, liquidityPassed: boolean) {
+  const w2AndDiv = row.w2Wages + row.dividends;
+  if (ownershipPct < 25 || !liquidityPassed) return w2AndDiv;
+  const share =
+    (row.taxableIncome - row.totalTaxPaid + row.depreciation + row.depletion + row.amortization - row.mealsM1 + row.nol) *
+    (ownershipPct / 100);
+  return share + w2AndDiv;
+}
+
+export function pnlAnnual(pnl: YtdPnl) {
+  if (!pnl.received) return 0;
+  return pnl.netProfit + pnl.depreciation + pnl.otherAddbacks;
+}
+
+export function ProfitLossBlock({
+  pnl,
+  onChange,
+  loanProgram,
+}: {
+  pnl: YtdPnl;
+  onChange: (next: YtdPnl) => void;
+  loanProgram: 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA';
+}) {
+  const government = loanProgram === 'FHA' || loanProgram === 'VA' || loanProgram === 'USDA';
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">Year-to-date profit &amp; loss</h4>
+          <p className="text-[11px] text-slate-500">
+            {government
+              ? 'Required if the file is dated April 1 or later, or the most recent tax year is not yet filed.'
+              : 'P&L is not required for Conventional. Fill this block when a statement is received.'}
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+          <input
+            type="checkbox"
+            checked={pnl.received}
+            onChange={(event) => onChange({ ...pnl, received: event.target.checked })}
+          />
+          P&amp;L received
+        </label>
+      </div>
+      {pnl.received ? (
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+          <label className="text-[10px] font-extrabold uppercase text-slate-500">
+            Through date
+            <input
+              type="date"
+              value={pnl.throughDate}
+              onChange={(event) => onChange({ ...pnl, throughDate: event.target.value })}
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
+            />
+          </label>
+          <label className="text-[10px] font-extrabold uppercase text-slate-500">
+            Net profit / (loss)
+            <input
+              type="number"
+              value={pnl.netProfit}
+              onChange={(event) => onChange({ ...pnl, netProfit: Number(event.target.value) })}
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
+            />
+          </label>
+          <label className="text-[10px] font-extrabold uppercase text-slate-500">
+            Depreciation add-back
+            <input
+              type="number"
+              value={pnl.depreciation}
+              onChange={(event) => onChange({ ...pnl, depreciation: Number(event.target.value) })}
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
+            />
+          </label>
+          <label className="text-[10px] font-extrabold uppercase text-slate-500">
+            Other add-backs
+            <input
+              type="number"
+              value={pnl.otherAddbacks}
+              onChange={(event) => onChange({ ...pnl, otherAddbacks: Number(event.target.value) })}
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
+            />
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export type FacsimileLine = {
   id: string;
   line: string;
@@ -284,9 +401,11 @@ export function LiquidityBlock({
 export function TwoYearToggle({
   twoYears,
   onChange,
+  caption,
 }: {
   twoYears: boolean;
   onChange: (next: boolean) => void;
+  caption?: string;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5">
@@ -308,7 +427,7 @@ export function TwoYearToggle({
       >
         2 years
       </button>
-      <span className="hidden text-[10px] text-slate-500 sm:inline">Required under 5 years / FHA-VA-USDA</span>
+      {caption ? <span className="hidden text-[10px] text-slate-500 sm:inline">{caption}</span> : null}
     </div>
   );
 }
@@ -340,7 +459,7 @@ export function QualifyingBar({
           </span>
         ) : null}
         {twoYears && declining(y1, y2) ? (
-          <span className="font-bold text-amber-700">Declining ≥ 20% — using 24-month average</span>
+          <span className="font-bold text-amber-700">Declining — 24-month average used (warning only)</span>
         ) : null}
         {dropped ? <span className="font-bold text-rose-700">Business income excluded (liquidity)</span> : null}
       </div>
@@ -393,7 +512,13 @@ export function seAvgOptions(
   return options;
 }
 
-export function seRecommend(y1: number, y2: number, twoYears: boolean, dropped?: boolean): { id: string; reason: string } {
+export function seRecommend(
+  y1: number,
+  y2: number,
+  twoYears: boolean,
+  dropped?: boolean,
+  loanProgram?: 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA',
+): { id: string; reason: string } {
   if (dropped) {
     return {
       id: 'restricted',
@@ -402,20 +527,29 @@ export function seRecommend(y1: number, y2: number, twoYears: boolean, dropped?:
     };
   }
   if (!twoYears) {
+    if (loanProgram === 'FHA' || loanProgram === 'VA' || loanProgram === 'USDA') {
+      return {
+        id: 'y1',
+        reason:
+          'One year on file. Request an additional year of returns and a year-to-date P&L if required (file dated April 1 or later, or the most recent tax year is not yet filed).',
+      };
+    }
     return {
       id: 'y1',
-      reason: 'One-year cash flow ÷ 12. Conventional can use the most recent return when the borrower has 5+ years in the same business.',
+      reason:
+        'One-year cash flow ÷ 12. If the business is under 5 years, request two years of returns.',
     };
   }
   if (declining(y1, y2)) {
     return {
-      id: 'y1',
-      reason: 'Cash flow declined 20% or more year over year. Guideline uses the most recent year, not the 24-month average.',
+      id: 'avg24',
+      reason:
+        'Two years in file — 24-month average (Year 1 + Year 2) ÷ 24. Income declined year over year; that is a warning only and does not switch the guideline pick to the lower year.',
     };
   }
   return {
     id: 'avg24',
-    reason: 'Two-year average (Year 1 + Year 2) ÷ 24. Income is stable or increasing, so the 24-month figure is the guideline pick.',
+    reason: 'Two years in file — 24-month average (Year 1 + Year 2) ÷ 24.',
   };
 }
 
@@ -549,6 +683,7 @@ export function SelfEmployedPanel({
   subtitle,
   twoYears,
   onTwoYears,
+  twoYearCaption,
   extra,
   children,
   choiceOptions,
@@ -561,6 +696,7 @@ export function SelfEmployedPanel({
   subtitle: string;
   twoYears: boolean;
   onTwoYears: (next: boolean) => void;
+  twoYearCaption?: string;
   extra?: ReactNode;
   children: ReactNode;
   choiceOptions: AvgOption[];
@@ -578,7 +714,7 @@ export function SelfEmployedPanel({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {extra}
-          <TwoYearToggle twoYears={twoYears} onChange={onTwoYears} />
+          <TwoYearToggle twoYears={twoYears} onChange={onTwoYears} caption={twoYearCaption} />
         </div>
       </div>
       {children}
@@ -669,6 +805,33 @@ export function CorpLines({
   );
 }
 
+export function CCorpLines({
+  row,
+  yearKey,
+  selectedId,
+  onSelect,
+  onChange,
+}: {
+  row: CCorpYear;
+  yearKey: 'y1' | 'y2';
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onChange: (patch: Partial<CCorpYear>) => void;
+}) {
+  const id = (key: string) => `ccorp-${key}-${yearKey}`;
+  return (
+    <>
+      <LineRow line="L28" label="Taxable income" value={row.taxableIncome} selected={selectedId === id('ti')} onSelect={() => onSelect(id('ti'))} onChange={(n) => onChange({ taxableIncome: n })} />
+      <LineRow line="L31" label="Total tax" hint="subtract" value={row.totalTaxPaid} selected={selectedId === id('tax')} onSelect={() => onSelect(id('tax'))} onChange={(n) => onChange({ totalTaxPaid: n })} />
+      <LineRow line="4562" label="Depreciation" hint="add-back" value={row.depreciation} selected={selectedId === id('dep')} onSelect={() => onSelect(id('dep'))} onChange={(n) => onChange({ depreciation: n })} />
+      <LineRow line="M-1" label="Non-deductible meals" hint="add-back" value={row.mealsM1} selected={selectedId === id('meals')} onSelect={() => onSelect(id('meals'))} onChange={(n) => onChange({ mealsM1: n })} />
+      <LineRow line="NOL" label="NOL / special deductions" value={row.nol} selected={selectedId === id('nol')} onSelect={() => onSelect(id('nol'))} onChange={(n) => onChange({ nol: n })} />
+      <LineRow line="W-2" label="Officer W-2 wages" hint="counts even if liquidity fails" value={row.w2Wages} selected={selectedId === id('w2')} onSelect={() => onSelect(id('w2'))} onChange={(n) => onChange({ w2Wages: n })} />
+      <LineRow line="1099" label="Borrower dividends" value={row.dividends} selected={selectedId === id('div')} onSelect={() => onSelect(id('div'))} onChange={(n) => onChange({ dividends: n })} />
+    </>
+  );
+}
+
 export function DemoDocumentCanvas({
   tab,
   yearIndex,
@@ -705,7 +868,7 @@ export function DemoDocumentCanvas({
 }) {
   const yk = yearIndex === 0 ? 'y1' : 'y2';
   const year = tab === 'SCHEDULE_C' ? schC.year : corp.year;
-  const isWage = tab === 'PAYSTUB_RECONCILIATION' || tab === 'W2_CONTINUITY' || tab === 'ENCOMPASS_SYNC';
+  const isWage = tab === 'PAYSTUB_RECONCILIATION' || tab === 'ENCOMPASS_SYNC';
   const isRental = tab === 'SCHEDULE_E';
 
   if (isWage) {
