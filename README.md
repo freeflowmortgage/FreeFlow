@@ -24,8 +24,8 @@ On macOS/Linux use `cp` instead of `copy`.
 
 | You create locally | Copied from |
 | --- | --- |
-| `.env.development` | `.env.example` (same content as `Docs/env.development`) |
-| `.env.slicer` | `Docs/Architecture/env.slicer-v2` |
+| `.env.development` | `.env.example` (same content as `docs/env.development`) |
+| `.env.slicer` | `docs/Architecture/env.slicer-v2` |
 
 Do not commit those two files.
 
@@ -44,7 +44,7 @@ Health check: http://127.0.0.1:8080/health
 **Underwriting console** (Vite, port 3000):
 
 ```bash
-cd Apps/underwriting-console
+cd apps/underwriting-console
 npm install
 npm run dev
 ```
@@ -57,13 +57,13 @@ Optional: `docker compose up -d` at the repo root for local Postgres / Redis / M
 
 | Path | What it is |
 | --- | --- |
-| `Apps/underwriting-console` | Live local UI |
-| `Apps/underwriter-portal` | Next.js billing / Encompass routes |
+| `apps/underwriting-console` | Live local UI |
+| `apps/underwriter-portal` | Next.js billing / Encompass routes |
 | `services/doc-parser` | FastAPI: bytes in, JSON boxes out (no sandwich PDF) |
-| `Packages/mortgage-engine` | Form 1084 v9 |
-| `Docs/ARCHITECTURE.md` | Live architecture |
+| `packages/mortgage-engine` | Form 1084 v9 |
+| `docs/ARCHITECTURE.md` | Live architecture |
 
 ## Docs
 
-- [Architecture](Docs/ARCHITECTURE.md)
-- [Monorepo map v4](Docs/b2b-income-monorepo-structure-v4.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Monorepo map v4](docs/b2b-income-monorepo-structure-v4.md)

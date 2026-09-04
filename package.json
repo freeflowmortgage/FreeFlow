@@ -5,6 +5,7 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
+    "test": "turbo test",
     "test:e2e": "pnpm --filter underwriting-console test:e2e"
   },
   "devDependencies": {
