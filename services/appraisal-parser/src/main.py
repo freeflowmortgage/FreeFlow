@@ -147,13 +147,13 @@ def audit_appraisal_document(
                 "contractDate": "2026-08-01",
                 "priorSaleDate": "2026-07-15",  # 15 days delta triggers FHA 90-day flip warning!
                 "priorSalePrice": 200000,
-                "contractSellerIsOwnerRecord": false, # Mismatch flags warning
-                "nonArmsLengthTransaction": true,     # Flags non-arm's length
-                "hasSolarPanels": true,
+                "contractSellerIsOwnerRecord": False, # Mismatch flags warning
+                "nonArmsLengthTransaction": True,     # Flags non-arm's length
+                "hasSolarPanels": True,
                 "solarOwnershipType": "LEASED",
-                "solarAppraisalValueAdjustmentIncluded": true, # Violates HUD 4000.1 leased solar value rule!
-                "solarLeasePaymentsIncludedInDti": false,
-                "solarAgreementContainsTransferRestrictions": true
+                "solarAppraisalValueAdjustmentIncluded": True, # Violates HUD 4000.1 leased solar value rule!
+                "solarLeasePaymentsIncludedInDti": False,
+                "solarAgreementContainsTransferRestrictions": True
             },
             "physicalConditionChecklist": {
                 "atticInspected": False,

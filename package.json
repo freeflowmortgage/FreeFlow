@@ -6,6 +6,8 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "test": "turbo test",
+    "test:services": "python3 -m pytest",
+    "test:all": "turbo test && python3 -m pytest",
     "test:e2e": "pnpm --filter underwriting-console test:e2e"
   },
   "devDependencies": {
