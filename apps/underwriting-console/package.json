@@ -10,6 +10,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@mortgage-pos/mortgage-engine": "workspace:*",
     "decimal.js": "^10.4.3",
     "lucide-react": "^0.378.0",
     "pdf-lib": "^1.17.1",

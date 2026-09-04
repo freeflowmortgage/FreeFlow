@@ -1,6 +1,7 @@
 # Dependencies and build
 node_modules/
 .venv/
+.venv-*/
 .venv-b2b-test/
 **/__pycache__/
 *.py[cod]
@@ -21,6 +22,7 @@ build/
 
 # Local parser / test artifacts
 test-docs/
+test-results/
 *.pdf
 !docs/**/*.md
 

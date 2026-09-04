@@ -9,7 +9,11 @@ export type ParseWord = {
 
 export type MappedIncomeField = {
   id: string;
-  form: 'W-2' | 'Schedule C' | 'Schedule E' | 'Form 1040' | 'Form 1120-S' | 'Form 1065';
+  /** Stable page-scoped document entity. Present on fields mapped by current parsers. */
+  entityId?: string;
+  /** Legacy field definition ID before entity scoping. */
+  sourceFieldId?: string;
+  form: 'W-2' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065';
   boxLabel: string;
   fieldLabel: string;
   lineNum: string;

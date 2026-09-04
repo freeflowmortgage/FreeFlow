@@ -108,6 +108,7 @@ def test_pdf_splitter_core_rules():
     assert "W-2" in CORE_RULES
     assert "Schedule C (Page 1 - Profits)" in CORE_RULES
     assert "Schedule E (Page 1 - Rentals)" in CORE_RULES
+    assert "Schedule F (Farm Income)" in CORE_RULES
     assert "Form 1120S (S-Corporation Return)" in CORE_RULES
     assert "Form 1065 (Partnership Return)" in CORE_RULES
 
@@ -116,6 +117,10 @@ def test_pdf_splitter_core_rules():
 
     sched_c = CORE_RULES["Schedule C (Page 1 - Profits)"].search("Schedule C Profit or Loss From Business")
     assert sched_c is not None
+    sched_f = CORE_RULES["Schedule F (Farm Income)"].search(
+        "Schedule F (Form 1040) Profit or Loss From Farming"
+    )
+    assert sched_f is not None
 
 
 def test_pdf_splitter_classification():
@@ -142,6 +147,24 @@ def test_pdf_splitter_classification():
     assert 1 in split_res.target_pages
     assert "W-2" in split_res.classifications[0]
     assert "Schedule C (Page 1 - Profits)" in split_res.classifications[1]
+
+
+def test_pdf_splitter_classifies_schedule_f():
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=True,
+        plain_text="Schedule F (Form 1040) Profit or Loss From Farming Line 34 58000",
+        words=[],
+    )
+
+    split_res = pre_split_tax_returns(
+        ConvertResult(pages=[page], page_count=1, ocr_page_count=0)
+    )
+
+    assert split_res.target_pages == [0]
+    assert "Schedule F (Farm Income)" in split_res.classifications[0]
 
 
 def test_mismo_xml_generation():

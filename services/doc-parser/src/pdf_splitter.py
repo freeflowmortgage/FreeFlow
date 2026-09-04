@@ -27,6 +27,10 @@ CORE_RULES = {
         re.IGNORECASE,
     ),
     "Schedule E (Part III Trusts)": re.compile(r"Part III.*Income or Loss From Estates and Trusts", re.IGNORECASE),
+    "Schedule F (Farm Income)": re.compile(
+        r"Schedule F(?:\s*\(Form 1040\))?.*Profit or Loss From Farming|Profit or Loss From Farming",
+        re.IGNORECASE,
+    ),
     "Form 1120S (S-Corporation Return)": re.compile(r"U\.S\. Income Tax Return for an S Corporation", re.IGNORECASE),
     "Form 1065 (Partnership Return)": re.compile(r"U\.S\. Return of Partnership Income", re.IGNORECASE),
     "Form 1120 (C-Corporation Return)": re.compile(r"U\.S\. Corporation Income Tax Return", re.IGNORECASE),
@@ -135,7 +139,7 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         if matched:
             classifications[page.index] = matched
             target_pages.add(page.index)
-            if any(term in "".join(matched) for term in ("Schedule C", "Schedule E", "Form 1065", "Form 1120", "Form 1120S")):
+            if any(term in "".join(matched) for term in ("Schedule C", "Schedule E", "Schedule F", "Form 1065", "Form 1120", "Form 1120S")):
                 if SEE_STATEMENT.search(text):
                     token_match = STMT_TOKEN.search(text)
                     snippet = token_match.group(0) if token_match else "see statement"

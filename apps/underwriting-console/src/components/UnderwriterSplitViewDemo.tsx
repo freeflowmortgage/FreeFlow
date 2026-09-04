@@ -21,6 +21,8 @@ import {
   Trash2,
   Monitor,
   MonitorX,
+  Tractor,
+  Coins,
 } from 'lucide-react';
 import type { LiveParseSession } from '../parseTypes';
 import { mapIncomeFields } from '../incomeFieldMap';
@@ -50,6 +52,8 @@ import {
   type SchCYear,
   type ScheduleL,
 } from './selfEmployedIncome';
+import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
+import UsdaDistributionToggle from './UsdaDistributionToggle';
 
 // TS Type Signatures for clean data structures
 interface OCRField {
@@ -71,6 +75,59 @@ interface PrevEmployerW2 {
   box14Overtime: number;
 }
 
+interface W2Employer {
+  id: string;
+  employerName: string;
+  ein: string;
+  employmentStartDate: string;
+  role: 'PRIMARY' | 'CONCURRENT';
+  monthsAtJob: number;
+  hourlyRate: number;
+  weeklyHours: number;
+  currentPeriodBasePay: number;
+  baseYtd: number;
+  bonusYtd: number;
+  overtimeYtd: number;
+  otherYtd: number;
+}
+
+interface BusinessEntity<TYear> {
+  id: string;
+  businessName: string;
+  ein: string;
+  years: [TYear, TYear];
+}
+
+interface SCorpEntity extends BusinessEntity<CorpYear> {
+  ownershipPct: number;
+  scheduleL: ScheduleL;
+}
+
+interface PartnershipEntity extends BusinessEntity<CorpYear> {
+  profitPctEnd: number;
+  capitalPctEnd: number;
+  scheduleL: ScheduleL;
+}
+
+interface ScheduleFYear {
+  year: number;
+  netFarmProfitLoss: number;
+  depreciation: number;
+  depletion: number;
+  amortization: number;
+  casualtyLoss: number;
+  businessUseOfHome: number;
+  mealsExclusion: number;
+  nonrecurringIncome: number;
+}
+
+interface AssetIncomeYear {
+  year: number;
+  interestIncome: number;
+  dividendIncome: number;
+  capitalGainsNetLoss: number;
+}
+
 type SplitViewSource = 'demo' | 'live';
 
 type IncomeTab =
@@ -79,6 +136,8 @@ type IncomeTab =
   | 'SCHEDULE_C'
   | 'SCORP'
   | 'PARTNERSHIP'
+  | 'SCHEDULE_F'
+  | 'ASSET_INCOME'
   | 'SCHEDULE_E'
   | 'ENCOMPASS_SYNC';
 
@@ -176,6 +235,8 @@ export default function UnderwriterSplitViewDemo({
       ['SCHEDULE_C', 'Schedule C', FileSpreadsheet],
       ['SCORP', 'S-Corp 1120-S', FileSpreadsheet],
       ['PARTNERSHIP', 'Partnership 1065', FileSpreadsheet],
+      ['SCHEDULE_F', 'Schedule F', Tractor],
+      ['ASSET_INCOME', 'Interest / gains', Coins],
       ['SCHEDULE_E', 'Rental Income', Home],
       ['ENCOMPASS_SYNC', 'Encompass', Lock],
     ] as const;
@@ -189,6 +250,8 @@ export default function UnderwriterSplitViewDemo({
       if (id === 'SCHEDULE_C') return forms.has('Schedule C');
       if (id === 'SCORP') return forms.has('Form 1120-S');
       if (id === 'PARTNERSHIP') return forms.has('Form 1065');
+      if (id === 'SCHEDULE_F') return forms.has('Schedule F');
+      if (id === 'ASSET_INCOME') return forms.has('Schedule B') || forms.has('Schedule D');
       if (id === 'SCHEDULE_E') return forms.has('Schedule E');
       return false;
     });
@@ -207,6 +270,8 @@ export default function UnderwriterSplitViewDemo({
   const [twoYearSchC, setTwoYearSchC] = useState(true);
   const [twoYearScorp, setTwoYearScorp] = useState(true);
   const [twoYearPartnership, setTwoYearPartnership] = useState(true);
+  const [twoYearScheduleF, setTwoYearScheduleF] = useState(true);
+  const [twoYearAssetIncome, setTwoYearAssetIncome] = useState(true);
   const [twoYearRental, setTwoYearRental] = useState(true);
   const [rentalChoice, setRentalChoice] = useState<string | null>(null);
 
@@ -246,15 +311,15 @@ export default function UnderwriterSplitViewDemo({
     });
   });
 
-  const [w2BaseChoice, setW2BaseChoice] = useState<string | null>(null);
-  const [w2VarChoice, setW2VarChoice] = useState<string | null>(null);
-  const [schCChoice, setSchCChoice] = useState<string | null>(null);
-  const [sCorpChoice, setSCorpChoice] = useState<string | null>(null);
-  const [partnershipChoice, setPartnershipChoice] = useState<string | null>(null);
+  const [w2BaseChoices, setW2BaseChoices] = useState<Record<string, string | null>>({});
+  const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
+  const [schCChoices, setSchCChoices] = useState<Record<string, string | null>>({});
+  const [sCorpChoices, setSCorpChoices] = useState<Record<string, string | null>>({});
+  const [partnershipChoices, setPartnershipChoices] = useState<Record<string, string | null>>({});
+  const [scheduleFChoices, setScheduleFChoices] = useState<Record<string, string | null>>({});
 
   // 2. Variable Continuity & Job Transition States
   const [mergePreviousEmployerVariable, setMergePreviousEmployerVariable] = useState<boolean>(true);
-  const [monthsAtCurrentJob, setMonthsAtCurrentJob] = useState<number>(8); // August 15 paystub represents 8 elapsed months
   const [monthsAtPreviousJob, setMonthsAtPreviousJob] = useState<number>(16); // Remainder of the 24-month verification window
 
   // Previous Job Variable History
@@ -267,63 +332,211 @@ export default function UnderwriterSplitViewDemo({
     box14Overtime: 6000     // Previous overtime history
   });
 
-  // Current paystub raw values inside mock state
-  const [currentHourlyRate, setCurrentHourlyRate] = useState<number>(45.00);
-  const [currentWeeklyHours, setCurrentWeeklyHours] = useState<number>(40);
-  const [currentPeriodBasePay, setCurrentPeriodBasePay] = useState<number>(3600.00); // Semi-monthly gross base
-  const [currentBaseYtd, setCurrentBaseYtd] = useState<number>(54000.00); // 8 months elapsed (Wage deficit trigger!)
-  const [currentBonusYtd, setCurrentBonusYtd] = useState<number>(12500.00);
-  const [currentOtYtd, setCurrentOtYtd] = useState<number>(4200.00);
-  const [currentOtherYtd, setCurrentOtherYtd] = useState<number>(0.00);
+  const [w2Employers, setW2Employers] = useState<W2Employer[]>([
+    {
+      id: 'w2-apex',
+      employerName: 'Apex Technology Partners LLC',
+      ein: '74-1234567',
+      employmentStartDate: '2025-12-15',
+      role: 'PRIMARY',
+      monthsAtJob: 8,
+      hourlyRate: 45,
+      weeklyHours: 40,
+      currentPeriodBasePay: 3600,
+      baseYtd: 54000,
+      bonusYtd: 12500,
+      overtimeYtd: 4200,
+      otherYtd: 0,
+    },
+    {
+      id: 'w2-meridian',
+      employerName: 'Meridian Health Systems',
+      ein: '52-7654321',
+      employmentStartDate: '2024-03-01',
+      role: 'CONCURRENT',
+      monthsAtJob: 29,
+      hourlyRate: 22,
+      weeklyHours: 12,
+      currentPeriodBasePay: 528,
+      baseYtd: 7920,
+      bonusYtd: 0,
+      overtimeYtd: 0,
+      otherYtd: 0,
+    },
+  ]);
+  const [activeW2EmployerId, setActiveW2EmployerId] = useState('w2-apex');
+  const activeW2Employer = w2Employers.find((entry) => entry.id === activeW2EmployerId) ?? w2Employers[0];
+  const patchW2Employer = (patch: Partial<W2Employer>) =>
+    setW2Employers((entries) => entries.map((entry) => (entry.id === activeW2Employer.id ? { ...entry, ...patch } : entry)));
+  const currentHourlyRate = activeW2Employer.hourlyRate;
+  const currentWeeklyHours = activeW2Employer.weeklyHours;
+  const currentPeriodBasePay = activeW2Employer.currentPeriodBasePay;
+  const currentBaseYtd = activeW2Employer.baseYtd;
+  const currentBonusYtd = activeW2Employer.bonusYtd;
+  const currentOtYtd = activeW2Employer.overtimeYtd;
+  const currentOtherYtd = activeW2Employer.otherYtd;
+  const monthsAtCurrentJob = activeW2Employer.monthsAtJob;
+  const setCurrentHourlyRate = (value: number) => patchW2Employer({ hourlyRate: value });
+  const setCurrentWeeklyHours = (value: number) => patchW2Employer({ weeklyHours: value });
+  const setCurrentPeriodBasePay = (value: number) => patchW2Employer({ currentPeriodBasePay: value });
+  const setCurrentBaseYtd = (value: number) => patchW2Employer({ baseYtd: value });
+  const setCurrentBonusYtd = (value: number) => patchW2Employer({ bonusYtd: value });
+  const setCurrentOtYtd = (value: number) => patchW2Employer({ overtimeYtd: value });
+  const setCurrentOtherYtd = (value: number) => patchW2Employer({ otherYtd: value });
+  const setMonthsAtCurrentJob = (value: number) => patchW2Employer({ monthsAtJob: value });
+  const w2BaseChoice = w2BaseChoices[activeW2Employer.id] ?? null;
+  const w2VarChoice = w2VarChoices[activeW2Employer.id] ?? null;
+  const setW2BaseChoice = (value: string | null) =>
+    setW2BaseChoices((choices) => ({ ...choices, [activeW2Employer.id]: value }));
+  const setW2VarChoice = (value: string | null) =>
+    setW2VarChoices((choices) => ({ ...choices, [activeW2Employer.id]: value }));
 
-  const [schCYears, setSchCYears] = useState<[SchCYear, SchCYear]>([
-    { year: 2025, line31: 115000, line13: 8500, line30: 2400, line44aMiles: 4500, line24bMeals: 1800 },
-    { year: 2024, line31: 98000, line13: 7200, line30: 2100, line44aMiles: 3800, line24bMeals: 1500 },
+  const [schCEntities, setSchCEntities] = useState<Array<BusinessEntity<SchCYear>>>([
+    {
+      id: 'schc-vance',
+      businessName: 'Vance Technology Consulting',
+      ein: '81-2345678',
+      years: [
+        { year: 2025, line31: 115000, line13: 8500, line30: 2400, line44aMiles: 4500, line24bMeals: 1800 },
+        { year: 2024, line31: 98000, line13: 7200, line30: 2100, line44aMiles: 3800, line24bMeals: 1500 },
+      ],
+    },
+    {
+      id: 'schc-studio',
+      businessName: 'Vance Design Studio',
+      ein: '81-8765432',
+      years: [
+        { year: 2025, line31: 32000, line13: 2100, line30: 0, line44aMiles: 1100, line24bMeals: 400 },
+        { year: 2024, line31: 28000, line13: 1800, line30: 0, line44aMiles: 900, line24bMeals: 350 },
+      ],
+    },
   ]);
-  const [sCorpYears, setSCorpYears] = useState<[CorpYear, CorpYear]>([
-    { year: 2025, ordinaryIncome: 142000, netRentalRealEstate: 12000, otherNetRental: 0, depreciation: 18500, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000, distributions: 62000 },
-    { year: 2024, ordinaryIncome: 128000, netRentalRealEstate: 9500, otherNetRental: 0, depreciation: 16200, depletion: 0, mealsM1: 1900, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 45000, distributions: 55000 },
+  const [activeSchCId, setActiveSchCId] = useState('schc-vance');
+  const activeSchC = schCEntities.find((entry) => entry.id === activeSchCId) ?? schCEntities[0];
+  const schCYears = activeSchC.years;
+  const setSchCYears = (update: React.SetStateAction<[SchCYear, SchCYear]>) =>
+    setSchCEntities((entities) =>
+      entities.map((entity) =>
+        entity.id === activeSchC.id
+          ? { ...entity, years: typeof update === 'function' ? update(entity.years) : update }
+          : entity,
+      ),
+    );
+  const schCChoice = schCChoices[activeSchC.id] ?? null;
+  const setSchCChoice = (value: string | null) =>
+    setSchCChoices((choices) => ({ ...choices, [activeSchC.id]: value }));
+
+  const baseSCorpScheduleL: ScheduleL = {
+    cash: 125000, receivables: 25000, allowance: 2500, taxExempt: 5000,
+    otherCurrentAssets: 15000, accountsPayable: 60000, notesLt1Yr: 30000, otherCurrentLiab: 10000,
+  };
+  const [sCorpEntities, setSCorpEntities] = useState<SCorpEntity[]>([
+    {
+      id: 'scorp-apex', businessName: 'Apex Advisory Holdings', ein: '74-9876543', ownershipPct: 35,
+      scheduleL: baseSCorpScheduleL,
+      years: [
+        { year: 2025, ordinaryIncome: 142000, netRentalRealEstate: 12000, otherNetRental: 0, depreciation: 18500, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000, distributions: 62000 },
+        { year: 2024, ordinaryIncome: 128000, netRentalRealEstate: 9500, otherNetRental: 0, depreciation: 16200, depletion: 0, mealsM1: 1900, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 45000, distributions: 55000 },
+      ],
+    },
   ]);
-  const [partnershipYears, setPartnershipYears] = useState<[CorpYear, CorpYear]>([
-    { year: 2025, ordinaryIncome: 96000, netRentalRealEstate: 18000, otherNetRental: 2400, depreciation: 12000, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0, distributions: 48000 },
-    { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
+  const [activeSCorpId, setActiveSCorpId] = useState('scorp-apex');
+  const activeSCorp = sCorpEntities.find((entry) => entry.id === activeSCorpId) ?? sCorpEntities[0];
+  const sCorpYears = activeSCorp.years;
+  const setSCorpYears = (update: React.SetStateAction<[CorpYear, CorpYear]>) =>
+    setSCorpEntities((entities) => entities.map((entity) => entity.id === activeSCorp.id
+      ? { ...entity, years: typeof update === 'function' ? update(entity.years) : update } : entity));
+  const sCorpChoice = sCorpChoices[activeSCorp.id] ?? null;
+  const setSCorpChoice = (value: string | null) =>
+    setSCorpChoices((choices) => ({ ...choices, [activeSCorp.id]: value }));
+
+  const basePartnershipScheduleL: ScheduleL = {
+    cash: 210000, receivables: 18000, allowance: 0, taxExempt: 0,
+    otherCurrentAssets: 8000, accountsPayable: 42000, notesLt1Yr: 15000, otherCurrentLiab: 6000,
+  };
+  const [partnershipEntities, setPartnershipEntities] = useState<PartnershipEntity[]>([
+    {
+      id: 'partnership-horizon', businessName: 'Horizon Property Partners', ein: '52-2468101',
+      profitPctEnd: 50, capitalPctEnd: 50, scheduleL: basePartnershipScheduleL,
+      years: [
+        { year: 2025, ordinaryIncome: 96000, netRentalRealEstate: 18000, otherNetRental: 2400, depreciation: 12000, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0, distributions: 48000 },
+        { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
+      ],
+    },
   ]);
+  const [activePartnershipId, setActivePartnershipId] = useState('partnership-horizon');
+  const activePartnership = partnershipEntities.find((entry) => entry.id === activePartnershipId) ?? partnershipEntities[0];
+  const partnershipYears = activePartnership.years;
+  const setPartnershipYears = (update: React.SetStateAction<[CorpYear, CorpYear]>) =>
+    setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id
+      ? { ...entity, years: typeof update === 'function' ? update(entity.years) : update } : entity));
+  const partnershipChoice = partnershipChoices[activePartnership.id] ?? null;
+  const setPartnershipChoice = (value: string | null) =>
+    setPartnershipChoices((choices) => ({ ...choices, [activePartnership.id]: value }));
   /** GSE investor drives which K-1 Item J ending percentage qualifies: FNMA = % capital, Freddie Mac = % profit */
   const [gseInvestor, setGseInvestor] = useState<'FNMA' | 'FREDDIE'>('FNMA');
   /** S-Corp K-1: single end-of-year stock ownership percentage */
-  const [sCorpShareholderPct, setSCorpShareholderPct] = useState<number>(35);
+  const sCorpShareholderPct = activeSCorp.ownershipPct;
+  const setSCorpShareholderPct = (value: number) =>
+    setSCorpEntities((entities) => entities.map((entity) => entity.id === activeSCorp.id ? { ...entity, ownershipPct: value } : entity));
   /** Partnership K-1 Item J END-of-year percentages (beginning % is never used to qualify) */
-  const [partnershipProfitPctEnd, setPartnershipProfitPctEnd] = useState<number>(50);
-  const [partnershipCapitalPctEnd, setPartnershipCapitalPctEnd] = useState<number>(50);
+  const partnershipProfitPctEnd = activePartnership.profitPctEnd;
+  const partnershipCapitalPctEnd = activePartnership.capitalPctEnd;
+  const setPartnershipProfitPctEnd = (value: number) =>
+    setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id ? { ...entity, profitPctEnd: value } : entity));
+  const setPartnershipCapitalPctEnd = (value: number) =>
+    setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id ? { ...entity, capitalPctEnd: value } : entity));
   const partnershipPct = gseInvestor === 'FREDDIE' ? partnershipProfitPctEnd : partnershipCapitalPctEnd;
-  const [sCorpL, setSCorpL] = useState<ScheduleL>({
-    cash: 125000,
-    receivables: 25000,
-    allowance: 2500,
-    taxExempt: 5000,
-    otherCurrentAssets: 15000,
-    accountsPayable: 60000,
-    notesLt1Yr: 30000,
-    otherCurrentLiab: 10000,
-  });
-  const [partnershipL, setPartnershipL] = useState<ScheduleL>({
-    cash: 210000,
-    receivables: 18000,
-    allowance: 0,
-    taxExempt: 0,
-    otherCurrentAssets: 8000,
-    accountsPayable: 42000,
-    notesLt1Yr: 15000,
-    otherCurrentLiab: 6000,
-  });
+  const sCorpL = activeSCorp.scheduleL;
+  const setSCorpL = (value: React.SetStateAction<ScheduleL>) =>
+    setSCorpEntities((entities) => entities.map((entity) => entity.id === activeSCorp.id
+      ? { ...entity, scheduleL: typeof value === 'function' ? value(entity.scheduleL) : value } : entity));
+  const partnershipL = activePartnership.scheduleL;
+  const setPartnershipL = (value: React.SetStateAction<ScheduleL>) =>
+    setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id
+      ? { ...entity, scheduleL: typeof value === 'function' ? value(entity.scheduleL) : value } : entity));
+
+  const [scheduleFEntities, setScheduleFEntities] = useState<Array<BusinessEntity<ScheduleFYear>>>([
+    {
+      id: 'farm-vance', businessName: 'Vance Family Farm', ein: '74-1122334',
+      years: [
+        { year: 2025, netFarmProfitLoss: 64000, depreciation: 9800, depletion: 0, amortization: 1200, casualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 800, nonrecurringIncome: 0 },
+        { year: 2024, netFarmProfitLoss: 58000, depreciation: 9100, depletion: 0, amortization: 1100, casualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 700, nonrecurringIncome: 0 },
+      ],
+    },
+  ]);
+  const [activeScheduleFId, setActiveScheduleFId] = useState('farm-vance');
+  const activeScheduleF = scheduleFEntities.find((entry) => entry.id === activeScheduleFId) ?? scheduleFEntities[0];
+  const scheduleFChoice = scheduleFChoices[activeScheduleF.id] ?? null;
+  const setScheduleFChoice = (value: string | null) =>
+    setScheduleFChoices((choices) => ({ ...choices, [activeScheduleF.id]: value }));
+  const patchScheduleFYear = (index: number, patch: Partial<ScheduleFYear>) =>
+    setScheduleFEntities((entities) => entities.map((entity) => entity.id === activeScheduleF.id
+      ? { ...entity, years: entity.years.map((year, i) => i === index ? { ...year, ...patch } : year) as [ScheduleFYear, ScheduleFYear] }
+      : entity));
+
+  const [assetIncomeYears, setAssetIncomeYears] = useState<[AssetIncomeYear, AssetIncomeYear]>([
+    { year: 2025, interestIncome: 4200, dividendIncome: 7600, capitalGainsNetLoss: 12500 },
+    { year: 2024, interestIncome: 3900, dividendIncome: 7100, capitalGainsNetLoss: 9800 },
+  ]);
+  const [assetIncomeIncluded, setAssetIncomeIncluded] = useState(false);
+  const [loanProgram, setLoanProgram] = useState<'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA'>('CONVENTIONAL');
+
+  useEffect(() => {
+    if (!isLive || !liveSession) return;
+    const documentLabels = Object.values(liveSession.result.classifications).flat().join(' ');
+    if (/USDA|Rural Development|3555/i.test(documentLabels)) setLoanProgram('USDA');
+    else if (/FHA|HUD-92800|HUD 92900/i.test(documentLabels)) setLoanProgram('FHA');
+    else if (/VA|Notice of Value|26-7/i.test(documentLabels)) setLoanProgram('VA');
+  }, [isLive, liveSession?.result.transaction_id]);
 
   // Borrower Core Metadata Reference
   const borrowerMetadata = {
     loanId: 'LN-2026-88042',
     borrowerName: 'Sarah K. Vance',
-    currentEmployer: 'Apex Technology Partners LLC',
-    employmentStartDate: '2025-12-15', // Less than 12 months at current job!
-    loanProgram: 'CONVENTIONAL',
+    currentEmployer: activeW2Employer.employerName,
+    employmentStartDate: activeW2Employer.employmentStartDate,
+    loanProgram,
   };
 
   // 4. Dynamic Spatial Fields Definitions (For Interactive Highlights)
@@ -404,6 +617,20 @@ export default function UnderwriterSplitViewDemo({
     return { y1, y2 };
   }, [schCYears]);
 
+  const additionalW2Monthly = useMemo(
+    () =>
+      w2Employers
+        .filter((entry) => entry.id !== activeW2Employer.id)
+        .reduce(
+          (totals, entry) => ({
+            base: totals.base + (entry.hourlyRate * entry.weeklyHours * 52) / 12,
+            variable: totals.variable + (entry.bonusYtd + entry.overtimeYtd) / Math.max(entry.monthsAtJob, 1),
+          }),
+          { base: 0, variable: 0 },
+        ),
+    [w2Employers, activeW2Employer.id],
+  );
+
   const sCorpLRatio = useMemo(() => scheduleLQuickRatio(sCorpL), [sCorpL]);
   const partnershipLRatio = useMemo(() => scheduleLQuickRatio(partnershipL), [partnershipL]);
 
@@ -465,6 +692,60 @@ export default function UnderwriterSplitViewDemo({
     const y2 = corpBusinessAnnual(partnershipYears[1], partnershipPct);
     return { y1, y2, gpMonthly, dropped: !partnershipLRatio.passes, isMinority: false, wasCapped: false };
   }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes]);
+
+  const scheduleFAnnual = (year: ScheduleFYear) =>
+    year.netFarmProfitLoss +
+    year.depreciation +
+    year.depletion +
+    year.amortization +
+    year.casualtyLoss +
+    year.businessUseOfHome -
+    year.mealsExclusion -
+    year.nonrecurringIncome;
+
+  const scheduleFFlow = useMemo(
+    () => ({ y1: scheduleFAnnual(activeScheduleF.years[0]), y2: scheduleFAnnual(activeScheduleF.years[1]) }),
+    [activeScheduleF],
+  );
+
+  const additionalBusinessMonthly = useMemo(() => {
+    const scheduleC = schCEntities
+      .filter((entity) => entity.id !== activeSchC.id)
+      .reduce((sum, entity) => sum + monthlyFromYears(schCAnnual(entity.years[0]), schCAnnual(entity.years[1]), twoYearSchC), 0);
+    const scheduleF = scheduleFEntities
+      .filter((entity) => entity.id !== activeScheduleF.id)
+      .reduce((sum, entity) => sum + monthlyFromYears(scheduleFAnnual(entity.years[0]), scheduleFAnnual(entity.years[1]), twoYearScheduleF), 0);
+    const sCorp = sCorpEntities
+      .filter((entity) => entity.id !== activeSCorp.id)
+      .reduce((sum, entity) => {
+        const ratio = scheduleLQuickRatio(entity.scheduleL);
+        const first = entity.ownershipPct < 25
+          ? corpMinorityAnnual(entity.years[0], entity.ownershipPct).capped + entity.years[0].w2Wages
+          : (ratio.passes ? corpBusinessAnnual(entity.years[0], entity.ownershipPct) : 0) + entity.years[0].w2Wages;
+        const second = entity.ownershipPct < 25
+          ? corpMinorityAnnual(entity.years[1], entity.ownershipPct).capped + entity.years[1].w2Wages
+          : (ratio.passes ? corpBusinessAnnual(entity.years[1], entity.ownershipPct) : 0) + entity.years[1].w2Wages;
+        return sum + monthlyFromYears(first, second, twoYearScorp);
+      }, 0);
+    const partnership = partnershipEntities
+      .filter((entity) => entity.id !== activePartnership.id)
+      .reduce((sum, entity) => {
+        const pct = gseInvestor === 'FREDDIE' ? entity.profitPctEnd : entity.capitalPctEnd;
+        const ratio = scheduleLQuickRatio(entity.scheduleL);
+        const first = pct < 25
+          ? corpMinorityAnnual(entity.years[0], pct).capped
+          : ratio.passes ? corpBusinessAnnual(entity.years[0], pct) : entity.years[0].guaranteedPayments * (pct / 100);
+        const second = pct < 25
+          ? corpMinorityAnnual(entity.years[1], pct).capped
+          : ratio.passes ? corpBusinessAnnual(entity.years[1], pct) : entity.years[1].guaranteedPayments * (pct / 100);
+        return sum + monthlyFromYears(first, second, twoYearPartnership);
+      }, 0);
+    return { scheduleC, scheduleF, sCorp, partnership };
+  }, [
+    schCEntities, activeSchC.id, twoYearSchC, scheduleFEntities, activeScheduleF.id, twoYearScheduleF,
+    sCorpEntities, activeSCorp.id, twoYearScorp, partnershipEntities, activePartnership.id,
+    gseInvestor, twoYearPartnership,
+  ]);
 
   // ── Rental Income (Schedule E Page 1 · Form 1084 / 1038 worksheet) ──────────
 
@@ -777,28 +1058,106 @@ export default function UnderwriterSplitViewDemo({
     };
   }, [partnershipFlow, twoYearPartnership, gseInvestor, partnershipPct]);
 
+  const scheduleFPicks = useMemo(() => {
+    const rec = seRecommend(scheduleFFlow.y1, scheduleFFlow.y2, twoYearScheduleF);
+    return {
+      options: seAvgOptions(scheduleFFlow.y1, scheduleFFlow.y2, twoYearScheduleF),
+      recommendedId: rec.id,
+      reason: `Schedule F farm cash flow uses net profit or loss adjusted for documented non-cash and nonrecurring items. ${rec.reason}`,
+    };
+  }, [scheduleFFlow, twoYearScheduleF]);
+
+  const assetIncomeAnnual = useMemo(
+    () => assetIncomeYears.map((entry) => entry.interestIncome + entry.dividendIncome + entry.capitalGainsNetLoss) as [number, number],
+    [assetIncomeYears],
+  );
+  const assetIncomeMonthly = twoYearAssetIncome
+    ? (assetIncomeAnnual[0] + assetIncomeAnnual[1]) / 24
+    : assetIncomeAnnual[0] / 12;
+  const assetIncomePicks = useMemo(
+    () => ({
+      options: [
+        { id: 'excluded', label: 'Excluded', monthly: 0, formula: 'Detected data retained · not used by default' },
+        {
+          id: 'include',
+          label: 'Include with UW approval',
+          monthly: assetIncomeMonthly,
+          formula: twoYearAssetIncome ? '24-month average after continuance review' : 'Most recent year / 12 after continuance review',
+        },
+      ],
+      recommendedId: 'excluded',
+      reason:
+        'Interest, dividends, and capital gains are retained for review but excluded from qualifying income by default. The UW may include them after verifying receipt history, continuance, and sufficient supporting assets.',
+    }),
+    [assetIncomeMonthly, twoYearAssetIncome],
+  );
+
   const w2BaseChosen = chosenMonthly(w2BasePicks.options, w2BaseChoice, w2BasePicks.recommendedId);
   const w2VarChosen = chosenMonthly(w2VarPicks.options, w2VarChoice, w2VarPicks.recommendedId);
   const schCChosen = chosenMonthly(schCPicks.options, schCChoice, schCPicks.recommendedId);
   const sCorpChosen = chosenMonthly(sCorpPicks.options, sCorpChoice, sCorpPicks.recommendedId);
   const partnershipChosen = chosenMonthly(partnershipPicks.options, partnershipChoice, partnershipPicks.recommendedId);
+  const scheduleFChosen = chosenMonthly(scheduleFPicks.options, scheduleFChoice, scheduleFPicks.recommendedId);
+  const assetIncomeChosen = chosenMonthly(
+    assetIncomePicks.options,
+    assetIncomeIncluded ? 'include' : null,
+    assetIncomePicks.recommendedId,
+  );
   const rentalChosen = chosenMonthly(rentalPicks.options, rentalChoice, rentalPicks.recommendedId);
 
   const form1084CashFlow = {
-    qualifyingMonthlySelfEmployed: schCChosen.monthly,
-    sCorpShareholderDraw: sCorpChosen.monthly,
-    partnershipMonthly: partnershipChosen.monthly,
-    w2BaseMonthly: w2BaseChosen.monthly,
-    w2VariableMonthly: w2VarChosen.monthly,
+    qualifyingMonthlySelfEmployed: schCChosen.monthly + additionalBusinessMonthly.scheduleC,
+    sCorpShareholderDraw: sCorpChosen.monthly + additionalBusinessMonthly.sCorp,
+    partnershipMonthly: partnershipChosen.monthly + additionalBusinessMonthly.partnership,
+    scheduleFMonthly: scheduleFChosen.monthly + additionalBusinessMonthly.scheduleF,
+    assetIncomeMonthly: assetIncomeChosen.monthly,
+    w2BaseMonthly: w2BaseChosen.monthly + additionalW2Monthly.base,
+    w2VariableMonthly: w2VarChosen.monthly + additionalW2Monthly.variable,
     rentalMonthly: rentalChosen.monthly,
     finalTotalQualifyingMonthly:
       schCChosen.monthly +
       sCorpChosen.monthly +
       partnershipChosen.monthly +
+      additionalBusinessMonthly.scheduleC +
+      additionalBusinessMonthly.sCorp +
+      additionalBusinessMonthly.partnership +
+      scheduleFChosen.monthly +
+      additionalBusinessMonthly.scheduleF +
+      assetIncomeChosen.monthly +
       w2BaseChosen.monthly +
+      additionalW2Monthly.base +
       w2VarChosen.monthly +
+      additionalW2Monthly.variable +
       rentalChosen.monthly,
   };
+
+  const usdaSelfEmployment = useMemo(
+    () => [
+      ...schCEntities.map((entity) => ({
+        type: 'SCHEDULE_C' as const,
+        entityId: entity.id,
+        businessName: entity.businessName,
+        ein: entity.ein,
+        netProfitLoss: entity.years[0].line31,
+        depreciation: entity.years[0].line13,
+        businessUseOfHome: entity.years[0].line30,
+        mealsExclusion: entity.years[0].line24bMeals,
+      })),
+      ...scheduleFEntities.map((entity) => ({
+        type: 'SCHEDULE_F' as const,
+        entityId: entity.id,
+        businessName: entity.businessName,
+        ein: entity.ein,
+        netFarmProfitLoss: entity.years[0].netFarmProfitLoss,
+        depreciation: entity.years[0].depreciation,
+        businessUseOfHome: entity.years[0].businessUseOfHome,
+        amortizationCasualtyLossDepletion:
+          entity.years[0].amortization + entity.years[0].casualtyLoss + entity.years[0].depletion,
+        nonrecurringOtherIncomeLoss: -entity.years[0].nonrecurringIncome,
+      })),
+    ],
+    [schCEntities, scheduleFEntities],
+  );
 
   // Core Orchestrated Warnings
   const activeIncomeWarnings = useMemo(() => {
@@ -863,6 +1222,16 @@ export default function UnderwriterSplitViewDemo({
       });
     }
 
+    if (assetIncomeAnnual.some((amount) => amount !== 0)) {
+      list.push({
+        id: assetIncomeIncluded ? 'ASSET_INCOME_UW_INCLUDED' : 'ASSET_INCOME_EXCLUDED',
+        type: 'WARNING',
+        message: assetIncomeIncluded
+          ? 'Interest, dividend, and capital-gain income was included by UW election. Verify stable receipt history, three-year continuance, and sufficient supporting asset balances before final approval.'
+          : 'Interest, dividend, and capital-gain income was detected and retained, but excluded from qualifying income by default. Additional income may be eligible; the underwriter may elect to include it after continuance and asset-support review.',
+      });
+    }
+
     // Rental PITIA missing (Encompass loan details did not include the property)
     if (rentalFlow.anyPitiaMissing) {
       const missing = rentalFlow.properties.filter((p) => p.pitiaMissing).map((p) => p.address || 'Unnamed property');
@@ -903,7 +1272,7 @@ export default function UnderwriterSplitViewDemo({
     }
 
     return list;
-  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor]);
+  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor, assetIncomeAnnual, assetIncomeIncluded]);
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
@@ -913,6 +1282,84 @@ export default function UnderwriterSplitViewDemo({
     if (target) setActivePdfPage(target.boxCoordinates.page);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
+  };
+
+  const asEntityOptions = <T extends { id: string; businessName?: string; employerName?: string; ein?: string }>(
+    entries: T[],
+  ): IncomeEntityOption[] =>
+    entries.map((entry) => ({
+      id: entry.id,
+      name: entry.businessName ?? entry.employerName ?? 'Unnamed entity',
+      ein: entry.ein,
+    }));
+
+  const addW2Employer = () => {
+    const id = `w2-${crypto.randomUUID()}`;
+    setW2Employers((entries) => [
+      ...entries,
+      {
+        id, employerName: `New Employer ${entries.length + 1}`, ein: '', employmentStartDate: '',
+        role: 'CONCURRENT', monthsAtJob: 12, hourlyRate: 0, weeklyHours: 40,
+        currentPeriodBasePay: 0, baseYtd: 0, bonusYtd: 0, overtimeYtd: 0, otherYtd: 0,
+      },
+    ]);
+    setActiveW2EmployerId(id);
+  };
+
+  const removeW2Employer = (id: string) => {
+    const remaining = w2Employers.filter((entry) => entry.id !== id);
+    setW2Employers(remaining);
+    setActiveW2EmployerId(remaining[0].id);
+  };
+
+  const addScheduleCEntity = () => {
+    const id = `schc-${crypto.randomUUID()}`;
+    setSchCEntities((entities) => [...entities, {
+      id, businessName: `New Schedule C Business ${entities.length + 1}`, ein: '',
+      years: [
+        { year: 2025, line31: 0, line13: 0, line30: 0, line44aMiles: 0, line24bMeals: 0 },
+        { year: 2024, line31: 0, line13: 0, line30: 0, line44aMiles: 0, line24bMeals: 0 },
+      ],
+    }]);
+    setActiveSchCId(id);
+  };
+
+  const addSCorpEntity = () => {
+    const id = `scorp-${crypto.randomUUID()}`;
+    const emptyYear = (year: number): CorpYear => ({
+      year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
+      depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+    });
+    setSCorpEntities((entities) => [...entities, {
+      id, businessName: `New S-Corporation ${entities.length + 1}`, ein: '', ownershipPct: 100,
+      scheduleL: { ...baseSCorpScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
+    }]);
+    setActiveSCorpId(id);
+  };
+
+  const addPartnershipEntity = () => {
+    const id = `partnership-${crypto.randomUUID()}`;
+    const emptyYear = (year: number): CorpYear => ({
+      year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
+      depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+    });
+    setPartnershipEntities((entities) => [...entities, {
+      id, businessName: `New Partnership ${entities.length + 1}`, ein: '', profitPctEnd: 100, capitalPctEnd: 100,
+      scheduleL: { ...basePartnershipScheduleL }, years: [emptyYear(2025), emptyYear(2024)],
+    }]);
+    setActivePartnershipId(id);
+  };
+
+  const addScheduleFEntity = () => {
+    const id = `farm-${crypto.randomUUID()}`;
+    const emptyYear = (year: number): ScheduleFYear => ({
+      year, netFarmProfitLoss: 0, depreciation: 0, depletion: 0, amortization: 0,
+      casualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 0, nonrecurringIncome: 0,
+    });
+    setScheduleFEntities((entities) => [...entities, {
+      id, businessName: `New Farm ${entities.length + 1}`, ein: '', years: [emptyYear(2025), emptyYear(2024)],
+    }]);
+    setActiveScheduleFId(id);
   };
 
   // ==================== DUAL-MONITOR DOCUMENT PANE (UW / QA) ====================
@@ -932,6 +1379,8 @@ export default function UnderwriterSplitViewDemo({
         ? twoYearScorp
         : activeTab === 'PARTNERSHIP'
           ? twoYearPartnership
+          : activeTab === 'SCHEDULE_F'
+            ? twoYearScheduleF
           : activeTab === 'SCHEDULE_E'
             ? twoYearRental
             : true;
@@ -1323,6 +1772,24 @@ export default function UnderwriterSplitViewDemo({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-500">
+            Program
+            <select
+              value={loanProgram}
+              onChange={(event) => setLoanProgram(event.target.value as typeof loanProgram)}
+              className={`rounded border px-2 py-1 text-xs font-black outline-none ${
+                loanProgram === 'USDA'
+                  ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                  : 'border-slate-200 bg-slate-50 text-slate-800'
+              }`}
+              aria-label="Loan program"
+            >
+              <option value="CONVENTIONAL">Conventional</option>
+              <option value="FHA">FHA</option>
+              <option value="VA">VA</option>
+              <option value="USDA">USDA Rural Development</option>
+            </select>
+          </label>
           {!docPopout ? (
             <button
               type="button"
@@ -1418,6 +1885,10 @@ export default function UnderwriterSplitViewDemo({
                         ? 'Form 1065'
                         : activeTab === 'SCHEDULE_E'
                           ? 'Schedule E'
+                          : activeTab === 'SCHEDULE_F'
+                            ? 'Schedule F'
+                            : activeTab === 'ASSET_INCOME'
+                              ? 'Schedules B / D'
                           : activeTab === 'W2_CONTINUITY'
                             ? 'Form W-2'
                             : 'Paystub'}
@@ -1453,6 +1924,43 @@ export default function UnderwriterSplitViewDemo({
                     </div>
                   )}
                 <FixturePdfViewer url={fixturePdf.url} label={fixturePdf.label} />
+              </div>
+            ) : activeTab === 'SCHEDULE_F' ? (
+              <div className="h-[540px] overflow-auto rounded-lg border border-slate-300 bg-[#f8f6f1] p-4 shadow-inner">
+                <div className="min-h-full rounded border-2 border-slate-900 bg-white p-4">
+                  <p className="text-[8px] font-bold uppercase tracking-widest text-slate-500">Department of the Treasury — Internal Revenue Service</p>
+                  <h3 className="border-b-2 border-slate-900 pb-2 text-sm font-black">Schedule F (Form 1040) · Profit or Loss From Farming</h3>
+                  <p className="py-3 text-xs font-bold">{activeScheduleF.businessName} · EIN {activeScheduleF.ein || 'pending'}</p>
+                  <div className="space-y-2">
+                    {Object.entries(activeScheduleF.years[canvasYearIndex]).map(([key, value]) => (
+                      <div key={key} className="flex justify-between rounded border border-slate-200 px-3 py-2 text-xs">
+                        <span className="font-semibold text-slate-600">{key.replace(/([A-Z])/g, ' $1')}</span>
+                        <span className="font-mono font-black">{typeof value === 'number' ? value.toLocaleString() : value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : activeTab === 'ASSET_INCOME' ? (
+              <div className="h-[540px] overflow-auto rounded-lg border border-slate-300 bg-[#f8f6f1] p-4 shadow-inner">
+                <div className="min-h-full rounded border-2 border-slate-900 bg-white p-4">
+                  <p className="text-[8px] font-bold uppercase tracking-widest text-slate-500">Department of the Treasury — Internal Revenue Service</p>
+                  <h3 className="border-b-2 border-slate-900 pb-2 text-sm font-black">Schedule B / Schedule D</h3>
+                  <p className="py-3 text-xs font-bold">{assetIncomeYears[canvasYearIndex].year} extracted asset income</p>
+                  {[
+                    ['Taxable interest', assetIncomeYears[canvasYearIndex].interestIncome],
+                    ['Ordinary dividends', assetIncomeYears[canvasYearIndex].dividendIncome],
+                    ['Net capital gain / (loss)', assetIncomeYears[canvasYearIndex].capitalGainsNetLoss],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="mb-2 flex justify-between rounded border border-slate-200 px-3 py-2 text-xs">
+                      <span className="font-semibold text-slate-600">{label}</span>
+                      <span className="font-mono font-black">{usd(Number(value))}</span>
+                    </div>
+                  ))}
+                  <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                    Data retained. Excluded from qualifying income unless the UW elects inclusion.
+                  </div>
+                </div>
               </div>
             ) : (
               <DemoDocumentCanvas
@@ -1519,6 +2027,16 @@ export default function UnderwriterSplitViewDemo({
               </button>
             </div>
           )}
+
+          {loanProgram === 'USDA' && (
+            <UsdaDistributionToggle
+              embedded
+              loanId={borrowerMetadata.loanId}
+              borrowerName={borrowerMetadata.borrowerName}
+              borrowerEarnedIncomeMonthly={form1084CashFlow.w2BaseMonthly + form1084CashFlow.w2VariableMonthly}
+              borrowerSelfEmployment={usdaSelfEmployment}
+            />
+          )}
           
           {/* Main Workspace Navigation Tab Array */}
           <div className="flex flex-wrap gap-1 rounded-lg border-b border-slate-200 bg-white p-1.5 shadow-sm">
@@ -1552,6 +2070,44 @@ export default function UnderwriterSplitViewDemo({
                 <span className="text-xs font-bold uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
                   Verified Base: $3,600.00 / Semi-Monthly
                 </span>
+              </div>
+
+              <IncomeEntitySelector
+                label="Employer / W-2"
+                entities={asEntityOptions(w2Employers)}
+                activeId={activeW2Employer.id}
+                onSelect={setActiveW2EmployerId}
+                onAdd={addW2Employer}
+                onRemove={removeW2Employer}
+              />
+              <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 text-xs md:grid-cols-3">
+                <label className="font-bold text-slate-500">
+                  Employer name
+                  <input
+                    value={activeW2Employer.employerName}
+                    onChange={(event) => patchW2Employer({ employerName: event.target.value })}
+                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
+                  />
+                </label>
+                <label className="font-bold text-slate-500">
+                  EIN
+                  <input
+                    value={activeW2Employer.ein}
+                    onChange={(event) => patchW2Employer({ ein: event.target.value })}
+                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-slate-900"
+                  />
+                </label>
+                <label className="font-bold text-slate-500">
+                  Job relationship
+                  <select
+                    value={activeW2Employer.role}
+                    onChange={(event) => patchW2Employer({ role: event.target.value as W2Employer['role'] })}
+                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
+                  >
+                    <option value="PRIMARY">Primary current employer</option>
+                    <option value="CONCURRENT">Concurrent employer</option>
+                  </select>
+                </label>
               </div>
 
               {/* Core interactive variable modification boxes */}
@@ -1682,6 +2238,15 @@ export default function UnderwriterSplitViewDemo({
                 </div>
               </div>
 
+              <IncomeEntitySelector
+                label="Employer / W-2"
+                entities={asEntityOptions(w2Employers)}
+                activeId={activeW2Employer.id}
+                onSelect={setActiveW2EmployerId}
+                onAdd={addW2Employer}
+                onRemove={removeW2Employer}
+              />
+
               {/* Tenure configuration inputs */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
                 <div>
@@ -1805,6 +2370,21 @@ export default function UnderwriterSplitViewDemo({
               choiceId={schCChoice}
               onChoice={setSchCChoice}
             >
+              <IncomeEntitySelector
+                label="Schedule C business"
+                entities={asEntityOptions(schCEntities)}
+                activeId={activeSchC.id}
+                onSelect={setActiveSchCId}
+                onAdd={addScheduleCEntity}
+                onUpdate={(id, patch) => setSchCEntities((entities) => entities.map((entity) =>
+                  entity.id === id ? { ...entity, businessName: patch.name ?? entity.businessName, ein: patch.ein ?? entity.ein } : entity,
+                ))}
+                onRemove={(id) => {
+                  const remaining = schCEntities.filter((entity) => entity.id !== id);
+                  setSchCEntities(remaining);
+                  setActiveSchCId(remaining[0].id);
+                }}
+              />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {schCYears.slice(0, twoYearSchC ? 2 : 1).map((row, index) => (
                   <YearStack
@@ -1865,6 +2445,21 @@ export default function UnderwriterSplitViewDemo({
                 </label>
               }
             >
+              <IncomeEntitySelector
+                label="S-Corporation"
+                entities={asEntityOptions(sCorpEntities)}
+                activeId={activeSCorp.id}
+                onSelect={setActiveSCorpId}
+                onAdd={addSCorpEntity}
+                onUpdate={(id, patch) => setSCorpEntities((entities) => entities.map((entity) =>
+                  entity.id === id ? { ...entity, businessName: patch.name ?? entity.businessName, ein: patch.ein ?? entity.ein } : entity,
+                ))}
+                onRemove={(id) => {
+                  const remaining = sCorpEntities.filter((entity) => entity.id !== id);
+                  setSCorpEntities(remaining);
+                  setActiveSCorpId(remaining[0].id);
+                }}
+              />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {sCorpYears.slice(0, twoYearScorp ? 2 : 1).map((row, index) => (
                   <YearStack key={row.year} title={`${row.year} K-1`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
@@ -1956,6 +2551,21 @@ export default function UnderwriterSplitViewDemo({
                 </div>
               }
             >
+              <IncomeEntitySelector
+                label="Partnership"
+                entities={asEntityOptions(partnershipEntities)}
+                activeId={activePartnership.id}
+                onSelect={setActivePartnershipId}
+                onAdd={addPartnershipEntity}
+                onUpdate={(id, patch) => setPartnershipEntities((entities) => entities.map((entity) =>
+                  entity.id === id ? { ...entity, businessName: patch.name ?? entity.businessName, ein: patch.ein ?? entity.ein } : entity,
+                ))}
+                onRemove={(id) => {
+                  const remaining = partnershipEntities.filter((entity) => entity.id !== id);
+                  setPartnershipEntities(remaining);
+                  setActivePartnershipId(remaining[0].id);
+                }}
+              />
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {partnershipYears.slice(0, twoYearPartnership ? 2 : 1).map((row, index) => (
                   <YearStack key={row.year} title={`${row.year} K-1`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
@@ -1991,6 +2601,132 @@ export default function UnderwriterSplitViewDemo({
                 onSelect={handleInspectField}
               />
             </SelfEmployedPanel>
+          )}
+
+          {activeTab === 'SCHEDULE_F' && (
+            <SelfEmployedPanel
+              title="Schedule F · farm income"
+              subtitle="Farm profit or loss with Form 1084 non-cash and nonrecurring adjustments, tracked separately for each farm."
+              twoYears={twoYearScheduleF}
+              onTwoYears={(next) => {
+                setTwoYearScheduleF(next);
+                if (!next) setCanvasYearIndex(0);
+              }}
+              choiceOptions={scheduleFPicks.options}
+              recommendedId={scheduleFPicks.recommendedId}
+              reason={scheduleFPicks.reason}
+              choiceId={scheduleFChoice}
+              onChoice={setScheduleFChoice}
+            >
+              <IncomeEntitySelector
+                label="Farm business"
+                entities={asEntityOptions(scheduleFEntities)}
+                activeId={activeScheduleF.id}
+                onSelect={setActiveScheduleFId}
+                onAdd={addScheduleFEntity}
+                onUpdate={(id, patch) => setScheduleFEntities((entities) => entities.map((entity) =>
+                  entity.id === id ? { ...entity, businessName: patch.name ?? entity.businessName, ein: patch.ein ?? entity.ein } : entity,
+                ))}
+                onRemove={(id) => {
+                  const remaining = scheduleFEntities.filter((entity) => entity.id !== id);
+                  setScheduleFEntities(remaining);
+                  setActiveScheduleFId(remaining[0].id);
+                }}
+              />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {activeScheduleF.years.slice(0, twoYearScheduleF ? 2 : 1).map((year, index) => (
+                  <YearStack key={year.year} title={`${year.year} Schedule F`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
+                    {[
+                      ['Line 34', 'Net farm profit / (loss)', 'netFarmProfitLoss'],
+                      ['Line 14', 'Depreciation', 'depreciation'],
+                      ['Line 32', 'Depletion', 'depletion'],
+                      ['Line 32', 'Amortization', 'amortization'],
+                      ['Line 32', 'Casualty loss', 'casualtyLoss'],
+                      ['Form 8829', 'Business use of home', 'businessUseOfHome'],
+                      ['Line 24b', 'Meals exclusion', 'mealsExclusion'],
+                      ['Other', 'Nonrecurring income', 'nonrecurringIncome'],
+                    ].map(([line, label, key]) => (
+                      <label key={key} className="flex items-center gap-2 rounded border border-slate-200 bg-white px-2.5 py-2 text-xs">
+                        <span className="w-20 shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">{line}</span>
+                        <span className="min-w-0 flex-1 font-semibold text-slate-700">{label}</span>
+                        <input
+                          type="number"
+                          value={year[key as keyof ScheduleFYear]}
+                          onChange={(event) => patchScheduleFYear(index, { [key]: Number(event.target.value) })}
+                          className="w-28 rounded border border-slate-300 px-2 py-1.5 text-right font-mono font-bold"
+                        />
+                      </label>
+                    ))}
+                    <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
+                      Adjusted annual farm cash flow {usd(scheduleFAnnual(year))}
+                    </p>
+                  </YearStack>
+                ))}
+              </div>
+            </SelfEmployedPanel>
+          )}
+
+          {activeTab === 'ASSET_INCOME' && (
+            <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="border-b border-slate-100 pb-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900">
+                      <Coins className="h-5 w-5 text-amber-600" />
+                      Interest, Dividends & Capital Gains
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">Schedule B / Schedule D values remain visible whether or not the UW elects to qualify them.</p>
+                  </div>
+                  <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                    <button type="button" onClick={() => setTwoYearAssetIncome(false)} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${!twoYearAssetIncome ? 'bg-slate-900 text-white' : 'text-slate-500'}`}>1 year</button>
+                    <button type="button" onClick={() => setTwoYearAssetIncome(true)} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${twoYearAssetIncome ? 'bg-slate-900 text-white' : 'text-slate-500'}`}>2 years</button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs leading-relaxed text-amber-950">
+                <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
+                <p>
+                  <strong className="block uppercase tracking-wider">Excluded from qualifying income by default</strong>
+                  Additional income from these sources may be eligible. The underwriter may choose to include it after verifying receipt history, expected continuance, and sufficient supporting asset balances.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {assetIncomeYears.slice(0, twoYearAssetIncome ? 2 : 1).map((year, index) => (
+                  <YearStack key={year.year} title={`${year.year} tax return`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
+                    {[
+                      ['Schedule B', 'Taxable interest', 'interestIncome'],
+                      ['Schedule B', 'Ordinary dividends', 'dividendIncome'],
+                      ['Schedule D', 'Net capital gain / (loss)', 'capitalGainsNetLoss'],
+                    ].map(([line, label, key]) => (
+                      <label key={key} className="flex items-center gap-2 rounded border border-slate-200 bg-white px-2.5 py-2 text-xs">
+                        <span className="w-20 shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">{line}</span>
+                        <span className="min-w-0 flex-1 font-semibold text-slate-700">{label}</span>
+                        <input
+                          type="number"
+                          value={year[key as keyof AssetIncomeYear]}
+                          onChange={(event) =>
+                            setAssetIncomeYears((entries) => entries.map((entry, i) =>
+                              i === index ? { ...entry, [key]: Number(event.target.value) } : entry,
+                            ) as [AssetIncomeYear, AssetIncomeYear])
+                          }
+                          className="w-28 rounded border border-slate-300 px-2 py-1.5 text-right font-mono font-bold"
+                        />
+                      </label>
+                    ))}
+                    <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
+                      Detected annual total {usd(assetIncomeAnnual[index])}
+                    </p>
+                  </YearStack>
+                ))}
+              </div>
+              <IncomeChoicePanel
+                options={assetIncomePicks.options}
+                recommendedId={assetIncomePicks.recommendedId}
+                reason={assetIncomePicks.reason}
+                selectedId={assetIncomeIncluded ? 'include' : null}
+                onSelect={(id) => setAssetIncomeIncluded(id === 'include')}
+              />
+            </div>
           )}
           
           {/* ==================== TAB: RENTAL INCOME (SCHEDULE E PAGE 1) ==================== */}
@@ -2406,10 +3142,25 @@ export default function UnderwriterSplitViewDemo({
                   <span className="mt-0.5 block text-[11px] text-slate-500">Partnership · {partnershipChosen.label}</span>
                   <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.partnershipMonthly)}/mo</span>
                 </div>
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <span className="text-[10px] font-black uppercase text-slate-400">Schedule F</span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">Farm income · {scheduleFChosen.label}</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.scheduleFMonthly)}/mo</span>
+                </div>
+                <div className={`rounded-lg border p-4 ${assetIncomeIncluded ? 'border-amber-300 bg-amber-50' : 'bg-slate-50'}`}>
+                  <span className="text-[10px] font-black uppercase text-slate-400">Asset income</span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">Interest / dividends / gains · {assetIncomeChosen.label}</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.assetIncomeMonthly)}/mo</span>
+                </div>
                 <div className="rounded-lg border bg-slate-50 p-4 ring-2 ring-indigo-200">
                   <span className="text-[10px] font-black uppercase text-slate-400">Field 113</span>
                   <span className="mt-0.5 block text-[11px] text-slate-500">Rental Income · {rentalChosen.label}</span>
                   <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.rentalMonthly)}/mo</span>
+                </div>
+                <div className="rounded-lg border border-indigo-300 bg-indigo-50 p-4 ring-2 ring-indigo-200">
+                  <span className="text-[10px] font-black uppercase text-indigo-500">Total qualifying income</span>
+                  <span className="mt-0.5 block text-[11px] text-indigo-700">{loanProgram} calculation</span>
+                  <span className="mt-1 block text-xl font-black text-indigo-900">{usd(form1084CashFlow.finalTotalQualifyingMonthly)}/mo</span>
                 </div>
               </div>
 

@@ -1,6 +1,6 @@
 import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord } from './parseTypes';
 
-export type IncomeForm = 'W-2' | 'Schedule C' | 'Schedule E' | 'Form 1040' | 'Form 1120-S' | 'Form 1065';
+export type IncomeForm = 'W-2' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065';
 
 export type IncomeFieldDef = {
   id: string;
@@ -8,13 +8,13 @@ export type IncomeFieldDef = {
   boxLabel: string;
   fieldLabel: string;
   lineNum: string;
-  category: 'wages' | 'withholding' | 'income' | 'addback' | 'mileage' | 'rental' | 'property';
+  category: 'wages' | 'withholding' | 'income' | 'addback' | 'mileage' | 'rental' | 'property' | 'identity' | 'asset' | 'farm';
   patterns: RegExp[];
   /** How the value is extracted from a matched line. Defaults to 'money'. */
   capture?: 'money' | 'integer' | 'text' | 'percent';
 };
 
-const MONEY = /(?:\$\s*)?(\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2})/;
+const MONEY = /(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}|\((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\))/;
 // Last standalone integer on the line (values sit at the right edge on tax forms)
 const TRAILING_INT = /(\d{1,3}(?:,\d{3})+|\d+)\s*$/;
 // All percentage tokens on a line. K-1 Item J prints Beginning then Ending columns,
@@ -22,6 +22,26 @@ const TRAILING_INT = /(\d{1,3}(?:,\d{3})+|\d+)\s*$/;
 const PERCENT = /(\d{1,3}(?:\.\d+)?)\s*%/g;
 
 export const W2_FIELD_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'w2-employer-name',
+    form: 'W-2',
+    boxLabel: 'Box c',
+    fieldLabel: 'Employer Name',
+    lineNum: 'Box c',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employer(?:'s)? name(?:, address and zip code)?\s*[:#–—-]?\s*/i],
+  },
+  {
+    id: 'w2-employer-ein',
+    form: 'W-2',
+    boxLabel: 'Box b',
+    fieldLabel: 'Employer Identification Number (EIN)',
+    lineNum: 'Box b',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employer(?:'s)? identification number(?:\s*\(ein\))?\s*[:#–—-]?\s*/i],
+  },
   {
     id: 'w2-box1',
     form: 'W-2',
@@ -105,6 +125,87 @@ export const SCHEDULE_C_DEFS: IncomeFieldDef[] = [
     lineNum: 'Line 44a',
     category: 'mileage',
     patterns: [/line\s*44a\b.{0,80}(miles|add-?back)/i, /business miles.{0,40}\d/i],
+  },
+];
+
+export const SCHEDULE_B_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'schedule-b-interest',
+    form: 'Schedule B',
+    boxLabel: 'Part I · Line 4',
+    fieldLabel: 'Taxable Interest Income',
+    lineNum: 'Line 4',
+    category: 'asset',
+    patterns: [/line\s*4\b.{0,80}(?:taxable\s+)?interest/i, /total\s+interest.{0,40}\d/i],
+  },
+  {
+    id: 'schedule-b-dividends',
+    form: 'Schedule B',
+    boxLabel: 'Part II · Line 6',
+    fieldLabel: 'Ordinary Dividend Income',
+    lineNum: 'Line 6',
+    category: 'asset',
+    patterns: [/line\s*6\b.{0,80}(?:ordinary\s+)?dividends?/i, /total\s+ordinary\s+dividends?.{0,40}\d/i],
+  },
+];
+
+export const SCHEDULE_D_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'schedule-d-capital-gain-loss',
+    form: 'Schedule D',
+    boxLabel: 'Line 16',
+    fieldLabel: 'Net Long/Short-Term Capital Gain or Loss',
+    lineNum: 'Line 16',
+    category: 'asset',
+    patterns: [/line\s*16\b.{0,80}(?:capital\s+)?gain|line\s*16\b.{0,80}loss/i, /combine lines 7 and 15.{0,60}\d/i],
+  },
+];
+
+export const SCHEDULE_F_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'schedule-f-net',
+    form: 'Schedule F',
+    boxLabel: 'Line 34',
+    fieldLabel: 'Net Farm Profit or Loss',
+    lineNum: 'Line 34',
+    category: 'farm',
+    patterns: [/line\s*34\b.{0,80}net farm profit|net farm profit or loss.{0,40}\d/i],
+  },
+  {
+    id: 'schedule-f-coop-ccc',
+    form: 'Schedule F',
+    boxLabel: 'Lines 3, 4, 6',
+    fieldLabel: 'Cooperative / CCC Payments',
+    lineNum: 'Lines 3, 4, 6',
+    category: 'farm',
+    patterns: [/(?:cooperative distributions|commodity credit corporation|ccc loans?).{0,60}\d/i],
+  },
+  {
+    id: 'schedule-f-other',
+    form: 'Schedule F',
+    boxLabel: 'Lines 5c & 8',
+    fieldLabel: 'Other Farm Income',
+    lineNum: 'Lines 5c & 8',
+    category: 'farm',
+    patterns: [/(?:line\s*(?:5c|8)\b.{0,60})?other income.{0,40}\d/i],
+  },
+  {
+    id: 'schedule-f-depreciation',
+    form: 'Schedule F',
+    boxLabel: 'Line 14',
+    fieldLabel: 'Depreciation',
+    lineNum: 'Line 14',
+    category: 'addback',
+    patterns: [/line\s*14\b.{0,80}depreciation|depreciation and section 179.{0,40}\d/i],
+  },
+  {
+    id: 'schedule-f-other-expense',
+    form: 'Schedule F',
+    boxLabel: 'Line 32',
+    fieldLabel: 'Other Expenses / Form 1084 Add-Back Support',
+    lineNum: 'Line 32',
+    category: 'addback',
+    patterns: [/line\s*32\b.{0,80}other expenses|other expenses.{0,40}\d/i],
   },
 ];
 
@@ -344,7 +445,16 @@ export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
   },
 ];
 
-export const INCOME_FIELD_DEFS: IncomeFieldDef[] = [...W2_FIELD_DEFS, ...SCHEDULE_C_DEFS, ...SCHEDULE_E_DEFS, ...SCORP_DEFS, ...PARTNERSHIP_DEFS];
+export const INCOME_FIELD_DEFS: IncomeFieldDef[] = [
+  ...W2_FIELD_DEFS,
+  ...SCHEDULE_B_DEFS,
+  ...SCHEDULE_C_DEFS,
+  ...SCHEDULE_D_DEFS,
+  ...SCHEDULE_E_DEFS,
+  ...SCHEDULE_F_DEFS,
+  ...SCORP_DEFS,
+  ...PARTNERSHIP_DEFS,
+];
 
 type LineCluster = {
   y: number;
@@ -458,9 +568,26 @@ function amountBox(line: LineCluster, moneyMatch: RegExpMatchArray): { box: Mapp
 function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
   const blob = page.formIds.join(' ').toLowerCase();
   if (form === 'W-2') return /w-?2/.test(blob);
+  if (form === 'Schedule B') return /schedule\s*b/.test(blob);
   if (form === 'Schedule C') return /schedule\s*c/.test(blob);
+  if (form === 'Schedule D') return /schedule\s*d/.test(blob);
   if (form === 'Schedule E') return /schedule\s*e/.test(blob);
+  if (form === 'Schedule F') return /schedule\s*f/.test(blob);
+  if (form === 'Form 1120-S') return /1120-?s/.test(blob);
+  if (form === 'Form 1065') return /1065/.test(blob);
   return /1040/.test(blob);
+}
+
+function formEntityId(form: IncomeForm, pageIndex: number): string {
+  return `${form.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-p${pageIndex}`;
+}
+
+function parseMoneyValue(raw: string): number {
+  const normalized = raw.replace(/[$,\s]/g, '');
+  if (normalized.startsWith('(') && normalized.endsWith(')')) {
+    return -Number(normalized.slice(1, -1));
+  }
+  return Number(normalized);
 }
 
 export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
@@ -468,16 +595,16 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
     return result.incomeFields;
   }
 
-  const found = new Map<string, MappedIncomeField>();
+  const found: MappedIncomeField[] = [];
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
 
   for (const def of INCOME_FIELD_DEFS) {
-    const ordered = [
-      ...pageLines.filter(({ page }) => pagePrefers(page, def.form)),
-      ...pageLines.filter(({ page }) => !pagePrefers(page, def.form)),
-    ];
+    const preferred = pageLines.filter(({ page }) => pagePrefers(page, def.form));
+    const ordered = preferred.length > 0 ? preferred : pageLines;
+    const allowMultipleEntities = preferred.length > 0;
+
     for (const { page, lines } of ordered) {
-      if (found.has(def.id)) break;
+      let mappedOnPage = false;
       for (const line of lines) {
         const matchedPattern = def.patterns.find((pattern) => pattern.test(line.text));
         if (!matchedPattern) continue;
@@ -490,7 +617,7 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
         if (capture === 'money') {
           const moneyMatch = line.text.match(MONEY);
           if (!moneyMatch) continue;
-          numeric = Number(moneyMatch[1].replace(/,/g, ''));
+          numeric = parseMoneyValue(moneyMatch[1]);
           if (!Number.isFinite(numeric)) continue;
           located = amountBox(line, moneyMatch);
           value = formatMoney(numeric);
@@ -528,8 +655,12 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
         }
 
         if (!located) continue;
-        found.set(def.id, {
-          id: def.id,
+        const entityId = formEntityId(def.form, page.index);
+        const isFirstDefinitionOccurrence = !found.some((field) => field.sourceFieldId === def.id);
+        found.push({
+          id: isFirstDefinitionOccurrence ? def.id : `${def.id}--${entityId}`,
+          entityId,
+          sourceFieldId: def.id,
           form: def.form,
           boxLabel: def.boxLabel,
           fieldLabel: def.fieldLabel,
@@ -541,12 +672,14 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
           wordIndex: located.wordIndex,
           box: located.box,
         });
+        mappedOnPage = true;
         break;
       }
+      if (mappedOnPage && !allowMultipleEntities) break;
     }
   }
 
-  return INCOME_FIELD_DEFS.map((def) => found.get(def.id)).filter((field): field is MappedIncomeField => Boolean(field));
+  return found;
 }
 
 export function fieldsOnPage(fields: MappedIncomeField[], pageIndex: number): MappedIncomeField[] {

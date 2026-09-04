@@ -6,7 +6,7 @@
  * browser (Upload PDF in the appraisal workspace) and the dev server (a blank
  * dropped into public/fixtures/blank/).
  */
-import { PDFDocument } from 'pdf-lib';
+import { PDFCheckBox, PDFDocument, PDFDropdown, PDFRadioGroup, PDFTextField } from 'pdf-lib';
 
 /** Matches the SUBJECT / appraiser data used across the appraisal workspace. */
 const DEMO_RULES: Array<{ match: RegExp; exclude?: RegExp; value: string }> = [
@@ -36,6 +36,21 @@ const DEMO_RULES: Array<{ match: RegExp; exclude?: RegExp; value: string }> = [
   { match: /census/i, value: '0024.07' },
 ];
 
+const CHECKBOX_RULES: Array<{ match: RegExp; exclude?: RegExp }> = [
+  { match: /owner.?occup(?:ied|ant)|occupancy.*owner/i, exclude: /tenant|vacant/i },
+  { match: /fee.?simple|property.?rights.*fee/i, exclude: /leasehold/i },
+  { match: /purchase(?:.?transaction)?|transaction.*purchase/i, exclude: /refinance/i },
+  { match: /highest.*best.*use.*yes|highest.*best.*use.*existing/i, exclude: /no/i },
+  { match: /utilities.*(?:active|on)|(?:active|on).*utilities/i, exclude: /inactive|off/i },
+];
+
+const CHOICE_RULES: Array<{ match: RegExp; values: string[] }> = [
+  { match: /occupancy|occupant/i, values: ['Owner', 'Owner Occupied', 'Owner-Occupied'] },
+  { match: /property.?rights|ownership/i, values: ['Fee Simple', 'FeeSimple'] },
+  { match: /transaction.?type|assignment.?type/i, values: ['Purchase', 'Purchase Transaction'] },
+  { match: /highest.*best.*use/i, values: ['Yes', 'Existing Use'] },
+];
+
 export interface AppraisalFillResult {
   bytes: Uint8Array;
   filledCount: number;
@@ -43,8 +58,9 @@ export interface AppraisalFillResult {
 }
 
 /**
- * Returns the filled + flattened PDF, or null when the document has no
- * fillable text fields (flat scans can't be auto-filled).
+ * Returns a filled PDF, or null when no safely matched AcroForm fields exist.
+ * Fields remain interactive so their values can be extracted by the appraisal
+ * API after upload.
  */
 export async function fillAppraisalPdfWithDemoData(source: ArrayBuffer | Uint8Array): Promise<AppraisalFillResult | null> {
   let doc: PDFDocument;
@@ -62,21 +78,50 @@ export async function fillAppraisalPdfWithDemoData(source: ArrayBuffer | Uint8Ar
   for (const field of fields) {
     const name = field.getName();
     const rule = DEMO_RULES.find((r) => r.match.test(name) && !(r.exclude && r.exclude.test(name)));
-    if (!rule) continue;
     try {
-      form.getTextField(name).setText(rule.value);
-      filledCount += 1;
+      if (field instanceof PDFTextField && rule) {
+        field.setText(rule.value);
+        filledCount += 1;
+        continue;
+      }
+      if (field instanceof PDFCheckBox) {
+        const checkRule = CHECKBOX_RULES.find((r) => r.match.test(name) && !(r.exclude && r.exclude.test(name)));
+        if (checkRule) {
+          field.check();
+          filledCount += 1;
+        }
+        continue;
+      }
+      if (field instanceof PDFRadioGroup || field instanceof PDFDropdown) {
+        const choiceRule = CHOICE_RULES.find((candidate) => candidate.match.test(name));
+        const requestedValues = rule ? [rule.value] : choiceRule?.values ?? [];
+        const option = safelyMatchedOption(field.getOptions(), requestedValues);
+        if (option) {
+          field.select(option);
+          filledCount += 1;
+        }
+      }
     } catch {
-      /* checkbox/radio or read-only field – skip */
+      /* Read-only or malformed vendor field – leave it unchanged. */
     }
   }
   if (filledCount === 0) return null;
 
   try {
-    form.flatten();
+    form.updateFieldAppearances();
   } catch {
-    /* leave interactive if flattening fails; values are still set */
+    /* Values remain in the AcroForm even when a vendor appearance fails. */
   }
   const bytes = await doc.save();
   return { bytes, filledCount, fieldCount: fields.length };
+}
+
+function safelyMatchedOption(options: string[], values: string[]): string | null {
+  const normalizedValues = new Set(values.map(normalizeOption));
+  const exact = options.filter((option) => normalizedValues.has(normalizeOption(option)));
+  return exact.length === 1 ? exact[0] : null;
+}
+
+function normalizeOption(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }

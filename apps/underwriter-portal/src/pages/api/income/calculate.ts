@@ -1,6 +1,10 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { PrismaClient } from '@prisma/client';
-import { calculateUnifiedIncome, UnifiedIncomeCalculationPayload, LoanProgram } from '@mortgage-pos/mortgage-engine';
+import {
+  dispatchIncomeCalculation,
+  UnifiedIncomeCalculationPayload,
+  LoanProgram
+} from '@mortgage-pos/mortgage-engine';
 
 // Initialize Prisma client (multi-tenant ledger database pool) [cite: 19, 20]
 const prisma = new PrismaClient();
@@ -64,7 +68,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Build the payload conforming strictly to UnifiedIncomeCalculationPayload structure [cite: 122]
     const calculationPayload: UnifiedIncomeCalculationPayload = {
       loanProgram: calculatorProgram,
+      w2Employers: documentData.w2Employers,
       scheduleC: documentData.scheduleC,
+      scheduleF: documentData.scheduleF,
       form1120S: documentData.form1120S,
       form1065: documentData.form1065,
       form1120: documentData.form1120,
@@ -72,16 +78,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       assets: documentData.assets,
       trusts: documentData.trusts,
       scheduleEProperties: documentData.scheduleEProperties,
-      militaryLES: documentData.militaryLES
+      militaryLES: documentData.militaryLES,
+      subjectPropertyRental: documentData.subjectPropertyRental
     };
 
-    // 5. Execute Core Mathematical Calculation Core (v5 Engine)
-    // Runs mathematically-sound calculations in transient server-side memory blocks (No persistent disk caching) [cite: 31, 33].
-    const calculationResults = calculateUnifiedIncome(calculationPayload);
+    // 5. Dispatch to a program-isolated engine. USDA never falls through to
+    // retrospective Form 1084 trending: it requires prospective repayment and
+    // household-eligibility inputs supplied directly to this income service.
+    let calculationResults: unknown;
+    let calculationEngine: 'FORM_1084' | 'USDA_STANDALONE';
+    let qualifyingMonthlyIncome: number;
+    let trendingResult: string;
+    let yearsAnalyzed: number[];
 
-    // Extract crucial results
-    const qualifyingMonthlyIncome = calculationResults.summary.qualifyingMonthlyIncome;
-    const trendingResult = calculationResults.summary.trendingResult;
+    if (calculatorProgram === 'USDA') {
+      if (!documentData.usdaInput) {
+        return res.status(400).json({
+          error: 'BAD REQUEST: USDA calculations require documentData.usdaInput with household members and county income limit.'
+        });
+      }
+      const dispatched = dispatchIncomeCalculation({
+        loanProgram: 'USDA',
+        usdaInput: { ...documentData.usdaInput, loanId }
+      });
+      calculationEngine = dispatched.engine;
+      calculationResults = dispatched.result;
+      qualifyingMonthlyIncome = dispatched.result.repaymentIncomeMonthly;
+      trendingResult = dispatched.result.isEligibleByIncome ? 'USDA_ELIGIBLE' : 'USDA_OVER_INCOME_LIMIT';
+      yearsAnalyzed = [];
+    } else {
+      const dispatched = dispatchIncomeCalculation({
+        loanProgram: calculatorProgram,
+        form1084Input: calculationPayload
+      });
+      calculationEngine = dispatched.engine;
+      calculationResults = dispatched.result;
+      qualifyingMonthlyIncome = dispatched.result.summary.qualifyingMonthlyIncome;
+      trendingResult = dispatched.result.summary.trendingResult;
+      yearsAnalyzed = dispatched.result.summary.yearsAnalyzed;
+    }
 
     // 6. Commit Form 1084 Audit record to Database (Atomic Transaction) [cite: 19, 38]
     // We strictly avoid saving raw document binaries or borrower SSNs here, complying with ZDR guidelines [cite: 33].
@@ -92,7 +127,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
           qualifyingMonthlyIncome,
           extractedTaxFields: JSON.parse(JSON.stringify(documentData)),
-          yearsAnalyzed: calculationResults.summary.yearsAnalyzed,
+          yearsAnalyzed,
         }
       })
     ]);
@@ -103,6 +138,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       loanId: loan.id,
       calculatedMonthlyIncome: qualifyingMonthlyIncome,
       trendingResult,
+      calculationEngine,
       calculationDetails: calculationResults,
       auditLogId: updatedAudit.id,
       timestamp: new Date().toISOString()

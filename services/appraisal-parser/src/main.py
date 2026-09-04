@@ -1,38 +1,35 @@
-# =============================================================================
-# FREEFLOW MORTGAGE SOLUTIONS - STATELESS APPRAISAL AUDIT FASTAPI MICROSERVICE
-# =============================================================================
-# File: services/appraisal-parser/src/main.py (appraisal-parser-main.py)
-# Description: Thread-safe, non-blocking in-memory appraisal parsing gateway.
-#              Streams incoming PDF payloads straight to a volatile tmpfs RAM disk,
-#              executes OCR coordinate mapping, scans for safety trigger words,
-#              and guarantees a hard purge of all local buffers upon request
-#              completion to meet Zero-Data-Retention (ZDR) SOC 2 standards.
-# =============================================================================
+"""Independent, zero-persistence appraisal audit HTTP service."""
 
 from __future__ import annotations
-import os
-import uuid
-import logging
-import shutil
-from typing import Dict, Any, List
-from pydantic import BaseModel, Field
-from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request, Header
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-# Set up logging boundaries for SOC 2 tracking (no PII written to logs)
+import logging
+import uuid
+from typing import Any, Literal
+
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+try:
+    from appraisal_parser import AppraisalParseError, AppraisalReviewParserV4
+    from rules import RULE_VERSION, SUPPORTED_PROGRAMS, run_appraisal_rules
+except ImportError:
+    from src.appraisal_parser import AppraisalParseError, AppraisalReviewParserV4
+    from src.rules import RULE_VERSION, SUPPORTED_PROGRAMS, run_appraisal_rules
+
+SERVICE_VERSION = "4.0.0"
+MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024
+
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("freeflow.appraisal.server")
 
 app = FastAPI(
-    title="Zero-Data-Retention Appraisal Audit Gateway",
-    description="Stateless Point-Solution parser for FHA/VA and conventional GSE collateral auditing.",
-    version="3.0.0",
-    docs_url=None,  # Disabled in production for security hardening
-    redoc_url=None
+    title="Zero-Persistence Appraisal Audit Service",
+    description="Native PDF and AcroForm extraction with deterministic appraisal rules.",
+    version=SERVICE_VERSION,
+    docs_url=None,
+    redoc_url=None,
 )
-
-# CORS configuration restricted to local/enterprise domains
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -41,9 +38,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Environment configuration
-ZDR_TEMP_DIR = os.getenv("ZDR_TEMP_DIR", "/tmp/zdr_scratch")
-MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB threshold for appraisal packages
 
 class HealthResponse(BaseModel):
     status: str
@@ -51,177 +45,129 @@ class HealthResponse(BaseModel):
     version: str
     zdr_boundary_active: bool
 
-@app.get("/health", response_model=HealthResponse, status_code=status.HTTP_200_OK)
-def health_check():
-    """
-    Standard health check probe for AWS ECS Fargate and Kubernetes.
-    Verifies that the ZDR volatile tmpfs mount directory is writeable.
-    """
-    zdr_active = os.path.exists(ZDR_TEMP_DIR) and os.access(ZDR_TEMP_DIR, os.W_OK)
-    return {
-        "status": "HEALTHY",
-        "service": "Appraisal Ingestion and Rules Engine",
-        "version": "3.0.0",
-        "zdr_boundary_active": zdr_active
-    }
 
-@app.post("/api/v1/appraisal/audit", status_code=status.HTTP_200_OK)
-def audit_appraisal_document(
+class FindingResponse(BaseModel):
+    code: str
+    label: str
+    extracted: str
+    why: str
+    severity: Literal["info", "warning", "error"]
+    authority: str
+    program: Literal["CONV", "FHA", "VA", "USDA"]
+    pageIndex: int | None
+    box: list[float] | None
+
+
+class ConditionResponse(BaseModel):
+    id: str
+    kind: Literal["REPAIR", "INSPECTION", "ADMIN", "REDFLAG"]
+    text: str
+    authority: str
+    program: Literal["CONV", "FHA", "VA", "USDA"]
+
+
+class AuditResponse(BaseModel):
+    transactionId: str
+    loanId: str
+    programUsed: Literal["CONV", "FHA", "VA", "USDA"]
+    ruleVersion: str
+    extractedData: dict[str, Any]
+    findings: list[FindingResponse]
+    conditions: list[ConditionResponse]
+
+
+@app.middleware("http")
+async def prevent_response_storage(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.get("/health", response_model=HealthResponse, status_code=status.HTTP_200_OK)
+def health_check() -> HealthResponse:
+    return HealthResponse(
+        status="HEALTHY",
+        service="Appraisal Ingestion and Rules Engine",
+        version=SERVICE_VERSION,
+        # Documents are parsed from request bytes and never written to a
+        # persistent volume. The container also provisions a tmpfs scratch path.
+        zdr_boundary_active=True,
+    )
+
+
+@app.post(
+    "/api/v1/appraisal/audit",
+    response_model=AuditResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def audit_appraisal_document(
     request: Request,
+    response: Response,
     x_tenant_id: str | None = Header(None),
     x_underwriter_id: str | None = Header(None),
-    x_loan_id: str | None = Header(None)
-):
-    """
-    Core synchronous appraisal auditing controller.
-    
-    By declaring this endpoint as a synchronous block ('def' instead of 'async def'), 
-    FastAPI offloads the CPU-heavy OCR, Poppler image conversion, and regex scans 
-    directly to a worker thread pool. This ensures that the primary async event loop 
-    remains completely responsive and never blocks concurrent users.
-    
-    All incoming file bytes exist strictly inside the volatile tmpfs RAM-mapped directory
-    and are unlinked immediately in the 'finally' execution block.
-    """
+    x_loan_id: str | None = Header(None),
+    x_loan_program: str = Header("CONV"),
+    x_document_title: str = Header("appraisal.pdf"),
+    x_appraisal_case_number: str | None = Header(None),
+) -> AuditResponse:
     transaction_id = str(uuid.uuid4())
-    logger.info(f"[Ingest Inbound] Tx: {transaction_id} | Tenant: {x_tenant_id} | Loan: {x_loan_id}")
-
-    # 1. Enforce strict SOC 2 audit trailing headers
     if not x_tenant_id or not x_underwriter_id or not x_loan_id:
-        logger.warning(f"[Reject Inbound] Missing tracking headers inside Tx: {transaction_id}")
+        logger.warning("Rejected appraisal request %s: missing tracking headers", transaction_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Header Validation Failure: Must declare 'x-tenant-id', 'x-underwriter-id', and 'x-loan-id' tracking headers."
+            detail=(
+                "Header Validation Failure: Must declare 'x-tenant-id', "
+                "'x-underwriter-id', and 'x-loan-id' tracking headers."
+            ),
         )
 
-    # Ensure our volatile tmpfs scratch space is initialized
-    os.makedirs(ZDR_TEMP_DIR, exist_ok=True)
-    
-    temp_file_id = f"appraisal_{transaction_id}_{x_loan_id}.pdf"
-    temp_pdf_path = os.path.join(ZDR_TEMP_DIR, temp_file_id)
+    program = x_loan_program.upper()
+    if program not in SUPPORTED_PROGRAMS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported appraisal program. Use one of: {', '.join(SUPPORTED_PROGRAMS)}.",
+        )
+
+    pdf_bytes = await request.body()
+    if not pdf_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file stream payload body.",
+        )
+    if len(pdf_bytes) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Inbound payload exceeds the 15 MB appraisal size limit.",
+        )
 
     try:
-        # 2. Extract and pipe incoming stream directly to our tmpfs RAM drive
-        import asyncio
-        pdf_bytes = asyncio.run(request.body())
-        
-        if not pdf_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file stream payload body.")
-
-        payload_size = len(pdf_bytes)
-        if payload_size > MAX_FILE_SIZE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Inbound payload exceeds secure size limits of {MAX_FILE_SIZE_BYTES / (1024*1024)} MB."
-            )
-
-        # Write to volatile tmpfs
-        with open(temp_pdf_path, "wb") as f:
-            f.write(pdf_bytes)
-
-        # 3. Simulate parsing execution (Calling our internal OCR + Python Coordinate core)
-        # In production, this imports and triggers:
-        # from .appraisal_parser import AppraisalReviewParser
-        # parser = AppraisalReviewParser()
-        # parsed_record = parser.parse(temp_pdf_path)
-        
-        # MOCK PARSED METADATA TO MATCH NEXT.JS AppraisalReviewGrid INTEGRATION
-        # This provides a fully functional schema integration output
-        mock_extracted_payload = {
-            "metadata": {
-                "transactionId": transaction_id,
-                "loanId": x_loan_id,
-                "caseNumber": "FHA-451-904322-B",
-                "propertyAddress": "742 Whispering Pines Dr, Austin, TX 78745",
-                "borrowerName": "Sarah K. Vance",
-                "appraiserName": "Robert J. Miller",
-                "appraiserLicense": "A-1084-TX",
-                "yearBuilt": 1974,  # Pre-1978 lead paint warning trigger
-                "intendedUse": "Underwrite mortgage transaction for secondary market delivery.",
-                "highestAndBestUse": True,
-                "ownershipType": "FEE_SIMPLE",
-                "loanMaturityDate": "2056-09-01",
-                "isManufacturedHousing": False,
-                "appraisedValue": 425000,
-                "isPurchaseLoan": True,
-                "contractDate": "2026-08-01",
-                "priorSaleDate": "2026-07-15",  # 15 days delta triggers FHA 90-day flip warning!
-                "priorSalePrice": 200000,
-                "contractSellerIsOwnerRecord": False, # Mismatch flags warning
-                "nonArmsLengthTransaction": True,     # Flags non-arm's length
-                "hasSolarPanels": True,
-                "solarOwnershipType": "LEASED",
-                "solarAppraisalValueAdjustmentIncluded": True, # Violates HUD 4000.1 leased solar value rule!
-                "solarLeasePaymentsIncludedInDti": False,
-                "solarAgreementContainsTransferRestrictions": True
-            },
-            "physicalConditionChecklist": {
-                "atticInspected": False,
-                "crawlspaceInspected": False,
-                "utilitiesAreActive": False,
-                "septicWellVisualInspectionNoted": False,
-                "peelingPaintDetected": True,
-                "termiteActiveInfestationDetected": False
-            },
-            "marketConditions1004MC": {
-                "neighborhoodTrend": "STABLE",
-                "mcMedianPriceCurrentQuarter": 330000,
-                "mcMedianPricePriorYearQuarter": 350000, # Dropping prices trigger mathematical declining trend
-                "mcMonthsSupplyCurrentQuarter": 6.5       # Oversupply indicator (> 6.0 months)
-            },
-            "comparables": [
-                {
-                    "compIndex": 1,
-                    "address": "142 Maplewood Ave, Austin, TX 78745",
-                    "salePrice": 425000,
-                    "proximityMiles": 0.45,
-                    "netAdjustmentAmount": 15000,
-                    "grossAdjustmentAmount": 25000,
-                    "individualLineItemAdjustments": [
-                        {"field": "GLA Difference", "amount": 5000},
-                        {"field": "Bathroom Count", "amount": 10000}
-                    ]
-                },
-                {
-                    "compIndex": 2,
-                    "address": "98 Oak Ridge Rd, West Lake Hills, TX 78746",
-                    "salePrice": 410000,
-                    "proximityMiles": 1.2, # Exceeds 1-mile urban guideline threshold!
-                    "netAdjustmentAmount": -8000,
-                    "grossAdjustmentAmount": 48000, # Gross adjustments represent 11.7% of price
-                    "individualLineItemAdjustments": [
-                        {"field": "Location Adjustment", "amount": -18000},
-                        {"field": "GLA Difference", "amount": -30000} # Single item exceeds 10% baseline!
-                    ]
-                }
-            ],
-            "commentaryTextBlocks": [
-                "The subject property exhibits typical wear and tear for its age. However, some areas in the crawl space show signs of moisture accumulation and mild dampness due to recent rain.",
-                "Potential mold spores were observed along the lower baseboards of the detached utility closet. Appraiser recommends a professional trade inspection to determine if hazardous remediation is required.",
-                "Exterior inspection noted minor hairline cracking on the concrete driveway. There were no signs of structural integrity settling or soil displacement affecting the main residential foundation."
-            ]
-        }
-
-        # Returns the JSON payload directly to the frontend for mapping
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=mock_extracted_payload
+        extracted = AppraisalReviewParserV4().parse_in_memory_stream(
+            pdf_bytes,
+            filename=x_document_title,
+            expected_case=x_appraisal_case_number,
         )
-
-    except Exception as e:
-        logger.error(f"Critical execution failure inside Tx {transaction_id}: {str(e)}")
+        findings, conditions = run_appraisal_rules(extracted, program)
+    except AppraisalParseError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        logger.exception("Appraisal audit %s failed", transaction_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal Server Processing Failure: {str(e)}"
-        )
+            detail="Appraisal processing failed.",
+        ) from error
 
-    finally:
-        # 4. STRICT ZERO-DATA-RETENTION HARD PURGE
-        # Regardless of whether parsing succeeds or fails, we delete the physical file
-        # from our volatile RAM disk block immediately.
-        if os.path.exists(temp_pdf_path):
-            try:
-                os.unlink(temp_pdf_path)
-                logger.info(f"[ZDR Hard Purge] Successfully deleted volatile file: {temp_pdf_path}")
-            except Exception as e:
-                logger.error(f"[ZDR Leak Warning] Failed to delete volatile file {temp_pdf_path}: {str(e)}")
+    response.headers["X-Appraisal-Rule-Version"] = RULE_VERSION
+    logger.info("Completed appraisal audit %s with program %s", transaction_id, program)
+    return AuditResponse(
+        transactionId=transaction_id,
+        loanId=x_loan_id,
+        programUsed=program,
+        ruleVersion=RULE_VERSION,
+        extractedData=extracted,
+        findings=findings,
+        conditions=conditions,
+    )

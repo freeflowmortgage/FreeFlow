@@ -41,6 +41,18 @@ docker run -d --name freeflow-parser -p 8080:8080 --memory=4g freeflow-doc-parse
 
 Health check: http://127.0.0.1:8080/health
 
+**Appraisal parser and rules** (independent Docker service, port 8081):
+
+```bash
+cd services/appraisal-parser
+docker build -t freeflow-appraisal-parser -f Dockerfile .
+docker run -d --name freeflow-appraisal-parser -p 8081:8081 \
+  --tmpfs /tmp/appraisal_scratch:rw,size=512m freeflow-appraisal-parser
+```
+
+Health check: http://127.0.0.1:8081/health. Appraisal PDFs are sent only to
+this service; they do not pass through the income parser or AI 1003 runtime.
+
 **Underwriting console** (Vite, port 3000):
 
 ```bash
@@ -51,7 +63,28 @@ npm run dev
 
 Open http://localhost:3000 — **Parser Lab** posts PDFs to `/parse` (proxied to the container). **Split View** is Demo v7.
 
-Optional: `docker compose up -d` at the repo root for local Postgres / Redis / MinIO if you are wiring the Next portal.
+**Underwriter Portal** (Next.js, port 3001):
+
+```bash
+cd apps/underwriter-portal
+npm install
+npm run dev
+```
+
+**Full Stack with Docker Compose** (all services and infrastructure):
+
+```bash
+docker compose up --build -d
+```
+
+Services started:
+- `underwriting-console` on `http://localhost:3000`
+- `underwriter-portal` on `http://localhost:3001`
+- `income-parser` on `http://localhost:8080`
+- `appraisal-parser` on `http://localhost:8081`
+- `postgres` on `localhost:5432`
+- `redis` on `localhost:6379`
+- `minio` on `localhost:9000` (API) & `localhost:9001` (Console)
 
 ## Layout
 
@@ -60,6 +93,7 @@ Optional: `docker compose up -d` at the repo root for local Postgres / Redis / M
 | `apps/underwriting-console` | Live local UI |
 | `apps/underwriter-portal` | Next.js billing / Encompass routes |
 | `services/doc-parser` | FastAPI: bytes in, JSON boxes out (no sandwich PDF) |
+| `services/appraisal-parser` | Independent FastAPI appraisal extraction and agency-rule overlays |
 | `packages/mortgage-engine` | Form 1084 v9 |
 | `docs/ARCHITECTURE.md` | Live architecture |
 

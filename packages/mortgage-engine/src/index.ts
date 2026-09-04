@@ -5,5 +5,5 @@ export * from './map-encompass-fields-v2';
 export * from './payload-guard';
 export * from './usda-projected-income-engine-v2';
 export * from './usda-ssi-rules-engine';
-export * from './AppraisalRulesEngine';
+export * from './income-calculation-dispatcher';
 export * from './mismoD1cMapper';

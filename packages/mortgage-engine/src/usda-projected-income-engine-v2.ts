@@ -64,11 +64,33 @@ export function calculateProjectedSsi(input: SsiProjectedInput): SsiProjectedRes
 }
 
 export interface UsdaScheduleCInput {
+  type?: 'SCHEDULE_C';
+  entityId?: string;
+  businessName?: string;
+  ein?: string;
   netProfitLoss: number;       // Schedule C Line 31 (Net Profit/Loss)
-  depreciation: number;        // Schedule C Line 12 (Depreciation)
-  businessUseOfHome: number;   // Schedule C Line 30 (Business Use of Home)
-  mealsExclusion: number;      // Schedule C Line 24b (Meals Exclusion)
+  depreciation?: number;       // Schedule C Line 13 (Depreciation)
+  businessUseOfHome?: number;  // Schedule C Line 30 (Business Use of Home)
+  mealsExclusion?: number;     // Schedule C Line 24b (Meals Exclusion)
+  depletion?: number;
+  nonrecurringOtherIncomeLoss?: number;
+  amortizationCasualtyLoss?: number;
 }
+
+export interface UsdaScheduleFInput {
+  type: 'SCHEDULE_F';
+  entityId?: string;
+  businessName?: string;
+  ein?: string;
+  netFarmProfitLoss: number;
+  nonTaxPortionOngoingCoopAndCccPayments?: number;
+  nonrecurringOtherIncomeLoss?: number;
+  depreciation?: number;
+  amortizationCasualtyLossDepletion?: number;
+  businessUseOfHome?: number;
+}
+
+export type UsdaSelfEmploymentInput = UsdaScheduleCInput | UsdaScheduleFInput;
 
 export interface UsdaHouseholdMember {
   name: string;
@@ -78,7 +100,11 @@ export interface UsdaHouseholdMember {
   isFullTimeStudent: boolean;
   earnedIncomeMonthly: number;     // e.g., wages, salary
   unearnedIncomeMonthly: number;   // e.g., SSI, child support, pensions
-  selfEmployment?: UsdaScheduleCInput;
+  isSsiRecipient?: boolean;
+  /** Legacy single-business property; arrays are also accepted for migration. */
+  selfEmployment?: UsdaSelfEmploymentInput | UsdaSelfEmploymentInput[];
+  /** Canonical multi-business input. Takes precedence over selfEmployment. */
+  selfEmploymentBusinesses?: UsdaSelfEmploymentInput[];
 }
 
 export interface UsdaAssetTx {
@@ -109,8 +135,33 @@ export interface UsdaEngineResult {
   adjustedAnnualIncome: number;       // Household income minus USDA standard deductions
   isEligibleByIncome: boolean;
   ssiBreakdowns: SsiProjectedResult[];
+  selfEmploymentBreakdowns: UsdaSelfEmploymentBreakdown[];
   sourcingAlerts: string[];
+  sourcedTransactionIds: string[];
   complianceLogs: string[];
+}
+
+export interface UsdaSelfEmploymentBreakdown {
+  memberName: string;
+  type: 'SCHEDULE_C' | 'SCHEDULE_F';
+  entityId: string | null;
+  businessName: string | null;
+  ein: string | null;
+  repaymentAnnualIncome: number;
+  householdEligibilityAnnualIncome: number;
+  includedInRepayment: boolean;
+}
+
+function selfEmploymentBusinesses(member: UsdaHouseholdMember): UsdaSelfEmploymentInput[] {
+  if (member.selfEmploymentBusinesses) return member.selfEmploymentBusinesses;
+  if (!member.selfEmployment) return [];
+  return Array.isArray(member.selfEmployment) ? member.selfEmployment : [member.selfEmployment];
+}
+
+function isScheduleF(
+  business: UsdaSelfEmploymentInput
+): business is UsdaScheduleFInput {
+  return business.type === 'SCHEDULE_F';
 }
 
 /**
@@ -126,7 +177,9 @@ export function processUsdaStandaloneCalculationV2(input: UsdaEngineInput): Usda
   let dependentDeductionsCount = 0;
 
   const ssiBreakdowns: SsiProjectedResult[] = [];
+  const selfEmploymentBreakdowns: UsdaSelfEmploymentBreakdown[] = [];
   const sourcingAlerts: string[] = [];
+  const sourcedTransactionIds: string[] = [];
   const complianceLogs: string[] = [];
 
   complianceLogs.push(`Initializing USDA Engine v2 under Procedure Notice PN 657 (Student earned income cap: $${studentCap}, Non-recurring deposit threshold: $${nonRecurringThreshold}).`);
@@ -172,23 +225,56 @@ export function processUsdaStandaloneCalculationV2(input: UsdaEngineInput): Usda
       repaymentAnnualTotal += (member.earnedIncomeMonthly * 12 + memberAnnualUnearned);
     }
 
-    // B. Self-Employment Dual-Track Math
-    if (member.selfEmployment) {
-      const se = member.selfEmployment;
+    // B. Self-Employment Dual-Track Math (each business remains independent)
+    for (const business of selfEmploymentBusinesses(member)) {
+      let repaymentSE: number;
+      let householdSE: number;
+      let type: UsdaSelfEmploymentBreakdown['type'];
 
-      // Track 1: Repayment (Allows Add-Backs of Depreciation and Business Use of Home)
-      const repaymentSE = se.netProfitLoss + se.depreciation + se.businessUseOfHome - se.mealsExclusion;
-
-      // Track 2: Household Eligibility (Strictest Track - Add-backs of Depreciation and Home Use are STRICTLY DISALLOWED)
-      const householdSE = se.netProfitLoss;
-
-      if (member.isBorrower) {
-        repaymentAnnualTotal += repaymentSE;
+      if (isScheduleF(business)) {
+        type = 'SCHEDULE_F';
+        const recurringCashAdjustments =
+          (business.nonTaxPortionOngoingCoopAndCccPayments || 0) +
+          (business.nonrecurringOtherIncomeLoss || 0);
+        repaymentSE =
+          business.netFarmProfitLoss +
+          recurringCashAdjustments +
+          (business.depreciation || 0) +
+          (business.amortizationCasualtyLossDepletion || 0) +
+          (business.businessUseOfHome || 0);
+        // Eligibility uses actual recurring farm cash income but disallows
+        // repayment-only non-cash expense add-backs.
+        householdSE = business.netFarmProfitLoss + recurringCashAdjustments;
+      } else {
+        type = 'SCHEDULE_C';
+        repaymentSE =
+          business.netProfitLoss +
+          (business.depreciation || 0) +
+          (business.depletion || 0) +
+          (business.businessUseOfHome || 0) -
+          (business.mealsExclusion || 0) +
+          (business.nonrecurringOtherIncomeLoss || 0) +
+          (business.amortizationCasualtyLoss || 0);
+        // USDA eligibility starts with taxable net profit/loss and does not
+        // permit the repayment calculation's non-cash add-backs.
+        householdSE = business.netProfitLoss;
       }
+
+      if (member.isBorrower) repaymentAnnualTotal += repaymentSE;
       householdAnnualTotal += householdSE;
+      selfEmploymentBreakdowns.push({
+        memberName: member.name,
+        type,
+        entityId: business.entityId ?? null,
+        businessName: business.businessName ?? null,
+        ein: business.ein ?? null,
+        repaymentAnnualIncome: repaymentSE,
+        householdEligibilityAnnualIncome: householdSE,
+        includedInRepayment: member.isBorrower
+      });
 
       complianceLogs.push(
-        `Self-Employment Split [${member.name}]: Repayment SE added $${repaymentSE.toFixed(2)} (Depreciation & Home-Use added back). Household Eligibility included $${householdSE.toFixed(2)} raw (Add-backs excluded to protect eligibility thresholds).`
+        `Self-Employment Split [${member.name} / ${business.businessName || business.entityId || type}]: Repayment added $${repaymentSE.toFixed(2)}; Household Eligibility included $${householdSE.toFixed(2)} with repayment-only non-cash add-backs excluded.`
       );
     }
   }
@@ -197,7 +283,10 @@ export function processUsdaStandaloneCalculationV2(input: UsdaEngineInput): Usda
   // We assume these are part of unearned income, but run through the gross-up display calculator
   // (Assuming any input SSI awards represent active borrower lines to gross up)
   for (const member of input.householdMembers) {
-    if (member.unearnedIncomeMonthly > 0 && member.name.toUpperCase().includes('SSI')) {
+    if (
+      member.unearnedIncomeMonthly > 0 &&
+      (member.isSsiRecipient === true || member.name.toUpperCase().includes('SSI'))
+    ) {
       const ssiResult = calculateProjectedSsi({
         grossAwardMonthly: member.unearnedIncomeMonthly,
         hasTaxReturns: false,
@@ -207,11 +296,11 @@ export function processUsdaStandaloneCalculationV2(input: UsdaEngineInput): Usda
       
       const ssiDTIIncrease = (ssiResult.finalQualifyingMonthly - ssiResult.grossAwardMonthly) * 12;
       
-      // Add the gross-up differential to both tracks
-      repaymentAnnualTotal += ssiDTIIncrease;
-      householdAnnualTotal += ssiDTIIncrease;
+      // Gross-up is repayment qualification treatment, not additional actual
+      // household income for USDA eligibility. It applies only to a borrower.
+      if (member.isBorrower) repaymentAnnualTotal += ssiDTIIncrease;
 
-      complianceLogs.push(`SSI Auto-Gross Up applied: Raw SSI $${ssiResult.grossAwardMonthly}/mo grossed up to $${ssiResult.finalQualifyingMonthly}/mo (+ $${ssiDTIIncrease}/yr in qualifying power). Formula: ${ssiResult.formulaDescription}`);
+      complianceLogs.push(`SSI repayment gross-up evaluated: Raw SSI $${ssiResult.grossAwardMonthly}/mo grossed up to $${ssiResult.finalQualifyingMonthly}/mo for a note borrower (+ $${member.isBorrower ? ssiDTIIncrease : 0}/yr repayment income). USDA household eligibility remains at actual projected SSI. Formula: ${ssiResult.formulaDescription}`);
     }
   }
 
@@ -228,11 +317,13 @@ export function processUsdaStandaloneCalculationV2(input: UsdaEngineInput): Usda
         sourcingAlerts.push(
           `Undisclosed Income Audit: RECURRING deposit of $${tx.amount.toFixed(2)} detected on ${tx.date} (${tx.description}). Under USDA Chapter 9, there is no tolerance; all recurring deposits must be sourced.`
         );
+        sourcedTransactionIds.push(tx.id);
       } else if (!tx.isRecurring && tx.amount >= nonRecurringThreshold) {
         // Rule: Non-recurring deposits greater than threshold (default $1,000; or $100 overlay)
         sourcingAlerts.push(
           `Large Deposit Audit: Individual non-recurring deposit of $${tx.amount.toFixed(2)} detected on ${tx.date} (${tx.description}). Exceeds the audit limit of $${nonRecurringThreshold}. Underwriter must obtain sourcing documentation.`
         );
+        sourcedTransactionIds.push(tx.id);
       }
     }
   }
@@ -251,7 +342,9 @@ export function processUsdaStandaloneCalculationV2(input: UsdaEngineInput): Usda
     adjustedAnnualIncome: adjustedAnnualIncome,
     isEligibleByIncome: isEligible,
     ssiBreakdowns,
+    selfEmploymentBreakdowns,
     sourcingAlerts,
+    sourcedTransactionIds,
     complianceLogs
   };
 }

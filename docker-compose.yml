@@ -1,7 +1,82 @@
 version: '3.8'
 
 services:
-  # 1. Multi-Tenant PostgreSQL Database [cite: 19, 23]
+  # 1. Underwriting Interactive QA Console (Vite frontend with custom middleware proxy)
+  underwriting-console:
+    build:
+      context: .
+      dockerfile: apps/underwriting-console/Dockerfile
+    container_name: freeflow-underwriting-console
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      DOC_PARSER_URL: http://income-parser:8080
+      APPRAISAL_PARSER_URL: http://appraisal-parser:8081
+    depends_on:
+      - income-parser
+      - appraisal-parser
+    restart: unless-stopped
+    networks:
+      - freeflow-network
+
+  # 2. Underwriter Portal (Next.js Application)
+  underwriter-portal:
+    build:
+      context: .
+      dockerfile: apps/underwriter-portal/Dockerfile
+    container_name: freeflow-underwriter-portal
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: postgresql://postgres:localpassword123@postgres:5432/freeflow_dev?schema=public
+      DOC_PARSER_URL: http://income-parser:8080/api/underwrite/process
+      DOC_PARSER_SERVICE_URL: http://income-parser:8080/parse
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      income-parser:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - freeflow-network
+
+  # 3. Stateless income-document parser. This service does not accept appraisal packages.
+  income-parser:
+    build:
+      context: ./services/doc-parser
+      dockerfile: Dockerfile
+    container_name: freeflow-income-parser
+    ports:
+      - "8080:8080"
+    tmpfs:
+      - /tmp:size=512m,mode=1770
+    restart: unless-stopped
+    networks:
+      - freeflow-network
+
+  # 4. Independent collateral parser and appraisal rules boundary.
+  appraisal-parser:
+    build:
+      context: ./services/appraisal-parser
+      dockerfile: Dockerfile
+    container_name: freeflow-appraisal-parser
+    ports:
+      - "8081:8081"
+    tmpfs:
+      - /tmp/appraisal_scratch:size=512m,mode=1770
+    environment:
+      APPRAISAL_SCRATCH_DIR: /tmp/appraisal_scratch
+    restart: unless-stopped
+    networks:
+      - freeflow-network
+
+  # 5. Multi-Tenant PostgreSQL Database [cite: 19, 23]
   postgres:
     image: postgres:16-alpine
     container_name: freeflow-postgres
@@ -22,7 +97,7 @@ services:
     networks:
       - freeflow-network
 
-  # 2. Redis Cache & Fallback Queue Service [cite: 84]
+  # 6. Redis Cache & Fallback Queue Service [cite: 84]
   redis:
     image: redis:7-alpine
     container_name: freeflow-redis
@@ -38,7 +113,7 @@ services:
     networks:
       - freeflow-network
 
-  # 3. Local S3 Object Storage (MinIO) for eFolder File Emulation [cite: 58]
+  # 7. Local S3 Object Storage (MinIO) for eFolder File Emulation [cite: 58]
   minio:
     image: minio/minio:RELEASE.2024-01-28T22-40-50Z
     container_name: freeflow-minio

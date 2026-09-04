@@ -7,6 +7,10 @@
  * 3. USDA Dual-Track Math (Repayment Income with add-backs vs. Annual Household Eligibility)
  * 4. Transactional Asset Sourcing for Undisclosed Household Income Detection
  */
+import {
+  processUsdaStandaloneCalculationV2,
+  UsdaEngineInput
+} from './usda-projected-income-engine-v2';
 
 export interface SsiInput {
   grossAward: number;
@@ -150,96 +154,37 @@ export interface SsiDualTrackResult {
  *      to artificially lower the eligibility income; net profit/loss is counted raw to avoid inflating eligibility thresholds.
  */
 export function calculateUsdaEligibility(input: UsdaCalculationInput): SsiDualTrackResult {
-  let totalRepaymentMonthly = 0;
-  let totalHouseholdAnnual = 0;
-  const complianceAlerts: string[] = [];
-
-  // Track primary repayment calculation baseline for transaction sourcing threshold
-  let borrowerW2Total = 0;
-
-  for (const member of input.householdMembers) {
-    let memberRepaymentAnnual = 0;
-    let memberHouseholdAnnual = 0;
-
-    // 1. Calculate W2 base
-    const w2Annual = member.w2IncomeMonthly * 12;
-    if (member.isBorrower) {
-      memberRepaymentAnnual += w2Annual;
-      borrowerW2Total += member.w2IncomeMonthly;
-    }
-    memberHouseholdAnnual += w2Annual;
-
-    // 2. Calculate Self-Employment if present
-    if (member.selfEmployment) {
-      const se = member.selfEmployment;
-      
-      // Repayment track (Conventional Form 1084 rules: add back depreciation & use of home, subtract meals)
-      const repaymentSE = se.netProfitLoss + se.depreciation + se.businessUseOfHome - se.mealsExclusion;
-      
-      // Household Eligibility track (USDA rules: depreciation & business use of home are NOT allowed as add-backs)
-      // Note: We take the net business profit/loss directly.
-      const householdSE = se.netProfitLoss;
-
-      if (member.isBorrower) {
-        memberRepaymentAnnual += repaymentSE;
-      }
-      memberHouseholdAnnual += householdSE;
-
-      complianceAlerts.push(
-        `USDA Accounting Split applied for ${member.name}: Repayment SE added back $${se.depreciation} depreciation, Household SE excluded it.`
-      );
-    }
-
-    // Accumulate
-    totalRepaymentMonthly += (memberRepaymentAnnual / 12);
-    totalHouseholdAnnual += memberHouseholdAnnual;
-  }
-
-  // Clamp monthly repayment to zero if net self-employment loss dragged it negative
-  totalRepaymentMonthly = Math.max(0, totalRepaymentMonthly);
-
-  // Determine eligibility against county limits
-  const isEligible = totalHouseholdAnnual <= input.countyMedianIncomeLimit;
-
-  // 3. Scan assets for potential undisclosed income sources (USDA Sourcing Audit)
-  // Threshold: Look for unverified deposits exceeding 50% of borrowing payroll income, or recurring deposits
-  const monthlyPayrollBase = borrowerW2Total || 2000; // default baseline if self-employed only
-  const sourcingThreshold = monthlyPayrollBase * 0.5;
-  const unverifiedAssetDeposits: BankTransaction[] = [];
-
-  for (const tx of input.bankTransactions) {
-    if (tx.amount > 0) {
-      const descUpper = tx.description.toUpperCase();
-      
-      // Exclude typical payroll or transfer descriptors
-      const isExpected = descUpper.includes('PAYROLL') || 
-                         descUpper.includes('DIR DEP') || 
-                         descUpper.includes('IRS TREAS') ||
-                         descUpper.includes('TAX REF') ||
-                         descUpper.includes('TRANSFER');
-
-      if (!isExpected) {
-        if (tx.amount >= sourcingThreshold) {
-          unverifiedAssetDeposits.push(tx);
-          complianceAlerts.push(
-            `Undisclosed Income Audit: Large asset deposit of $${tx.amount} detected on ${tx.date} (${tx.description}). Underwriter must source to satisfy USDA regulations.`
-          );
-        } else if (descUpper.includes('ZELLE') || descUpper.includes('VENMO') || descUpper.includes('CASH APP')) {
-          // Flag P2P apps as potential unrecorded cash income
-          unverifiedAssetDeposits.push(tx);
-          complianceAlerts.push(
-            `Potential Cash Flow Leak: Peer-to-Peer transfer of $${tx.amount} detected (${tx.description}). Underwriter must verify if this is undisclosed household income.`
-          );
-        }
-      }
-    }
-  }
+  const canonicalInput: UsdaEngineInput = {
+    loanId: 'legacy-usda-calculation',
+    countyMedianIncomeLimit: input.countyMedianIncomeLimit,
+    householdMembers: input.householdMembers.map((member) => ({
+      name: member.name,
+      age: member.age,
+      isBorrower: member.isBorrower,
+      isSpouse: false,
+      isFullTimeStudent: false,
+      earnedIncomeMonthly: member.w2IncomeMonthly,
+      unearnedIncomeMonthly: 0,
+      selfEmployment: member.selfEmployment
+        ? {
+            type: 'SCHEDULE_C',
+            ...member.selfEmployment
+          }
+        : undefined
+    })),
+    bankTransactions: input.bankTransactions.map((tx) => ({
+      ...tx,
+      isRecurring: /\b(?:ZELLE|VENMO|CASH APP)\b/i.test(tx.description)
+    }))
+  };
+  const canonical = processUsdaStandaloneCalculationV2(canonicalInput);
+  const sourcedIds = new Set(canonical.sourcedTransactionIds);
 
   return {
-    repaymentIncomeMonthly: totalRepaymentMonthly,
-    annualHouseholdIncome: totalHouseholdAnnual,
-    isEligibleByIncome: isEligible,
-    unverifiedAssetDeposits,
-    complianceAlerts
+    repaymentIncomeMonthly: canonical.repaymentIncomeMonthly,
+    annualHouseholdIncome: canonical.annualHouseholdIncome,
+    isEligibleByIncome: canonical.isEligibleByIncome,
+    unverifiedAssetDeposits: input.bankTransactions.filter((tx) => sourcedIds.has(tx.id)),
+    complianceAlerts: [...canonical.complianceLogs, ...canonical.sourcingAlerts]
   };
 }

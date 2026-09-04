@@ -1,254 +1,206 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  ShieldCheck, AlertTriangle, CheckCircle2, RefreshCw, 
-  HelpCircle, Calendar, FileText, Ban, ArrowRight, Check
-} from 'lucide-react';
-import { Decimal } from 'decimal.js';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, PlusCircle, ShieldCheck, Trash2 } from 'lucide-react';
+import {
+  processUsdaStandaloneCalculationV2,
+  type UsdaEngineResult,
+  type UsdaHouseholdMember,
+  type UsdaSelfEmploymentInput,
+} from '@mortgage-pos/mortgage-engine';
 
-// ────────────────────────────────────────────────────────────────────────
-// TYPES & INTERFACES (Aligned with calculateForm1084Income.ts / v9)
-// ────────────────────────────────────────────────────────────────────────
-
-interface Form1040Distribution {
+type HouseholdRow = Omit<UsdaHouseholdMember, 'isBorrower' | 'isSpouse' | 'selfEmployment'> & {
   id: string;
-  year: number;
-  sourceName: string; // e.g., "Fidelity IRA Account"
-  totalDistribution: number;
-  taxableAmount: number;
-  isRecurring: boolean; // Managed by Underwriter Toggle
-}
+};
 
-interface UsdaCalculationResult {
-  repaymentIncomeMonthly: number;    // DTI (Note Borrowers Only)
-  annualHouseholdIncome: number;     // Eligibility Cap (No Add-Backs, Capped FT Students)
-  adjustedAnnualIncome: number;      // Household minus standard deductions
-  isEligible: boolean;
-  warnings: string[];
-  conditions: { title: string; docType: string; description: string }[];
-}
-
-export default function UsdaDistributionToggle() {
-  // 1. DOCKER HANDSHAKE SIMULATION STATES
-  const [loanGuid] = useState<string>("8b7e91a0-cf42-4b2a-89bc-98fd8b725c1d");
-  const [activeAgency] = useState<string>("USDA-RHS");
-  const [countyMedianLimit] = useState<number>(115000); // Standard county limit
-
-  // 2. EXTRACTED DATA STATE (Form 1040 OCR Outputs in volatile tmpfs RAM)
-  const [distributions, setDistributions] = useState<Form1040Distribution[]>([
+export default function UsdaDistributionToggle({
+  embedded = false,
+  loanId = 'LN-2026-88042',
+  borrowerName = 'Sarah K. Vance',
+  borrowerEarnedIncomeMonthly = 7660,
+  borrowerSelfEmployment = [],
+  onCalculation,
+}: {
+  embedded?: boolean;
+  loanId?: string;
+  borrowerName?: string;
+  borrowerEarnedIncomeMonthly?: number;
+  borrowerSelfEmployment?: UsdaSelfEmploymentInput[];
+  onCalculation?: (result: UsdaEngineResult) => void;
+}) {
+  const [countyIncomeLimit, setCountyIncomeLimit] = useState(115000);
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdRow[]>([
     {
-      id: "dist-1",
-      year: 2025,
-      sourceName: "Traditional IRA Distribution (Form 1040, Line 4b)",
-      totalDistribution: 15000,
-      taxableAmount: 12000,
-      isRecurring: true // Included by default under strict USDA Safeguards
+      id: 'member-jordan',
+      name: 'Jordan Vance',
+      age: 20,
+      isFullTimeStudent: true,
+      earnedIncomeMonthly: 1200,
+      unearnedIncomeMonthly: 0,
     },
-    {
-      id: "dist-2",
-      year: 2024,
-      sourceName: "Pension Distribution (Form 1040, Line 5b)",
-      totalDistribution: 8400,
-      taxableAmount: 8400,
-      isRecurring: true
-    }
   ]);
 
-  // Other Household Income baseline for eligibility calculation
-  const [householdBaseEarnings] = useState<number>(92000); // Base salaries of occupants
+  const calculation = useMemo(() => {
+    const result = processUsdaStandaloneCalculationV2({
+      loanId,
+      countyMedianIncomeLimit: countyIncomeLimit,
+      householdMembers: [
+        {
+          name: borrowerName,
+          age: 38,
+          isBorrower: true,
+          isSpouse: false,
+          isFullTimeStudent: false,
+          earnedIncomeMonthly: borrowerEarnedIncomeMonthly,
+          unearnedIncomeMonthly: 0,
+          selfEmploymentBusinesses: borrowerSelfEmployment,
+        },
+        ...householdMembers.map(({ id: _id, ...member }) => ({
+          ...member,
+          isBorrower: false,
+          isSpouse: false,
+        })),
+      ],
+      bankTransactions: [],
+    });
+    onCalculation?.(result);
+    return result;
+  }, [
+    loanId,
+    countyIncomeLimit,
+    borrowerName,
+    borrowerEarnedIncomeMonthly,
+    borrowerSelfEmployment,
+    householdMembers,
+    onCalculation,
+  ]);
 
-  // 3. MUTATION HANDLER: Toggle Distribution Recurrency Status
-  const handleToggleRecurrency = (id: string) => {
-    setDistributions(prev => 
-      prev.map(dist => 
-        dist.id === id ? { ...dist, isRecurring: !dist.isRecurring } : dist
-      )
-    );
+  const patchMember = (id: string, patch: Partial<HouseholdRow>) =>
+    setHouseholdMembers((members) => members.map((member) => member.id === id ? { ...member, ...patch } : member));
+
+  const addMember = () => {
+    const id = crypto.randomUUID();
+    setHouseholdMembers((members) => [...members, {
+      id,
+      name: `Household member ${members.length + 1}`,
+      age: 18,
+      isFullTimeStudent: false,
+      earnedIncomeMonthly: 0,
+      unearnedIncomeMonthly: 0,
+    }]);
   };
 
-  // 4. REAL-TIME DUAL-TRACK USDA RULES ENGINE (useMemo for maximum performance)
-  const calculation: UsdaCalculationResult = useMemo(() => {
-    let repaymentAnnualTotal = new Decimal(0);
-    let eligibilityAnnualTotal = new Decimal(householdBaseEarnings);
-    const warnings: string[] = [];
-    const conditions: { title: string; docType: string; description: string }[] = [];
-
-    // Process each extracted distribution
-    distributions.forEach(dist => {
-      const total = new Decimal(dist.totalDistribution);
-      const taxable = new Decimal(dist.taxableAmount);
-      const exempt = Decimal.max(0, total.sub(taxable));
-
-      // A. REPAYMENT TRACK (Only count if verified recurring & belongs to primary note borrower)
-      if (dist.isRecurring) {
-        // USDA/GSE allows 1.25x gross-up of tax-exempt portions
-        const qualifyingAnnual = taxable.add(exempt.mul(1.25));
-        repaymentAnnualTotal = repaymentAnnualTotal.add(qualifyingAnnual);
-      }
-
-      // B. ELIGIBILITY TRACK (Strict USDA Chapter 9 & PN 657 Guidelines)
-      if (dist.isRecurring) {
-        // Recurring distributions are fully included in Household Eligibility Cap
-        eligibilityAnnualTotal = eligibilityAnnualTotal.add(total);
-      } else {
-        // Non-recurring / Irregular lump sums are strictly excluded from Eligibility
-        warnings.push(
-          `Excluded non-recurring distribution of $${total.toLocaleString()} (${dist.sourceName}) from USDA Annual Household Income.`
-        );
-
-        // Auto-generate verification condition for underwriter compliance
-        conditions.push({
-          title: "IRA Non-Recurring Distribution Verification",
-          docType: "RETIREMENT_ACCOUNT_STMT_SHOWING_BAL_AND_ONE_TIME_WITHDRAWAL",
-          description: `The underwriter has excluded the $${total.toLocaleString()} distribution from USDA household income. Obtain the latest retirement ledger showing the balance and proving this was an irregular, non-scheduled withdrawal.`
-        });
-      }
-    });
-
-    // USDA Household Deductions (e.g. $480 standard dependent deduction simulator)
-    const standardUSDAHouseholdDeductions = new Decimal(480);
-    const adjustedEligibility = Decimal.max(0, eligibilityAnnualTotal.sub(standardUSDAHouseholdDeductions));
-    const isEligible = adjustedEligibility.lte(countyMedianLimit);
-
-    return {
-      repaymentIncomeMonthly: repaymentAnnualTotal.div(12).toDecimalPlaces(2).toNumber(),
-      annualHouseholdIncome: eligibilityAnnualTotal.toDecimalPlaces(2).toNumber(),
-      adjustedAnnualIncome: adjustedEligibility.toDecimalPlaces(2).toNumber(),
-      isEligible,
-      warnings,
-      conditions
-    };
-  }, [distributions, householdBaseEarnings, countyMedianLimit]);
-
   return (
-    <div className="bg-white text-slate-800 p-6 rounded-2xl border border-slate-900 font-sans max-w-4xl mx-auto space-y-6 shadow-2xl">
-      
-      {/* HEADER LOGO PANEL */}
-      <div className="flex justify-between items-center border-b border-slate-900 pb-4">
-        <div className="flex items-center space-x-2.5">
-          <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400 border border-emerald-500/20">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="font-sans font-black text-white text-sm tracking-tight block">FREEFLOW</span>
-            <span className="text-[9px] text-slate-400 uppercase tracking-widest leading-none block font-mono">USDA Dual-Track Module</span>
-          </div>
-        </div>
-        <div className="text-right font-mono text-[10px]">
-          <span className="text-slate-500">LOS SYNC: </span>
-          <span className="text-emerald-400 font-bold">ACTIVE ({activeAgency})</span>
-          <div className="text-[9px] text-slate-600">GUID: {loanGuid}</div>
-        </div>
-      </div>
-
-      {/* COMPLIANCE INTRO */}
-      <div className="bg-slate-50 p-4 rounded-xl border border-slate-900/60 text-xs text-slate-400 leading-relaxed">
-        <span className="font-bold text-white uppercase tracking-wider block mb-1">USDA HB-1-3555 CHAPTER 9 COMPLIANCE SHIELD</span>
-        Standard guidelines mandate including 100% of retirement distributions in the Annual Household Eligibility Cap unless the distribution is verified by the underwriter as an irregular, non-recurring lump-sum. Toggle the status below to dynamically audit and sync the loan file.
-      </div>
-
-      {/* DUAL DISPLAY CARDS: REPAYMENT VS ELIGIBILITY */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Track 1: Repayment Income */}
-        <div className="p-5 bg-slate-50 border border-slate-900 rounded-xl relative space-y-2">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Track 1: Repayment Income (DTI)</span>
-          <span className="text-3xl font-black text-white block">
-            ${calculation.repaymentIncomeMonthly.toLocaleString()}<span className="text-xs font-normal text-slate-500"> / mo</span>
-          </span>
-          <p className="text-[10px] text-slate-400 leading-relaxed">
-            Note Borrowers only. Includes 1.25x gross-up of tax-exempt portions of regular distributions. Used to calculate final underwriting Qualifying DTI.
+    <section className={`${embedded ? '' : 'mx-auto max-w-5xl'} space-y-5 rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm`}>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-emerald-100 pb-4">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-black text-emerald-950">
+            <ShieldCheck className="h-5 w-5 text-emerald-600" />
+            USDA Rural Development · Dual-Track Income
+          </h2>
+          <p className="mt-1 text-xs text-slate-600">
+            Income-service inputs only. AI 1003 data is not read or imported.
           </p>
         </div>
+        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+          County household income limit
+          <input
+            type="number"
+            value={countyIncomeLimit}
+            onChange={(event) => setCountyIncomeLimit(Number(event.target.value))}
+            className="ml-2 w-32 rounded border border-slate-300 px-2 py-1.5 text-right font-mono text-xs text-slate-900"
+          />
+        </label>
+      </div>
 
-        {/* Track 2: Eligibility Income */}
-        <div className={`p-5 border rounded-xl relative space-y-2 transition-all ${
-          calculation.isEligible 
-            ? 'bg-emerald-950/10 border-emerald-500/20 shadow-lg shadow-emerald-500/5' 
-            : 'bg-rose-950/10 border-rose-500/20 shadow-lg shadow-rose-500/5'
-        }`}>
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Track 2: Household Eligibility</span>
-            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-              calculation.isEligible 
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-            }`}>
-              {calculation.isEligible ? 'Program Eligible' : 'Over-Income Limit'}
-            </span>
-          </div>
-          <span className={`text-3xl font-black block ${calculation.isEligible ? 'text-emerald-400' : 'text-rose-400'}`}>
-            ${calculation.adjustedAnnualIncome.toLocaleString()}<span className="text-xs font-normal text-slate-500"> / yr</span>
-          </span>
-          <div className="text-[9px] text-slate-400 space-y-0.5 font-mono">
-            <div>Median Limit: ${countyMedianLimit.toLocaleString()} / yr</div>
-            <div>Raw Income: ${calculation.annualHouseholdIncome.toLocaleString()} | USDA Ded: $480</div>
-          </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <Metric label="Repayment income · DTI" value={`${money(calculation.repaymentIncomeMonthly)}/mo`} />
+        <Metric label="Annual household income" value={`${money(calculation.annualHouseholdIncome)}/yr`} />
+        <div className={`rounded-xl border p-4 ${calculation.isEligibleByIncome ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50'}`}>
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Adjusted eligibility income</p>
+          <p className="mt-1 text-xl font-black text-slate-950">{money(calculation.adjustedAnnualIncome)}/yr</p>
+          <p className={`mt-1 flex items-center gap-1 text-[10px] font-black uppercase ${calculation.isEligibleByIncome ? 'text-emerald-700' : 'text-rose-700'}`}>
+            {calculation.isEligibleByIncome ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+            {calculation.isEligibleByIncome ? 'Within income limit' : 'Over income limit'}
+          </p>
         </div>
       </div>
 
-      {/* INTERACTIVE FORM FIELD SECTION */}
-      <div className="space-y-3">
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Extracted Income & Verification Toggles</span>
-        
-        <div className="space-y-2.5">
-          {distributions.map((dist) => (
-            <div 
-              key={dist.id} 
-              className={`p-4 bg-slate-50 rounded-xl border transition-all duration-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${
-                dist.isRecurring ? 'border-slate-900' : 'border-indigo-500/20 bg-indigo-500/5'
-              }`}
-            >
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-bold text-white">{dist.sourceName}</span>
-                  <span className="text-[10px] font-mono text-slate-500">Tax Year: {dist.year}</span>
-                </div>
-                <div className="text-[11px] text-slate-400">
-                  Total Distribution: <span className="text-white font-semibold">${dist.totalDistribution.toLocaleString()}</span> 
-                  <span className="mx-2 text-slate-600">|</span> 
-                  Taxable Amount: <span className="text-white font-semibold">${dist.taxableAmount.toLocaleString()}</span>
-                </div>
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">Household members</h3>
+            <p className="mt-1 text-[11px] text-slate-500">Entered directly in the income tool for USDA eligibility only.</p>
+          </div>
+          <button type="button" onClick={addMember} className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-[10px] font-black uppercase text-emerald-700">
+            <PlusCircle className="h-3.5 w-3.5" />
+            Add member
+          </button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {householdMembers.map((member) => (
+            <div key={member.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-[1.4fr_.6fr_1fr_1fr_auto]">
+              <Input label="Name" value={member.name} onChange={(value) => patchMember(member.id, { name: value })} />
+              <Input label="Age" type="number" value={member.age} onChange={(value) => patchMember(member.id, { age: Number(value) })} />
+              <Input label="Earned / mo" type="number" value={member.earnedIncomeMonthly} onChange={(value) => patchMember(member.id, { earnedIncomeMonthly: Number(value) })} />
+              <Input label="Unearned / mo" type="number" value={member.unearnedIncomeMonthly} onChange={(value) => patchMember(member.id, { unearnedIncomeMonthly: Number(value) })} />
+              <div className="flex items-end gap-2">
+                <label className="flex items-center gap-1 pb-1.5 text-[9px] font-black uppercase text-slate-500">
+                  <input
+                    type="checkbox"
+                    checked={member.isFullTimeStudent}
+                    onChange={(event) => patchMember(member.id, { isFullTimeStudent: event.target.checked })}
+                  />
+                  Student
+                </label>
+                <button type="button" onClick={() => setHouseholdMembers((members) => members.filter((row) => row.id !== member.id))} className="mb-0.5 rounded p-1.5 text-rose-500 hover:bg-rose-50" aria-label={`Remove ${member.name}`}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
-
-              {/* TOGGLE BUTTON */}
-              <button
-                onClick={() => handleToggleRecurrency(dist.id)}
-                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all duration-200 flex items-center space-x-1 border ${
-                  dist.isRecurring
-                    ? 'bg-white border-slate-200 text-slate-400 hover:text-slate-950 hover:bg-slate-850'
-                    : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400 shadow-sm shadow-indigo-500/10'
-                }`}
-              >
-                {!dist.isRecurring && <Check className="w-3.5 h-3.5 mr-0.5" />}
-                <span>{dist.isRecurring ? "Exempt as Non-Recurring" : "Excluded (Lump-Sum)"}</span>
-              </button>
             </div>
           ))}
+          {householdMembers.length === 0 ? <p className="text-xs text-slate-500">No additional household members entered.</p> : null}
         </div>
       </div>
 
-      {/* WARNINGS & DYNAMIC CHECKLIST CONDITIONS GENERATED */}
-      {calculation.conditions.length > 0 && (
-        <div className="border-t border-slate-900 pt-5 space-y-3">
-          <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider block">Programmatically Generated Checklist Conditions</span>
-          
-          <div className="space-y-2.5">
-            {calculation.conditions.map((cond, idx) => (
-              <div key={idx} className="p-4 bg-white/10 border border-slate-900 rounded-xl space-y-2">
-                <div className="flex items-center space-x-2 text-xs font-bold text-white">
-                  <FileText className="w-4 h-4 text-indigo-400" />
-                  <span>{cond.title}</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">{cond.description}</p>
-                <div className="inline-flex items-center space-x-1.5 px-2 py-0.5 bg-white text-[9px] font-mono font-bold text-slate-400 rounded border border-slate-200">
-                  <span>REQUIRED DOC:</span>
-                  <span className="text-indigo-400">{cond.docType}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-950">
+        <strong>USDA rules active:</strong> repayment income includes eligible borrower business add-backs; household eligibility uses all household members and excludes those add-backs. Adult full-time student earned income is capped at $500 annually, and minor earned income is excluded.
+      </div>
+    </section>
+  );
+}
 
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="mt-1 text-xl font-black text-slate-950">{value}</p>
     </div>
   );
+}
+
+function Input({
+  label,
+  value,
+  type = 'text',
+  onChange,
+}: {
+  label: string;
+  value: string | number;
+  type?: 'text' | 'number';
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-[9px] font-black uppercase tracking-wider text-slate-500">
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-slate-900"
+      />
+    </label>
+  );
+}
+
+function money(value: number) {
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }

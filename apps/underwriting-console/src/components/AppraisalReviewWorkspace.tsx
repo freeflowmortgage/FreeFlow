@@ -5,7 +5,7 @@ import { usePdfViewer, type SpatialCoordinates } from '../hooks/usePdfViewer';
 import { APPRAISAL_DOC_CHANNEL, type AppraisalDocMessage, type AppraisalDocSnapshot } from '../splitDocSync';
 
 type Severity = 'info' | 'warning' | 'error';
-type Program = 'CONV' | 'FHA' | 'VA';
+type Program = 'CONV' | 'FHA' | 'VA' | 'USDA';
 type ConditionKind = 'REPAIR' | 'INSPECTION' | 'ADMIN' | 'REDFLAG';
 
 type Finding = {
@@ -14,8 +14,8 @@ type Finding = {
   extracted: string;
   why: string;
   severity: Severity;
-  pageIndex: number;
-  box: SpatialCoordinates['box'];
+  pageIndex: number | null;
+  box: SpatialCoordinates['box'] | null;
   programs: Program[];
 };
 
@@ -36,6 +36,43 @@ type Condition = {
   programs: Program[];
 };
 
+type AuditResponse = {
+  transactionId: string;
+  loanId: string;
+  programUsed: Program;
+  ruleVersion: string;
+  extractedData: {
+    document?: {
+      filename?: string;
+      extractionMethod?: string;
+      pageCount?: number;
+      nativeTextPageCount?: number;
+      formFieldCount?: number;
+      warnings?: string[];
+    };
+    metadata?: Record<string, unknown>;
+    comparables?: Array<Record<string, unknown>>;
+  };
+  findings: Array<{
+    code: string;
+    label: string;
+    extracted: string;
+    why: string;
+    severity: Severity;
+    authority: string;
+    program: Program;
+    pageIndex: number | null;
+    box: SpatialCoordinates['box'] | null;
+  }>;
+  conditions: Array<{
+    id: string;
+    kind: ConditionKind;
+    text: string;
+    authority: string;
+    program: Program;
+  }>;
+};
+
 const URAR_PDF = '/fixtures/urar-1004.pdf';
 const BLANK_URAR_PDF = '/fixtures/urar-1004.pdf?blank=true';
 
@@ -50,7 +87,19 @@ const SUBJECT = {
   appraiser: 'Robert J. Miller, TX A-1084',
 };
 
-const COMPS = [
+type SalesComp = {
+  name: string;
+  address: string;
+  gla: number;
+  price: number;
+  prox: string;
+  net: string;
+  gross: string;
+  lines: string[];
+  flag: boolean;
+};
+
+const COMPS: SalesComp[] = [
   {
     name: 'Subject',
     address: '742 Whispering Pines Dr',
@@ -306,6 +355,11 @@ export default function AppraisalReviewWorkspace() {
   const [useBlankForm, setUseBlankForm] = useState(false);
   const [customPdfUrl, setCustomPdfUrl] = useState<string | null>(null);
   const [uploadFillNote, setUploadFillNote] = useState<string | null>(null);
+  const [audit, setAudit] = useState<AuditResponse | null>(null);
+  const [auditState, setAuditState] = useState<'idle' | 'parsing' | 'success' | 'error'>('idle');
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const uploadedPdfRef = useRef<{ bytes: Uint8Array; filename: string } | null>(null);
+  const auditSequenceRef = useRef(0);
   /** True when a user 1004 dropped into public/fixtures/blank replaces the facsimile. */
   const [droppedDoc, setDroppedDoc] = useState(false);
 
@@ -327,22 +381,62 @@ export default function AppraisalReviewWorkspace() {
    * subject data written into them (best-effort keyword match) so a dropped-in
    * blank 1004 renders as a completed appraisal. Flat PDFs display as-is.
    */
+  async function requestAudit(bytes: Uint8Array, filename: string, selectedProgram: Program) {
+    const sequence = ++auditSequenceRef.current;
+    setAudit(null);
+    setAuditState('parsing');
+    setAuditError(null);
+    try {
+      const response = await fetch('/api/appraisal/audit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/pdf',
+          'X-Tenant-Id': 'underwriting-console',
+          'X-Underwriter-Id': 'demo-underwriter',
+          'X-Loan-Id': SUBJECT.loanId,
+          'X-Loan-Program': selectedProgram,
+          'X-Document-Title': safeHeaderFilename(filename),
+        },
+        body: bytes as BodyInit,
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(payload) || `Appraisal audit failed (${response.status}).`);
+      }
+      if (!isAuditResponse(payload)) {
+        throw new Error('Appraisal audit returned an invalid response.');
+      }
+      if (sequence !== auditSequenceRef.current) return;
+      setAudit(payload);
+      setAuditState('success');
+    } catch (error) {
+      if (sequence !== auditSequenceRef.current) return;
+      setAuditState('error');
+      setAuditError(error instanceof Error ? error.message : 'Appraisal audit failed.');
+    }
+  }
+
   async function handleUploadedPdf(file: File) {
     setUseBlankForm(false);
     setUploadFillNote(null);
+    setAudit(null);
+    setAuditError(null);
     try {
+      const raw = new Uint8Array(await file.arrayBuffer());
       const { fillAppraisalPdfWithDemoData } = await import('../appraisalDemoFill');
-      const filled = await fillAppraisalPdfWithDemoData(await file.arrayBuffer());
+      const filled = await fillAppraisalPdfWithDemoData(raw);
+      const auditBytes = filled?.bytes ?? raw;
+      uploadedPdfRef.current = { bytes: auditBytes, filename: file.name };
+      if (customPdfUrl) URL.revokeObjectURL(customPdfUrl);
+      setCustomPdfUrl(URL.createObjectURL(new Blob([auditBytes as BlobPart], { type: 'application/pdf' })));
       if (filled) {
-        const blob = new Blob([filled.bytes as BlobPart], { type: 'application/pdf' });
-        setCustomPdfUrl(URL.createObjectURL(blob));
         setUploadFillNote(`Demo data filled into ${filled.filledCount} of ${filled.fieldCount} form fields`);
-        return;
       }
-    } catch {
-      /* fall through to raw display */
+      await requestAudit(auditBytes, file.name, program);
+    } catch (error) {
+      setAuditState('error');
+      setAuditError(error instanceof Error ? error.message : 'Unable to read the selected PDF.');
     }
-    setCustomPdfUrl(URL.createObjectURL(file));
   }
   const {
     currentPage,
@@ -359,15 +453,23 @@ export default function AppraisalReviewWorkspace() {
     clearHighlight,
   } = usePdfViewer(3);
 
-  const visibleFindings = useMemo(
-    () => FINDINGS.filter((finding) => finding.programs.includes(program)),
-    [program],
-  );
-  const conditions = useMemo(
-    () => CONDITIONS.filter((item) => item.programs.includes(program)),
-    [program],
-  );
-  const mappedBoxes = visibleFindings.map((finding) => ({ pageIndex: finding.pageIndex, box: finding.box }));
+  const hasUploadedPdf = uploadedPdfRef.current !== null;
+  const visibleFindings = useMemo<Finding[]>(() => {
+    if (audit) {
+      return audit.findings.map((finding) => ({ ...finding, programs: [finding.program] }));
+    }
+    return hasUploadedPdf ? [] : FINDINGS.filter((finding) => finding.programs.includes(program));
+  }, [audit, hasUploadedPdf, program]);
+  const conditions = useMemo<Condition[]>(() => {
+    if (audit) {
+      return audit.conditions.map((item) => ({ ...item, programs: [item.program] }));
+    }
+    return hasUploadedPdf ? [] : CONDITIONS.filter((item) => item.programs.includes(program));
+  }, [audit, hasUploadedPdf, program]);
+  const mappedBoxes = visibleFindings
+    .filter((finding): finding is Finding & { pageIndex: number; box: SpatialCoordinates['box'] } =>
+      finding.pageIndex !== null && finding.box !== null)
+    .map((finding) => ({ pageIndex: finding.pageIndex, box: finding.box }));
   /**
    * Uploaded or dropped-in documents have their own layout, so the facsimile's
    * coordinate overlays (finding boxes, tap-to-highlight) are suppressed.
@@ -378,10 +480,15 @@ export default function AppraisalReviewWorkspace() {
   const errors = visibleFindings.filter((finding) => finding.severity === 'error').length;
   const warnings = visibleFindings.filter((finding) => finding.severity === 'warning').length;
   const novFails = NOV_CHECKLIST.filter((item) => item.status === 'fail').length;
+  const extractedMetadata = audit?.extractedData.metadata;
+  const displayedLoanId = audit?.loanId ?? (hasUploadedPdf || useBlankForm ? '—' : SUBJECT.loanId);
+  const displayedBorrower = readText(extractedMetadata?.borrowerName) ?? (hasUploadedPdf || useBlankForm ? '—' : SUBJECT.borrower);
+  const displayedValue = readNumber(extractedMetadata?.appraisedValue);
+  const displayedCase = readText(extractedMetadata?.caseNumber) ?? (hasUploadedPdf || useBlankForm ? '—' : SUBJECT.caseNumber);
 
   function inspect(code: string) {
-    const finding = FINDINGS.find((item) => item.code === code);
-    if (!finding) return;
+    const finding = visibleFindings.find((item) => item.code === code);
+    if (!finding || finding.pageIndex === null || finding.box === null) return;
     triggerHighlight({ pageIndex: finding.pageIndex, box: finding.box });
   }
 
@@ -392,9 +499,10 @@ export default function AppraisalReviewWorkspace() {
 
   const docSnapshot = useMemo<AppraisalDocSnapshot>(
     () => ({
-      loanId: useBlankForm ? '—' : SUBJECT.loanId,
-      borrower: useBlankForm ? '—' : SUBJECT.borrower,
-      programLabel: program === 'CONV' ? 'Conventional' : program === 'VA' ? 'VA NOV' : 'FHA',
+      loanId: displayedLoanId,
+      borrower: displayedBorrower,
+      programLabel:
+        program === 'CONV' ? 'Conventional' : program === 'VA' ? 'VA NOV' : program === 'USDA' ? 'USDA' : 'FHA',
       currentPage,
       zoomScale,
       totalPages,
@@ -405,7 +513,7 @@ export default function AppraisalReviewWorkspace() {
       documentUrl: customPdfUrl || (useBlankForm ? BLANK_URAR_PDF : URAR_PDF),
       mappedBoxes: canvasBoxes,
     }),
-    [useBlankForm, program, currentPage, zoomScale, totalPages, canvasHighlight, customPdfUrl, canvasBoxes],
+    [displayedLoanId, displayedBorrower, useBlankForm, program, currentPage, zoomScale, totalPages, canvasHighlight, customPdfUrl, canvasBoxes],
   );
   const docSnapshotRef = useRef(docSnapshot);
   docSnapshotRef.current = docSnapshot;
@@ -465,6 +573,8 @@ export default function AppraisalReviewWorkspace() {
   const header =
     program === 'VA'
       ? { kicker: 'VA SAR / LAPP', title: 'Notice of Value', sub: 'NOV checklist → sales comps → red flags & conditions' }
+      : program === 'USDA'
+        ? { kicker: 'USDA SFH', title: 'Property acceptability review', sub: 'Native appraisal data → USDA conditions' }
       : program === 'FHA'
         ? { kicker: 'FHA HUD 4000.1', title: 'CCDE / 92800.5B review', sub: 'Mapped findings write HUD-92800.5B conditions' }
         : { kicker: 'GSE collateral', title: 'URAR 1004 review', sub: 'CU net/gross bands · 1004MC · commentary flags' };
@@ -542,6 +652,11 @@ export default function AppraisalReviewWorkspace() {
                   {uploadFillNote}
                 </span>
               )}
+              {auditState === 'parsing' && (
+                <span className="mr-2 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                  Parsing…
+                </span>
+              )}
               {droppedDoc && !customPdfUrl && (
                 <span
                   className="mr-2 rounded bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700"
@@ -557,6 +672,11 @@ export default function AppraisalReviewWorkspace() {
                   if (!useBlankForm) {
                     setCustomPdfUrl(null);
                     setUploadFillNote(null);
+                    uploadedPdfRef.current = null;
+                    auditSequenceRef.current += 1;
+                    setAudit(null);
+                    setAuditState('idle');
+                    setAuditError(null);
                   }
                 }}
                 className={`mr-2 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
@@ -565,46 +685,71 @@ export default function AppraisalReviewWorkspace() {
               >
                 {useBlankForm && !customPdfUrl ? 'Using Blank Form' : 'Use Blank Form'}
               </button>
-              {(['CONV', 'FHA', 'VA'] as Program[]).map((item) => (
+              {(['CONV', 'FHA', 'VA', 'USDA'] as Program[]).map((item) => (
                 <button
                   key={item}
                   type="button"
-                  onClick={() => setProgram(item)}
+                  onClick={() => {
+                    setProgram(item);
+                    const uploaded = uploadedPdfRef.current;
+                    if (uploaded) void requestAudit(uploaded.bytes, uploaded.filename, item);
+                  }}
                   className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${
                     program === item ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  {item === 'CONV' ? 'Conv' : item === 'VA' ? 'VA NOV' : 'FHA'}
+                  {item === 'CONV' ? 'Conv' : item === 'VA' ? 'VA NOV' : item}
                 </button>
               ))}
             </div>
           </div>
+          {auditError && (
+            <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+              {auditError}
+            </p>
+          )}
           <dl className="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
-            <Meta label="Loan" value={useBlankForm ? '—' : SUBJECT.loanId} />
-            <Meta label="Borrower" value={useBlankForm ? '—' : SUBJECT.borrower} />
-            <Meta label="Appraised" value={useBlankForm ? '—' : `$${SUBJECT.value.toLocaleString()}`} />
-            <Meta label="Case" value={useBlankForm ? '—' : SUBJECT.caseNumber} />
+            <Meta label="Loan" value={displayedLoanId} />
+            <Meta label="Borrower" value={displayedBorrower} />
+            <Meta
+              label="Appraised"
+              value={displayedValue !== null ? `$${displayedValue.toLocaleString()}` : hasUploadedPdf || useBlankForm ? '—' : `$${SUBJECT.value.toLocaleString()}`}
+            />
+            <Meta label="Case" value={displayedCase} />
           </dl>
           <p className="mt-3 text-xs text-slate-600">
-            {useBlankForm ? 'No subject data loaded' : `${SUBJECT.address} · ${SUBJECT.gla.toLocaleString()} sf · built ${SUBJECT.yearBuilt} · ${SUBJECT.appraiser}`}
+            {audit
+              ? appraisalMetadataSummary(audit)
+              : hasUploadedPdf
+                ? auditState === 'parsing'
+                  ? 'Extracting native PDF text and AcroForm values…'
+                  : 'No appraisal metadata is available for this upload.'
+                : useBlankForm
+                  ? 'No subject data loaded'
+                  : `${SUBJECT.address} · ${SUBJECT.gla.toLocaleString()} sf · built ${SUBJECT.yearBuilt} · ${SUBJECT.appraiser}`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
             <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-800">
-              {useBlankForm ? '0 exceptions' : program === 'VA' ? `${novFails} NOV items open` : `${errors} exceptions`}
+              {useBlankForm || (hasUploadedPdf && !audit) ? '0 exceptions' : program === 'VA' && !audit ? `${novFails} NOV items open` : `${errors} exceptions`}
             </span>
-            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">{useBlankForm ? '0' : warnings} title / contract flags</span>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">Native PDF mapped</span>
+            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">{useBlankForm || (hasUploadedPdf && !audit) ? '0' : warnings} review flags</span>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
+              {audit ? `${audit.programUsed} · ${audit.ruleVersion}` : 'Demo appraisal review'}
+            </span>
           </div>
         </header>
 
         <div className="space-y-6 px-6 py-5">
-          {program === 'VA' ? (
+          {audit ? (
+            <FindingsList findings={visibleFindings} activeHighlight={activeHighlight} onInspect={inspect} />
+          ) : program === 'VA' && !hasUploadedPdf ? (
             <NovChecklist items={useBlankForm ? [] : NOV_CHECKLIST} onInspect={inspect} />
           ) : (
-            <FindingsList findings={useBlankForm ? [] : visibleFindings} activeHighlight={activeHighlight} onInspect={inspect} />
+            <FindingsList findings={useBlankForm || hasUploadedPdf ? [] : visibleFindings} activeHighlight={activeHighlight} onInspect={inspect} />
           )}
 
-          {!useBlankForm && <SalesCompAnalysis />}
+          {!useBlankForm && !hasUploadedPdf && <SalesCompAnalysis comps={COMPS} />}
+          {audit && <SalesCompAnalysis comps={auditComparables(audit)} />}
 
           {program === 'FHA' ? (
             <ConditionsPanel
@@ -618,6 +763,12 @@ export default function AppraisalReviewWorkspace() {
               intro="Failed MPR items and commentary keywords prefill the Notice of Value. Clear the checklist before lock & sync."
               conditions={useBlankForm ? [] : conditions}
               nov
+            />
+          ) : program === 'USDA' ? (
+            <ConditionsPanel
+              title="USDA property conditions"
+              intro="Deterministic USDA appraisal conditions extracted from the uploaded document."
+              conditions={conditions}
             />
           ) : (
             <ConditionsPanel
@@ -653,10 +804,17 @@ function FindingsList({
   return (
     <section>
       <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-400">Mapped findings — tap to land on the PDF</h3>
-      <p className="mt-1 text-xs text-slate-500">Native URAR 1004. Engine boxed the data points, not every OCR token.</p>
+      <p className="mt-1 text-xs text-slate-500">Native PDF text and AcroForm review; image-only content is not OCR processed.</p>
+      {findings.length === 0 && (
+        <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+          No findings returned for this appraisal and program.
+        </p>
+      )}
       <ul className="mt-3 space-y-2">
         {findings.map((finding) => {
           const active =
+            finding.pageIndex !== null &&
+            finding.box !== null &&
             activeHighlight?.pageIndex === finding.pageIndex &&
             activeHighlight.box.join(',') === finding.box.join(',');
           return (
@@ -677,7 +835,9 @@ function FindingsList({
                   <span className="mt-1 block text-xs text-slate-700">{finding.extracted}</span>
                   <span className="mt-1 block text-[11px] text-slate-500">{finding.why}</span>
                 </span>
-                <Eye className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                {finding.pageIndex !== null && finding.box !== null ? (
+                  <Eye className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                ) : null}
               </button>
             </li>
           );
@@ -738,11 +898,16 @@ function NovChecklist({ items, onInspect }: { items: NovItem[]; onInspect: (code
   );
 }
 
-function SalesCompAnalysis() {
+function SalesCompAnalysis({ comps }: { comps: SalesComp[] }) {
   return (
     <section>
       <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-400">Sales comparison — adjustment analysis</h3>
       <p className="mt-1 text-xs text-slate-500">Net/gross bands and line items extracted from page 2 of the URAR.</p>
+      {comps.length === 0 ? (
+        <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+          No comparable-sale values were extracted.
+        </p>
+      ) : (
       <div className="mt-2 overflow-hidden rounded-xl border border-slate-200">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
@@ -755,7 +920,7 @@ function SalesCompAnalysis() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {COMPS.map((comp) => (
+            {comps.map((comp) => (
               <tr key={comp.name} className={comp.flag ? 'bg-rose-50' : ''}>
                 <td className="px-3 py-2">
                   <p className="font-bold text-slate-950">{comp.name}</p>
@@ -776,6 +941,7 @@ function SalesCompAnalysis() {
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 }
@@ -829,4 +995,112 @@ function SeverityIcon({ severity }: { severity: Severity }) {
   if (severity === 'error') return <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />;
   if (severity === 'warning') return <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />;
   return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />;
+}
+
+function isAuditResponse(value: unknown): value is AuditResponse {
+  if (!isRecord(value) || !isRecord(value.extractedData)) return false;
+  if (
+    typeof value.transactionId !== 'string' ||
+    typeof value.loanId !== 'string' ||
+    !isProgram(value.programUsed) ||
+    typeof value.ruleVersion !== 'string' ||
+    !Array.isArray(value.findings) ||
+    !Array.isArray(value.conditions)
+  ) {
+    return false;
+  }
+  const findingsValid = value.findings.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.code === 'string' &&
+      typeof item.label === 'string' &&
+      typeof item.extracted === 'string' &&
+      typeof item.why === 'string' &&
+      (item.severity === 'info' || item.severity === 'warning' || item.severity === 'error') &&
+      typeof item.authority === 'string' &&
+      isProgram(item.program) &&
+      (item.pageIndex === null || typeof item.pageIndex === 'number') &&
+      isSpatialBoxOrNull(item.box),
+  );
+  const conditionsValid = value.conditions.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.id === 'string' &&
+      (item.kind === 'REPAIR' || item.kind === 'INSPECTION' || item.kind === 'ADMIN' || item.kind === 'REDFLAG') &&
+      typeof item.text === 'string' &&
+      typeof item.authority === 'string' &&
+      isProgram(item.program),
+  );
+  return findingsValid && conditionsValid;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isProgram(value: unknown): value is Program {
+  return value === 'CONV' || value === 'FHA' || value === 'VA' || value === 'USDA';
+}
+
+function isSpatialBoxOrNull(value: unknown): value is SpatialCoordinates['box'] | null {
+  return value === null || (Array.isArray(value) && value.length === 4 && value.every((item) => typeof item === 'number'));
+}
+
+function apiErrorMessage(value: unknown): string | null {
+  return isRecord(value) && typeof value.detail === 'string' ? value.detail : null;
+}
+
+function safeHeaderFilename(filename: string): string {
+  return filename.replace(/[^\x20-\x7E]/g, '_').slice(0, 200) || 'appraisal.pdf';
+}
+
+function readText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function appraisalMetadataSummary(audit: AuditResponse): string {
+  const metadata = audit.extractedData.metadata ?? {};
+  const document = audit.extractedData.document;
+  const parts = [
+    readText(metadata.propertyAddress),
+    readNumber(metadata.grossLivingArea) !== null ? `${readNumber(metadata.grossLivingArea)?.toLocaleString()} sf` : null,
+    readNumber(metadata.yearBuilt) !== null ? `built ${readNumber(metadata.yearBuilt)}` : null,
+    readText(metadata.appraiserName),
+  ].filter((part): part is string => Boolean(part));
+  const extraction = document
+    ? `${document.extractionMethod ?? 'native extraction'} · ${document.nativeTextPageCount ?? 0} text pages · ${document.formFieldCount ?? 0} form values`
+    : 'native extraction';
+  return `${parts.length ? `${parts.join(' · ')} · ` : ''}${extraction}`;
+}
+
+function auditComparables(audit: AuditResponse): SalesComp[] {
+  return (audit.extractedData.comparables ?? []).flatMap((item) => {
+    const index = readNumber(item.compIndex);
+    const price = readNumber(item.salePrice);
+    if (index === null || price === null) return [];
+    const grossAmount = readNumber(item.grossAdjustmentAmount);
+    const netAmount = readNumber(item.netAdjustmentAmount);
+    const proximity = readNumber(item.proximityMiles);
+    const ratio = grossAmount === null || price === 0 ? null : Math.abs(grossAmount) / price;
+    return [{
+      name: `Comp ${index}`,
+      address: readText(item.address) ?? 'Address not extracted',
+      gla: readNumber(item.grossLivingArea) ?? 0,
+      price,
+      prox: proximity === null ? '—' : `${proximity.toFixed(2)} mi`,
+      net: netAmount === null ? '—' : formatSignedMoney(netAmount),
+      gross: ratio === null ? '—' : ratio.toLocaleString(undefined, { style: 'percent', maximumFractionDigits: 1 }),
+      lines: [],
+      flag: ratio !== null && ratio > 0.1,
+    }];
+  });
+}
+
+function formatSignedMoney(value: number): string {
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+  return `${sign}$${Math.abs(value).toLocaleString()}`;
 }

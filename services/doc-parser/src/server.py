@@ -9,8 +9,12 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-from pdf_splitter import pre_split_tax_returns
+try:
+    from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
+    from pdf_splitter import pre_split_tax_returns
+except ImportError:
+    from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
+    from src.pdf_splitter import pre_split_tax_returns
 
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("freeflow.server")

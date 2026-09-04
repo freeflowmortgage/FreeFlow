@@ -623,6 +623,48 @@ export default function Conversational1003() {
                   ))}
                 </div>
               ) : null}
+              {/* iOS / Mobile speech-first large mic callout where the keyboard would be */}
+              {voiceMode && support.listen && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    disabled={typing}
+                    onClick={() => {
+                      if (listening) {
+                        stopListening();
+                        return;
+                      }
+                      stopSpeaking();
+                      setSpeaking(false);
+                      startListening();
+                    }}
+                    className={`flex w-full items-center justify-center gap-3 rounded-2xl py-3.5 px-4 font-bold text-base transition-all shadow-md ${
+                      listening
+                        ? 'bg-rose-500 text-white animate-pulse shadow-rose-500/30 ring-4 ring-rose-200'
+                        : speaking
+                          ? 'bg-emerald-100 text-emerald-800 border-2 border-emerald-300 cursor-not-allowed opacity-90'
+                          : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-600/30 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.98]'
+                    }`}
+                  >
+                    {listening ? (
+                      <>
+                        <MicOff className="h-5 w-5 animate-bounce" />
+                        <span>Listening… tap when done</span>
+                      </>
+                    ) : speaking ? (
+                      <>
+                        <Volume2 className="h-5 w-5 animate-pulse" />
+                        <span>FreeFlow is asking…</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="h-5 w-5" />
+                        <span>Tap to speak answer</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
               <form onSubmit={onSubmit} className="flex items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-white px-3 py-2 shadow-[0_10px_30px_rgba(16,185,129,0.12)]">
                 <input
                   ref={inputRef}

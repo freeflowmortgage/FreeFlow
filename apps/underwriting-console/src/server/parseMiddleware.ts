@@ -8,8 +8,9 @@ import { generatePaystubPdf } from './generatePaystubPdf';
 import { fillK1Partnership, fillK1SCorp, fillScheduleC, fillScheduleE, fillW2, num } from './demoDocs';
 import { droppedUrarExists, loadDroppedUrar } from './fillDroppedUrar';
 
-const PYTHON_PARSE = 'http://127.0.0.1:8080/parse';
-const PYTHON_HEALTH = 'http://127.0.0.1:8080/health';
+const DEFAULT_DOC_PARSER_URL = 'http://127.0.0.1:8080';
+const PYTHON_PARSE = `${(process.env.DOC_PARSER_URL || process.env.DOC_PARSER_SERVICE_URL || DEFAULT_DOC_PARSER_URL).replace(/\/+$/, '')}/parse`;
+const PYTHON_HEALTH = `${(process.env.DOC_PARSER_URL || process.env.DOC_PARSER_SERVICE_URL || DEFAULT_DOC_PARSER_URL).replace(/\/+$/, '')}/health`;
 const MAX_PDF_BYTES = 40 * 1024 * 1024;
 
 const CLASSIFIERS: Array<[string, RegExp]> = [
@@ -20,6 +21,7 @@ const CLASSIFIERS: Array<[string, RegExp]> = [
   ['Schedule D (Capital Gains)', /Schedule D.*Capital Gains and Losses/i],
   ['Schedule E (Page 1 - Rentals)', /Schedule E.*Supplemental Income and Loss/i],
   ['Schedule E (Page 2 - K-1s)', /Schedule E \(Form 1040\).*Page 2|Part II.*Income or Loss From Partnerships/i],
+  ['Schedule F (Farm Income)', /Schedule F(?:\s*\(Form 1040\))?.*Profit or Loss From Farming|Profit or Loss From Farming/i],
   ['Form 1120S (S-Corporation Return)', /U\.S\. Income Tax Return for an S Corporation/i],
   ['Form 1065 (Partnership Return)', /U\.S\. Return of Partnership Income/i],
   ['Form 1120 (C-Corporation Return)', /U\.S\. Corporation Income Tax Return/i],
@@ -164,7 +166,7 @@ function toParseResponse(pages: ParsePage[], filename: string, engine: ParseResp
     extracted_page_indices: extracted,
     ocr_page_count: engine === 'python-ocr' ? pages.filter((page) => !page.isNativeText).length : 0,
     has_business_returns: pages.some((page) =>
-      page.formIds.some((label) => /schedule c|schedule e|form 1120|form 1065|k-1/i.test(label)),
+      page.formIds.some((label) => /schedule c|schedule e|schedule f|form 1120|form 1065|k-1/i.test(label)),
     ),
     flags: extracted.length ? [] : ['no_core_forms_detected'],
     classifications,

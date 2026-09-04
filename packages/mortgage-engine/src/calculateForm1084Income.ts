@@ -19,7 +19,32 @@ export interface GeneratedCondition {
 // 1. COMPLEX VARIABLE, MILITARY, AND TAX-EXEMPT INCOME INPUT INTERFACES
 // ────────────────────────────────────────────────────────────────────────
 
+export type W2EmploymentRole = 'CURRENT' | 'CONCURRENT' | 'PRIOR';
+
+export interface W2EmployerEntry {
+  /** Stable source-system identifier. Do not derive this from the employer name. */
+  entityId: string;
+  employerName: string;
+  ein?: string;
+  role: W2EmploymentRole;
+  year: number;
+  monthsWorked?: number;
+  /** Actual or projected annual total. Takes precedence over the component fields. */
+  annualIncome?: number;
+  /** Alias for annualIncome when the source is explicitly a W-2. */
+  annualWages?: number;
+  /** Annualized base and variable components when no annual total is supplied. */
+  annualBaseIncome?: number;
+  annualVariableIncome?: number;
+  /** Backward-friendly aliases; these values are also treated as annual amounts. */
+  baseIncome?: number;
+  variableIncome?: number;
+}
+
 export interface ScheduleCEntry {
+  entityId?: string;
+  businessName?: string;
+  ein?: string;
   year: number;
   monthsInBusiness?: number;
   netProfitLoss: number;
@@ -32,6 +57,9 @@ export interface ScheduleCEntry {
 }
 
 export interface Form1120SEntry {
+  entityId?: string;
+  businessName?: string;
+  ein?: string;
   year: number;
   monthsInBusiness?: number;
   /** END-of-year stock ownership percentage from the K-1 (never the beginning figure) */
@@ -49,6 +77,9 @@ export interface Form1120SEntry {
 }
 
 export interface Form1065Entry {
+  entityId?: string;
+  businessName?: string;
+  ein?: string;
   year: number;
   monthsInBusiness?: number;
   /**
@@ -69,6 +100,9 @@ export interface Form1065Entry {
 }
 
 export interface Form1120Entry {
+  entityId?: string;
+  businessName?: string;
+  ein?: string;
   year: number;
   monthsInBusiness?: number;
   ownershipPercentage: number;
@@ -87,6 +121,25 @@ export interface Form1120Entry {
   borrowerDividendsReceived?: number; // C-Corp dividends distributed directly to the borrower (from Form 1099-DIV / Schedule B)
 }
 
+export interface ScheduleFEntry {
+  entityId: string;
+  businessName: string;
+  ein?: string;
+  year: number;
+  monthsInBusiness?: number;
+  netFarmProfitLoss: number;
+  /** Form 1084 line 6b: only the verified recurring non-taxable portion. */
+  nonTaxPortionOngoingCoopAndCccPayments?: number;
+  /**
+   * Form 1084 line 6c signed adjustment: use a negative value to remove
+   * nonrecurring other income and a positive value to add back a nonrecurring loss.
+   */
+  nonrecurringOtherIncomeLoss?: number;
+  depreciation?: number;
+  amortizationCasualtyLossDepletion?: number;
+  businessUseOfHome?: number;
+}
+
 export interface Form1040BenefitInput {
   year: number;
   totalSocialSecurity?: number;
@@ -103,6 +156,8 @@ export interface ScheduleBAndDInput {
   interestIncome?: number;       // Schedule B, Part I
   dividendIncome?: number;       // Schedule B, Part II
   capitalGainsNetLoss?: number;  // Schedule D
+  /** Asset-derived income is excluded unless an underwriter explicitly elects it. */
+  includeInQualifyingIncome?: boolean;
   hasThreeYearAssetSupport?: boolean; // Underwriter verified continuance based on asset balance
 }
 
@@ -145,7 +200,9 @@ export interface SubjectPropertyRentalInput {
 
 export interface UnifiedIncomeCalculationPayload {
   loanProgram: LoanProgram;
+  w2Employers?: W2EmployerEntry[];
   scheduleC?: ScheduleCEntry[];
+  scheduleF?: ScheduleFEntry[];
   form1120S?: Form1120SEntry[];
   form1065?: Form1065Entry[];
   form1120?: Form1120Entry[];
@@ -222,6 +279,36 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
   };
 
   // ──────────────────────────────────────────────────────────────────────
+  // W-2 EMPLOYERS - EXPLICIT ROLE PREVENTS CONCURRENT JOBS FROM BEING
+  // MISCLASSIFIED AS EMPLOYMENT TRANSITIONS
+  // ──────────────────────────────────────────────────────────────────────
+  const w2EmployerBreakdown = (payload.w2Employers || []).map((entry) => {
+    const base = new Decimal(entry.annualBaseIncome ?? entry.baseIncome ?? 0);
+    const variable = new Decimal(entry.annualVariableIncome ?? entry.variableIncome ?? 0);
+    const annualQualifying = new Decimal(
+      entry.annualIncome ?? entry.annualWages ?? base.add(variable).toNumber()
+    );
+
+    // CURRENT and CONCURRENT are both active qualifying employments. PRIOR is
+    // retained as its own historical entity and contributes only to its stated
+    // tax year; no role is inferred from array order or employer count.
+    addFlowToYear(entry.year, annualQualifying);
+
+    return {
+      entityId: entry.entityId,
+      employerName: entry.employerName,
+      ein: entry.ein ?? null,
+      role: entry.role,
+      isActiveEmployment: entry.role !== 'PRIOR',
+      year: entry.year,
+      monthsWorked: entry.monthsWorked ?? null,
+      annualBaseIncome: base.toNumber(),
+      annualVariableIncome: variable.toNumber(),
+      annualQualifyingIncome: annualQualifying.toNumber()
+    };
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
   // A. SCHEDULE C - INDIVIDUAL PROFIT OR LOSS SOLE PROPRIETOR
   // ──────────────────────────────────────────────────────────────────────
   const scheduleCBreakdown = (payload.scheduleC || []).map((entry) => {
@@ -245,11 +332,50 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     addFlowToYear(entry.year, totalAdjusted);
 
     return {
+      entityId: entry.entityId ?? null,
+      businessName: entry.businessName ?? null,
+      ein: entry.ein ?? null,
       year: entry.year,
       netProfitLoss: netProfit.toNumber(),
       depreciation: depr.toNumber(),
       businessUseOfHome: homeUse.toNumber(),
       mealsExclusion: meals.toNumber(),
+      totalAdjustedIncome: totalAdjusted.toNumber()
+    };
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // A2. SCHEDULE F - PROFIT OR LOSS FROM FARMING (FORM 1084 SECTION 6)
+  // ──────────────────────────────────────────────────────────────────────
+  const scheduleFBreakdown = (payload.scheduleF || []).map((entry) => {
+    const netFarmProfitLoss = new Decimal(entry.netFarmProfitLoss);
+    const ongoingCoopAndCcc = new Decimal(entry.nonTaxPortionOngoingCoopAndCccPayments || 0);
+    const nonrecurringOther = new Decimal(entry.nonrecurringOtherIncomeLoss || 0);
+    const depreciation = new Decimal(entry.depreciation || 0);
+    const amortizationCasualtyLossDepletion = new Decimal(entry.amortizationCasualtyLossDepletion || 0);
+    const businessUseOfHome = new Decimal(entry.businessUseOfHome || 0);
+
+    const totalAdjusted = netFarmProfitLoss
+      .add(ongoingCoopAndCcc)
+      .add(nonrecurringOther)
+      .add(depreciation)
+      .add(amortizationCasualtyLossDepletion)
+      .add(businessUseOfHome);
+
+    addFlowToYear(entry.year, totalAdjusted);
+
+    return {
+      entityId: entry.entityId,
+      businessName: entry.businessName,
+      ein: entry.ein ?? null,
+      year: entry.year,
+      monthsInBusiness: entry.monthsInBusiness ?? null,
+      netFarmProfitLoss: netFarmProfitLoss.toNumber(),
+      nonTaxPortionOngoingCoopAndCccPayments: ongoingCoopAndCcc.toNumber(),
+      nonrecurringOtherIncomeLoss: nonrecurringOther.toNumber(),
+      depreciation: depreciation.toNumber(),
+      amortizationCasualtyLossDepletion: amortizationCasualtyLossDepletion.toNumber(),
+      businessUseOfHome: businessUseOfHome.toNumber(),
       totalAdjustedIncome: totalAdjusted.toNumber()
     };
   });
@@ -313,6 +439,9 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     addFlowToYear(entry.year, totalCombined);
 
     return {
+      entityId: entry.entityId ?? null,
+      businessName: entry.businessName ?? null,
+      ein: entry.ein ?? null,
       year: entry.year,
       w2WagesFromBusiness: w2.toNumber(),
       k1EligibleIncome: k1EligibleIncome.toNumber(),
@@ -379,6 +508,9 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     addFlowToYear(entry.year, totalCombined);
 
     return {
+      entityId: entry.entityId ?? null,
+      businessName: entry.businessName ?? null,
+      ein: entry.ein ?? null,
       year: entry.year,
       guaranteedPayments: guaranteed.toNumber(),
       k1EligibleIncome: k1EligibleIncome.toNumber(),
@@ -439,6 +571,9 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     addFlowToYear(entry.year, totalCombined);
 
     return {
+      entityId: entry.entityId ?? null,
+      businessName: entry.businessName ?? null,
+      ein: entry.ein ?? null,
       year: entry.year,
       w2WagesFromCorporate: w2.toNumber(),
       borrowerDividendsReceived: dividends.toNumber(),
@@ -506,25 +641,50 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
   // ──────────────────────────────────────────────────────────────────────
   // F. ASSET-DERIVED INCOME (SCHEDULE B INTEREST/DIVIDENDS & SCHEDULE D GAINS)
   // ──────────────────────────────────────────────────────────────────────
-  if (payload.assets && payload.assets.length > 0) {
-    payload.assets.forEach((entry) => {
-      const interest = new Decimal(entry.interestIncome || 0);
-      const dividends = new Decimal(entry.dividendIncome || 0);
-      const capitalGains = new Decimal(entry.capitalGainsNetLoss || 0);
+  const assetIncomeBreakdown = (payload.assets || []).map((entry) => {
+    const interest = new Decimal(entry.interestIncome || 0);
+    const dividends = new Decimal(entry.dividendIncome || 0);
+    const capitalGains = new Decimal(entry.capitalGainsNetLoss || 0);
+    const detectedAssetIncome = interest.add(dividends).add(capitalGains);
+    const included = entry.includeInQualifyingIncome === true;
+    const qualifyingAssetIncome = included ? detectedAssetIncome : new Decimal(0);
 
-      const totalAssetFlow = interest.add(dividends).add(capitalGains);
-      addFlowToYear(entry.year, totalAssetFlow);
+    if (included) {
+      addFlowToYear(entry.year, qualifyingAssetIncome);
 
-      if (totalAssetFlow.gt(0) && !entry.hasThreeYearAssetSupport) {
+      if (detectedAssetIncome.gt(0) && !entry.hasThreeYearAssetSupport) {
         conditions.push({
           title: 'Asset Income Continuance & Asset Balance Audit',
           category: 'INCOME',
-          description: `Borrower is qualifying using asset-derived income (Interest/Dividends/Capital Gains). Underwriter must verify that the underlying brokerage or deposit asset balance is sufficient to support the distribution rate for at least 36 months.`,
+          description: `Underwriter elected to include asset-derived income for ${entry.year}. Verify that the underlying brokerage or deposit asset balance and receipt history support continuance for at least 36 months.`,
           requiredDocType: 'BROKERAGE_ACCOUNT_STATEMENTS_3_YEARS'
         });
       }
-    });
-  }
+    } else if (!detectedAssetIncome.eq(0) || !capitalGains.eq(0)) {
+      warnings.push({
+        code: 'ASSET_INCOME_EXCLUDED_BY_DEFAULT',
+        severity: 'WARNING',
+        message: `Schedule B/D income for ${entry.year} was detected but excluded from qualifying income by default. An underwriter may elect inclusion with includeInQualifyingIncome only after documenting receipt history, asset sufficiency, stability, and continuance.`
+      });
+      conditions.push({
+        title: 'Asset Income Underwriter Election',
+        category: 'INCOME',
+        description: `Interest, dividends, or capital gain/loss was detected for ${entry.year} and remains excluded. If the underwriter elects inclusion, document the required receipt history, underlying asset balance, stability, and continuance before setting includeInQualifyingIncome.`,
+        requiredDocType: 'BROKERAGE_ACCOUNT_STATEMENTS_3_YEARS'
+      });
+    }
+
+    return {
+      year: entry.year,
+      interestIncome: interest.toNumber(),
+      dividendIncome: dividends.toNumber(),
+      capitalGainsNetLoss: capitalGains.toNumber(),
+      detectedAssetIncome: detectedAssetIncome.toNumber(),
+      includeInQualifyingIncome: included,
+      qualifyingAssetIncome: qualifyingAssetIncome.toNumber(),
+      hasThreeYearAssetSupport: entry.hasThreeYearAssetSupport === true
+    };
+  });
 
   // ──────────────────────────────────────────────────────────────────────
   // G. TRUST INCOME (SCHEDULE E, PART III & K-1 1041)
@@ -680,7 +840,14 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
 
   let trendingResult = 'INSUFFICIENT_DATA';
 
-  if (program === 'VA' && sortedYears.length < 2 && (payload.scheduleC || payload.form1120S || payload.form1065 || payload.form1120)) {
+  const hasSelfEmployment =
+    (payload.scheduleC?.length || 0) > 0 ||
+    (payload.scheduleF?.length || 0) > 0 ||
+    (payload.form1120S?.length || 0) > 0 ||
+    (payload.form1065?.length || 0) > 0 ||
+    (payload.form1120?.length || 0) > 0;
+
+  if (program === 'VA' && sortedYears.length < 2 && hasSelfEmployment) {
     warnings.push({
       code: 'VA_MIN_HISTORY_BREACH',
       severity: 'WARNING',
@@ -885,10 +1052,16 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     },
     warnings,
     conditions,
+    annualCalculatedTotals: Object.fromEntries(
+      Object.entries(annualCalculatedTotals).map(([year, amount]) => [year, amount.toNumber()])
+    ),
+    w2EmployerBreakdown,
     scheduleCBreakdown,
+    scheduleFBreakdown,
     form1120SBreakdown,
     form1065Breakdown,
     form1120Breakdown,
+    assetIncomeBreakdown,
     scheduleEPropertiesBreakdown,
     militaryBreakdown
   };
