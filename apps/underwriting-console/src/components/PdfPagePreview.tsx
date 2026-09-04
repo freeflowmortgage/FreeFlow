@@ -116,11 +116,12 @@ export default function PdfPagePreview({
             <button
               key={field.id}
               type="button"
+              data-box-id={field.id}
               title={`${field.boxLabel} · ${field.fieldLabel} · ${field.value}`}
               className={`absolute box-border rounded-sm ${
                 selected
-                  ? 'z-10 border-2 border-emerald-600 bg-emerald-400/30 ring-2 ring-emerald-500/40'
-                  : 'border border-emerald-500/80 bg-emerald-400/15 hover:bg-emerald-400/25'
+                  ? 'z-10 border-2 border-emerald-600 bg-transparent'
+                  : 'border border-emerald-500/80 bg-transparent hover:border-emerald-600'
               }`}
               style={{
                 left: `${field.box.x * 100}%`,

@@ -12,6 +12,7 @@ import SplitDocPane from './components/SplitDocPane';
 import AppraisalDocPane from './components/AppraisalDocPane';
 import type { ConsoleView, SourceMode, Surface } from './appTypes';
 import type { LiveParseSession, ParseResponse } from './parseTypes';
+import { postParsePdf } from './postParsePdf';
 
 const NAV: { id: ConsoleView; label: string; icon: typeof ShieldCheck }[] = [
   { id: 'split', label: 'Income', icon: ShieldCheck },
@@ -119,16 +120,8 @@ export default function App() {
     setParseBusy(true);
     setParseError(null);
     try {
-      const body = new FormData();
-      body.append('file', file);
-      const response = await fetch('/parse', { method: 'POST', body });
-      const payload = await response.json();
-      if (!response.ok) {
-        const detail = payload.detail;
-        const message = typeof detail === 'string' ? detail : JSON.stringify(detail || payload);
-        throw new Error(message || `Parser returned ${response.status}`);
-      }
-      setSession({ file, fileName: file.name, result: payload as ParseResponse });
+      const payload = await postParsePdf(file);
+      setSession({ file, fileName: file.name, result: payload });
       setSource('live');
       enterWorkspace('split');
     } catch (err) {

@@ -23,6 +23,7 @@ import {
   Tractor,
   Coins,
 } from 'lucide-react';
+import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveParseSession } from '../parseTypes';
 import { mapIncomeFields } from '../incomeFieldMap';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
@@ -303,6 +304,7 @@ export default function UnderwriterSplitViewDemo({
   const [canvasYearIndex, setCanvasYearIndex] = useState<0 | 1>(0);
   /** Left-pane document style: interactive facsimile or the real filled source PDF. */
   const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('pdf');
+  const [wageDocKind, setWageDocKind] = useState<'paystub' | 'w2'>('paystub');
   const [twoYearSchC, setTwoYearSchC] = useState(false);
   const [twoYearScorp, setTwoYearScorp] = useState(false);
   const [twoYearCCorp, setTwoYearCCorp] = useState(false);
@@ -651,19 +653,16 @@ export default function UnderwriterSplitViewDemo({
 
   // 4. Dynamic Spatial Fields Definitions (For Interactive Highlights)
   const fieldCoordinatesMapping = useMemo<OCRField[]>(() => [
-    // Paystub Metadata Fields (Page 1)
-    { id: 'ps-emp-name', category: 'METADATA', label: 'Employer Name', value: borrowerMetadata.currentEmployer, numericValue: 0, isDiscrepancy: false, boxCoordinates: { x: 10, y: 5, width: 40, height: 3, page: 1 } },
-    { id: 'ps-ee-name', category: 'METADATA', label: 'Employee Name', value: borrowerMetadata.borrowerName, numericValue: 0, isDiscrepancy: false, boxCoordinates: { x: 50, y: 5, width: 40, height: 3, page: 1 } },
-    { id: 'ps-period', category: 'METADATA', label: 'Pay Period', value: '2026-08-01 to 2026-08-15', numericValue: 0, isDiscrepancy: false, boxCoordinates: { x: 10, y: 12, width: 40, height: 3, page: 1 } },
-    { id: 'ps-frequency', category: 'METADATA', label: 'Pay Frequency', value: 'Semi-Monthly (24 Pays/Yr)', numericValue: 24, isDiscrepancy: false, boxCoordinates: { x: 10, y: 15, width: 40, height: 3, page: 1 } },
-    
-    // Earnings Statement Fields (Page 1)
-    { id: 'ps-hourly-rate', category: 'EARNINGS', label: 'Hourly Pay Rate', value: `$${currentHourlyRate.toFixed(2)}/hr`, numericValue: currentHourlyRate, isDiscrepancy: false, boxCoordinates: { x: 10, y: 22, width: 40, height: 3, page: 1 } },
-    { id: 'ps-hours-week', category: 'EARNINGS', label: 'Standard Weekly Hours', value: `${currentWeeklyHours} hrs`, numericValue: currentWeeklyHours, isDiscrepancy: false, boxCoordinates: { x: 50, y: 22, width: 40, height: 3, page: 1 } },
-    { id: 'ps-current-base', category: 'EARNINGS', label: 'Current Period Base Pay', value: `$${currentPeriodBasePay.toLocaleString()}`, numericValue: currentPeriodBasePay, isDiscrepancy: false, boxCoordinates: { x: 10, y: 25, width: 40, height: 3, page: 1 } },
-    { id: 'ps-base-ytd', category: 'EARNINGS', label: 'Base Wages YTD', value: `$${currentBaseYtd.toLocaleString()}`, numericValue: currentBaseYtd, isDiscrepancy: true, boxCoordinates: { x: 10, y: 28, width: 40, height: 3, page: 1 } },
-    { id: 'ps-bonus-ytd', category: 'EARNINGS', label: 'Bonus Income YTD', value: `$${currentBonusYtd.toLocaleString()}`, numericValue: currentBonusYtd, isDiscrepancy: false, boxCoordinates: { x: 50, y: 28, width: 40, height: 3, page: 1 } },
-    { id: 'ps-ot-ytd', category: 'EARNINGS', label: 'Overtime Income YTD', value: `$${currentOtYtd.toLocaleString()}`, numericValue: currentOtYtd, isDiscrepancy: false, boxCoordinates: { x: 10, y: 31, width: 40, height: 3, page: 1 } },
+    { id: 'ps-emp-name', category: 'METADATA', label: 'Employer Name', value: borrowerMetadata.currentEmployer, numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-emp-name'] },
+    { id: 'ps-ee-name', category: 'METADATA', label: 'Employee Name', value: borrowerMetadata.borrowerName, numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-ee-name'] },
+    { id: 'ps-period', category: 'METADATA', label: 'Pay Period', value: '2026-08-01 to 2026-08-15', numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-period'] },
+    { id: 'ps-frequency', category: 'METADATA', label: 'Pay Frequency', value: 'Semi-Monthly (24 Pays/Yr)', numericValue: 24, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-frequency'] },
+    { id: 'ps-hourly-rate', category: 'EARNINGS', label: 'Hourly Pay Rate', value: `$${currentHourlyRate.toFixed(2)}/hr`, numericValue: currentHourlyRate, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-hourly-rate'] },
+    { id: 'ps-hours-week', category: 'EARNINGS', label: 'Standard Weekly Hours', value: `${currentWeeklyHours} hrs`, numericValue: currentWeeklyHours, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-hours-week'] },
+    { id: 'ps-current-base', category: 'EARNINGS', label: 'Current Period Base Pay', value: `$${currentPeriodBasePay.toLocaleString()}`, numericValue: currentPeriodBasePay, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-current-base'] },
+    { id: 'ps-base-ytd', category: 'EARNINGS', label: 'Base Wages YTD', value: `$${currentBaseYtd.toLocaleString()}`, numericValue: currentBaseYtd, isDiscrepancy: true, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-base-ytd'] },
+    { id: 'ps-bonus-ytd', category: 'EARNINGS', label: 'Bonus Income YTD', value: `$${currentBonusYtd.toLocaleString()}`, numericValue: currentBonusYtd, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-bonus-ytd'] },
+    { id: 'ps-ot-ytd', category: 'EARNINGS', label: 'Overtime Income YTD', value: `$${currentOtYtd.toLocaleString()}`, numericValue: currentOtYtd, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-ot-ytd'] },
   ], [
     currentHourlyRate, 
     currentWeeklyHours, 
@@ -1460,12 +1459,18 @@ export default function UnderwriterSplitViewDemo({
   const handleInspectField = (fieldId: string) => {
     setHighlightFieldId(fieldId);
     setDocMode('pdf');
+    if (fieldId.startsWith('w2-')) setWageDocKind('w2');
+    if (fieldId.startsWith('ps-')) setWageDocKind('paystub');
     const live = mappedFields.find((field) => field.id === fieldId || field.sourceFieldId === fieldId);
     if (live) setLivePageIndex(live.pageIndex);
     const target = fieldCoordinatesMapping.find((f) => f.id === fieldId);
     if (target) setActivePdfPage(target.boxCoordinates.page);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-qa-field="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      document.querySelector(`[data-box-id="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   };
 
   const asEntityOptions = <T extends { id: string; businessName?: string; employerName?: string; ein?: string }>(
@@ -1843,6 +1848,20 @@ export default function UnderwriterSplitViewDemo({
     switch (activeTab) {
       case 'PAYSTUB_RECONCILIATION':
       case 'ENCOMPASS_SYNC':
+        if (wageDocKind === 'w2') {
+          return {
+            label: `Form W-2 (${prevEmployerW2.year})`,
+            url: `/fixtures/docs/w2.pdf?${q({
+              year: prevEmployerW2.year,
+              employer: prevEmployerW2.employerName,
+              ein: prevEmployerW2.ein,
+              borrower: borrowerMetadata.borrowerName,
+              box1: prevEmployerW2.box1Wages,
+              bonus: prevEmployerW2.box12Bonus,
+              ot: prevEmployerW2.box14Overtime,
+            })}`,
+          };
+        }
         return {
           label: 'Earnings statement',
           url: `/fixtures/docs/paystub.pdf?${q({
@@ -1930,6 +1949,7 @@ export default function UnderwriterSplitViewDemo({
     currentBaseYtd,
     currentBonusYtd,
     currentOtYtd,
+    wageDocKind,
     prevEmployerW2,
     rentalProperties,
     schCYears,
@@ -1941,10 +1961,10 @@ export default function UnderwriterSplitViewDemo({
   ]);
 
   return (
-    <div className="mx-auto max-w-7xl p-6 font-sans space-y-6 text-slate-800 bg-slate-50 min-h-screen">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50 font-sans text-slate-800">
       
       {/* ==================== 1. COMPREHENSIVE WORKSPACE HEADER ==================== */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm gap-4">
+      <div className="flex shrink-0 flex-col justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:flex-row lg:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
@@ -2034,14 +2054,14 @@ export default function UnderwriterSplitViewDemo({
         {parseError ? <p className="w-full text-xs text-rose-600">{parseError}</p> : null}
       </div>
 
-      {/* ==================== 2. SPLIT SCREEN CONTROL GRID ==================== */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
+      <div className="flex min-h-0 flex-1">
         
         {/* ==================== LEFT PANEL: PDF COORDINATES VISUAL CANVAS ==================== */}
         {/* Unmounted (not just hidden) while the canvas lives in its own window, so the
             main window does no duplicate PDF/canvas rendering work in dual-monitor mode */}
         {!docPopout && (
-        <div className="space-y-4 xl:col-span-4">
+        <div className="flex min-h-0 min-w-0 w-[42%] max-w-[560px] flex-col space-y-4 overflow-y-auto border-r border-slate-200 bg-slate-50 p-4">
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <div className="flex items-center gap-2">
@@ -2067,6 +2087,24 @@ export default function UnderwriterSplitViewDemo({
                     </button>
                   </div>
                 )}
+                {!isLive && fixturePdf && (activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && (
+                  <div className="flex rounded-md border border-slate-200 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setWageDocKind('paystub')}
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${wageDocKind === 'paystub' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                    >
+                      Paystub
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWageDocKind('w2')}
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${wageDocKind === 'w2' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                    >
+                      W-2
+                    </button>
+                  </div>
+                )}
                 <span className="rounded bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-500">
                   {activeTab === 'SCHEDULE_C'
                     ? 'Schedule C'
@@ -2082,6 +2120,8 @@ export default function UnderwriterSplitViewDemo({
                               ? 'Schedules B / D'
                             : activeTab === 'CCORP'
                               ? 'Form 1120'
+                          : wageDocKind === 'w2'
+                            ? 'Form W-2'
                           : 'Paystub'}
                 </span>
               </div>
@@ -2094,7 +2134,7 @@ export default function UnderwriterSplitViewDemo({
                 pageCount={liveSession.result.total_pages_scanned}
                 fields={mappedFields}
                 selectedFieldId={highlightFieldId}
-                onSelectField={setHighlightFieldId}
+                onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
               />
             ) : docMode === 'pdf' && fixturePdf ? (
@@ -2117,6 +2157,29 @@ export default function UnderwriterSplitViewDemo({
                 <FixturePdfViewer
                   url={fixturePdf.url}
                   label={fixturePdf.label}
+                  selectedId={highlightFieldId}
+                  locate={
+                    activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC'
+                      ? wageDocKind === 'w2'
+                        ? [
+                            { id: 'w2-box1', needle: prevEmployerW2.box1Wages.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+                            { id: 'w2-box12-bonus', needle: prevEmployerW2.box12Bonus.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), lineHint: 'BONUS' },
+                            { id: 'w2-box14-ot', needle: prevEmployerW2.box14Overtime.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), lineHint: 'OT  ' },
+                          ]
+                        : [
+                          { id: 'ps-emp-name', needle: borrowerMetadata.currentEmployer },
+                          { id: 'ps-ee-name', needle: borrowerMetadata.borrowerName },
+                          { id: 'ps-period', needle: '08/01/2026' },
+                          { id: 'ps-frequency', needle: 'Semi-monthly' },
+                          { id: 'ps-hours-week', needle: `${currentWeeklyHours} hr/wk` },
+                          { id: 'ps-hourly-rate', lineHint: 'Regular', moneyIndex: 0 },
+                          { id: 'ps-current-base', lineHint: 'Regular', moneyIndex: 2 },
+                          { id: 'ps-base-ytd', lineHint: 'Regular', moneyIndex: 3 },
+                          { id: 'ps-ot-ytd', lineHint: 'Overtime', moneyIndex: 3 },
+                          { id: 'ps-bonus-ytd', lineHint: 'Bonus', moneyIndex: 1 },
+                        ]
+                      : []
+                  }
                   boxes={fieldCoordinatesMapping
                     .filter((field) => activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC')
                     .map((field) => ({
@@ -2226,7 +2289,7 @@ export default function UnderwriterSplitViewDemo({
         )}
 
         {/* ==================== RIGHT PANEL: TAB-DRIVEN CALCULATION ENGINES ==================== */}
-        <div className={`space-y-6 ${docPopout ? 'xl:col-span-12' : 'xl:col-span-8'}`}>
+        <div className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto p-4">
           {docPopout && (
             <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs">
               <span className="flex items-center gap-2 font-bold text-indigo-800">
@@ -2347,7 +2410,7 @@ export default function UnderwriterSplitViewDemo({
 
               {/* Core interactive variable modification boxes */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
-                <div>
+                <div data-qa-field="ps-hourly-rate" className={highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-hourly-rate')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Hourly Rate of Pay</label>
                   <input
                     type="number"
@@ -2360,8 +2423,7 @@ export default function UnderwriterSplitViewDemo({
                   </button>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Standard Weekly Hours</label>
+                <div data-qa-field="ps-hours-week" className={highlightFieldId === 'ps-hours-week' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-hours-week')}>
                   <input
                     type="number"
                     value={currentWeeklyHours}
@@ -2373,8 +2435,7 @@ export default function UnderwriterSplitViewDemo({
                   </button>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Current Period Base Pay</label>
+                <div data-qa-field="ps-current-base" className={highlightFieldId === 'ps-current-base' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-current-base')}>
                   <input
                     type="number"
                     value={currentPeriodBasePay}
@@ -2386,8 +2447,7 @@ export default function UnderwriterSplitViewDemo({
                   </button>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Base Wages YTD</label>
+                <div data-qa-field="ps-base-ytd" className={highlightFieldId === 'ps-base-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-base-ytd')}>
                   <input
                     type="number"
                     value={currentBaseYtd}
@@ -2401,7 +2461,7 @@ export default function UnderwriterSplitViewDemo({
                   </button>
                 </div>
 
-                <div>
+                <div data-qa-field="w2-box1" className={highlightFieldId === 'w2-box1' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box1')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 1</label>
                   <input
                     type="number"
@@ -2409,6 +2469,9 @@ export default function UnderwriterSplitViewDemo({
                     onChange={(e) => setPrevEmployerW2({ ...prevEmployerW2, box1Wages: Number(e.target.value) })}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
+                  <button type="button" onClick={() => handleInspectField('w2-box1')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
+                    <Eye className="h-3 w-3" /> Inspect Coordinates
+                  </button>
                 </div>
 
                 <div>
@@ -2537,7 +2600,7 @@ export default function UnderwriterSplitViewDemo({
                     Prior Job 2025 W-2 Variable Extractions
                   </h4>
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div>
+                    <div data-qa-field="w2-box12-bonus" className={highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box12-bonus')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 12 Bonus History</label>
                       <input
                         type="number"
@@ -2546,8 +2609,11 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                         disabled={!mergePreviousEmployerVariable}
                       />
+                      <button type="button" onClick={() => handleInspectField('w2-box12-bonus')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
+                        <Eye className="h-3 w-3" /> Inspect Coordinates
+                      </button>
                     </div>
-                    <div>
+                    <div data-qa-field="w2-box14-ot" className={highlightFieldId === 'w2-box14-ot' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box14-ot')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 14 Overtime History</label>
                       <input
                         type="number"
@@ -2556,6 +2622,9 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                         disabled={!mergePreviousEmployerVariable}
                       />
+                      <button type="button" onClick={() => handleInspectField('w2-box14-ot')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
+                        <Eye className="h-3 w-3" /> Inspect Coordinates
+                      </button>
                     </div>
                   </div>
                   <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">

@@ -5,6 +5,7 @@ import type { ParsePage, ParseResponse, ParseWord } from '../parseTypes';
 import { generateIncomeSmokePdf } from './generateIncomeSmokePdf';
 import { generateUrarPdf } from './generateUrarPdf';
 import { generatePaystubPdf } from './generatePaystubPdf';
+import { generateW2Pdf } from './generateW2Pdf';
 import { fillK1Partnership, fillK1SCorp, fillScheduleC, fillScheduleE, fillW2, num } from './demoDocs';
 import { droppedUrarExists, loadDroppedUrar } from './fillDroppedUrar';
 
@@ -63,11 +64,13 @@ function parseMultipartPdf(buffer: Buffer, contentType: string): { bytes: Buffer
     const part = buffer.slice(start + marker.length, next < 0 ? buffer.length : next);
     cursor = next < 0 ? buffer.length : next;
     const headerEnd = indexOf(part, Buffer.from('\r\n\r\n'));
-    if (headerEnd < 0) continue;
-    const header = part.slice(0, headerEnd).toString('utf8');
-    if (!/filename=/i.test(header) && !/name="file"/i.test(header)) continue;
-    const filename = /filename="([^"]+)"/i.exec(header)?.[1] || 'document.pdf';
-    let body = part.slice(headerEnd + 4);
+    const headerEndLf = headerEnd < 0 ? indexOf(part, Buffer.from('\n\n')) : headerEnd;
+    if (headerEndLf < 0) continue;
+    const sepLen = headerEnd >= 0 ? 4 : 2;
+    const header = part.slice(0, headerEndLf).toString('utf8');
+    if (!/filename=/i.test(header) && !/name="?file"?/i.test(header)) continue;
+    const filename = /filename="([^"]+)"/i.exec(header)?.[1] || /filename=([^;\s]+)/i.exec(header)?.[1] || 'document.pdf';
+    let body = part.slice(headerEndLf + sepLen);
     if (body.slice(-2).toString('binary') === '\r\n') body = body.slice(0, -2);
     if (body.slice(0, 2).toString('binary') === '\r\n') body = body.slice(2);
     return { bytes: body, name: filename };
@@ -268,7 +271,18 @@ export function parseMiddleware(): Connect.NextHandleFunction {
             ytdBonus: num(params, 'ytdBonus', 12500),
             ytdOt: num(params, 'ytdOt', 4200),
           }),
-        w2: () => fillW2(params),
+        w2: () =>
+          fillW2(params).catch(() =>
+            generateW2Pdf({
+              year: num(params, 'year', 2025),
+              employer: params.get('employer') || 'Digital Solutions Corp',
+              ein: params.get('ein') || '94-8765432',
+              borrower: params.get('borrower') || 'Sarah K. Vance',
+              box1: num(params, 'box1', 78500),
+              bonus: num(params, 'bonus', 18000),
+              overtime: num(params, 'ot', 6000),
+            }),
+          ),
         'schedule-e': () => fillScheduleE(params),
         'schedule-c': () => fillScheduleC(params),
         'k1-1065': () => fillK1Partnership(params),

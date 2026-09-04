@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FileSearch, Loader2, Upload } from 'lucide-react';
 import { mapIncomeFields } from '../incomeFieldMap';
 import type { LiveParseSession, ParseResponse } from '../parseTypes';
+import { postParsePdf } from '../postParsePdf';
 import PdfPagePreview from './PdfPagePreview';
 
 export default function ParserLab() {
@@ -36,16 +37,7 @@ export default function ParserLab() {
     setSession(null);
     setBusy(true);
     try {
-      const body = new FormData();
-      body.append('file', file);
-      const response = await fetch('/parse', { method: 'POST', body });
-      const payload = await response.json();
-      if (!response.ok) {
-        const detail = payload.detail;
-        const message = typeof detail === 'string' ? detail : JSON.stringify(detail || payload);
-        throw new Error(message || `Parser returned ${response.status}`);
-      }
-      const result = payload as ParseResponse;
+      const result = await postParsePdf(file);
       setSession({ file, fileName: file.name, result });
       setPageIndex(result.pages[0]?.index ?? 0);
     } catch (err) {

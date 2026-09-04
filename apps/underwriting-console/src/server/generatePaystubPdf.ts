@@ -1,4 +1,14 @@
 import PDFDocument from 'pdfkit';
+import {
+  PAYSTUB_COL,
+  PAYSTUB_EARNINGS_GAP,
+  PAYSTUB_HEADER_H,
+  PAYSTUB_INFO_ROW_H,
+  PAYSTUB_INFO_TOP,
+  PAYSTUB_LINE_H,
+  PAYSTUB_PAGE,
+  PAYSTUB_SECTION_H,
+} from '../paystubLayout';
 
 export interface PaystubValues {
   employer: string;
@@ -11,9 +21,9 @@ export interface PaystubValues {
   ytdOt: number;
 }
 
-const W = 612;
-const H = 792;
-const M = 40;
+const W = PAYSTUB_PAGE.width;
+const H = PAYSTUB_PAGE.height;
+const M = PAYSTUB_PAGE.margin;
 
 const usd = (v: number) =>
   v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -46,7 +56,7 @@ export function generatePaystubPdf(values: PaystubValues): Promise<Uint8Array> {
     const ytdRetirement = values.ytdBase * 0.05;
 
     // Header band
-    doc.rect(0, 0, W, 86).fill('#10312b');
+    doc.rect(0, 0, W, PAYSTUB_HEADER_H).fill('#10312b');
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(16).text(values.employer, M, 20);
     doc.font('Helvetica').fontSize(8).fillColor('#a9c8bf')
       .text('2210 Riverside Pkwy · Austin, TX 78704 · Payroll operated by NimbusPay HCM', M, 42);
@@ -56,16 +66,16 @@ export function generatePaystubPdf(values: PaystubValues): Promise<Uint8Array> {
       .text('Advice # 2026-081547 · Non-negotiable', W - 240, 62, { width: 200, align: 'right' });
 
     // Employee / period block
-    const infoTop = 102;
+    const infoTop = PAYSTUB_INFO_TOP;
     const rows: Array<[string, string, string, string]> = [
       ['Employee', values.borrower, 'Pay period', '08/01/2026 – 08/15/2026'],
       ['Employee ID', 'ATP-04417', 'Pay date', '08/15/2026'],
       ['SSN', 'XXX-XX-1847', 'Pay frequency', 'Semi-monthly (24/yr)'],
       ['Department', 'Client Engineering', 'Base rate', `$${usd(values.hourly)} / hr · ${values.hours} hr/wk`],
     ];
-    doc.rect(M, infoTop - 8, W - 2 * M, rows.length * 16 + 14).lineWidth(0.8).stroke('#c7d2cd');
+    doc.rect(M, infoTop - 8, W - 2 * M, rows.length * PAYSTUB_INFO_ROW_H + 14).lineWidth(0.8).stroke('#c7d2cd');
     rows.forEach((r, i) => {
-      const y = infoTop + i * 16;
+      const y = infoTop + i * PAYSTUB_INFO_ROW_H;
       doc.font('Helvetica').fontSize(7.5).fillColor('#5c6f68').text(r[0].toUpperCase(), M + 10, y);
       doc.font('Helvetica-Bold').fontSize(9).fillColor('#132a24').text(r[1], M + 90, y - 1);
       doc.font('Helvetica').fontSize(7.5).fillColor('#5c6f68').text(r[2].toUpperCase(), 330, y);
@@ -73,9 +83,9 @@ export function generatePaystubPdf(values: PaystubValues): Promise<Uint8Array> {
     });
 
     // Table helper
-    const col = [M, 250, 330, 415, 500];
+    const col = [...PAYSTUB_COL];
     const tableWidth = W - 2 * M;
-    let y = infoTop + rows.length * 16 + 30;
+    let y = infoTop + rows.length * PAYSTUB_INFO_ROW_H + PAYSTUB_EARNINGS_GAP;
 
     const sectionHeader = (title: string) => {
       doc.rect(M, y, tableWidth, 18).fill('#e7efec');
@@ -85,7 +95,7 @@ export function generatePaystubPdf(values: PaystubValues): Promise<Uint8Array> {
       doc.text('HOURS', col[2], y + 6, { width: 70, align: 'right' });
       doc.text('CURRENT', col[3], y + 6, { width: 70, align: 'right' });
       doc.text('YTD', col[4], y + 6, { width: 72, align: 'right' });
-      y += 22;
+      y += PAYSTUB_SECTION_H;
     };
 
     const line = (label: string, rate: string, hrs: string, current: string, ytd: string, bold = false) => {
@@ -96,7 +106,7 @@ export function generatePaystubPdf(values: PaystubValues): Promise<Uint8Array> {
       doc.text(current, col[3], y, { width: 70, align: 'right' });
       doc.text(ytd, col[4], y, { width: 72, align: 'right' });
       doc.moveTo(M, y + 12).lineTo(W - M, y + 12).lineWidth(0.4).stroke('#e2e8e5');
-      y += 17;
+      y += PAYSTUB_LINE_H;
     };
 
     sectionHeader('Earnings');
