@@ -28,8 +28,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
 COPY --from=deps /app/apps/underwriting-console/node_modules ./apps/underwriting-console/node_modules
 COPY --from=deps /app/packages/mortgage-engine/node_modules ./packages/mortgage-engine/node_modules
-COPY --from=deps /app/packages/database/node_modules ./packages/database/
-COPY --from=deps /app/packages/ui/node_modules ./packages/ui/
+COPY --from=deps /app/packages/database/node_modules ./packages/database/node_modules
+COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
@@ -59,7 +59,6 @@ COPY --from=builder /app/apps/underwriter-portal/package.json ./apps/underwriter
 COPY --from=builder /app/apps/underwriter-portal/next.config.js ./apps/underwriter-portal/
 COPY --from=builder /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
 COPY --from=builder /app/apps/underwriter-portal/.next ./apps/underwriter-portal/.next
-COPY --from=builder /app/apps/underwriter-portal/public ./apps/underwriter-portal/public 2>/dev/null || true
 
 USER nextjs
 

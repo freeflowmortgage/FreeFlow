@@ -1,0 +1,50 @@
+# FreeFlow Deployment Readiness
+
+Status: **not approved for production deployment**
+Assessment date: 2026-09-04
+Canonical product architecture: [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
+
+This folder turns the repository's architecture and design material into a
+single production-readiness package. `ARCHITECTURE.md` v4.1 remains the product
+authority. Other files already under `docs/` are historical design inputs or
+examples unless this package explicitly adopts them. In particular, source-code
+examples under `docs/` must not be copied into production without review and
+tests.
+
+## Documents
+
+| Document | Purpose |
+|---|---|
+| [SECURITY-ASSESSMENT.md](SECURITY-ASSESSMENT.md) | Adversarial findings and release gates |
+| [SECURITY-SPEC.md](SECURITY-SPEC.md) | Required production security controls and threat model |
+| [BACKEND-API-SPEC.md](BACKEND-API-SPEC.md) | Authentication, tenancy, API, job, error, and audit contracts |
+| [DATABASE-SPEC.md](DATABASE-SPEC.md) | Production schema, RLS, migration, retention, backup, and restore requirements |
+| [APPLICATION-SPEC.md](APPLICATION-SPEC.md) | Runtime boundaries, production capabilities, and functional gaps |
+| [AWS-ECS-DEPLOYMENT-SPEC.md](AWS-ECS-DEPLOYMENT-SPEC.md) | Target AWS topology and ECS/Fargate translation |
+| [RUNBOOKS.md](RUNBOOKS.md) | Deployment, rollback, incident, restore, rotation, and vulnerability procedures |
+| [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
+| [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
+
+## Non-negotiable invariants
+
+1. FreeFlow is B2B-only. A verified server-side identity determines tenant and
+   role; caller-provided identity headers never do.
+2. Income underwriting and appraisal review remain separate bounded contexts.
+3. Document processing is bytes-in and structured JSON-with-coordinates-out.
+   Raw PDFs, OCR text, and raw XML are not persisted or placed on queues.
+4. Calculations are deterministic and versioned. Human overrides are append-only
+   events containing actor, reason, source hash, prior value, and new value.
+5. Encompass remains the source of truth for source documents. Only an approved,
+   immutable server-side calculation can be synchronized back.
+6. Production deploys immutable, scanned image digests through infrastructure as
+   code; no mutable `latest` tags or console-authored infrastructure.
+
+## Release decision
+
+The local development stack runs, but that is not evidence of production
+readiness. Authentication is absent, multiple APIs are callable without a
+verified identity, tenant scope can be supplied by the caller, the database has
+no application tables or migrations, several routes return 500, and the current
+console image runs a Vite development server. All P0 items in the burndown must
+be closed with attached evidence before any production traffic or real borrower
+data is allowed.
