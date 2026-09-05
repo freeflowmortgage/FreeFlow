@@ -4,8 +4,7 @@ dist
 build
 .turbo
 *.log
-.env.local
-.env.*.local
+.env*
 .DS_Store
 .git
 .github

@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip uninstall -y opencv-python \
-    && pip install --no-cache-dir opencv-python-headless==4.10.0.84
+    && pip install --no-cache-dir --force-reinstall --no-deps opencv-python-headless==4.10.0.84
 
 COPY src/server.py src/ai_pdf_converter.py src/pdf_splitter.py ./
 

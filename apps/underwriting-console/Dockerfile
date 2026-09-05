@@ -28,8 +28,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/underwriting-console/node_modules ./apps/underwriting-console/node_modules
 COPY --from=deps /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
 COPY --from=deps /app/packages/mortgage-engine/node_modules ./packages/mortgage-engine/node_modules
-COPY --from=deps /app/packages/database/node_modules ./packages/database/
-COPY --from=deps /app/packages/ui/node_modules ./packages/ui/
+COPY --from=deps /app/packages/database/node_modules ./packages/database/node_modules
+COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
@@ -53,6 +53,8 @@ COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.ya
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/underwriting-console ./apps/underwriting-console
+
+RUN chown -R consoleuser:nodejs /app/apps/underwriting-console
 
 USER consoleuser
 

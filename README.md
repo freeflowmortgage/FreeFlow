@@ -13,21 +13,23 @@ cd Freeflow
 
 ## Environment files
 
-Copy the examples, then edit if your ports or keys differ:
+The tracked `.env.development` contains mock-only local defaults. Copy the
+slicer example when that optional workflow is needed:
 
 ```bash
-copy .env.example .env.development
-copy Docs\Architecture\env.slicer-v2 .env.slicer
+copy docs\Architecture\env.slicer-v2 .env.slicer
 ```
 
 On macOS/Linux use `cp` instead of `copy`.
 
-| You create locally | Copied from |
+| File | Policy |
 | --- | --- |
-| `.env.development` | `.env.example` (same content as `docs/env.development`) |
-| `.env.slicer` | `docs/Architecture/env.slicer-v2` |
+| `.env.development` | Tracked, mock-only development defaults; extends `.env.example` with Docker/service and feature settings |
+| `.env.slicer` | Local-only; copy from `docs/Architecture/env.slicer-v2` |
+| `.env.production.example` | Tracked production variable contract with placeholders only |
+| `.env.production` | Local-only and ignored; ECS production secrets come from Secrets Manager/SSM |
 
-Do not commit those two files.
+Never put a real credential in a tracked environment file or Docker build context.
 
 ## Run locally
 
@@ -102,3 +104,4 @@ Services started:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Monorepo map v4](docs/b2b-income-monorepo-structure-v4.md)
+- [Production deployment readiness](docs/deployment-readiness/README.md)
