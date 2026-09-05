@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "node scripts/start.mjs",
+    "lint": "next lint",
+    "test": "node --test scripts/*.test.mjs",
+    "validate:production-config": "node scripts/production-config.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

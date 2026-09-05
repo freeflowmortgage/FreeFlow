@@ -1,106 +1,155 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextApiRequest, NextApiResponse } from 'next';
 import { PrismaClient } from '@prisma/client';
 import Stripe from 'stripe';
+import { isProtectedRuntime } from '../../../server/runtimeMode';
 
 const prisma = new PrismaClient();
+const MAX_WEBHOOK_BYTES = 1024 * 1024;
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20' as any,
-});
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-
-// ────────────────────────────────────────────────────────────────────────
-// 1. STRIPE METADATA SCHEMA FOR AUTOMATED TRANSACTION CHECKS
-// ────────────────────────────────────────────────────────────────────────
 export interface StripeProcessingMetadata {
   loanId: string;
   tenantId: string;
   targetTier: 'W2_WAGE_EARNER' | 'SOLE_PROPRIETOR_SINGLE_ENTITY' | 'MULTI_ENTITY_PORTFOLIO_OR_USDA';
   isUpgrade: 'true' | 'false';
   historicalTier?: 'W2_WAGE_EARNER' | 'SOLE_PROPRIETOR_SINGLE_ENTITY' | 'MULTI_ENTITY_PORTFOLIO_OR_USDA';
-  calculatedCents: string; // Dynamic amount calculated in cents
+  calculatedCents: string;
 }
 
 /**
- * PRODUCTION-GRADE STRIPE WEBHOOK HANDLER
- * Handles: payment_intent.succeeded
- * Processes: $8.00 / $25.00 / $45.00 volumetric billing, upgrades ($17/$37/$20 deltas), and $0.00 resubmissions
+ * Pages Router adapter for Stripe webhooks.
+ *
+ * The legacy metadata-driven billing transition is available only to local
+ * development. Staging and production fail closed until P0-09 adds an
+ * authoritative, idempotent event ledger and server-side price reconciliation.
  */
-export async function POST(req: NextRequest) {
-  const body = await req.text();
-  const sig = req.headers.get('stripe-signature');
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).json({
+      error: { code: 'METHOD_NOT_ALLOWED', message: 'Only POST is supported.' },
+    });
+  }
+
+  if (isProtectedRuntime()) {
+    res.setHeader('Retry-After', '3600');
+    return res.status(503).json({
+      error: {
+        code: 'BILLING_RECONCILIATION_NOT_READY',
+        message: 'Billing reconciliation is not enabled in this environment.',
+      },
+    });
+  }
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const signatureHeader = req.headers['stripe-signature'];
+  const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+
+  if (!stripeSecretKey || !endpointSecret || !signature) {
+    return res.status(400).json({
+      error: { code: 'WEBHOOK_CONFIGURATION_INVALID', message: 'Webhook verification is unavailable.' },
+    });
+  }
 
   let event: Stripe.Event;
-
-  // 1. Cryptographic Signature Verification
   try {
-    if (!sig || !endpointSecret) {
-      return NextResponse.json({ error: 'Missing security credentials' }, { status: 400 });
+    const body = await readRawBody(req, MAX_WEBHOOK_BYTES);
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
+    event = stripe.webhooks.constructEvent(body, signature, endpointSecret);
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      return res.status(413).json({
+        error: { code: 'PAYLOAD_TOO_LARGE', message: 'Webhook payload exceeds the allowed size.' },
+      });
     }
-    event = stripe.webhooks.constructEvent(body, sig, endpointSecret);
-  } catch (err: any) {
-    console.error(`❌ Webhook Signature Verification Failed: ${err.message}`);
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+    console.warn('[billing-webhook] signature verification failed', {
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return res.status(400).json({
+      error: { code: 'INVALID_SIGNATURE', message: 'Webhook signature verification failed.' },
+    });
   }
 
-  // 2. Handle Payment Intent Success Event
-  if (event.type === 'payment_intent.succeeded') {
-    const paymentIntent = event.data.object as Stripe.PaymentIntent;
-    const metadata = paymentIntent.metadata as unknown as StripeProcessingMetadata;
-
-    // Validate essential metadata presence to prevent orphan charges
-    if (!metadata.loanId || !metadata.targetTier) {
-      console.warn(`⚠️ Received PaymentIntent ${paymentIntent.id} without required FreeFlow metadata properties.`);
-      return NextResponse.json({ received: true, warning: 'Missing application context' });
-    }
-
-    const { loanId, targetTier, isUpgrade, calculatedCents } = metadata;
-
-    console.log(`💳 Stripe Charge Success! Processing Transaction for Loan: ${loanId} | Tier: ${targetTier} | Cents: ${calculatedCents}`);
-
-    try {
-      // 3. Perform Fail-Secure Database State Transition in a Single Transaction
-      await prisma.$transaction(async (tx) => {
-        // Fetch current loan application record to verify state
-        const loan = await tx.loanApplication.findUnique({
-          where: { id: loanId },
-        });
-
-        if (!loan) {
-          throw new Error(`Loan record ${loanId} not found during Stripe success sync`);
-        }
-
-        // Commit billing ledger update
-        await tx.tenantBillingLedger.create({
-          data: {
-            tenantId: metadata.tenantId,
-            loanId: loanId,
-            amountCents: Number(calculatedCents) || paymentIntent.amount,
-            stripeChargeId: paymentIntent.id,
-            isBilled: true,
-            activeTier: targetTier === 'W2_WAGE_EARNER' ? 'STANDARD' : 'COMPLEX',
-            documentHashList: [],
-          },
-        });
-
-        console.log(`✅ Database Synchronized for Loan: ${loanId}. Billed Tier set to: ${targetTier}.`);
-      });
-
-      return NextResponse.json({ 
-        success: true, 
-        loanId, 
-        billedTier: targetTier, 
-        centsCharged: Number(calculatedCents) 
-      });
-
-    } catch (dbErr: any) {
-      console.error(`❌ Database Commit Failed after successful Stripe charge: ${dbErr.message}`);
-      // Return 500 so Stripe retries the webhook delivery (Critical to maintain billing integrity)
-      return NextResponse.json({ error: 'Database transaction lock failure' }, { status: 500 });
-    }
+  if (event.type !== 'payment_intent.succeeded') {
+    return res.status(200).json({ received: true });
   }
 
-  // Return 200 for unhandled events to acknowledge receipt
-  return NextResponse.json({ received: true });
+  const paymentIntent = event.data.object as Stripe.PaymentIntent;
+  const metadata = paymentIntent.metadata as unknown as StripeProcessingMetadata;
+  if (!metadata.loanId || !metadata.tenantId || !metadata.targetTier) {
+    return res.status(400).json({
+      error: { code: 'APPLICATION_CONTEXT_MISSING', message: 'Required billing context is missing.' },
+    });
+  }
+
+  const { loanId, targetTier, calculatedCents } = metadata;
+  try {
+    await prisma.$transaction(async (tx) => {
+      const loan = await tx.loanApplication.findUnique({ where: { id: loanId } });
+      if (!loan) throw new Error('LoanNotFound');
+
+      await tx.tenantBillingLedger.create({
+        data: {
+          tenantId: metadata.tenantId,
+          loanId,
+          amountCents: Number(calculatedCents) || paymentIntent.amount,
+          stripeChargeId: paymentIntent.id,
+          isBilled: true,
+          activeTier: targetTier === 'W2_WAGE_EARNER' ? 'STANDARD' : 'COMPLEX',
+          documentHashList: [],
+        },
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      loanId,
+      billedTier: targetTier,
+      centsCharged: Number(calculatedCents),
+    });
+  } catch (error) {
+    console.error('[billing-webhook] local transaction failed', {
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return res.status(500).json({
+      error: { code: 'BILLING_TRANSACTION_FAILED', message: 'Billing transaction could not be recorded.' },
+    });
+  }
+}
+
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super('Webhook payload too large');
+    this.name = 'PayloadTooLargeError';
+  }
+}
+
+function readRawBody(req: NextApiRequest, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let rejected = false;
+
+    req.on('data', (chunk: Buffer | string) => {
+      if (rejected) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      received += buffer.length;
+      if (received > maxBytes) {
+        rejected = true;
+        reject(new PayloadTooLargeError());
+        return;
+      }
+      chunks.push(buffer);
+    });
+    req.on('end', () => {
+      if (!rejected) resolve(Buffer.concat(chunks));
+    });
+    req.on('error', reject);
+  });
 }
