@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
 
 export const config = {
   api: {
@@ -12,23 +13,17 @@ const PARSER_URL = process.env.DOC_PARSER_URL || 'http://127.0.0.1:8080/api/unde
  * Portal ingest gateway: forwards PDF bytes to the live FastAPI parser.
  * Does not write uploads to disk and does not exec ai_pdf_converter-v2.py.
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+async function handler(req: NextApiRequest, res: NextApiResponse, context: RequestContext) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
-  }
-
-  const tenantId = req.headers['x-tenant-id'] as string | undefined;
-  const underwriterId = req.headers['x-underwriter-id'] as string | undefined;
-  if (!tenantId || !underwriterId) {
-    return res.status(401).json({ error: 'Missing tenant configuration or agent headers' });
   }
 
   try {
     const body = await collectBody(req);
     const headers: Record<string, string> = {
       'Content-Type': (req.headers['content-type'] as string) || 'application/pdf',
-      'x-tenant-id': tenantId,
-      'x-underwriter-id': underwriterId,
+      'x-tenant-id': context.tenantId,
+      'x-underwriter-id': context.membershipId,
     };
     const loanId = req.headers['x-loan-id'];
     const loanProgram = req.headers['x-loan-program'];
@@ -50,6 +45,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 }
+
+export default withRequestContext('income:process', handler);
 
 function collectBody(req: NextApiRequest): Promise<Buffer> {
   return new Promise((resolve, reject) => {

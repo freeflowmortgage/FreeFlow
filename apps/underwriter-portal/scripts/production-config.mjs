@@ -30,6 +30,7 @@ const FORBIDDEN_DEMO_FLAGS = [
   'ENABLE_FIXTURES',
   'ALLOW_TEXT_FIXTURES',
   'NEXT_PUBLIC_ENABLE_DEMO',
+  'ALLOW_DEV_AUTH_BYPASS',
 ];
 const PLACEHOLDER_PATTERN =
   /(?:replace[-_ ]?with|change[-_ ]?me|placeholder|dummy|mock|example\.com|_EXAMPLE|111122223333|secrets-manager:)/i;
@@ -142,6 +143,9 @@ export function validateProductionConfig(env) {
   }
   if (!/^arn:aws(?:-us-gov)?:elasticloadbalancing:[^:]+:\d{12}:loadbalancer\/app\//.test(value(env, 'ALB_OIDC_SIGNER_ARN'))) {
     errors.push('ALB_OIDC_SIGNER_ARN must be an application load balancer ARN.');
+  }
+  if (value(env, 'OIDC_CLIENT_ID') && value(env, 'OIDC_AUDIENCE') !== value(env, 'OIDC_CLIENT_ID')) {
+    errors.push('OIDC_AUDIENCE must match OIDC_CLIENT_ID for ALB-signed user claims.');
   }
   if (!value(env, 'STRIPE_SECRET_KEY').startsWith('sk_live_')) {
     errors.push('STRIPE_SECRET_KEY must be a Stripe live-mode secret key.');

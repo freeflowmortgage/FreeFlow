@@ -75,6 +75,7 @@ model Tenant {
   companyName           String                @db.VarChar(255)
   nmlsId                String?               @db.VarChar(50)
   primaryContactEmail   String                @db.VarChar(255)
+  isActive              Boolean               @default(true)
   
   // Stripe Metered Billing Integrations
   stripeCustomerId      String?               @unique @db.VarChar(255)
@@ -121,6 +122,8 @@ model User {
   tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   email                 String                @unique @db.VarChar(255)
+  oidcSubject           String?               @unique @db.VarChar(255)
+  isActive              Boolean               @default(true)
   passwordHash          String?               @db.VarChar(255)
   firstName             String                @db.VarChar(100)
   lastName              String                @db.VarChar(100)
