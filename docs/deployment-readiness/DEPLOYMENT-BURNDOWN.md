@@ -10,8 +10,8 @@ enough. No P0 may be accepted as risk for initial production launch.
 |---|---|---|---|---|
 | P0-01 | IN PROGRESS | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests all deny | Security/backend TBD |
 | P0-02 | IN PROGRESS | Enforce tenant-qualified repository and object authorization | Complete two-tenant API/job/share/export negative matrix passes | Backend TBD |
-| P0-03 | IN PROGRESS | Create one ordered database migration baseline and restricted roles | Empty DB migrates; clean drift; app role has no owner/BYPASSRLS | Database TBD |
-| P0-04 | OPEN | Add tenant columns, composite FKs/indexes, FORCE RLS to every domain table | Constraint/RLS tests cover direct, joined, worker, and admin paths | Database TBD |
+| P0-03 | DONE | Create one ordered database migration baseline and restricted roles | [Role bootstrap](../../packages/database/prisma/bootstrap/roles.sql), [ordered migrations](../../packages/database/prisma/migrations), and [isolation test](../../packages/database/prisma/tests/tenant-rls-isolation.sql) prove empty-DB deploy/clean drift and non-owner/non-BYPASSRLS roles | Repository evidence; reviewer required |
+| P0-04 | IN PROGRESS | Add tenant columns, composite FKs/indexes, FORCE RLS to every domain table | Direct Prisma and SQL isolation tests pass; worker/admin and complete joined-path matrix remain | Database TBD |
 | P0-05 | OPEN | Implement append-only approval/override audit events | DB rejects update/delete; actor/reason/version/hash evidence verified | Backend/database TBD |
 | P0-06 | OPEN | Remove raw PDF/OCR/raw XML persistence and sensitive job/log fields | Canary markers absent from DB, queue, cache, files, logs, traces, dumps | Security/data TBD |
 | P0-07 | IN PROGRESS | Repair API routing and remove all production demo fallbacks | Route contract tests pass; missing/dependency cases return typed 404/503 | Backend TBD |
@@ -58,7 +58,7 @@ enough. No P0 may be accepted as risk for initial production launch.
 
 | Priority | Done | Total | Remaining |
 |---|---:|---:|---:|
-| P0 | 1 | 22 | 21 |
+| P0 | 2 | 22 | 20 |
 | P1 | 0 | 8 | 8 |
 | P2 | 0 | 5 | 5 |
 

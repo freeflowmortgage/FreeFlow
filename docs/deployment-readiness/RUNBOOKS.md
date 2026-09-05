@@ -12,17 +12,21 @@ digests, completed ECR scan, backward-compatible migration, staging evidence,
 healthy backups, and named rollback owner.
 
 1. Confirm production plan changes only approved resources and image digests.
-2. Run the one-off migration task with the migrator role. Verify its exit code,
+2. For a new database only, have the administrative workflow execute
+   `packages/database/prisma/bootstrap/roles.sql`, then create unique LOGIN
+   principals through IaC and grant only their matching NOLOGIN capability role.
+   Never place role passwords in the SQL file or repository.
+3. Run the one-off migration task with the migrator role. Verify its exit code,
    migration ledger, schema compatibility, RLS tests, and no long blocking lock.
-3. Deploy parser and worker-compatible changes before portal code that requires
+4. Deploy parser and worker-compatible changes before portal code that requires
    them. Enable ECS deployment circuit-breaker rollback and alarm rollback.
-4. Watch target health, deployment events, 5xx/latency, task restarts, DB pool,
+5. Watch target health, deployment events, 5xx/latency, task restarts, DB pool,
    queue age, parser errors, auth denials, and log-redaction alarms.
-5. Run authenticated synthetic smoke tests plus anonymous/forged-tenant negative
+6. Run authenticated synthetic smoke tests plus anonymous/forged-tenant negative
    tests. Use synthetic data only.
-6. Confirm audit events, one idempotent sync in the Encompass sandbox, webhook
+7. Confirm audit events, one idempotent sync in the Encompass sandbox, webhook
    deduplication, and absence of document/OCR content in logs/queues/storage.
-7. Record the stable digest/task-definition revision and close the change after
+8. Record the stable digest/task-definition revision and close the change after
    the observation window.
 
 ## Roll back application

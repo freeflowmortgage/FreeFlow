@@ -2,11 +2,12 @@
 
 ## Current-state decision
 
-The existing Prisma schema is a design input, not a production baseline. The
-running development PostgreSQL instance contains no application tables and the
-repository has no ordered migrations. APIs also reference missing tables and
-columns. Production data work must therefore start with an explicit versioned
-baseline migration; `prisma db push` is prohibited outside disposable local use.
+The repository now has an ordered Prisma baseline followed by a tenant/RLS
+foundation migration. The latter adds tenant-qualified child relationships,
+restricted capability roles, non-login ownership, and forced row-level security.
+The remaining minimum logical-model, immutable workflow, and retention changes
+below are still production blockers. `prisma db push` is prohibited outside
+disposable local use.
 
 ## Production platform
 
@@ -38,6 +39,13 @@ References: [RDS PostgreSQL SSL](https://docs.aws.amazon.com/AmazonRDS/latest/Us
 
 Normal services MUST NOT use the PostgreSQL superuser or a Supabase service-role
 key. Credentials are unique per environment and role.
+
+`prisma/bootstrap/roles.sql` is executed once per database by the RDS
+administrative workflow before the first Prisma migration. It creates only
+NOLOGIN capability roles and intentionally contains no passwords. IaC creates a
+unique LOGIN principal for each ECS service or migration task and grants it only
+the corresponding capability role. Re-running application migrations never
+requires `CREATEROLE`.
 
 ## Minimum logical model
 

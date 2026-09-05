@@ -1,6 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
 import {
   DEMO_INCOME_SUMMARY,
   renderIncomeSummaryPdf,
@@ -8,8 +7,7 @@ import {
 } from '@mortgage-pos/mortgage-engine';
 import { isProtectedRuntime } from '../../../server/runtimeMode';
 import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
-
-const prisma = new PrismaClient();
+import { withTenantTransaction } from '../../../server/database/client';
 
 /**
  * Streams a Form 1084 income summary PDF from RAM (PDFKit → res).
@@ -24,7 +22,6 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 
   const loanIdRaw = req.method === 'GET' ? req.query.loanId : req.body?.loanId;
   const loanId = Array.isArray(loanIdRaw) ? loanIdRaw[0] : loanIdRaw;
-  const tenantId = context.tenantId;
 
   if (!loanId || typeof loanId !== 'string') {
     return res.status(400).json({
@@ -33,7 +30,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
   }
 
   try {
-    const data = await loadSummaryData(loanId, tenantId);
+    const data = await loadSummaryData(loanId, context);
 
     const doc = new PDFDocument({
       size: 'A4',
@@ -64,7 +61,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 
 export default withRequestContext('loan:read', handler);
 
-async function loadSummaryData(loanId: string, tenantId?: string): Promise<IncomeSummaryPdfData> {
+async function loadSummaryData(loanId: string, context: RequestContext): Promise<IncomeSummaryPdfData> {
   const fallback: IncomeSummaryPdfData = { ...DEMO_INCOME_SUMMARY, loanId };
 
   if (!process.env.DATABASE_URL) {
@@ -75,10 +72,13 @@ async function loadSummaryData(loanId: string, tenantId?: string): Promise<Incom
   }
 
   try {
-    const loanApp = await prisma.loanApplication.findFirst({
-      where: tenantId ? { id: loanId, tenantId } : { id: loanId },
-      include: { tenant: true, documents: true },
-    });
+    const loanApp = await withTenantTransaction(
+      { tenantId: context.tenantId, principalId: context.membershipId },
+      (transaction) => transaction.loanApplication.findFirst({
+        where: { id: loanId, tenantId: context.tenantId },
+        include: { tenant: true, documents: true },
+      }),
+    );
 
     if (!loanApp) {
       if (isProtectedRuntime()) {

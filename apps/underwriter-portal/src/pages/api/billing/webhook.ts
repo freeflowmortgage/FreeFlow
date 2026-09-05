@@ -1,10 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { PrismaClient } from '@prisma/client';
 import Stripe from 'stripe';
 import { isProtectedRuntime } from '../../../server/runtimeMode';
+import { withTenantTransaction } from '../../../server/database/client';
 
-const prisma = new PrismaClient();
 const MAX_WEBHOOK_BYTES = 1024 * 1024;
+const STRIPE_SERVICE_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
 
 export const config = {
   api: {
@@ -90,22 +90,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { loanId, targetTier, calculatedCents } = metadata;
   try {
-    await prisma.$transaction(async (tx) => {
-      const loan = await tx.loanApplication.findUnique({ where: { id: loanId } });
-      if (!loan) throw new Error('LoanNotFound');
+    await withTenantTransaction(
+      { tenantId: metadata.tenantId, principalId: STRIPE_SERVICE_PRINCIPAL_ID },
+      async (transaction) => {
+        const loan = await transaction.loanApplication.findFirst({
+          where: { id: loanId, tenantId: metadata.tenantId },
+        });
+        if (!loan) throw new Error('LoanNotFound');
 
-      await tx.tenantBillingLedger.create({
-        data: {
-          tenantId: metadata.tenantId,
-          loanId,
-          amountCents: Number(calculatedCents) || paymentIntent.amount,
-          stripeChargeId: paymentIntent.id,
-          isBilled: true,
-          activeTier: targetTier === 'W2_WAGE_EARNER' ? 'STANDARD' : 'COMPLEX',
-          documentHashList: [],
-        },
-      });
-    });
+        await transaction.tenantBillingLedger.create({
+          data: {
+            tenantId: metadata.tenantId,
+            loanId,
+            amountCents: Number(calculatedCents) || paymentIntent.amount,
+            stripeChargeId: paymentIntent.id,
+            isBilled: true,
+            activeTier: targetTier === 'W2_WAGE_EARNER' ? 'STANDARD' : 'COMPLEX',
+            documentHashList: [],
+          },
+        });
+      },
+    );
 
     return res.status(200).json({
       success: true,
