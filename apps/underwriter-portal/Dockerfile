@@ -3,7 +3,8 @@ FROM node:20-alpine AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN apk add --no-cache openssl \
+    && corepack enable
 
 WORKDIR /app
 
@@ -20,16 +21,10 @@ COPY packages/ui/package.json ./packages/ui/
 
 RUN pnpm install --frozen-lockfile
 
-# 2. Builder stage
-FROM base AS builder
+# 2. Builder stage. Inherit the dependency layer so pnpm workspace links remain
+# intact; copying linked node_modules trees between stages breaks Prisma's CLI.
+FROM deps AS builder
 WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
-COPY --from=deps /app/apps/underwriting-console/node_modules ./apps/underwriting-console/node_modules
-COPY --from=deps /app/packages/mortgage-engine/node_modules ./packages/mortgage-engine/node_modules
-COPY --from=deps /app/packages/database/node_modules ./packages/database/node_modules
-COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
@@ -37,7 +32,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
 RUN pnpm --filter @mortgage-pos/database prisma:generate
-RUN pnpm --filter @mortgage-pos/mortgage-engine build 2>/dev/null || true
+RUN pnpm --filter @mortgage-pos/mortgage-engine build
 RUN pnpm --filter web build
 
 # 3. Production runner stage
@@ -49,6 +44,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
 
+RUN apk add --no-cache openssl
+
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
@@ -57,6 +54,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/underwriter-portal/package.json ./apps/underwriter-portal/
 COPY --from=builder /app/apps/underwriter-portal/next.config.js ./apps/underwriter-portal/
+COPY --from=builder /app/apps/underwriter-portal/scripts ./apps/underwriter-portal/scripts
 COPY --from=builder /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
 COPY --from=builder /app/apps/underwriter-portal/.next ./apps/underwriter-portal/.next
 
@@ -68,4 +66,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["node", "-e", "require('http').get('http://127.0.0.1:3001', (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
 WORKDIR /app/apps/underwriter-portal
-CMD ["node_modules/.bin/next", "start", "-p", "3001"]
+CMD ["node", "scripts/start.mjs"]

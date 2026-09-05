@@ -6,12 +6,14 @@ import {
   renderIncomeSummaryPdf,
   type IncomeSummaryPdfData,
 } from '@mortgage-pos/mortgage-engine';
+import { isProtectedRuntime } from '../../../server/runtimeMode';
 
 const prisma = new PrismaClient();
 
 /**
  * Streams a Form 1084 income summary PDF from RAM (PDFKit → res).
- * No temp files. Uses Prisma when DATABASE_URL + loan row exist; otherwise the local demo fixture.
+ * No temp files. Local development may use a synthetic fixture; protected
+ * runtimes fail closed when the database or requested loan is unavailable.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -24,7 +26,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const tenantId = req.headers['x-tenant-id'] as string | undefined;
 
   if (!loanId || typeof loanId !== 'string') {
-    return res.status(400).json({ error: 'Invalid Request: Missing required string parameter [loanId].' });
+    return res.status(400).json({
+      error: { code: 'INVALID_REQUEST', message: 'loanId must be a non-empty string.' },
+    });
+  }
+
+  if (isProtectedRuntime() && !tenantId) {
+    return res.status(401).json({
+      error: { code: 'AUTH_CONTEXT_REQUIRED', message: 'Verified tenant context is required.' },
+    });
   }
 
   try {
@@ -43,13 +53,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     renderIncomeSummaryPdf(doc as unknown as Parameters<typeof renderIncomeSummaryPdf>[0], data);
     doc.end();
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('[Summary PDF API Route Error] System Failure:', error);
+    const publicError = toPublicError(error);
+    console.error('[summary-pdf] request failed', {
+      code: publicError.code,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
     if (!res.headersSent) {
-      return res.status(500).json({
-        error: `Document generation failed during in-memory PDF compilation: ${message}`,
+      return res.status(publicError.status).json({
+        error: { code: publicError.code, message: publicError.message },
       });
     }
+    res.destroy();
   }
 }
 
@@ -57,6 +71,9 @@ async function loadSummaryData(loanId: string, tenantId?: string): Promise<Incom
   const fallback: IncomeSummaryPdfData = { ...DEMO_INCOME_SUMMARY, loanId };
 
   if (!process.env.DATABASE_URL) {
+    if (isProtectedRuntime()) {
+      throw new SummaryDataError(503, 'DATABASE_UNAVAILABLE', 'The summary data service is unavailable.');
+    }
     return fallback;
   }
 
@@ -67,6 +84,9 @@ async function loadSummaryData(loanId: string, tenantId?: string): Promise<Incom
     });
 
     if (!loanApp) {
+      if (isProtectedRuntime()) {
+        throw new SummaryDataError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
+      }
       return fallback;
     }
 
@@ -76,7 +96,33 @@ async function loadSummaryData(loanId: string, tenantId?: string): Promise<Incom
       primaryBorrowerEmail: loanApp.primaryBorrowerEmail,
       tenantCompanyName: loanApp.tenant.companyName,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof SummaryDataError) throw error;
+    if (isProtectedRuntime()) {
+      throw new SummaryDataError(503, 'DATABASE_UNAVAILABLE', 'The summary data service is unavailable.');
+    }
     return fallback;
   }
+}
+
+class SummaryDataError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'SummaryDataError';
+  }
+}
+
+function toPublicError(error: unknown): { status: number; code: string; message: string } {
+  if (error instanceof SummaryDataError) {
+    return { status: error.status, code: error.code, message: error.message };
+  }
+  return {
+    status: 500,
+    code: 'DOCUMENT_GENERATION_FAILED',
+    message: 'The summary document could not be generated.',
+  };
 }
