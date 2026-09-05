@@ -7,19 +7,29 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
-try:
-    from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-    from pdf_splitter import pre_split_tax_returns
-except ImportError:
-    from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-    from src.pdf_splitter import pre_split_tax_returns
+from fastapi.responses import HTMLResponse, JSONResponse
 
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("freeflow.server")
 logging.getLogger("freeflow.ocr").setLevel(logging.INFO)
 logging.getLogger("freeflow.splitter").setLevel(logging.INFO)
+
+# OCR/OpenCV deps are only needed for POST /parse. Import them lazily so
+# GET / and /health still bind :8080 when the image or venv is incomplete.
+MAX_PDF_BYTES = 40 * 1024 * 1024
+AIPDFConverter = None
+pre_split_tax_returns = None
+_engine_error: str | None = None
+try:
+    from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
+    from pdf_splitter import pre_split_tax_returns
+except Exception as exc:
+    try:
+        from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
+        from src.pdf_splitter import pre_split_tax_returns
+    except Exception:
+        _engine_error = str(exc)
+        logger.warning("OCR engine unavailable; /parse disabled: %s", _engine_error)
 
 app = FastAPI(
     title="FreeFlow Document Parser",
@@ -29,19 +39,81 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-_converter: AIPDFConverter | None = None
+_LANDING_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FreeFlow Document Parser</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+    main { max-width: 40rem; margin: 4rem auto; padding: 0 1.25rem; }
+    h1 { font-size: 1.35rem; margin: 0 0 .35rem; }
+    p { line-height: 1.5; color: #334155; }
+    .ok { display: inline-block; background: #d1fae5; color: #065f46; font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: .2rem .55rem; border-radius: 999px; }
+    a { color: #047857; font-weight: 600; }
+    code { background: #e2e8f0; padding: .1rem .35rem; border-radius: .25rem; font-size: .9em; }
+    ul { padding-left: 1.1rem; color: #334155; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="ok">Healthy</span>
+    <h1>FreeFlow document parser</h1>
+    <p>Port <code>8080</code> is the income-document API, not the underwriting UI. This page loading means the parser is up.</p>
+    <p>Open the income workspace at <a href="http://localhost:3000/#workspace">http://localhost:3000/#workspace</a>.</p>
+    <ul>
+      <li><a href="/health">/health</a> — JSON health check</li>
+      <li><a href="/docs">/docs</a> — OpenAPI</li>
+      <li><code>POST /parse</code> — PDF bytes in, classified pages out</li>
+    </ul>
+  </main>
+</body>
+</html>
+"""
+
+_converter = None
 
 
-def get_converter() -> AIPDFConverter:
+def get_converter():
     global _converter
+    if AIPDFConverter is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"OCR engine is not installed. {_engine_error or 'Install services/doc-parser requirements.'}",
+        )
     if _converter is None:
         _converter = AIPDFConverter()
     return _converter
+
+
+@app.get("/", response_model=None)
+def root(request: Request):
+    """Browsers opening :8080 used to get FastAPI's empty 404. Serve a real page."""
+    accept = (request.headers.get("accept") or "").lower()
+    if "text/html" in accept:
+        return HTMLResponse(_LANDING_HTML)
+    return {
+        "status": "HEALTHY",
+        "service": "FreeFlow Document Processing Engine",
+        "version": "5.0.0",
+        "ui": "http://localhost:3000/#workspace",
+        "health": "/health",
+        "parse": "POST /parse",
+    }
 
 
 @app.get("/health", status_code=status.HTTP_200_OK)

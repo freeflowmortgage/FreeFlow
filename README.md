@@ -39,7 +39,8 @@ docker build -t freeflow-doc-parser:v3 -f Dockerfile .
 docker run -d --name freeflow-parser -p 8080:8080 --memory=4g freeflow-doc-parser:v3
 ```
 
-Health check: http://127.0.0.1:8080/health
+Open http://127.0.0.1:8080 in a browser for a status page, or http://127.0.0.1:8080/health for JSON.
+The underwriting UI is on port 3000, not 8080.
 
 **Appraisal parser and rules** (independent Docker service, port 8081):
 
