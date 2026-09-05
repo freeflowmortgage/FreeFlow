@@ -59,6 +59,28 @@ async def test_health_check():
 
 
 @pytest.mark.asyncio
+async def test_root_html_loads_for_browsers():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/", headers={"Accept": "text/html,application/xhtml+xml"})
+        assert res.status_code == 200
+        assert "text/html" in res.headers["content-type"]
+        assert "FreeFlow document parser" in res.text
+        assert "localhost:3000/#workspace" in res.text
+
+
+@pytest.mark.asyncio
+async def test_root_json_for_api_clients():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/", headers={"Accept": "application/json"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "HEALTHY"
+        assert data["parse"] == "POST /parse"
+
+
+@pytest.mark.asyncio
 async def test_parse_invalid_file_extension():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
