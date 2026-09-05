@@ -7,6 +7,7 @@ import {
   type IncomeSummaryPdfData,
 } from '@mortgage-pos/mortgage-engine';
 import { isProtectedRuntime } from '../../../server/runtimeMode';
+import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
 
 const prisma = new PrismaClient();
 
@@ -15,7 +16,7 @@ const prisma = new PrismaClient();
  * No temp files. Local development may use a synthetic fixture; protected
  * runtimes fail closed when the database or requested loan is unavailable.
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+async function handler(req: NextApiRequest, res: NextApiResponse, context: RequestContext) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', ['GET', 'POST']);
     return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
@@ -23,17 +24,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const loanIdRaw = req.method === 'GET' ? req.query.loanId : req.body?.loanId;
   const loanId = Array.isArray(loanIdRaw) ? loanIdRaw[0] : loanIdRaw;
-  const tenantId = req.headers['x-tenant-id'] as string | undefined;
+  const tenantId = context.tenantId;
 
   if (!loanId || typeof loanId !== 'string') {
     return res.status(400).json({
       error: { code: 'INVALID_REQUEST', message: 'loanId must be a non-empty string.' },
-    });
-  }
-
-  if (isProtectedRuntime() && !tenantId) {
-    return res.status(401).json({
-      error: { code: 'AUTH_CONTEXT_REQUIRED', message: 'Verified tenant context is required.' },
     });
   }
 
@@ -66,6 +61,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.destroy();
   }
 }
+
+export default withRequestContext('loan:read', handler);
 
 async function loadSummaryData(loanId: string, tenantId?: string): Promise<IncomeSummaryPdfData> {
   const fallback: IncomeSummaryPdfData = { ...DEMO_INCOME_SUMMARY, loanId };

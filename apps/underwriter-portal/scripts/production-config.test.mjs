@@ -16,7 +16,7 @@ function validProductionEnv() {
     APPRAISAL_PARSER_URL: 'http://appraisal-parser.internal:8081',
     OIDC_ISSUER: 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_a1b2c3d4',
     OIDC_CLIENT_ID: '4exampleclientid9',
-    OIDC_AUDIENCE: 'freeflow-production',
+    OIDC_AUDIENCE: '4exampleclientid9',
     ALB_OIDC_SIGNER_ARN:
       'arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/freeflow/abc123',
     ENCOMPASS_BASE_URL: 'https://api.elliemae.com',
@@ -59,11 +59,13 @@ test('loopback dependencies, static AWS keys, and demo flags are rejected', () =
   env.AWS_ACCESS_KEY_ID = 'AKIAEXAMPLE';
   env.AWS_SECRET_ACCESS_KEY = 'not-logged';
   env.ENABLE_FIXTURES = 'true';
+  env.ALLOW_DEV_AUTH_BYPASS = 'true';
 
   const errors = validateProductionConfig(env);
   assert.ok(errors.includes('DOC_PARSER_URL must not target a loopback or wildcard host.'));
   assert.ok(errors.includes('Static AWS access keys are forbidden; use the ECS task role.'));
   assert.ok(errors.includes('ENABLE_FIXTURES must be disabled.'));
+  assert.ok(errors.includes('ALLOW_DEV_AUTH_BYPASS must be disabled.'));
 });
 
 test('owner database roles, plaintext Redis, and test Stripe keys are rejected', () => {

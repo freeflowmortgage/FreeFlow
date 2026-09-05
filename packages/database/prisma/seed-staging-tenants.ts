@@ -45,6 +45,7 @@ async function main() {
   const user = await prisma.user.upsert({
     where: { email: 'underwriter.staging@freeflow.local' },
     update: {
+      oidcSubject: 'freeflow-staging-underwriter',
       tenantId: tenant.id,
       firstName: 'Avery',
       lastName: 'Underwood',
@@ -52,6 +53,7 @@ async function main() {
     },
     create: {
       id: STAGING_USER_ID,
+      oidcSubject: 'freeflow-staging-underwriter',
       tenantId: tenant.id,
       email: 'underwriter.staging@freeflow.local',
       firstName: 'Avery',

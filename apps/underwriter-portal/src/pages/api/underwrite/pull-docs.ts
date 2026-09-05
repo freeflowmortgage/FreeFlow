@@ -1,11 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase client for metadata logging only (ZDR compliance) [cite: 33, 39]
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
+import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
+import { isProtectedRuntime } from '../../../server/runtimeMode';
 
 interface EncompassTokenResponse {
   access_token: string;
@@ -84,15 +80,39 @@ async function fetchEFolderAttachments(
  * 3. Next.js Secure API Route Handler
  * Direct eFolder File Stream Handler (Encompass Workspace Context) [cite: 102]
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+async function handler(req: NextApiRequest, res: NextApiResponse, context: RequestContext) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { loanId, tenantId, filterCategory = 'TAX_RETURN' } = req.body;
+  if (isProtectedRuntime()) {
+    return res.status(503).json({
+      error: {
+        code: 'TENANT_REPOSITORY_REQUIRED',
+        message: 'Document retrieval is disabled until the tenant-scoped repository is available.',
+        requestId: context.requestId,
+      },
+    });
+  }
 
-  if (!loanId || !tenantId) {
-    return res.status(400).json({ error: 'Missing required parameters: loanId and tenantId.' });
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    return res.status(503).json({
+      error: {
+        code: 'DOCUMENT_RETRIEVAL_UNAVAILABLE',
+        message: 'Document retrieval is not configured.',
+        requestId: context.requestId,
+      },
+    });
+  }
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+  const { loanId, filterCategory = 'TAX_RETURN' } = req.body;
+  const tenantId = context.tenantId;
+
+  if (!loanId) {
+    return res.status(400).json({ error: 'Missing required parameter: loanId.' });
   }
 
   try {
@@ -218,3 +238,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 }
+
+export default withRequestContext('income:process', handler);

@@ -5,6 +5,7 @@ import {
   UnifiedIncomeCalculationPayload,
   LoanProgram
 } from '@mortgage-pos/mortgage-engine';
+import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
 
 // Initialize Prisma client (multi-tenant ledger database pool) [cite: 19, 20]
 const prisma = new PrismaClient();
@@ -22,7 +23,7 @@ const prisma = new PrismaClient();
  * 5. Commits non-PII metrics and audit logs back to PostgreSQL in an atomic transaction [cite: 19, 38].
  * 6. Returns a standardized JSON payload to fuel real-time, interactive frontend updates [cite: 26].
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+async function handler(req: NextApiRequest, res: NextApiResponse, context: RequestContext) {
   // 1. Enforce POST only
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -30,9 +31,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // 2. Security Check: Ingest Security Headers & Tenant Metadata
-    const sessionUserEmail = (req.headers['x-user-email'] as string) || 'underwriter@freeflow.local';
-
     const { loanId, documentData } = req.body;
 
     // Validate parameters
@@ -45,8 +43,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 3. Resolve the Active Loan Product / Agency [cite: 35]
     // Dynamically query our multitenant database to resolve the loan's program parameters [cite: 20, 35].
-    const loan = await prisma.loanApplication.findUnique({
-      where: { id: loanId },
+    const loan = await prisma.loanApplication.findFirst({
+      where: { id: loanId, tenantId: context.tenantId },
       select: {
         id: true,
         tenantId: true
@@ -126,7 +124,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           loanId: loan.id,
           totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
           qualifyingMonthlyIncome,
-          extractedTaxFields: JSON.parse(JSON.stringify(documentData)),
+          extractedTaxFields: {
+            schemaVersion: 'calculation-request-v1',
+            source: 'authenticated-api',
+          },
           yearsAnalyzed,
         }
       })
@@ -144,12 +145,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       timestamp: new Date().toISOString()
     });
 
-  } catch (error: any) {
-    console.error('❌ [API CALCULATION FAILURE] Error executing rules engine:', error);
+  } catch (error: unknown) {
+    console.error('[income-calculate] calculation failed', {
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
     return res.status(500).json({
       success: false,
-      error: 'INTERNAL SERVER ERROR: Failed to execute income calculation rules engine.',
-      message: error.message
+      error: {
+        code: 'INCOME_CALCULATION_FAILED',
+        message: 'The income calculation could not be completed.',
+        requestId: context.requestId,
+      },
     });
   }
 }
+
+export default withRequestContext('income:calculate', handler);

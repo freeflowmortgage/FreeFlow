@@ -8,9 +8,9 @@ enough. No P0 may be accepted as risk for initial production launch.
 
 | ID | Status | Work item | Acceptance evidence | Owner |
 |---|---|---|---|---|
-| P0-01 | OPEN | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests all deny | Security/backend TBD |
-| P0-02 | OPEN | Enforce tenant-qualified repository and object authorization | Complete two-tenant API/job/share/export negative matrix passes | Backend TBD |
-| P0-03 | OPEN | Create one ordered database migration baseline and restricted roles | Empty DB migrates; clean drift; app role has no owner/BYPASSRLS | Database TBD |
+| P0-01 | IN PROGRESS | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests all deny | Security/backend TBD |
+| P0-02 | IN PROGRESS | Enforce tenant-qualified repository and object authorization | Complete two-tenant API/job/share/export negative matrix passes | Backend TBD |
+| P0-03 | IN PROGRESS | Create one ordered database migration baseline and restricted roles | Empty DB migrates; clean drift; app role has no owner/BYPASSRLS | Database TBD |
 | P0-04 | OPEN | Add tenant columns, composite FKs/indexes, FORCE RLS to every domain table | Constraint/RLS tests cover direct, joined, worker, and admin paths | Database TBD |
 | P0-05 | OPEN | Implement append-only approval/override audit events | DB rejects update/delete; actor/reason/version/hash evidence verified | Backend/database TBD |
 | P0-06 | OPEN | Remove raw PDF/OCR/raw XML persistence and sensitive job/log fields | Canary markers absent from DB, queue, cache, files, logs, traces, dumps | Security/data TBD |
