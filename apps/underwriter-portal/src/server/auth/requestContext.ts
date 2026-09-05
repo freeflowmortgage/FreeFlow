@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
-import { PrismaClient } from '@prisma/client';
 import { isProtectedRuntime } from '../runtimeMode';
+import { setTenantContext, withIdentityTransaction } from '../database/client';
 import { verifyAlbOidcToken, type VerifiedAlbIdentity } from './albOidc';
 import {
   permissionsForRole,
@@ -45,8 +45,6 @@ class RequestAuthenticationError extends Error {
     this.name = 'RequestAuthenticationError';
   }
 }
-
-const prisma = new PrismaClient();
 
 export function withRequestContext(
   requiredPermission: Permission,
@@ -146,18 +144,30 @@ function defaultDependencies(): RequestContextDependencies {
 }
 
 async function resolveActiveMembership(subject: string): Promise<ActiveMembership | null> {
-  const user = await prisma.user.findUnique({
-    where: { oidcSubject: subject },
-    select: {
-      id: true,
-      tenantId: true,
-      role: true,
-      isActive: true,
-      tenant: { select: { isActive: true } },
-    },
+  return withIdentityTransaction(subject, async (transaction) => {
+    const user = await transaction.user.findUnique({
+      where: { oidcSubject: subject },
+      select: {
+        id: true,
+        tenantId: true,
+        role: true,
+        isActive: true,
+      },
+    });
+    if (!user?.isActive) return null;
+
+    await setTenantContext(transaction, {
+      tenantId: user.tenantId,
+      principalId: user.id,
+    });
+    const tenant = await transaction.tenant.findFirst({
+      where: { id: user.tenantId, isActive: true },
+      select: { id: true },
+    });
+    if (!tenant) return null;
+
+    return { id: user.id, tenantId: user.tenantId, role: user.role as ApplicationRole };
   });
-  if (!user?.isActive || !user.tenant.isActive) return null;
-  return { id: user.id, tenantId: user.tenantId, role: user.role as ApplicationRole };
 }
 
 function createDevelopmentContext(requestId: string, requiredPermission: Permission): RequestContext {

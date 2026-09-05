@@ -82,6 +82,7 @@ async function main() {
   await prisma.appraisalAudit.upsert({
     where: { id: STAGING_APPRAISAL_ID },
     update: {
+      tenantId: tenant.id,
       loanId: loan.id,
       caseNumber: 'CA-1928005-A',
       intendedUse: 'FHA purchase underwriting',
@@ -94,6 +95,7 @@ async function main() {
     },
     create: {
       id: STAGING_APPRAISAL_ID,
+      tenantId: tenant.id,
       loanId: loan.id,
       caseNumber: 'CA-1928005-A',
       intendedUse: 'FHA purchase underwriting',

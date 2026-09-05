@@ -1,14 +1,11 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { PrismaClient } from '@prisma/client';
 import {
   dispatchIncomeCalculation,
   UnifiedIncomeCalculationPayload,
   LoanProgram
 } from '@mortgage-pos/mortgage-engine';
 import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
-
-// Initialize Prisma client (multi-tenant ledger database pool) [cite: 19, 20]
-const prisma = new PrismaClient();
+import { withTenantTransaction } from '../../../server/database/client';
 
 /**
  * 🚀 Next.js API Route: /api/income/calculate
@@ -43,13 +40,16 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 
     // 3. Resolve the Active Loan Product / Agency [cite: 35]
     // Dynamically query our multitenant database to resolve the loan's program parameters [cite: 20, 35].
-    const loan = await prisma.loanApplication.findFirst({
-      where: { id: loanId, tenantId: context.tenantId },
-      select: {
-        id: true,
-        tenantId: true
-      }
-    });
+    const loan = await withTenantTransaction(
+      { tenantId: context.tenantId, principalId: context.membershipId },
+      (transaction) => transaction.loanApplication.findFirst({
+        where: { id: loanId, tenantId: context.tenantId },
+        select: {
+          id: true,
+          tenantId: true
+        }
+      }),
+    );
 
     if (!loan) {
       return res.status(404).json({ error: `LOAN NOT FOUND: Active file ID "${loanId}" does not exist.` });
@@ -118,9 +118,11 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 
     // 6. Commit Form 1084 Audit record to Database (Atomic Transaction) [cite: 19, 38]
     // We strictly avoid saving raw document binaries or borrower SSNs here, complying with ZDR guidelines [cite: 33].
-    const [updatedAudit] = await prisma.$transaction([
-      prisma.form1084Audit.create({
+    const updatedAudit = await withTenantTransaction(
+      { tenantId: context.tenantId, principalId: context.membershipId },
+      (transaction) => transaction.form1084Audit.create({
         data: {
+          tenantId: context.tenantId,
           loanId: loan.id,
           totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
           qualifyingMonthlyIncome,
@@ -130,8 +132,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
           },
           yearsAnalyzed,
         }
-      })
-    ]);
+      }),
+    );
 
     // 7. Success: Return fully calculated and compliant JSON to frontend dashboard [cite: 26]
     return res.status(200).json({

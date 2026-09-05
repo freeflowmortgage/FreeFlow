@@ -8,6 +8,7 @@
     "start": "node scripts/start.mjs",
     "lint": "next lint",
     "test": "node --test scripts/*.test.mjs && tsx --test src/server/auth/*.test.ts",
+    "test:database-isolation": "tsx --test src/server/database/*.integration.test.ts",
     "validate:production-config": "node scripts/production-config.mjs"
   },
   "dependencies": {
