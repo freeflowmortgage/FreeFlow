@@ -9,17 +9,27 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
-try:
-    from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-    from pdf_splitter import pre_split_tax_returns
-except ImportError:
-    from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-    from src.pdf_splitter import pre_split_tax_returns
-
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("freeflow.server")
 logging.getLogger("freeflow.ocr").setLevel(logging.INFO)
 logging.getLogger("freeflow.splitter").setLevel(logging.INFO)
+
+# OCR/OpenCV deps are only needed for POST /parse. Import them lazily so
+# GET / and /health still bind :8080 when the image or venv is incomplete.
+MAX_PDF_BYTES = 40 * 1024 * 1024
+AIPDFConverter = None
+pre_split_tax_returns = None
+_engine_error: str | None = None
+try:
+    from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
+    from pdf_splitter import pre_split_tax_returns
+except Exception as exc:
+    try:
+        from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
+        from src.pdf_splitter import pre_split_tax_returns
+    except Exception:
+        _engine_error = str(exc)
+        logger.warning("OCR engine unavailable; /parse disabled: %s", _engine_error)
 
 app = FastAPI(
     title="FreeFlow Document Parser",
@@ -75,11 +85,16 @@ _LANDING_HTML = """<!DOCTYPE html>
 </html>
 """
 
-_converter: AIPDFConverter | None = None
+_converter = None
 
 
-def get_converter() -> AIPDFConverter:
+def get_converter():
     global _converter
+    if AIPDFConverter is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"OCR engine is not installed. {_engine_error or 'Install services/doc-parser requirements.'}",
+        )
     if _converter is None:
         _converter = AIPDFConverter()
     return _converter
