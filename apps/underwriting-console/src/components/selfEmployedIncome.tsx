@@ -631,7 +631,7 @@ export function InspectNote() {
   return (
     <p className="flex items-start gap-1.5 text-[11px] text-slate-500">
       <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-      Click a line label or the PDF box. Amount stays on the same row — type to override.
+      Click a worksheet line to show its padded box on the source PDF. Amount stays on the same row — type to override.
     </p>
   );
 }

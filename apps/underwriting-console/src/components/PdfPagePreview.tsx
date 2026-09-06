@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { MappedIncomeField } from '../parseTypes';
+import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -110,24 +111,26 @@ export default function PdfPagePreview({
       </div>
       <div className="relative inline-block max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white">
         <canvas ref={canvasRef} className="block max-w-full" />
-        {pageFields.map((field) => {
+        {pageFields.filter((field) => isUsableOverlayBox(field.box)).map((field) => {
           const selected = selectedFieldId === field.id;
+          const box = padOverlayBox(field.box);
           return (
             <button
               key={field.id}
               type="button"
               data-box-id={field.id}
+              data-overlay-visible={selected ? 'true' : 'false'}
               title={`${field.boxLabel} · ${field.fieldLabel} · ${field.value}`}
               className={`absolute box-border rounded-sm ${
                 selected
-                  ? 'z-10 border-2 border-emerald-600 bg-transparent'
-                  : 'border border-emerald-500/80 bg-transparent hover:border-emerald-600'
+                  ? 'z-10 border-2 border-emerald-600 bg-emerald-400/10'
+                  : 'border-0 bg-transparent'
               }`}
               style={{
-                left: `${field.box.x * 100}%`,
-                top: `${field.box.y * 100}%`,
-                width: `${Math.max(field.box.w * 100, 1.2)}%`,
-                height: `${Math.max(field.box.h * 100, 1.1)}%`,
+                left: `${box.x * 100}%`,
+                top: `${box.y * 100}%`,
+                width: `${Math.max(box.w * 100, 1.2)}%`,
+                height: `${Math.max(box.h * 100, 1.1)}%`,
               }}
               onClick={() => onSelectField?.(field.id)}
             />
