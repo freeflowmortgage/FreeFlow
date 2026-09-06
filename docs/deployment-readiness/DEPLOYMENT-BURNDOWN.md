@@ -22,7 +22,7 @@ enough. No P0 may be accepted as risk for initial production launch.
 | P0-12 | OPEN | Upgrade vulnerable JS and income-parser dependencies | Fresh audits have zero critical/high or approved exception (not allowed at launch) | Platform TBD |
 | P0-13 | OPEN | Complete parser resource/admission controls | Worst-case corpus stays within task limit/SLO and fails closed | Parser/platform TBD |
 | P0-14 | OPEN | Produce minimal hardened production images | Non-root, read-only, cap-drop, immutable digest; no dev server/fixture/source/dev deps | Platform TBD |
-| P0-15 | OPEN | Build AWS account/network/data/edge/compute IaC | Clean staging create/drift/destroy evidence; only ALB public; least-privilege SG/IAM | Cloud TBD |
+| P0-15 | IN PROGRESS | Build AWS account/network/data/edge/compute IaC | [Terraform foundation](../../infrastructure/terraform/README.md) establishes protected-state bootstrap and environment boundaries; clean staging create/drift/destroy evidence, only-ALB-public, and least-privilege SG/IAM remain required | Cloud TBD |
 | P0-16 | OPEN | Implement CI/CD supply-chain and digest promotion | Tests/scans/SBOM/signing/provenance/policy/approval and rollback demonstrated | Platform/security TBD |
 | P0-17 | OPEN | Configure RDS security, backups, PITR, migration task, schema readiness | TLS/private/Multi-AZ/deletion protection plus measured restore drill | Database/cloud TBD |
 | P0-18 | OPEN | Configure observability without sensitive data | Dashboards/alarms trigger; structured-log allowlist and masking tests pass | SRE/security TBD |
