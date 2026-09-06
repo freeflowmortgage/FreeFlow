@@ -48,7 +48,8 @@ BEGIN
     'public.loan_conditions'::regclass,
     'public.tenant_billing_ledgers'::regclass,
     'public.appraisal_audits'::regclass,
-    'public.appraisal_action_items'::regclass
+    'public.appraisal_action_items'::regclass,
+    'public.audit_events'::regclass
   ) AND (NOT relrowsecurity OR NOT relforcerowsecurity);
   IF unprotected_tables <> 0 THEN
     RAISE EXCEPTION 'One or more tenant tables do not force row-level security';
@@ -59,6 +60,10 @@ BEGIN
   END IF;
   IF has_table_privilege('freeflow_readonly', 'loan_applications', 'SELECT') THEN
     RAISE EXCEPTION 'freeflow_readonly received access before safe diagnostic views exist';
+  END IF;
+  IF has_table_privilege('freeflow_app', 'audit_events', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'audit_events', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_app can mutate append-only audit events';
   END IF;
 END
 $role_assertions$;
@@ -152,7 +157,88 @@ BEGIN
   END;
 END
 $composite_fk$;
+
+INSERT INTO "audit_events" (
+  "id", "tenantId", "loanId", "actorUserId", "action", "entityType", "entityId",
+  "expectedLoanVersion", "reasonCode", "ruleVersion", "schemaVersion", "requestId",
+  "resultHash", "eventHash"
+) VALUES (
+  '13131313-1313-4131-8131-131313131313',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'INCOME_CALCULATION_COMPLETED', 'FORM_1084_AUDIT', '14141414-1414-4141-8141-141414141414',
+  1, 'SYSTEM_CALCULATION', 'form-1084-v9', 'audit-event-v1', 'audit-test-request',
+  repeat('0', 64), repeat('1', 64)
+);
+
+DO $append_only_grants$
+BEGIN
+  BEGIN
+    UPDATE "audit_events"
+    SET "reasonCode" = 'TAMPERED'
+    WHERE "id" = '13131313-1313-4131-8131-131313131313';
+    RAISE EXCEPTION 'freeflow_app unexpectedly updated an audit event';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM "audit_events"
+    WHERE "id" = '13131313-1313-4131-8131-131313131313';
+    RAISE EXCEPTION 'freeflow_app unexpectedly deleted an audit event';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END
+$append_only_grants$;
+
+SET LOCAL app.tenant_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+DO $audit_event_cross_tenant$
+DECLARE
+  visible_events integer;
+BEGIN
+  SELECT count(*) INTO visible_events FROM "audit_events";
+  IF visible_events <> 0 THEN
+    RAISE EXCEPTION 'Tenant B observed Tenant A audit events';
+  END IF;
+END
+$audit_event_cross_tenant$;
 ROLLBACK;
+
+BEGIN;
+SET ROLE freeflow_migrator;
+SET LOCAL app.tenant_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+SET LOCAL app.principal_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+INSERT INTO "audit_events" (
+  "id", "tenantId", "loanId", "actorUserId", "action", "entityType", "entityId",
+  "expectedLoanVersion", "reasonCode", "ruleVersion", "schemaVersion", "requestId",
+  "resultHash", "eventHash"
+) VALUES (
+  '15151515-1515-4151-8151-151515151515',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'INCOME_CALCULATION_COMPLETED', 'FORM_1084_AUDIT', '16161616-1616-4161-8161-161616161616',
+  1, 'SYSTEM_CALCULATION', 'form-1084-v9', 'audit-event-v1', 'audit-trigger-test',
+  repeat('2', 64), repeat('3', 64)
+);
+
+DO $append_only_trigger$
+BEGIN
+  BEGIN
+    UPDATE "audit_events"
+    SET "reasonCode" = 'TAMPERED'
+    WHERE "id" = '15151515-1515-4151-8151-151515151515';
+    RAISE EXCEPTION 'Audit mutation trigger did not reject the update';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END
+$append_only_trigger$;
+ROLLBACK;
+RESET ROLE;
 
 DO $ddl_denial$
 BEGIN
