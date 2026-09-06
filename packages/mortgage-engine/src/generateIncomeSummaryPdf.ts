@@ -25,6 +25,32 @@ export interface IncomeSummaryOverride {
   reason: string;
 }
 
+/** One qualifying source type — never one row per rental property or K-1. */
+export interface IncomeSummarySourceLine {
+  source: string;
+  method: string;
+  monthly: number;
+}
+
+/** Per-property rent, finished 1038 net, and the PITIA the income tool parsed from the app. */
+export interface IncomeSummaryRentalProperty {
+  address: string;
+  rent: number;
+  /** Monthly 1038 after days-rented averaging and app PITIA (the calculator result). */
+  form1038: number;
+  /** Full monthly PITIA parsed from the 1003 / Encompass app. */
+  pitia?: number | null;
+}
+
+export interface IncomeSummaryRentalSchedule {
+  properties: IncomeSummaryRentalProperty[];
+  /** One qualifying sum: added to income when the book nets positive. */
+  toIncome: number;
+  /** One qualifying sum: proposed liability when the book nets a loss. */
+  toLiability: number;
+  toHousing?: number;
+}
+
 export interface IncomeSummaryPdfData {
   loanId: string;
   primaryBorrowerName: string;
@@ -39,6 +65,40 @@ export interface IncomeSummaryPdfData {
   activeWarnings: IncomeSummaryWarning[];
   pendingConditions: IncomeSummaryCondition[];
   overrideAuditLogs: IncomeSummaryOverride[];
+  sourceLines?: IncomeSummarySourceLine[];
+  rentalSchedule?: IncomeSummaryRentalSchedule;
+  programNote?: string;
+}
+
+export function qualifyingProgramNote(program: string): string {
+  switch (program.toUpperCase()) {
+    case 'FHA':
+      return 'FHA · 2-year default. 2–4 unit decline bands apply.';
+    case 'VA':
+      return 'VA · 2-year default. Decline warns only.';
+    case 'USDA':
+      return 'USDA · 2-year default. Subject purchase may use 75% market rent.';
+    default:
+      return 'Conventional · 1-year default; 2 years in file uses a 24-month average.';
+  }
+}
+
+export function compactSourceLines(lines: IncomeSummarySourceLine[]): IncomeSummarySourceLine[] {
+  return lines.filter((line) => Math.abs(line.monthly) > 0.005);
+}
+
+function money(amount: number): string {
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+}
+
+export function hasRentalSchedule(schedule?: IncomeSummaryRentalSchedule): boolean {
+  if (!schedule) return false;
+  return (
+    schedule.properties.length > 0 ||
+    Math.abs(schedule.toIncome) > 0.005 ||
+    Math.abs(schedule.toLiability) > 0.005 ||
+    Math.abs(schedule.toHousing ?? 0) > 0.005
+  );
 }
 
 /** Local QA fixture — used when Prisma / loan row is not available. */
@@ -49,6 +109,21 @@ export const DEMO_INCOME_SUMMARY: IncomeSummaryPdfData = {
   tenantCompanyName: 'FreeFlow Local Sandbox',
   calculatedIncome: 12450.5,
   programUsed: 'CONVENTIONAL',
+  sourceLines: [
+    { source: 'W-2 base', method: 'YTD average', monthly: 7200 },
+    { source: 'W-2 variable', method: 'Current job only', monthly: 850 },
+    { source: 'Schedule C', method: '1084 cash flow', monthly: 2100 },
+  ],
+  rentalSchedule: {
+    properties: [
+      { address: '1958 Easter Rd, Nashville, TN', rent: 18000, form1038: 900, pitia: 550 },
+      { address: '1895 Broadway, Mesa, AZ', rent: 11700, form1038: 650, pitia: 450 },
+      { address: '29685 Easter Ct, Gilbert, AZ', rent: 14500, form1038: 750.5, pitia: 450 },
+    ],
+    toIncome: 2300.5,
+    toLiability: 0,
+  },
+  programNote: qualifyingProgramNote('CONVENTIONAL'),
   trendingResult: 'CONVENTIONAL_STABLE_OR_INCREASING',
   appliedMultiplier: 1.25,
   appliedMultiplierText: '25%',
@@ -193,16 +268,87 @@ export function renderIncomeSummaryPdf(doc: IncomeSummaryPdfKitDoc, data: Income
   doc.fillColor(C.textSlate).font('Helvetica').text('ZDR Security Vault:', 330, 256);
   doc.fillColor(C.emerald).font('Helvetica-Bold').text('RAM BUFFER ACTIVE', 430, 256);
 
-  doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(10).text('3. COMPLIANCE AUDIT OVERRIDE LEDGER', 40, 298);
+  let sectionY = 286;
+  const rental = hasRentalSchedule(data.rentalSchedule) ? data.rentalSchedule : undefined;
+  const sources = compactSourceLines(data.sourceLines ?? []).filter(
+    (line) => !(rental && /^schedule e$/i.test(line.source)),
+  );
+  if (sources.length || rental) {
+    doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text('By source', 40, sectionY);
+    doc.fillColor(C.textSlate).font('Helvetica').text('Method', 175, sectionY);
+    doc.text('Monthly', 500, sectionY);
+    sectionY += 12;
+    doc.moveTo(40, sectionY).lineTo(555, sectionY).strokeColor(C.borderLight).stroke();
+    sectionY += 6;
+    sources.forEach((line) => {
+      doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text(line.source, 40, sectionY, { width: 125 });
+      doc.fillColor(C.textSlate).font('Helvetica').text(line.method, 175, sectionY, { width: 300 });
+      doc.fillColor(C.deepSlate).font('Helvetica-Bold').text(money(line.monthly), 470, sectionY, {
+        width: 85,
+        align: 'right',
+      });
+      sectionY += 13;
+    });
+    if (rental) {
+      doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text('Schedule E', 40, sectionY);
+      sectionY += 12;
+      rental.properties.forEach((property) => {
+        const pitiaLabel =
+          property.pitia == null ? 'PITIA --' : `PITIA ${money(property.pitia)}`;
+        doc.fillColor(C.textSlate).font('Helvetica').fontSize(8).text(property.address, 52, sectionY, { width: 190 });
+        doc.text(`Rent ${money(property.rent)}`, 245, sectionY, { width: 100 });
+        doc.text(`1038 ${money(property.form1038)}`, 345, sectionY, { width: 100 });
+        doc.text(pitiaLabel, 450, sectionY, { width: 105, align: 'right' });
+        sectionY += 12;
+      });
+      const income = rental.toIncome;
+      const liability = rental.toLiability;
+      const housing = rental.toHousing ?? 0;
+      if (income > 0.005 && liability <= 0.005) {
+        doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text('Added to income', 52, sectionY);
+        doc.text(money(income), 470, sectionY, { width: 85, align: 'right' });
+        sectionY += 13;
+      } else if (liability > 0.005 && income <= 0.005) {
+        doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text('Proposed liability', 52, sectionY);
+        doc.text(money(liability), 470, sectionY, { width: 85, align: 'right' });
+        sectionY += 13;
+      } else if (income > 0.005 || liability > 0.005) {
+        if (income > 0.005) {
+          doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text('Added to income', 52, sectionY);
+          doc.text(money(income), 470, sectionY, { width: 85, align: 'right' });
+          sectionY += 13;
+        }
+        if (liability > 0.005) {
+          doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(8).text('Proposed liability', 52, sectionY);
+          doc.text(money(liability), 470, sectionY, { width: 85, align: 'right' });
+          sectionY += 13;
+        }
+      }
+      if (housing > 0.005) {
+        doc.fillColor(C.textSlate).font('Helvetica').fontSize(8).text('Housing expense', 52, sectionY);
+        doc.text(money(housing), 470, sectionY, { width: 85, align: 'right' });
+        sectionY += 13;
+      }
+    }
+    sectionY += 4;
+  }
+  if (data.programNote) {
+    doc.fillColor(C.textSlate).font('Helvetica').fontSize(8).text(data.programNote, 40, sectionY, { width: 515 });
+    sectionY += 16;
+  }
+  sectionY += 10;
 
-  doc.rect(40, 313, 515, 16).fill(C.deepSlate);
+  doc.fillColor(C.deepSlate).font('Helvetica-Bold').fontSize(10).text('3. COMPLIANCE AUDIT OVERRIDE LEDGER', 40, sectionY);
+
+  const ledgerHead = sectionY + 15;
+  doc.rect(40, ledgerHead, 515, 16).fill(C.deepSlate);
   doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8);
-  doc.text('TARGET FIELD', 45, 317);
-  doc.text('EXTRACTED', 180, 317);
-  doc.text('OVERRIDE', 250, 317);
-  doc.text('MODIFIED BY & TIMESTAMP', 320, 317);
+  doc.text('TARGET FIELD', 45, ledgerHead + 4);
+  doc.text('EXTRACTED', 180, ledgerHead + 4);
+  doc.text('OVERRIDE', 250, ledgerHead + 4);
+  doc.text('MODIFIED BY & TIMESTAMP', 320, ledgerHead + 4);
 
-  let yPos = 329;
+  let yPos = ledgerHead + 16;
   data.overrideAuditLogs.forEach((row, idx) => {
     if (idx % 2 === 0) {
       doc.rect(40, yPos, 515, 45).fill('#f1f5f9');

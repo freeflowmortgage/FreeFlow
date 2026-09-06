@@ -693,7 +693,7 @@ export function SelfEmployedPanel({
   onChoice,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   twoYears: boolean;
   onTwoYears: (next: boolean) => void;
   twoYearCaption?: string;
@@ -710,7 +710,7 @@ export function SelfEmployedPanel({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
           <h3 className="text-base font-extrabold text-slate-900">{title}</h3>
-          <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
+          {subtitle ? <p className="mt-1 text-xs text-slate-500">{subtitle}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {extra}

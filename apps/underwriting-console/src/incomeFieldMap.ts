@@ -1,4 +1,4 @@
-import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord } from './parseTypes';
+import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
 
 export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
 
@@ -683,15 +683,86 @@ function parseMoneyValue(raw: string): number {
   return Number(normalized);
 }
 
+const GRID_LINE_TO_DEF: Record<string, string> = {
+  '3': 'ent2-rent',
+  '9': 'ent2-ins',
+  '12': 'ent2-int',
+  '16': 'ent2-tax',
+  '18': 'ent2-dep',
+  '19': 'ent2-hoa',
+  '20': 'ent2-exp',
+  '21': 'ent2-net',
+};
+
+function fieldsFromScheduleEGrid(extracts: ScheduleEPropertyExtract[]): MappedIncomeField[] {
+  const found: MappedIncomeField[] = [];
+  for (const prop of extracts) {
+    const entityId = `schedule-e-p${prop.pageIndex}-${prop.column.toLowerCase()}`;
+    const push = (
+      sourceFieldId: string,
+      boxLabel: string,
+      fieldLabel: string,
+      lineNum: string,
+      category: MappedIncomeField['category'],
+      value: string,
+      numericValue: number,
+    ) => {
+      const isFirst = !found.some((field) => field.sourceFieldId === sourceFieldId);
+      found.push({
+        id: isFirst ? sourceFieldId : `${sourceFieldId}--${entityId}`,
+        entityId,
+        sourceFieldId,
+        form: 'Schedule E',
+        boxLabel,
+        fieldLabel,
+        lineNum,
+        category,
+        value,
+        numericValue,
+        pageIndex: prop.pageIndex,
+        wordIndex: 0,
+        box: { x: 0, y: 0, w: 0, h: 0 },
+      });
+    };
+    if (prop.address) {
+      push('ent2-address', 'Line 1a', 'Property Address (Line 1a)', 'Line 1a', 'property', prop.address, 0);
+    }
+    if (prop.propertyType) {
+      const typeCode = Number((prop.propertyType.match(/[1-8]/) || [])[0]);
+      push(
+        'ent2-type',
+        'Line 1b',
+        'Type of Property (Line 1b)',
+        'Line 1b',
+        'property',
+        PROPERTY_TYPE_CODES[typeCode] ? `${typeCode} — ${PROPERTY_TYPE_CODES[typeCode]}` : prop.propertyType,
+        Number.isFinite(typeCode) ? typeCode : 0,
+      );
+    }
+    if (prop.fairRentalDays) {
+      push('ent2-days', 'Line 2', 'Fair Rental Days (Line 2)', 'Line 2', 'property', String(prop.fairRentalDays), prop.fairRentalDays);
+    }
+    for (const [line, sourceId] of Object.entries(GRID_LINE_TO_DEF)) {
+      const def = SCHEDULE_E_DEFS.find((item) => item.id === sourceId);
+      const amount = prop.financials[line];
+      if (!def || amount == null || (amount === 0 && line !== '21')) continue;
+      push(sourceId, def.boxLabel, def.fieldLabel, def.lineNum, def.category, formatMoney(amount), amount);
+    }
+  }
+  return found;
+}
+
 export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
   if (result.incomeFields?.length) {
     return result.incomeFields;
   }
 
-  const found: MappedIncomeField[] = [];
+  const gridFields = fieldsFromScheduleEGrid(result.scheduleEProperties ?? []);
+  const found: MappedIncomeField[] = [...gridFields];
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
 
   for (const def of INCOME_FIELD_DEFS) {
+    if (gridFields.length && def.form === 'Schedule E') continue;
     const preferred = pageLines.filter(({ page }) => pagePrefers(page, def.form));
     const ordered = preferred.length > 0 ? preferred : pageLines;
     const allowMultipleEntities = preferred.length > 0;

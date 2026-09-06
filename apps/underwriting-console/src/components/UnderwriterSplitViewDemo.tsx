@@ -22,9 +22,10 @@ import {
   MonitorX,
   Tractor,
   Coins,
+  Printer,
 } from 'lucide-react';
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
-import type { LiveParseSession } from '../parseTypes';
+import type { LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields } from '../incomeFieldMap';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfPagePreview from './PdfPagePreview';
@@ -58,7 +59,11 @@ import {
   type ScheduleL,
   type YtdPnl,
 } from './selfEmployedIncome';
-import { computeRental1038CashFlow } from '@mortgage-pos/mortgage-engine';
+import {
+  compactSourceLines,
+  computeRental1038CashFlow,
+  qualifyingProgramNote,
+} from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
 
@@ -182,6 +187,7 @@ interface RentalPropertyYear {
   netIncomeLoss: number | null; // Line 21 – prefer this when parsed; null reconstructs from L3 − L20
   extraordinaryAddBack: number; // UW extraordinary / other allowed add-back (not an IRS line)
   fairRentalDays: number;   // Line 2  – (0 = full year / 365)
+  expenseDetermination?: ScheduleEExpenseDetermination;
 }
 
 interface RentalProperty {
@@ -210,13 +216,38 @@ interface RentalProperty {
 }
 
 /**
- * Simulated Encompass loan-detail REO section: address → full monthly PITIA.
- * When loan details arrive from Encompass with a PITIA for the property, the box
- * is prefilled; otherwise it stays blank for the underwriter to complete.
+ * PITIA parsed from the loan application (1003 / Encompass REO), not Schedule E.
+ * The 1038 calculator subtracts this after days-rented averaging.
+ * When the app has a PITIA for the property, the box is prefilled; otherwise it
+ * stays blank for the underwriter to complete.
  */
 const ENCOMPASS_REO_PITIA: Record<string, number> = {
   '742 Evergreen Terrace, Springfield, IL': 1450,
 };
+
+function normalizeReoAddress(address: string): string {
+  return address
+    .toLowerCase()
+    .replace(/\b(street|st|avenue|ave|road|rd|court|ct|drive|dr|boulevard|blvd|lane|ln|unit|apt|#)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Match Schedule E / REO addresses to the PITIA the income tool parsed from the app. */
+function pitiaFromApp(address: string): number | undefined {
+  if (!address) return undefined;
+  if (Object.prototype.hasOwnProperty.call(ENCOMPASS_REO_PITIA, address)) {
+    return ENCOMPASS_REO_PITIA[address];
+  }
+  const needle = normalizeReoAddress(address);
+  if (!needle) return undefined;
+  for (const [key, value] of Object.entries(ENCOMPASS_REO_PITIA)) {
+    const hay = normalizeReoAddress(key);
+    if (needle === hay || needle.startsWith(hay) || hay.startsWith(needle)) return value;
+  }
+  return undefined;
+}
 
 /**
  * Simulated Encompass proposed-loan PITIA for the subject property. The subject
@@ -224,6 +255,87 @@ const ENCOMPASS_REO_PITIA: Record<string, number> = {
  * property flagged as Subject uses this figure (not the REO section).
  */
 const ENCOMPASS_SUBJECT_PROPOSED_PITIA = 2350;
+
+function emptyRentalYear(year: number): RentalPropertyYear {
+  return {
+    year,
+    rentsReceived: 0,
+    insurance: 0,
+    mortgageInterest: 0,
+    taxes: 0,
+    depreciation: 0,
+    hoaDues: 0,
+    totalExpenses: 0,
+    netIncomeLoss: null,
+    extraordinaryAddBack: 0,
+    fairRentalDays: 0,
+  };
+}
+
+function mapScheduleEPropertyType(raw: string): RentalProperty['propertyType'] {
+  const code = (raw.match(/[1-8]/) || [])[0];
+  if (code === '2') return 'DUPLEX';
+  if (code === '3') return 'VACATION';
+  if (code === '4') return 'COMMERCIAL';
+  return 'SFR';
+}
+
+function rentalYearFromExtract(extract: ScheduleEPropertyExtract): RentalPropertyYear {
+  const financials = extract.financials || {};
+  return {
+    year: extract.year ?? 0,
+    rentsReceived: financials['3'] ?? 0,
+    insurance: financials['9'] ?? 0,
+    mortgageInterest: financials['12'] ?? 0,
+    taxes: financials['16'] ?? 0,
+    depreciation: financials['18'] ?? 0,
+    hoaDues: financials['19'] ?? 0,
+    totalExpenses: financials['20'] ?? 0,
+    netIncomeLoss: financials['21'] ?? null,
+    extraordinaryAddBack: 0,
+    fairRentalDays: extract.fairRentalDays || 0,
+    expenseDetermination: extract.determination,
+  };
+}
+
+/** Group every Schedule E column by address so two tax years become year1 / year2. */
+function rentalPropertiesFromExtracts(extracts: ScheduleEPropertyExtract[]): RentalProperty[] {
+  const grouped = new Map<string, ScheduleEPropertyExtract[]>();
+  for (const extract of extracts) {
+    const address = extract.address.trim();
+    const key = address
+      ? address.toLowerCase().replace(/\s+/g, ' ')
+      : `column-${extract.column}-p${extract.pageIndex}`;
+    const rows = grouped.get(key) ?? [];
+    rows.push(extract);
+    grouped.set(key, rows);
+  }
+
+  return [...grouped.values()].map((rows, index) => {
+    const byYear = new Map<number, ScheduleEPropertyExtract>();
+    for (const row of rows) {
+      byYear.set(row.year ?? 0, row);
+    }
+    const newestFirst = [...byYear.values()].sort((left, right) => (right.year ?? 0) - (left.year ?? 0));
+    const latest = newestFirst[0];
+    const prior = newestFirst[1];
+    const address = latest.address.trim() || `Schedule E ${latest.column} · page ${latest.pageIndex + 1}`;
+    const encompassPitia = pitiaFromApp(address);
+    return {
+      id: `live-e-${index + 1}`,
+      address,
+      propertyType: mapScheduleEPropertyType(latest.propertyType),
+      isSubjectProperty: false,
+      subjectMethod: 'SCHEDULE_E' as const,
+      marketRent: 0,
+      isPrimary2To4: false,
+      pitia: encompassPitia ?? null,
+      pitiaSource: encompassPitia !== undefined ? ('ENCOMPASS' as const) : null,
+      year1: rentalYearFromExtract(latest),
+      year2: prior ? rentalYearFromExtract(prior) : emptyRentalYear((latest.year ?? 1) - 1),
+    };
+  });
+}
 
 export default function UnderwriterSplitViewDemo({
   liveSession = null,
@@ -339,9 +451,9 @@ export default function UnderwriterSplitViewDemo({
         year2: { year: 2024, rentsReceived: 34000, insurance: 1750, mortgageInterest: 7400, taxes: 4200, depreciation: 5200, hoaDues: 2400, totalExpenses: 22100, netIncomeLoss: 11900, extraordinaryAddBack: 0, fairRentalDays: 0 },
       },
     ];
-    // Prefill PITIA from Encompass loan details when the REO section has the property
+    // Prefill PITIA from the application REO parse when the property is on the 1003.
     return props.map((p) => {
-      const encompassPitia = ENCOMPASS_REO_PITIA[p.address];
+      const encompassPitia = pitiaFromApp(p.address);
       return {
         ...p,
         pitia: encompassPitia ?? null,
@@ -349,6 +461,17 @@ export default function UnderwriterSplitViewDemo({
       };
     });
   });
+
+  useEffect(() => {
+    const extracts = liveSession?.result.scheduleEProperties;
+    if (!isLive || !extracts?.length) return;
+    const next = rentalPropertiesFromExtracts(extracts);
+    setRentalProperties(next);
+    setTwoYearRental(next.some((property) => {
+      const prior = property.year2;
+      return Boolean(prior.rentsReceived || prior.totalExpenses || prior.netIncomeLoss || prior.fairRentalDays);
+    }));
+  }, [isLive, liveSession?.result.transaction_id]);
 
   const [w2BaseChoices, setW2BaseChoices] = useState<Record<string, string | null>>({});
   const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
@@ -623,7 +746,6 @@ export default function UnderwriterSplitViewDemo({
   const [partnershipPnl, setPartnershipPnl] = useState<YtdPnl>(EMPTY_PNL);
 
   const governmentTwoYear = loanProgram === 'FHA' || loanProgram === 'VA' || loanProgram === 'USDA';
-  const twoYearCaption = loanProgram === 'CONVENTIONAL' ? 'FNMA/Freddie default: 1 year' : 'FHA/VA default: 2 years';
 
   useEffect(() => {
     setTwoYearRental(governmentTwoYear);
@@ -1311,6 +1433,53 @@ export default function UnderwriterSplitViewDemo({
       rentalChosen.monthly,
   };
 
+  const summarySourceLines = compactSourceLines([
+    { source: 'W-2 base', method: w2BaseChosen.label, monthly: form1084CashFlow.w2BaseMonthly },
+    { source: 'W-2 variable', method: w2VarChosen.label, monthly: form1084CashFlow.w2VariableMonthly },
+    { source: 'Schedule C', method: schCChosen.label, monthly: form1084CashFlow.qualifyingMonthlySelfEmployed },
+    { source: 'S-Corp', method: sCorpChosen.label, monthly: form1084CashFlow.sCorpShareholderDraw },
+    { source: 'C-Corp', method: cCorpChosen.label, monthly: form1084CashFlow.cCorpMonthly },
+    { source: 'Partnership', method: partnershipChosen.label, monthly: form1084CashFlow.partnershipMonthly },
+    { source: 'Schedule F', method: scheduleFChosen.label, monthly: form1084CashFlow.scheduleFMonthly },
+    { source: 'Asset income', method: assetIncomeChosen.label, monthly: form1084CashFlow.assetIncomeMonthly },
+  ]);
+
+  const chosenRentalRouting = rentalPicks.routingByOption[rentalChosen.id] ?? rentalFlow.routing;
+  const rentalSchedule = {
+    properties: rentalProperties.map((property) => {
+      const result = rentalFlow.properties.find((row) => row.id === property.id);
+      return {
+        address: property.address,
+        rent: property.year1.rentsReceived,
+        form1038: result?.netMonthly ?? 0,
+        pitia: property.pitia,
+      };
+    }),
+    toIncome: chosenRentalRouting.incomeMonthly,
+    toLiability: chosenRentalRouting.liabilityDebtMonthly,
+    toHousing: chosenRentalRouting.housingExpenseAdjustment,
+  };
+
+  const printIncomeSummary = async () => {
+    const response = await fetch('/api/underwrite/summary-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        loanId: borrowerMetadata.loanId,
+        primaryBorrowerName: borrowerMetadata.borrowerName,
+        programUsed: loanProgram,
+        calculatedIncome: form1084CashFlow.finalTotalQualifyingMonthly,
+        sourceLines: summarySourceLines,
+        rentalSchedule,
+        programNote: qualifyingProgramNote(loanProgram),
+      }),
+    });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+  };
+
   const usdaSelfEmployment = useMemo(
     () => [
       ...schCEntities.map((entity) => ({
@@ -1800,7 +1969,7 @@ export default function UnderwriterSplitViewDemo({
         const next = { ...p, ...patch };
         // Address changed: re-check Encompass loan details for a PITIA unless the UW keyed one manually
         if (patch.address !== undefined && !next.isSubjectProperty && next.pitiaSource !== 'UW') {
-          const encompassPitia = ENCOMPASS_REO_PITIA[patch.address];
+          const encompassPitia = pitiaFromApp(patch.address);
           if (encompassPitia !== undefined) {
             next.pitia = encompassPitia;
             next.pitiaSource = 'ENCOMPASS';
@@ -1813,7 +1982,7 @@ export default function UnderwriterSplitViewDemo({
             next.pitia = ENCOMPASS_SUBJECT_PROPOSED_PITIA;
             next.pitiaSource = 'ENCOMPASS';
           } else {
-            const encompassPitia = ENCOMPASS_REO_PITIA[next.address];
+            const encompassPitia = pitiaFromApp(next.address);
             next.pitia = encompassPitia ?? null;
             next.pitiaSource = encompassPitia !== undefined ? 'ENCOMPASS' : null;
           }
@@ -2001,6 +2170,14 @@ export default function UnderwriterSplitViewDemo({
               <option value="USDA">USDA Rural Development</option>
             </select>
           </label>
+          <button
+            type="button"
+            onClick={() => void printIncomeSummary()}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <Printer className="h-4 w-4" />
+            Print summary
+          </button>
           {!docPopout ? (
             <button
               type="button"
@@ -2339,7 +2516,6 @@ export default function UnderwriterSplitViewDemo({
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">4-Way Base Wage Reconciliation</h3>
-                  <p className="text-xs text-slate-400 mt-1">Cross-references paystub hourly pay rates against annualized parameters and YTD balances</p>
                 </div>
                 <span className="text-xs font-bold uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
                   Verified Base: $3,600.00 / Semi-Monthly
@@ -2649,13 +2825,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'SCHEDULE_C' && (
             <SelfEmployedPanel
               title="Schedule C · sole proprietor"
-              subtitle="Form 1084 cash flow. No Schedule L liquidity test — that applies to 1120-S / 1065 only."
               twoYears={twoYearSchC}
               onTwoYears={(next) => {
                 setTwoYearSchC(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={schCPicks.options}
               recommendedId={schCPicks.recommendedId}
               reason={schCPicks.reason}
@@ -2710,13 +2884,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'SCORP' && (
             <SelfEmployedPanel
               title="S-Corp · Form 1120-S / K-1"
-              subtitle="Two-year K-1 analysis first. Schedule L liquidity sits underneath — if it fails, only officer W-2 qualifies."
               twoYears={twoYearScorp}
               onTwoYears={(next) => {
                 setTwoYearScorp(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={sCorpPicks.options}
               recommendedId={sCorpPicks.recommendedId}
               reason={sCorpPicks.reason}
@@ -2804,13 +2976,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'CCORP' && (
             <SelfEmployedPanel
               title="C-Corp · Form 1120"
-              subtitle="Taxable income less tax, plus non-cash add-backs, times ownership. Schedule L quick ratio ≥ 1.0 required at ≥25%. W-2 and dividends still count if liquidity fails."
               twoYears={twoYearCCorp}
               onTwoYears={(next) => {
                 setTwoYearCCorp(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={cCorpPicks.options}
               recommendedId={cCorpPicks.recommendedId}
               reason={cCorpPicks.reason}
@@ -2873,13 +3043,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'PARTNERSHIP' && (
             <SelfEmployedPanel
               title="Partnership · Form 1065 / K-1"
-              subtitle="Two-year K-1 first. Schedule L liquidity below. Guaranteed payments still count if liquidity fails."
               twoYears={twoYearPartnership}
               onTwoYears={(next) => {
                 setTwoYearPartnership(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={partnershipPicks.options}
               recommendedId={partnershipPicks.recommendedId}
               reason={partnershipPicks.reason}
@@ -3002,13 +3170,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'SCHEDULE_F' && (
             <SelfEmployedPanel
               title="Schedule F · farm income"
-              subtitle="Farm profit or loss with Form 1084 non-cash and nonrecurring adjustments, tracked separately for each farm."
               twoYears={twoYearScheduleF}
               onTwoYears={(next) => {
                 setTwoYearScheduleF(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={scheduleFPicks.options}
               recommendedId={scheduleFPicks.recommendedId}
               reason={scheduleFPicks.reason}
@@ -3072,7 +3238,6 @@ export default function UnderwriterSplitViewDemo({
                       <Coins className="h-5 w-5 text-amber-600" />
                       Interest, Dividends & Capital Gains
                     </h3>
-                    <p className="mt-1 text-xs text-slate-500">Schedule B / Schedule D values remain visible whether or not the UW elects to qualify them.</p>
                   </div>
                   <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
                     <button type="button" onClick={() => setTwoYearAssetIncome(false)} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${!twoYearAssetIncome ? 'bg-slate-900 text-white' : 'text-slate-500'}`}>1 year</button>
@@ -3136,14 +3301,10 @@ export default function UnderwriterSplitViewDemo({
                     <Home className="h-5 w-5 text-indigo-600" />
                     Rental Income · Schedule E Page 1
                   </h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Form 1038 / 1038A · Line 21 net + Insurance (L9) + Mortgage interest (L12) + Taxes (L16) + Depreciation (L18) + HOA (L19) + UW extraordinary ÷ rental months (L2) − PITIA
-                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Loan Program Badge */}
                   <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-[10px] font-black uppercase text-indigo-700">
-                    {borrowerMetadata.loanProgram} Rules
+                    {borrowerMetadata.loanProgram}
                   </span>
                   {/* 1 / 2 year toggle */}
                   <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
@@ -3161,7 +3322,6 @@ export default function UnderwriterSplitViewDemo({
                     >
                       2 years
                     </button>
-                    <span className="hidden text-[10px] text-slate-500 sm:inline">{twoYearCaption}</span>
                   </div>
                 </div>
               </div>
@@ -3287,12 +3447,7 @@ export default function UnderwriterSplitViewDemo({
                       }`}>
                         <span className="font-mono text-[10px] font-black uppercase text-slate-500 w-[4.5rem] shrink-0">PITIA</span>
                         <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800">
-                          {prop.isSubjectProperty ? 'Proposed PITIA (subject loan)' : 'Full monthly housing expense'}
-                          <span className="ml-1 font-normal text-slate-400">
-                            {prop.isSubjectProperty
-                              ? '· proposed payment on the new loan'
-                              : '· principal, interest, taxes, insurance, association dues'}
-                          </span>
+                          {prop.isSubjectProperty ? 'Proposed PITIA (subject loan)' : 'Monthly housing expense'}
                         </span>
                         {prop.pitiaSource === 'ENCOMPASS' ? (
                           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-black uppercase text-indigo-700">
@@ -3348,20 +3503,19 @@ export default function UnderwriterSplitViewDemo({
 
                               {/* Line fields — full Form 1084 Schedule E line set */}
                               {[
-                                { line: 'Line 3', label: 'Rents received', key: 'rentsReceived' as const, hint: 'Gross rental income' },
-                                { line: 'Line 9', label: 'Insurance', key: 'insurance' as const, hint: 'Add-back' },
-                                { line: 'Line 12', label: 'Mortgage interest', key: 'mortgageInterest' as const, hint: 'Add-back' },
-                                { line: 'Line 16', label: 'Taxes', key: 'taxes' as const, hint: 'Add-back' },
-                                { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const, hint: 'Add-back' },
-                                { line: 'Line 19', label: 'HOA dues', key: 'hoaDues' as const, hint: 'Add-back if in PITIA' },
-                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'As listed — do not rebuild' },
-                                { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const, hint: '0 = full year' },
-                              ].map(({ line, label, key, hint }) => (
+                                { line: 'Line 3', label: 'Rents received', key: 'rentsReceived' as const },
+                                { line: 'Line 9', label: 'Insurance', key: 'insurance' as const },
+                                { line: 'Line 12', label: 'Mortgage interest', key: 'mortgageInterest' as const },
+                                { line: 'Line 16', label: 'Taxes', key: 'taxes' as const },
+                                { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const },
+                                { line: 'Line 19', label: 'HOA dues', key: 'hoaDues' as const },
+                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const },
+                                { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const },
+                              ].map(({ line, label, key }) => (
                                 <div key={key} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2.5 py-2">
                                   <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">{line}</span>
                                   <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                     {label}
-                                    <span className="ml-1 font-normal text-slate-400">· {hint}</span>
                                   </span>
                                   <input
                                     type="number"
@@ -3372,11 +3526,45 @@ export default function UnderwriterSplitViewDemo({
                                 </div>
                               ))}
 
+                              {y.expenseDetermination?.daysStatus && (
+                                <p
+                                  className={`rounded-md px-2.5 py-1.5 text-[10px] font-semibold ${
+                                    y.expenseDetermination.daysStatus === 'missing'
+                                      ? 'border border-amber-200 bg-amber-50 text-amber-900'
+                                      : 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                  }`}
+                                >
+                                  {y.expenseDetermination.daysStatus === 'missing'
+                                    ? 'Line 2 blank · 12 months'
+                                    : y.expenseDetermination.daysStatus === 'full-year'
+                                      ? `Line 2 · ${y.expenseDetermination.fairRentalDays} days · 12 months`
+                                      : `Line 2 · ${y.expenseDetermination.fairRentalDays} days · ${y.expenseDetermination.rentalMonths} months`}
+                                </p>
+                              )}
+                              {y.expenseDetermination && y.expenseDetermination.status !== 'incomplete' && (
+                                <p
+                                  className={`rounded-md px-2.5 py-1.5 text-[10px] font-semibold ${
+                                    y.expenseDetermination.status === 'confirmed'
+                                      ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                      : y.expenseDetermination.status === 'reconstructed'
+                                        ? 'border border-indigo-200 bg-indigo-50 text-indigo-800'
+                                        : 'border border-amber-200 bg-amber-50 text-amber-900'
+                                  }`}
+                                >
+                                  {y.expenseDetermination.status === 'confirmed' && (
+                                    y.expenseDetermination.recheckValidated
+                                      ? `Form re-read L${y.expenseDetermination.recheckedLine} · ${y.expenseDetermination.recheckedFrom?.toLocaleString('en-US')} → ${y.expenseDetermination.recheckedTo?.toLocaleString('en-US')}`
+                                      : 'Parse confirmed'
+                                  )}
+                                  {y.expenseDetermination.status === 'reconstructed' && 'Line 20 filled from itemized'}
+                                  {y.expenseDetermination.status === 'mismatch' && 'Line 20 kept · itemized differs'}
+                                </p>
+                              )}
+
                               <div className="flex items-center gap-2 rounded border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
                                 <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">Line 21</span>
                                 <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                   Net income / (loss)
-                                  <span className="ml-1 font-normal text-slate-400">· prefer parsed L21; blank reconstructs L3 − L20</span>
                                 </span>
                                 <input
                                   type="number"
@@ -3394,7 +3582,6 @@ export default function UnderwriterSplitViewDemo({
                                 <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-amber-700">UW</span>
                                 <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                   Extraordinary / other add-back
-                                  <span className="ml-1 font-normal text-slate-400">· not an IRS line</span>
                                 </span>
                                 <input
                                   type="number"
@@ -3407,7 +3594,7 @@ export default function UnderwriterSplitViewDemo({
                               {/* Annual 1038 adjusted cash flow summary */}
                               <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs space-y-1">
                                 <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                  <span>Add-backs (L9 + L12 + L16 + L18 + L19 + UW extra)</span>
+                                  <span>Add-backs</span>
                                   <span className="font-mono font-bold text-slate-500">
                                     +{cf.addBacks.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                                   </span>
@@ -3512,25 +3699,6 @@ export default function UnderwriterSplitViewDemo({
                 );
               })()}
 
-              {/* Loan-program guidance note */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
-                <p className="font-black uppercase text-slate-800 text-[10px] tracking-wider">Loan-Program Guidelines Applied</p>
-                {borrowerMetadata.loanProgram === 'FHA' && (
-                  <p><strong>FHA / HUD 4000.1:</strong> Default two years. 2–4 unit decline ≤ 5% → 24-month avg; 5–20% → most recent year; &gt;20% → disqualified. Other rental types use the 24-month average with a decline warning only.</p>
-                )}
-                {borrowerMetadata.loanProgram === 'CONVENTIONAL' && (
-                  <p><strong>Conventional / FNMA 1038:</strong> Default one year. Two years in file → 24-month average. Decline is a warning and does not switch to the lower year. Add back L9/L12/L16/L18/L19 from Line 20; do not rebuild expenses.</p>
-                )}
-                {borrowerMetadata.loanProgram === 'VA' && (
-                  <p><strong>VA:</strong> Default two years. Two years in file → 24-month average. Decline warns only. Depreciation and PITIA add-backs apply.</p>
-                )}
-                {borrowerMetadata.loanProgram === 'USDA' && (
-                  <p><strong>USDA:</strong> Default two years. Two years in file → 24-month average. Subject purchase with a new rental agreement may use 75% of market rent.</p>
-                )}
-                <p>
-                  <strong>Subject vs non-subject:</strong> Non-subject (REO) rentals use Schedule E history against the property's actual PITIA; an aggregate loss {borrowerMetadata.loanProgram === 'VA' ? 'reduces gross income directly (VA)' : 'is clamped to $0 income and redirected as a proposed liability'}. The subject property uses the proposed PITIA of the new loan — with Schedule E history on a refinance, or 75% of Form 1007/1025 market rent on a purchase. A subject deficit on a 2–4 unit primary adjusts the housing expense; a subject investment deficit maps to a proposed liability.
-                </p>
-              </div>
             </div>
           )}
 

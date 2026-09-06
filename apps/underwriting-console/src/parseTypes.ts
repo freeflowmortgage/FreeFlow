@@ -50,6 +50,39 @@ export type ParseResponse = {
   incomeFields?: MappedIncomeField[];
   parser_engine?: 'python-ocr' | 'native-pdf';
   original_filename?: string;
+  /** Every Schedule E Page 1 property column (A/B/C) across all years in the package. */
+  scheduleEProperties?: ScheduleEPropertyExtract[];
+};
+
+export type ScheduleEExpenseDetermination = {
+  status: 'confirmed' | 'reconstructed' | 'mismatch' | 'incomplete';
+  itemizedExpenses: number;
+  reportedLine20: number;
+  line20Source: 'visual' | 'itemized-sum';
+  expensesBalanced: boolean;
+  calculatedNet: number;
+  netBalanced: boolean;
+  fairRentalDays?: number;
+  personalUseDays?: number;
+  rentalMonths?: number;
+  daysStatus?: 'accepted' | 'full-year' | 'missing';
+  daysBalanced?: boolean;
+  recheckedLine?: string;
+  recheckedFrom?: number;
+  recheckedTo?: number;
+  recheckValidated?: boolean;
+  recheckSource?: 'form-bound';
+};
+
+export type ScheduleEPropertyExtract = {
+  pageIndex: number;
+  column: 'A' | 'B' | 'C';
+  year: number | null;
+  address: string;
+  propertyType: string;
+  fairRentalDays: number;
+  financials: Record<string, number>;
+  determination?: ScheduleEExpenseDetermination;
 };
 
 export type LiveParseSession = {
