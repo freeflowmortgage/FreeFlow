@@ -86,6 +86,7 @@ model Tenant {
   configurations   TenantConfiguration?
   loanApplications LoanApplication[]
   billingLedgers   TenantBillingLedger[]
+  auditEvents      AuditEvent[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -134,6 +135,7 @@ model User {
   verifiedAudits          Form1084Audit[]       @relation("VerifiedByUser")
   verifiedAppraisals      AppraisalAudit[]      @relation("AppraisalVerifiedByUser")
   clearedAppraisalActions AppraisalActionItem[] @relation("ActionItemClearedByUser")
+  auditEvents             AuditEvent[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -154,6 +156,7 @@ model LoanApplication {
   primaryBorrowerEmail String            @db.VarChar(255)
   status               ApplicationStatus @default(DRAFT)
   encompassGuid        String?           @db.VarChar(255) // Matches active loan in Encompass eFolder
+  version              Int               @default(1)
 
   // Relations
   documents        LoanDocument[]
@@ -162,6 +165,7 @@ model LoanApplication {
   appraisalAudits  AppraisalAudit[]
   conditions       LoanCondition[]
   billingLedgers   TenantBillingLedger[]
+  auditEvents      AuditEvent[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -258,7 +262,42 @@ model Form1084Audit {
   @@map("form_1084_audits")
 }
 
-// 8. LOAN CONDITIONS (Encompass Checklist Integration)
+// 8. IMMUTABLE AUDIT EVENTS (calculation, approval, and override evidence)
+//
+// This table intentionally stores only identifiers, version metadata, bounded
+// reason fields, and hashes. It must never contain PDFs, OCR text, raw request
+// bodies, borrower identifiers, or provider secrets. The database migration
+// grants INSERT/SELECT only and rejects every UPDATE/DELETE attempt.
+model AuditEvent {
+  id              String          @id @default(uuid()) @db.Uuid
+  tenantId        String          @db.Uuid
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  loanId          String          @db.Uuid
+  loanApplication LoanApplication @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
+  actorUserId     String          @db.Uuid
+  actorUser       User            @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
+
+  action              String   @db.VarChar(100)
+  entityType          String   @db.VarChar(100)
+  entityId            String   @db.Uuid
+  expectedLoanVersion Int
+  reasonCode          String   @db.VarChar(100)
+  reasonNarrative     String?  @db.VarChar(500)
+  ruleVersion         String   @db.VarChar(100)
+  schemaVersion       String   @db.VarChar(100)
+  requestId           String   @db.VarChar(100)
+  resultHash          String   @db.Char(64)
+  previousEventHash   String?  @db.Char(64)
+  eventHash           String   @unique @db.Char(64)
+  occurredAt          DateTime @default(now()) @db.Timestamptz
+
+  @@index([tenantId, occurredAt, id])
+  @@index([tenantId, loanId, occurredAt, id])
+  @@index([tenantId, requestId])
+  @@map("audit_events")
+}
+
+// 9. LOAN CONDITIONS (Encompass Checklist Integration)
 model LoanCondition {
   id              String          @id @default(uuid()) @db.Uuid
   tenantId        String          @db.Uuid

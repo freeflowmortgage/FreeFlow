@@ -6,6 +6,7 @@ import {
 } from '@mortgage-pos/mortgage-engine';
 import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
 import { withTenantTransaction } from '../../../server/database/client';
+import { appendAuditEvent, hashAuditResult } from '../../../server/audit/appendEvent';
 
 /**
  * 🚀 Next.js API Route: /api/income/calculate
@@ -46,7 +47,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
         where: { id: loanId, tenantId: context.tenantId },
         select: {
           id: true,
-          tenantId: true
+          tenantId: true,
+          version: true,
         }
       }),
     );
@@ -120,19 +122,42 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
     // We strictly avoid saving raw document binaries or borrower SSNs here, complying with ZDR guidelines [cite: 33].
     const updatedAudit = await withTenantTransaction(
       { tenantId: context.tenantId, principalId: context.membershipId },
-      (transaction) => transaction.form1084Audit.create({
-        data: {
-          tenantId: context.tenantId,
-          loanId: loan.id,
-          totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
-          qualifyingMonthlyIncome,
-          extractedTaxFields: {
-            schemaVersion: 'calculation-request-v1',
-            source: 'authenticated-api',
+      async (transaction) => {
+        const audit = await transaction.form1084Audit.create({
+          data: {
+            tenantId: context.tenantId,
+            loanId: loan.id,
+            totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
+            qualifyingMonthlyIncome,
+            extractedTaxFields: {
+              schemaVersion: 'calculation-request-v1',
+              source: 'authenticated-api',
+            },
+            yearsAnalyzed,
           },
-          yearsAnalyzed,
-        }
-      }),
+        });
+
+        const event = await appendAuditEvent(transaction, context, {
+          loanId: loan.id,
+          entityType: 'FORM_1084_AUDIT',
+          entityId: audit.id,
+          expectedLoanVersion: loan.version,
+          action: 'INCOME_CALCULATION_COMPLETED',
+          reasonCode: 'SYSTEM_CALCULATION',
+          ruleVersion: calculatorProgram === 'USDA' ? 'usda-income-v2' : 'form-1084-v9',
+          schemaVersion: 'audit-event-v1',
+          resultHash: hashAuditResult({
+            calculationEngine,
+            loanProgram: calculatorProgram,
+            qualifyingMonthlyIncome,
+            totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
+            trendingResult,
+            yearsAnalyzed,
+          }),
+        });
+
+        return { audit, event };
+      },
     );
 
     // 7. Success: Return fully calculated and compliant JSON to frontend dashboard [cite: 26]
@@ -143,7 +168,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
       trendingResult,
       calculationEngine,
       calculationDetails: calculationResults,
-      auditLogId: updatedAudit.id,
+      auditLogId: updatedAudit.audit.id,
+      auditEventId: updatedAudit.event.id,
       timestamp: new Date().toISOString()
     });
 
