@@ -34,3 +34,16 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Terraform state, providers, local overrides, and generated plans
+**/.terraform/
+**/backend.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

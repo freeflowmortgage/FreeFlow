@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars locally. This file is ignored by Git.
+aws_region        = "us-west-2"
+environment       = "dev"
+state_bucket_name = "replace-with-a-globally-unique-freeflow-dev-tf-state-bucket"

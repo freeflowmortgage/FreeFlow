@@ -1,0 +1,7 @@
+# Copy to backend.hcl locally after the bootstrap state bucket exists.
+# This example contains no credentials or account IDs.
+bucket         = "replace-with-freeflow-dev-tf-state-bucket"
+key            = "platform/dev.tfstate"
+region         = "us-west-2"
+encrypt        = true
+dynamodb_table = "freeflow-dev-terraform-lock"

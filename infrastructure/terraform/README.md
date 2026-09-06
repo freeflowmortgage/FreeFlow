@@ -1,0 +1,102 @@
+# FreeFlow Terraform
+
+Terraform is the only planned source of truth for FreeFlow AWS infrastructure.
+Console changes are limited to the one-time state bootstrap, break-glass incident
+response, and an explicitly recorded import/reconciliation workflow. A console
+change is never a substitute for a reviewed Terraform change.
+
+## Environment boundary
+
+| Environment | Purpose | AWS boundary | Current status |
+| --- | --- | --- | --- |
+| `dev` | Synthetic-data engineering and integration testing | Existing `mortgage-dev-*` account/VPC in `us-west-2` | Manually created; reconcile before Terraform manages it |
+| `staging` | Production-like qualification and drills | Separate non-production account/VPC | Not created |
+| `production` | Customer workload | Dedicated production account/VPC | Not created |
+
+`dev` must never receive production borrower data. Production does not inherit
+the development Free Tier constraints: it requires multi-AZ compute and data,
+durable backups/PITR, protected state, monitoring, and a paid operating budget.
+
+## Layout
+
+```text
+infrastructure/terraform/
+  bootstrap/                 # one-time protected Terraform state resources
+  environments/              # checked-in, non-secret per-environment contracts
+```
+
+The next infrastructure slices add reviewed modules/stacks in this order:
+
+1. account baseline and CI deployment identity;
+2. network (VPC, subnets, routing, flow logs, endpoints, controlled egress);
+3. data (KMS, RDS, Secrets Manager, SQS/DLQ);
+4. edge (Route 53, ACM, WAF, ALB, Cognito);
+5. compute (ECR, ECS, service discovery, task and execution roles);
+6. observability and delivery policy.
+
+This order is intentional: no task definition, image, or service is production
+ready until its network, identities, secrets, database, and alarms exist.
+
+## One-time state bootstrap
+
+`bootstrap/` creates an encrypted S3 state bucket and DynamoDB lock table. It
+starts with local state because the remote state does not exist yet. Use an
+approved administrative identity in the target AWS account; it must not be the
+long-lived root user and its credentials must not be placed in this repository.
+
+1. Copy `bootstrap/terraform.tfvars.example` to a local
+   `bootstrap/terraform.tfvars` and choose a globally unique bucket name.
+2. Review the plan in the intended account and apply it.
+3. Secure the bootstrap state according to the change record, then configure
+   each environment backend from `environments/<environment>/backend.hcl.example`.
+4. Commit only backend examples and non-secret contracts. Never commit a state
+   file, plan file, populated tfvars file, secret, account credential, or
+   Cognito client secret.
+
+The backend S3 bucket is intentionally distinct from application buckets. It
+contains sensitive infrastructure metadata and is not an artifact store.
+
+## Existing development environment
+
+Do not run `terraform apply` against the manually created `mortgage-dev-*`
+resources until an import inventory has been reviewed. The safe sequence is:
+
+1. Inventory actual resource IDs, tags, routes, security-group rules, RDS
+   configuration, ECR settings, and S3 settings.
+2. Write Terraform that matches the approved desired configuration.
+3. Import one resource at a time into the `dev` state.
+4. Run `terraform plan` until it is either empty or contains explicitly approved
+   corrective changes.
+5. Apply only those approved changes and record the result in the deployment
+   runbook.
+
+For staging and production, prefer clean creation from Terraform rather than
+imports. Production must use separate state, credentials, and account boundary.
+
+## Domain and identity decisions
+
+Approved hostname pattern:
+
+| Environment | Portal | API | Cognito domain |
+| --- | --- | --- | --- |
+| production | `app.mb-ai.com` | `api.mb-ai.com` | `auth.mb-ai.com` |
+| development | `dev.mb-ai.com` | `api-dev.mb-ai.com` | `auth-dev.mb-ai.com` |
+
+Each environment has its own Cognito user pool and app client. Cognito proves
+identity; FreeFlow's application/database membership model continues to resolve
+tenant and role authorization. ALB authenticates users with Cognito and the
+portal verifies the resulting signed identity assertion server-side.
+
+## Required inputs before an environment apply
+
+- AWS account ID and owner for each environment;
+- Route 53 hosted-zone ownership for `mb-ai.com`;
+- approved regions and disaster-recovery decision;
+- alert destination and on-call ownership;
+- RPO/RTO, backup retention, and retention/legal requirements;
+- permitted external egress requirements for Encompass and Stripe;
+- image digests and migration compatibility for the release.
+
+See [`docs/deployment-readiness/AWS-ECS-DEPLOYMENT-SPEC.md`](../../docs/deployment-readiness/AWS-ECS-DEPLOYMENT-SPEC.md)
+and [`docs/deployment-readiness/RUNBOOKS.md`](../../docs/deployment-readiness/RUNBOOKS.md)
+for the production acceptance criteria.
