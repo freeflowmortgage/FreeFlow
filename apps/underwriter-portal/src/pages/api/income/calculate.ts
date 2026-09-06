@@ -129,10 +129,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
             loanId: loan.id,
             totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
             qualifyingMonthlyIncome,
-            extractedTaxFields: {
-              schemaVersion: 'calculation-request-v1',
-              source: 'authenticated-api',
-            },
+            calculationSchemaVersion: 'calculation-request-v1',
+            calculationSource: 'authenticated-api',
             yearsAnalyzed,
           },
         });

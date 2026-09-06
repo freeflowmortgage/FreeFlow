@@ -204,7 +204,7 @@ async def process_document(request: Request):
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("parse_failed txn=%s", transaction_id)
+        logger.error("parse_failed txn=%s error_type=%s", transaction_id, type(exc).__name__)
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Document processing failed during in-memory execution.",

@@ -38,10 +38,16 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
     const json = await upstream.json();
     return res.status(upstream.status).json(json);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
+    console.error('[underwrite-process] parser request failed', {
+      requestId: context.requestId,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
     return res.status(502).json({
-      error: 'Live parser is unreachable. Start freeflow-doc-parser on :8080.',
-      detail: message,
+      error: {
+        code: 'DOCUMENT_PROCESSOR_UNAVAILABLE',
+        message: 'Document processing is temporarily unavailable.',
+        requestId: context.requestId,
+      },
     });
   }
 }
