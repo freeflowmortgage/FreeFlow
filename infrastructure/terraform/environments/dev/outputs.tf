@@ -26,6 +26,14 @@ output "cognito_login_domain" {
   value = var.enable_edge && var.enable_cognito_edge ? "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com" : null
 }
 
+output "public_hosted_zone_id" {
+  value = var.create_hosted_zone || var.enable_cognito_edge ? local.public_hosted_zone_id : null
+}
+
+output "public_hosted_zone_name_servers" {
+  value = var.create_hosted_zone ? aws_route53_zone.public[0].name_servers : []
+}
+
 output "migration_task_definition_arn" {
   value = var.enable_services && var.enable_edge ? aws_ecs_task_definition.migration[0].arn : null
 }

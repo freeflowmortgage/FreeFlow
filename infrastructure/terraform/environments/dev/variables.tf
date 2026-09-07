@@ -73,11 +73,28 @@ variable "portal_hostname" {
   default     = "dev.mb-ai.com"
 }
 
+variable "domain_name" {
+  type        = string
+  description = "Registered parent domain delegated to the Route 53 public hosted zone."
+  default     = "mb-ai.com"
+}
+
+variable "create_hosted_zone" {
+  type        = bool
+  description = "Creates the public Route 53 zone as a separate first phase before registrar delegation."
+  default     = false
+}
+
 variable "hosted_zone_id" {
   type        = string
-  description = "Route 53 public hosted-zone ID for the portal hostname. Required when enable_edge is true."
+  description = "Existing Route 53 public hosted-zone ID. Leave null when create_hosted_zone is true."
   default     = null
   nullable    = true
+
+  validation {
+    condition     = !(var.create_hosted_zone && var.hosted_zone_id != null)
+    error_message = "Set only one of create_hosted_zone or hosted_zone_id."
+  }
 }
 
 variable "enable_edge" {
@@ -90,6 +107,15 @@ variable "enable_cognito_edge" {
   type        = bool
   description = "Adds ACM, Route 53, and ALB Cognito authentication after domain control is confirmed."
   default     = false
+
+  validation {
+    condition = (
+      !var.enable_cognito_edge ||
+      var.create_hosted_zone ||
+      (var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != "")
+    )
+    error_message = "Cognito/HTTPS requires either create_hosted_zone=true or an existing hosted_zone_id."
+  }
 }
 
 variable "plte_allowed_ipv4_cidrs" {

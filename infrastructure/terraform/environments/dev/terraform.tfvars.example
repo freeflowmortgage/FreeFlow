@@ -2,11 +2,15 @@
 aws_region  = "us-west-2"
 aws_profile = null
 
-# Enable only after mb-ai.com DNS is hosted in Route 53 and provide its zone ID.
+# Phase 1 after registrar ownership is confirmed: set create_hosted_zone=true,
+# apply, and delegate the displayed Route 53 nameservers at the registrar.
+# Phase 2 after public delegation resolves: set enable_cognito_edge=true.
 enable_edge         = false
 enable_cognito_edge = false
-hosted_zone_id = null
-portal_hostname = "dev.mb-ai.com"
+create_hosted_zone  = false
+hosted_zone_id      = null
+domain_name         = "mb-ai.com"
+portal_hostname     = "dev.mb-ai.com"
 
 # Temporary PLTE HTTP mode must be restricted to approved workstation /32s.
 plte_allowed_ipv4_cidrs = []

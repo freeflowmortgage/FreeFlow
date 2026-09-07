@@ -1,10 +1,18 @@
+resource "aws_route53_zone" "public" {
+  count = var.create_hosted_zone ? 1 : 0
+
+  name          = var.domain_name
+  force_destroy = false
+}
+
 resource "aws_cognito_user_pool" "live_test" {
   count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
 
   name                     = "${local.name_prefix}-users"
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
-  mfa_configuration        = "OPTIONAL"
+  mfa_configuration        = "ON"
+  deletion_protection      = "ACTIVE"
 
   software_token_mfa_configuration {
     enabled = true
@@ -23,10 +31,21 @@ resource "aws_cognito_user_pool" "live_test" {
     allow_admin_create_user_only = true
   }
 
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = ["email"]
+  }
+
   lifecycle {
     precondition {
-      condition     = var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != ""
-      error_message = "hosted_zone_id is required before the HTTPS/Cognito edge can be enabled."
+      condition     = endswith(var.portal_hostname, ".${var.domain_name}")
+      error_message = "portal_hostname must be a subdomain of domain_name."
     }
   }
 }
@@ -82,7 +101,7 @@ resource "aws_route53_record" "certificate_validation" {
     }
   } : {}
 
-  zone_id = data.aws_route53_zone.public[0].zone_id
+  zone_id = local.public_hosted_zone_id
   name    = each.value.name
   type    = each.value.type
   ttl     = 60
@@ -102,10 +121,42 @@ resource "aws_lb" "portal" {
   name                       = "${local.name_prefix}-portal"
   internal                   = false
   load_balancer_type         = "application"
-  security_groups            = var.enable_cognito_edge ? [var.alb_security_group_id] : [aws_security_group.plte_alb[0].id]
+  security_groups            = var.enable_cognito_edge ? [aws_security_group.authenticated_alb[0].id] : [aws_security_group.plte_alb[0].id]
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
   enable_deletion_protection = false
+}
+
+resource "aws_security_group" "authenticated_alb" {
+  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+
+  name        = "${local.name_prefix}-authenticated-alb-sg"
+  description = "Public HTTPS edge protected by Cognito authentication"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    description = "HTTP redirect to HTTPS"
+    protocol    = "tcp"
+    from_port   = 80
+    to_port     = 80
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Authenticated HTTPS portal"
+    protocol    = "tcp"
+    from_port   = 443
+    to_port     = 443
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description     = "ALB to portal tasks only"
+    protocol        = "tcp"
+    from_port       = 8000
+    to_port         = 8000
+    security_groups = [var.app_security_group_id]
+  }
 }
 
 resource "aws_security_group" "plte_alb" {
@@ -142,6 +193,18 @@ resource "aws_security_group_rule" "portal_from_plte_alb" {
   to_port                  = 8000
   security_group_id        = var.app_security_group_id
   source_security_group_id = aws_security_group.plte_alb[0].id
+}
+
+resource "aws_security_group_rule" "portal_from_authenticated_alb" {
+  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+
+  type                     = "ingress"
+  description              = "Authenticated ALB to portal"
+  protocol                 = "tcp"
+  from_port                = 8000
+  to_port                  = 8000
+  security_group_id        = var.app_security_group_id
+  source_security_group_id = aws_security_group.authenticated_alb[0].id
 }
 
 resource "aws_lb_target_group" "portal" {
@@ -229,7 +292,7 @@ resource "aws_lb_listener" "https" {
 resource "aws_route53_record" "portal" {
   count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
 
-  zone_id = data.aws_route53_zone.public[0].zone_id
+  zone_id = local.public_hosted_zone_id
   name    = var.portal_hostname
   type    = "A"
 
