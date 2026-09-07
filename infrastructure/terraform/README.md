@@ -37,7 +37,8 @@ Infrastructure slices are added and qualified in this order:
    and production HA remain);
 5. compute (digest-gated portal, parser, and migration tasks implemented;
    qualification and worker/appraisal services remain);
-6. observability and delivery policy.
+6. observability (encrypted SNS topic, dashboard, and seven dev alarms deployed;
+   subscription/drill and log-masking evidence remain) and delivery policy.
 
 This order is intentional: no task definition, image, or service is production
 ready until its network, identities, secrets, database, and alarms exist.
@@ -91,6 +92,12 @@ Each environment has its own Cognito user pool and app client. Cognito proves
 identity; FreeFlow's application/database membership model continues to resolve
 tenant and role authorization. ALB authenticates users with Cognito and the
 portal verifies the resulting signed identity assertion server-side.
+
+Domain activation is deliberately two-phase. First set
+`create_hosted_zone = true` while Cognito remains disabled, apply, and delegate
+the registrar to the output nameservers. Only after public delegation resolves
+should `enable_cognito_edge = true` create ACM, Cognito, HTTPS, and the DNS alias.
+See the [domain and user-access runbook](../../docs/deployment-readiness/DOMAIN-COGNITO-USER-ACCESS-RUNBOOK.md).
 
 ## Required inputs before an environment apply
 
