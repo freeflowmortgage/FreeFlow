@@ -120,6 +120,17 @@ variable "enable_services" {
   default     = false
 }
 
+variable "portal_desired_count" {
+  type        = number
+  description = "Portal task count. Keep zero until the private migration succeeds, then set to one for PLTE."
+  default     = 0
+
+  validation {
+    condition     = contains([0, 1], var.portal_desired_count)
+    error_message = "The low-cost PLTE portal desired count must be either 0 or 1."
+  }
+}
+
 variable "portal_image" {
   type        = string
   description = "Portal ECR image reference pinned with @sha256:."

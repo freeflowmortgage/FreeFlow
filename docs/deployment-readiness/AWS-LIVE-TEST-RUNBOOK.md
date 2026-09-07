@@ -76,7 +76,8 @@ For the temporary PLTE exception, set `enable_edge = true`,
 `enable_cognito_edge = false`, `enable_parser = false`, and allowlist only the
 operator's current public IPv4 `/32`. The parser digest is not required. This
 mode uses the ALB-generated HTTP hostname and must be removed when Cognito/TLS
-is enabled.
+is enabled. Keep `portal_desired_count = 0` for the first apply, run and verify
+the private migration, then set it to `1` and apply a second reviewed plan.
 
 Never apply an unsaved plan. Every plan must contain zero destroys unless an
 approved teardown change explicitly names the resources being removed.

@@ -241,7 +241,7 @@ resource "aws_ecs_service" "portal" {
   name                              = "${local.name_prefix}-portal"
   cluster                           = data.aws_ecs_cluster.existing.arn
   task_definition                   = aws_ecs_task_definition.portal[0].arn
-  desired_count                     = 1
+  desired_count                     = var.portal_desired_count
   launch_type                       = "FARGATE"
   platform_version                  = "LATEST"
   health_check_grace_period_seconds = 90

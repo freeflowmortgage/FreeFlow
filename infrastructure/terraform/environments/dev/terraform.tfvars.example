@@ -15,6 +15,7 @@ plte_allowed_ipv4_cidrs = []
 # value with the ECR repository URL plus the immutable image digest.
 enable_services = false
 enable_parser   = false
+portal_desired_count = 0
 portal_image     = ""
 parser_image     = ""
 migration_image  = ""
