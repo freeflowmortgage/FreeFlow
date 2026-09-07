@@ -114,6 +114,32 @@ variable "enable_parser" {
   default     = false
 }
 
+variable "enable_monitoring" {
+  type        = bool
+  description = "Creates the low-cost PLTE CloudWatch dashboard, alarms, and encrypted SNS topic."
+  default     = false
+
+  validation {
+    condition     = !var.enable_monitoring || (var.enable_edge && var.enable_services)
+    error_message = "enable_edge and enable_services must both be true before monitoring is enabled."
+  }
+}
+
+variable "operations_alert_email" {
+  type        = string
+  description = "Optional operator email for alarm notifications. Keep in ignored tfvars; the recipient must confirm the SNS subscription."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.operations_alert_email == null ||
+      can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.operations_alert_email))
+    )
+    error_message = "operations_alert_email must be null or a syntactically valid email address."
+  }
+}
+
 variable "enable_services" {
   type        = bool
   description = "Creates digest-pinned ECS task definitions and services after images are pushed."

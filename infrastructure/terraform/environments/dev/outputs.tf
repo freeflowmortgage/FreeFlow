@@ -45,3 +45,11 @@ output "app_private_subnet_ids" {
 output "app_security_group_id" {
   value = var.app_security_group_id
 }
+
+output "operations_dashboard_name" {
+  value = var.enable_monitoring ? aws_cloudwatch_dashboard.operations[0].dashboard_name : null
+}
+
+output "operations_alert_topic_arn" {
+  value = var.enable_monitoring ? aws_sns_topic.operations[0].arn : null
+}
