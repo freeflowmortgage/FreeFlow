@@ -20,9 +20,11 @@ allowlisted address is stored only in ignored local Terraform variables.
   pending `0`, deployment `COMPLETED`, failed tasks `0`.
 - ALB target: healthy on private task address port `8000`.
 - Running parser tasks: `0`; parser ECS service: absent.
-- Portal image: immutable digest
-  `sha256:e2200bc58c343c323a3c17b52e7d62383b993ef08bfc014ae5c8e29daf694531`;
+- Portal image after the stylesheet repair: immutable digest
+  `sha256:6e59a381ce1b535737d0c2b6ec58d1d1b29bc9a7ff3cd285b128a6b03b2ccc1a`;
   ECR Basic scan completed with no findings.
+- ECS portal task definition revision `2`: desired `1`, running `1`, pending
+  `0`, deployment `COMPLETED`.
 
 ## Database evidence
 
@@ -44,6 +46,9 @@ allowlisted address is stored only in ignored local Terraform variables.
 ## Live smoke tests
 
 - `GET /`: HTTP `200`, expected portal content present.
+- `GET /_next/static/css/714e120eebfd5bd5.css`: HTTP `200`, content type
+  `text/css; charset=UTF-8`, 24,546 bytes; expected Tailwind layout rules
+  verified. This closes the initial unstyled-page regression.
 - `POST /api/underwrite/process`: HTTP `503` with the parser feature disabled.
 - `POST /api/income/calculate` for a nonexistent synthetic loan: tenant-scoped
   HTTP `404` with the expected `LOAN NOT FOUND` contract, proving the restricted
