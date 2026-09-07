@@ -124,4 +124,48 @@ describe('entity-scoped income field mapping', () => {
     expect(fields.find((field) => field.sourceFieldId === 'schedule-f-depreciation')?.numericValue).toBe(10000);
     expect(fields.find((field) => field.sourceFieldId === 'schedule-d-capital-gain-loss')?.numericValue).toBe(-3000);
   });
+
+  test('Schedule E grid fields keep official overlay boxes', () => {
+    const fields = mapIncomeFields({
+      transaction_id: 'e-grid',
+      total_pages_scanned: 1,
+      pages_extracted_count: 1,
+      extracted_page_indices: [0],
+      ocr_page_count: 0,
+      has_business_returns: true,
+      flags: [],
+      classifications: { '0': ['Schedule E (Page 1 - Rentals)'] },
+      unresolved_statements: [],
+      pages: [
+        {
+          index: 0,
+          formIds: ['Schedule E (Page 1 - Rentals)'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: [],
+        },
+      ],
+      scheduleEProperties: [
+        {
+          pageIndex: 0,
+          column: 'A',
+          year: 2025,
+          address: '100 Main St',
+          propertyType: '1',
+          fairRentalDays: 365,
+          financials: { '3': 24000, '20': 9000, '21': 15000 },
+          boxes: {
+            address: { x: 0.1, y: 0.22, w: 0.7, h: 0.02 },
+            financials: { '3': { x: 0.12, y: 0.4, w: 0.18, h: 0.02 } },
+          },
+        },
+      ],
+    });
+    const rent = fields.find((field) => field.sourceFieldId === 'ent2-rent');
+    expect(rent?.id).toBe('ent2-rent');
+    expect(rent?.box).toEqual({ x: 0.12, y: 0.4, w: 0.18, h: 0.02 });
+    expect(rent?.pageIndex).toBe(0);
+  });
 });

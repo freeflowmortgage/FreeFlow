@@ -196,6 +196,47 @@ def convert_relative_words(
     return words
 
 
+def relative_box(page: Any, box: Iterable[float] | None) -> dict[str, float] | None:
+    """Convert a PDF-point clip [x0, y0, x1, y1] into a 0–1 overlay box."""
+    if not box:
+        return None
+    coords = [float(value) for value in box]
+    if len(coords) < 4:
+        return None
+    x0, y0, x1, y1 = coords[:4]
+    width = float(page.rect.width) or 1.0
+    height = float(page.rect.height) or 1.0
+    rel = {
+        "x": x0 / width,
+        "y": y0 / height,
+        "w": max(0.0, (x1 - x0) / width),
+        "h": max(0.0, (y1 - y0) / height),
+    }
+    if rel["w"] <= 0 or rel["h"] <= 0:
+        return None
+    return rel
+
+
+def property_overlay_boxes(page: Any, template_map: dict[str, Any], column: str) -> dict[str, Any]:
+    meta = template_map.get("properties_meta", {}).get(column, {})
+    financials: dict[str, dict[str, float]] = {}
+    for line_num, columns in (template_map.get("financial_grid") or {}).items():
+        rel = relative_box(page, columns.get(column))
+        if rel:
+            financials[str(line_num)] = rel
+    boxes: dict[str, Any] = {"financials": financials}
+    address = relative_box(page, meta.get("address_box"))
+    type_code = relative_box(page, meta.get("type_code_box"))
+    days = relative_box(page, meta.get("fair_rental_days_box"))
+    if address:
+        boxes["address"] = address
+    if type_code:
+        boxes["type"] = type_code
+    if days:
+        boxes["days"] = days
+    return boxes
+
+
 def words_in_box(words: Iterable[dict[str, Any]], box: Iterable[float], *, pad: float = 3.0) -> list[dict[str, Any]]:
     x0, y0, x1, y1 = (float(v) for v in box)
     hits: list[dict[str, Any]] = []
@@ -766,6 +807,7 @@ def parse_schedule_e_page(
             "fairRentalDays": days,
             "financials": financials,
             "determination": determination,
+            "boxes": property_overlay_boxes(page, template_map, letter),
         }
         if _occupied(prop):
             properties.append(prop)

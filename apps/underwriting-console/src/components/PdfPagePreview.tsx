@@ -82,6 +82,11 @@ export default function PdfPagePreview({
     };
   }, [pageIndex, ready]);
 
+  useEffect(() => {
+    if (!selectedFieldId) return;
+    document.querySelector(`[data-box-id="${selectedFieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedFieldId, pageIndex, ready]);
+
   const last = Math.max(pageCount - 1, 0);
 
   return (

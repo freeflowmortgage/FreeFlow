@@ -84,6 +84,11 @@ def test_extracts_columns_a_and_b_from_one_page() -> None:
     assert by_col["B"]["financials"]["3"] == 18000
     assert by_col["A"]["propertyType"].strip().startswith("1")
     assert by_col["B"]["propertyType"].strip().startswith("2")
+    rent_box = by_col["A"]["boxes"]["financials"]["3"]
+    assert rent_box["w"] > 0.04
+    assert rent_box["h"] > 0.005
+    assert 0 <= rent_box["x"] < 1
+    assert 0 <= rent_box["y"] < 1
 
 
 @pytest.mark.skipif(not TEMPLATE_PDF.exists(), reason="official f1040se.pdf blank is required")

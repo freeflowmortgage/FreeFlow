@@ -25,8 +25,16 @@ import {
   Printer,
 } from 'lucide-react';
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
-import type { LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
-import { mapIncomeFields } from '../incomeFieldMap';
+import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
+import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
+import {
+  allScheduleEExtracts,
+  firstPageForKind,
+  kindsOf,
+  pickDocumentForTab,
+  tabForKinds,
+  type WorkspaceTab,
+} from '../livePacket';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfPagePreview from './PdfPagePreview';
 import FixturePdfViewer from './FixturePdfViewer';
@@ -188,6 +196,7 @@ interface RentalPropertyYear {
   extraordinaryAddBack: number; // UW extraordinary / other allowed add-back (not an IRS line)
   fairRentalDays: number;   // Line 2  – (0 = full year / 365)
   expenseDetermination?: ScheduleEExpenseDetermination;
+  source?: { documentId: string; pageIndex: number; column: 'A' | 'B' | 'C' };
 }
 
 interface RentalProperty {
@@ -280,7 +289,7 @@ function mapScheduleEPropertyType(raw: string): RentalProperty['propertyType'] {
   return 'SFR';
 }
 
-function rentalYearFromExtract(extract: ScheduleEPropertyExtract): RentalPropertyYear {
+function rentalYearFromExtract(extract: ScheduleEPropertyExtract & { documentId?: string }): RentalPropertyYear {
   const financials = extract.financials || {};
   return {
     year: extract.year ?? 0,
@@ -295,11 +304,16 @@ function rentalYearFromExtract(extract: ScheduleEPropertyExtract): RentalPropert
     extraordinaryAddBack: 0,
     fairRentalDays: extract.fairRentalDays || 0,
     expenseDetermination: extract.determination,
+    source: extract.documentId
+      ? { documentId: extract.documentId, pageIndex: extract.pageIndex, column: extract.column }
+      : undefined,
   };
 }
 
 /** Group every Schedule E column by address so two tax years become year1 / year2. */
-function rentalPropertiesFromExtracts(extracts: ScheduleEPropertyExtract[]): RentalProperty[] {
+function rentalPropertiesFromExtracts(
+  extracts: Array<ScheduleEPropertyExtract & { documentId?: string }>,
+): RentalProperty[] {
   const grouped = new Map<string, ScheduleEPropertyExtract[]>();
   for (const extract of extracts) {
     const address = extract.address.trim();
@@ -339,30 +353,43 @@ function rentalPropertiesFromExtracts(extracts: ScheduleEPropertyExtract[]): Ren
 
 export default function UnderwriterSplitViewDemo({
   liveSession = null,
+  liveDocuments = [],
   source = 'demo',
   parseBusy = false,
   parseError = null,
   onParseFile,
+  onParseFiles,
   onUseDemo,
   onUseLive,
 }: {
   liveSession?: LiveParseSession | null;
+  liveDocuments?: LiveDocument[];
   source?: SplitViewSource;
   parseBusy?: boolean;
   parseError?: string | null;
   onParseFile?: (file: File) => void;
+  onParseFiles?: (files: File[]) => void;
   onUseDemo?: () => void;
   onUseLive?: () => void;
 } = {}) {
-  const isLive = source === 'live' && liveSession !== null;
+  const packet: LiveDocument[] = liveDocuments.length
+    ? liveDocuments
+    : liveSession
+      ? [{ id: 'single', sha256: '', file: liveSession.file, fileName: liveSession.fileName, result: liveSession.result }]
+      : [];
+  const isLive = source === 'live' && packet.length > 0;
   const viewer = usePdfViewer(2);
   const [livePageIndex, setLivePageIndex] = useState(0);
   const activePdfPage = viewer.currentPage;
   const setActivePdfPage = viewer.setPage;
   const mappedFields = useMemo(
-    () => (liveSession ? mapIncomeFields(liveSession.result) : []),
-    [liveSession?.result.transaction_id],
+    () =>
+      packet.flatMap((doc) =>
+        mapIncomeFields(doc.result).map((field) => ({ ...field, documentId: doc.id })),
+      ),
+    [packet.map((doc) => doc.id).join('|')],
   );
+  const scheduleEExtracts = useMemo(() => allScheduleEExtracts(packet), [packet.map((doc) => doc.id).join('|')]);
 
   // 1. Navigation & View States
   const [activeTab, setActiveTab] = useState<IncomeTab>('PAYSTUB_RECONCILIATION');
@@ -383,28 +410,22 @@ export default function UnderwriterSplitViewDemo({
 
     if (!isLive) return allTabs; // Demo mode shows all tabs for walkthrough
 
-    const formTokens = [
-      ...mappedFields.map((f) => f.form),
-      ...(liveSession?.result.pages.flatMap((page) => page.formIds) ?? []),
-      ...Object.keys(liveSession?.result.classifications ?? {}),
-    ];
-    const hasDoc = (...patterns: RegExp[]) => formTokens.some((token) => patterns.some((pattern) => pattern.test(token)));
+    const packetKinds = packet.flatMap((doc) => kindsOf(doc));
+    const hasKind = (...want: Array<(typeof packetKinds)[number]>) => want.some((kind) => packetKinds.includes(kind));
 
     return allTabs.filter(([id]) => {
       if (id === 'ENCOMPASS_SYNC') return true;
-      if (id === 'PAYSTUB_RECONCILIATION') {
-        return hasDoc(/W-?2/i, /Paystub/i, /pay stub/i, /Earnings statement/i, /WVOE/i, /Verification of Employment/i);
-      }
-      if (id === 'SCHEDULE_C') return hasDoc(/Schedule C/i);
-      if (id === 'SCORP') return hasDoc(/1120-?S/i, /S-Corporation/i);
-      if (id === 'CCORP') return hasDoc(/1120 \(C-Corporation/i, /C-Corporation Return/i) && !hasDoc(/1120-?S/i);
-      if (id === 'PARTNERSHIP') return hasDoc(/Form 1065/i, /K-1 \(1065\)/i);
-      if (id === 'SCHEDULE_F') return hasDoc(/Schedule F/i);
-      if (id === 'ASSET_INCOME') return hasDoc(/Schedule B/i, /Schedule D/i);
-      if (id === 'SCHEDULE_E') return hasDoc(/Schedule E/i);
+      if (id === 'PAYSTUB_RECONCILIATION') return hasKind('paystub', 'w2', 'unknown');
+      if (id === 'SCHEDULE_C') return hasKind('schedule-c');
+      if (id === 'SCORP') return hasKind('scorp');
+      if (id === 'CCORP') return hasKind('ccorp');
+      if (id === 'PARTNERSHIP') return hasKind('partnership');
+      if (id === 'SCHEDULE_F') return hasKind('schedule-f');
+      if (id === 'ASSET_INCOME') return hasKind('asset');
+      if (id === 'SCHEDULE_E') return hasKind('schedule-e');
       return false;
     });
-  }, [isLive, mappedFields, liveSession]);
+  }, [isLive, packet]);
 
   // Ensure active tab is valid
   React.useEffect(() => {
@@ -417,6 +438,48 @@ export default function UnderwriterSplitViewDemo({
   /** Left-pane document style: interactive facsimile or the real filled source PDF. */
   const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('pdf');
   const [wageDocKind, setWageDocKind] = useState<'paystub' | 'w2'>('paystub');
+  const [inspectDocId, setInspectDocId] = useState<string | null>(null);
+  const packetKey = packet.map((doc) => doc.id).join('|');
+  const prevPacketKeyRef = useRef('');
+  const skipPageResetRef = useRef(false);
+  useEffect(() => {
+    if (!isLive || packetKey === prevPacketKeyRef.current) {
+      prevPacketKeyRef.current = packetKey;
+      return;
+    }
+    const addedId = packetKey.split('|').filter((id) => id && !prevPacketKeyRef.current.split('|').includes(id)).pop();
+    prevPacketKeyRef.current = packetKey;
+    const added = packet.find((doc) => doc.id === addedId);
+    if (!added) return;
+    const next = tabForKinds(kindsOf(added));
+    setActiveTab(next.tab);
+    if (next.wageDocKind) setWageDocKind(next.wageDocKind);
+    setInspectDocId(added.id);
+    setLivePageIndex(firstPageForKind(added.result, kindsOf(added)[0]));
+  }, [isLive, packetKey]);
+  const canvasDoc = pickDocumentForTab(packet, activeTab as WorkspaceTab, wageDocKind, inspectDocId);
+  const canvasFields = mappedFields.filter((field) => !canvasDoc || field.documentId === canvasDoc.id);
+  const hasLivePaystub = packet.some((doc) => kindsOf(doc).includes('paystub') || kindsOf(doc).includes('unknown'));
+  const hasLiveW2 = packet.some((doc) => kindsOf(doc).includes('w2'));
+  useEffect(() => {
+    if (!isLive || (activeTab !== 'PAYSTUB_RECONCILIATION' && activeTab !== 'ENCOMPASS_SYNC')) return;
+    if (wageDocKind === 'paystub' && !hasLivePaystub && hasLiveW2) setWageDocKind('w2');
+    if (wageDocKind === 'w2' && !hasLiveW2 && hasLivePaystub) setWageDocKind('paystub');
+  }, [isLive, activeTab, wageDocKind, hasLivePaystub, hasLiveW2]);
+  useEffect(() => {
+    if (!isLive || !canvasDoc) return;
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
+    const want =
+      activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC'
+        ? wageDocKind
+        : activeTab === 'SCHEDULE_E'
+          ? 'schedule-e'
+          : kindsOf(canvasDoc)[0];
+    setLivePageIndex(firstPageForKind(canvasDoc.result, want));
+  }, [isLive, canvasDoc?.id, activeTab, wageDocKind]);
   const [twoYearSchC, setTwoYearSchC] = useState(false);
   const [twoYearScorp, setTwoYearScorp] = useState(false);
   const [twoYearCCorp, setTwoYearCCorp] = useState(false);
@@ -463,15 +526,15 @@ export default function UnderwriterSplitViewDemo({
   });
 
   useEffect(() => {
-    const extracts = liveSession?.result.scheduleEProperties;
-    if (!isLive || !extracts?.length) return;
+    const extracts = scheduleEExtracts;
+    if (!isLive || !extracts.length) return;
     const next = rentalPropertiesFromExtracts(extracts);
     setRentalProperties(next);
     setTwoYearRental(next.some((property) => {
       const prior = property.year2;
       return Boolean(prior.rentsReceived || prior.totalExpenses || prior.netIncomeLoss || prior.fairRentalDays);
     }));
-  }, [isLive, liveSession?.result.transaction_id]);
+  }, [isLive, scheduleEExtracts]);
 
   const [w2BaseChoices, setW2BaseChoices] = useState<Record<string, string | null>>({});
   const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
@@ -757,12 +820,12 @@ export default function UnderwriterSplitViewDemo({
   }, [governmentTwoYear]);
 
   useEffect(() => {
-    if (!isLive || !liveSession) return;
-    const documentLabels = Object.values(liveSession.result.classifications).flat().join(' ');
+    if (!isLive || !packet.length) return;
+    const documentLabels = packet.flatMap((doc) => Object.values(doc.result.classifications).flat()).join(' ');
     if (/USDA|Rural Development|3555/i.test(documentLabels)) setLoanProgram('USDA');
     else if (/FHA|HUD-92800|HUD 92900/i.test(documentLabels)) setLoanProgram('FHA');
     else if (/VA|Notice of Value|26-7/i.test(documentLabels)) setLoanProgram('VA');
-  }, [isLive, liveSession?.result.transaction_id]);
+  }, [isLive, packet.map((doc) => doc.id).join('|')]);
 
   // Borrower Core Metadata Reference
   const borrowerMetadata = {
@@ -1625,13 +1688,25 @@ export default function UnderwriterSplitViewDemo({
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
-  const handleInspectField = (fieldId: string) => {
+  const handleInspectField = (fieldId: string, documentId?: string) => {
+    skipPageResetRef.current = true;
     setHighlightFieldId(fieldId);
     setDocMode('pdf');
-    if (fieldId.startsWith('w2-')) setWageDocKind('w2');
+    if (fieldId.startsWith('w2-') || fieldId.startsWith('ent2-')) {
+      if (fieldId.startsWith('w2-')) setWageDocKind('w2');
+      if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
+    }
     if (fieldId.startsWith('ps-')) setWageDocKind('paystub');
-    const live = mappedFields.find((field) => field.id === fieldId || field.sourceFieldId === fieldId);
+    const live = mappedFields.find(
+      (field) =>
+        (field.id === fieldId || field.sourceFieldId === fieldId) &&
+        (!documentId || field.documentId === documentId),
+    );
+    if (live?.documentId) setInspectDocId(live.documentId);
+    else if (documentId) setInspectDocId(documentId);
     if (live) setLivePageIndex(live.pageIndex);
+    const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
+    if (!live && fromEntity) setLivePageIndex(Number(fromEntity[1]));
     const target = fieldCoordinatesMapping.find((f) => f.id === fieldId);
     if (target) setActivePdfPage(target.boxCoordinates.page);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
@@ -1782,19 +1857,20 @@ export default function UnderwriterSplitViewDemo({
         ytd: currentBaseYtd,
       },
       live:
-        isLive && liveSession
+        isLive && canvasDoc
           ? {
-              file: liveSession.file,
-              fileName: liveSession.fileName,
+              file: canvasDoc.file,
+              fileName: canvasDoc.fileName,
               pageIndex: livePageIndex,
-              pageCount: liveSession.result.total_pages_scanned,
-              fields: mappedFields,
+              pageCount: canvasDoc.result.total_pages_scanned,
+              fields: canvasFields,
             }
           : null,
     }),
     [
       isLive,
       liveSession,
+      canvasDoc,
       activeTab,
       canvasYearIndex,
       twoYearForCanvas,
@@ -1810,6 +1886,7 @@ export default function UnderwriterSplitViewDemo({
       currentBaseYtd,
       livePageIndex,
       mappedFields,
+      canvasFields,
     ],
   );
 
@@ -2204,15 +2281,19 @@ export default function UnderwriterSplitViewDemo({
             <input
               type="file"
               accept="application/pdf"
+              multiple
               className="hidden"
               disabled={parseBusy}
               onChange={(event) => {
-                const next = event.target.files?.[0];
-                if (next) onParseFile?.(next);
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = '';
+                if (!files.length) return;
+                if (onParseFiles) onParseFiles(files);
+                else files.forEach((file) => onParseFile?.(file));
               }}
             />
           </label>
-          {liveSession ? (
+          {packet.length > 0 ? (
             <button
               type="button"
               onClick={() => (isLive ? onUseDemo?.() : onUseLive?.())}
@@ -2229,6 +2310,30 @@ export default function UnderwriterSplitViewDemo({
           </button>
         </div>
         {parseError ? <p className="w-full text-xs text-rose-600">{parseError}</p> : null}
+        {isLive && packet.length > 0 ? (
+          <div className="flex w-full flex-wrap gap-1.5">
+            {packet.map((doc) => (
+              <button
+                key={doc.id}
+                type="button"
+                onClick={() => {
+                  const next = tabForKinds(kindsOf(doc));
+                  setActiveTab(next.tab);
+                  if (next.wageDocKind) setWageDocKind(next.wageDocKind);
+                  setInspectDocId(doc.id);
+                  setLivePageIndex(firstPageForKind(doc.result, kindsOf(doc)[0]));
+                }}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                  canvasDoc?.id === doc.id
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+                }`}
+              >
+                {doc.fileName}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
@@ -2264,18 +2369,25 @@ export default function UnderwriterSplitViewDemo({
                     </button>
                   </div>
                 )}
-                {!isLive && fixturePdf && (activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && (
+                {(activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') &&
+                  (!isLive ? Boolean(fixturePdf) : hasLivePaystub || hasLiveW2) && (
                   <div className="flex rounded-md border border-slate-200 p-0.5">
                     <button
                       type="button"
-                      onClick={() => setWageDocKind('paystub')}
+                      onClick={() => {
+                        setWageDocKind('paystub');
+                        setInspectDocId(null);
+                      }}
                       className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${wageDocKind === 'paystub' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
                     >
                       Paystub
                     </button>
                     <button
                       type="button"
-                      onClick={() => setWageDocKind('w2')}
+                      onClick={() => {
+                        setWageDocKind('w2');
+                        setInspectDocId(null);
+                      }}
                       className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${wageDocKind === 'w2' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
                     >
                       W-2
@@ -2304,16 +2416,20 @@ export default function UnderwriterSplitViewDemo({
               </div>
             </div>
 
-            {isLive && liveSession ? (
+            {isLive && canvasDoc ? (
               <PdfPagePreview
-                file={liveSession.file}
+                file={canvasDoc.file}
                 pageIndex={livePageIndex}
-                pageCount={liveSession.result.total_pages_scanned}
-                fields={mappedFields}
+                pageCount={canvasDoc.result.total_pages_scanned}
+                fields={canvasFields}
                 selectedFieldId={highlightFieldId}
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
               />
+            ) : isLive ? (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-500">
+                No {activeTab === 'PAYSTUB_RECONCILIATION' && wageDocKind === 'w2' ? 'W-2' : activeTab === 'PAYSTUB_RECONCILIATION' ? 'paystub' : 'matching'} PDF on file for this tab. Load live PDF keeps each document — it does not replace the last one.
+              </p>
             ) : docMode === 'pdf' && fixturePdf ? (
               <div className="space-y-2">
                 {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
@@ -2497,6 +2613,7 @@ export default function UnderwriterSplitViewDemo({
                 type="button"
                 onClick={() => {
                   setActiveTab(id);
+                  setInspectDocId(null);
                   setHighlightFieldId(null);
                   setCanvasYearIndex(0);
                 }}
@@ -3354,6 +3471,14 @@ export default function UnderwriterSplitViewDemo({
                           type="text"
                           value={prop.address}
                           placeholder="Property address"
+                          onFocus={() => {
+                            const src = prop.year1.source;
+                            if (!src) return;
+                            handleInspectField(
+                              scheduleEGridFieldId(scheduleEExtracts, src.pageIndex, src.column, 'ent2-address'),
+                              src.documentId,
+                            );
+                          }}
                           onChange={(e) => patchRentalProperty(prop.id, { address: e.target.value })}
                           className="flex-1 min-w-[200px] rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
                         />
@@ -3512,7 +3637,25 @@ export default function UnderwriterSplitViewDemo({
                                 { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const },
                                 { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const },
                               ].map(({ line, label, key }) => (
-                                <div key={key} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2.5 py-2">
+                                <div
+                                  key={key}
+                                  data-qa-field={y.source ? scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, RENTAL_YEAR_KEY_TO_SOURCE[key]) : undefined}
+                                  className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
+                                    y.source &&
+                                    highlightFieldId ===
+                                      scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, RENTAL_YEAR_KEY_TO_SOURCE[key])
+                                      ? 'border-emerald-300 bg-emerald-50'
+                                      : 'border-slate-100 bg-slate-50'
+                                  }`}
+                                  onClick={() => {
+                                    if (!y.source) return;
+                                    const sourceId = RENTAL_YEAR_KEY_TO_SOURCE[key];
+                                    handleInspectField(
+                                      scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, sourceId),
+                                      y.source.documentId,
+                                    );
+                                  }}
+                                >
                                   <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">{line}</span>
                                   <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                     {label}
@@ -3561,7 +3704,22 @@ export default function UnderwriterSplitViewDemo({
                                 </p>
                               )}
 
-                              <div className="flex items-center gap-2 rounded border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
+                              <div
+                                className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
+                                  y.source &&
+                                  highlightFieldId ===
+                                    scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, 'ent2-net')
+                                    ? 'border-indigo-300 bg-indigo-50'
+                                    : 'border-indigo-100 bg-indigo-50/50'
+                                }`}
+                                onClick={() => {
+                                  if (!y.source) return;
+                                  handleInspectField(
+                                    scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, 'ent2-net'),
+                                    y.source.documentId,
+                                  );
+                                }}
+                              >
                                 <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">Line 21</span>
                                 <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                   Net income / (loss)

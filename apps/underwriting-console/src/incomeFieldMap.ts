@@ -1,4 +1,4 @@
-import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
+import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
 
 export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
 
@@ -694,10 +694,60 @@ const GRID_LINE_TO_DEF: Record<string, string> = {
   '21': 'ent2-net',
 };
 
+export const RENTAL_YEAR_KEY_TO_SOURCE: Record<string, string> = {
+  rentsReceived: 'ent2-rent',
+  insurance: 'ent2-ins',
+  mortgageInterest: 'ent2-int',
+  taxes: 'ent2-tax',
+  depreciation: 'ent2-dep',
+  hoaDues: 'ent2-hoa',
+  totalExpenses: 'ent2-exp',
+  netIncomeLoss: 'ent2-net',
+  fairRentalDays: 'ent2-days',
+};
+
+const EMPTY_BOX: OverlayBox = { x: 0, y: 0, w: 0, h: 0 };
+
+export function scheduleEEntityId(pageIndex: number, column: string): string {
+  return `schedule-e-p${pageIndex}-${String(column).toLowerCase()}`;
+}
+
+function extractEmitsSource(prop: ScheduleEPropertyExtract, sourceFieldId: string): boolean {
+  if (sourceFieldId === 'ent2-address') return Boolean(prop.address);
+  if (sourceFieldId === 'ent2-type') return Boolean(prop.propertyType);
+  if (sourceFieldId === 'ent2-days') return Boolean(prop.fairRentalDays);
+  const line = Object.entries(GRID_LINE_TO_DEF).find(([, id]) => id === sourceFieldId)?.[0];
+  if (!line) return false;
+  const amount = prop.financials?.[line];
+  return amount != null && !(amount === 0 && line !== '21');
+}
+
+export function scheduleEGridFieldId(
+  extracts: ScheduleEPropertyExtract[],
+  pageIndex: number,
+  column: string,
+  sourceFieldId: string,
+): string {
+  const entityId = scheduleEEntityId(pageIndex, column);
+  const first = extracts.find((prop) => extractEmitsSource(prop, sourceFieldId));
+  if (first && first.pageIndex === pageIndex && first.column === column) return sourceFieldId;
+  return `${sourceFieldId}--${entityId}`;
+}
+
+function overlayBoxFor(prop: ScheduleEPropertyExtract, sourceFieldId: string): OverlayBox {
+  const boxes = prop.boxes;
+  if (!boxes) return EMPTY_BOX;
+  if (sourceFieldId === 'ent2-address') return boxes.address ?? EMPTY_BOX;
+  if (sourceFieldId === 'ent2-type') return boxes.type ?? EMPTY_BOX;
+  if (sourceFieldId === 'ent2-days') return boxes.days ?? EMPTY_BOX;
+  const line = Object.entries(GRID_LINE_TO_DEF).find(([, id]) => id === sourceFieldId)?.[0];
+  return (line ? boxes.financials?.[line] : undefined) ?? EMPTY_BOX;
+}
+
 function fieldsFromScheduleEGrid(extracts: ScheduleEPropertyExtract[]): MappedIncomeField[] {
   const found: MappedIncomeField[] = [];
   for (const prop of extracts) {
-    const entityId = `schedule-e-p${prop.pageIndex}-${prop.column.toLowerCase()}`;
+    const entityId = scheduleEEntityId(prop.pageIndex, prop.column);
     const push = (
       sourceFieldId: string,
       boxLabel: string,
@@ -707,9 +757,8 @@ function fieldsFromScheduleEGrid(extracts: ScheduleEPropertyExtract[]): MappedIn
       value: string,
       numericValue: number,
     ) => {
-      const isFirst = !found.some((field) => field.sourceFieldId === sourceFieldId);
       found.push({
-        id: isFirst ? sourceFieldId : `${sourceFieldId}--${entityId}`,
+        id: scheduleEGridFieldId(extracts, prop.pageIndex, prop.column, sourceFieldId),
         entityId,
         sourceFieldId,
         form: 'Schedule E',
@@ -721,7 +770,7 @@ function fieldsFromScheduleEGrid(extracts: ScheduleEPropertyExtract[]): MappedIn
         numericValue,
         pageIndex: prop.pageIndex,
         wordIndex: 0,
-        box: { x: 0, y: 0, w: 0, h: 0 },
+        box: overlayBoxFor(prop, sourceFieldId),
       });
     };
     if (prop.address) {
