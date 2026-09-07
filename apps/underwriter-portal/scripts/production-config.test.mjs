@@ -42,6 +42,28 @@ test('a complete production environment is accepted', () => {
   assert.deepEqual(validateProductionConfig(validProductionEnv()), []);
 });
 
+test('staging accepts disabled integrations without placeholder credentials', () => {
+  const env = validProductionEnv();
+  env.FREEFLOW_RUNTIME_ENV = 'staging';
+  delete env.REDIS_URL;
+  delete env.ENCOMPASS_BASE_URL;
+  delete env.ENCOMPASS_CLIENT_ID;
+  delete env.ENCOMPASS_CLIENT_SECRET;
+  delete env.STRIPE_SECRET_KEY;
+  delete env.STRIPE_WEBHOOK_SECRET;
+
+  assert.deepEqual(validateProductionConfig(env), []);
+});
+
+test('production continues to require integration credentials', () => {
+  const env = validProductionEnv();
+  delete env.STRIPE_SECRET_KEY;
+
+  const errors = validateProductionConfig(env);
+  assert.ok(errors.includes('STRIPE_SECRET_KEY is required.'));
+  assert.ok(errors.includes('STRIPE_SECRET_KEY must be a Stripe live-mode secret key.'));
+});
+
 test('missing values and placeholders fail closed without exposing values', () => {
   const env = validProductionEnv();
   delete env.OIDC_AUDIENCE;

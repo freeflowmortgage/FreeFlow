@@ -1,0 +1,165 @@
+variable "aws_region" {
+  type        = string
+  description = "AWS region containing the existing mortgage development resources."
+  default     = "us-west-2"
+}
+
+variable "aws_profile" {
+  type        = string
+  description = "Optional legacy local AWS CLI profile. Prefer short-lived environment credentials or CI OIDC."
+  default     = null
+  nullable    = true
+}
+
+variable "environment" {
+  type        = string
+  description = "Deployment environment name."
+  default     = "dev"
+
+  validation {
+    condition     = var.environment == "dev"
+    error_message = "This transitional stack may manage only the synthetic-data dev environment."
+  }
+}
+
+variable "vpc_id" {
+  type    = string
+  default = "vpc-009b508e6966e5bed"
+}
+
+variable "public_subnet_ids" {
+  type    = list(string)
+  default = ["subnet-0828c38953c407dc3", "subnet-0c15242f773d5a495"]
+}
+
+variable "app_private_subnet_ids" {
+  type    = list(string)
+  default = ["subnet-0e0ef8093350beb89", "subnet-0b3ce33cb99748d7c"]
+}
+
+variable "nat_gateway_id" {
+  type    = string
+  default = "nat-01d159a759eb8369b"
+}
+
+variable "alb_security_group_id" {
+  type    = string
+  default = "sg-027f8fdeaafbc222a"
+}
+
+variable "app_security_group_id" {
+  type    = string
+  default = "sg-0984be80d6c95483f"
+}
+
+variable "ecs_cluster_name" {
+  type    = string
+  default = "mortgage-dev-cluster"
+}
+
+variable "rds_instance_identifier" {
+  type    = string
+  default = "mortgage-dev-postgres"
+}
+
+variable "portal_repository_name" {
+  type    = string
+  default = "mortgage-api"
+}
+
+variable "portal_hostname" {
+  type        = string
+  description = "HTTPS hostname used by the live-test portal."
+  default     = "dev.mb-ai.com"
+}
+
+variable "hosted_zone_id" {
+  type        = string
+  description = "Route 53 public hosted-zone ID for the portal hostname. Required when enable_edge is true."
+  default     = null
+  nullable    = true
+}
+
+variable "enable_edge" {
+  type        = bool
+  description = "Creates the PLTE ALB. Cognito/TLS/DNS remain separately gated."
+  default     = false
+}
+
+variable "enable_cognito_edge" {
+  type        = bool
+  description = "Adds ACM, Route 53, and ALB Cognito authentication after domain control is confirmed."
+  default     = false
+}
+
+variable "plte_allowed_ipv4_cidrs" {
+  type        = list(string)
+  description = "Workstation IPv4 CIDRs allowed to reach the temporary HTTP PLTE endpoint."
+  default     = []
+
+  validation {
+    condition = (
+      !var.enable_edge || var.enable_cognito_edge ||
+      (length(var.plte_allowed_ipv4_cidrs) > 0 && alltrue([
+        for cidr in var.plte_allowed_ipv4_cidrs : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))
+      ]))
+    )
+    error_message = "Temporary HTTP PLTE edge requires at least one valid IPv4 CIDR allowlist entry."
+  }
+}
+
+variable "enable_parser" {
+  type        = bool
+  description = "Creates the parser task and service. Keep false while its image has unresolved findings."
+  default     = false
+}
+
+variable "enable_services" {
+  type        = bool
+  description = "Creates digest-pinned ECS task definitions and services after images are pushed."
+  default     = false
+}
+
+variable "portal_desired_count" {
+  type        = number
+  description = "Portal task count. Keep zero until the private migration succeeds, then set to one for PLTE."
+  default     = 0
+
+  validation {
+    condition     = contains([0, 1], var.portal_desired_count)
+    error_message = "The low-cost PLTE portal desired count must be either 0 or 1."
+  }
+}
+
+variable "portal_image" {
+  type        = string
+  description = "Portal ECR image reference pinned with @sha256:."
+  default     = ""
+
+  validation {
+    condition     = !var.enable_services || can(regex("@sha256:[0-9a-f]{64}$", var.portal_image))
+    error_message = "portal_image must be an immutable @sha256 digest reference when services are enabled."
+  }
+}
+
+variable "parser_image" {
+  type        = string
+  description = "Income parser ECR image reference pinned with @sha256:."
+  default     = ""
+
+  validation {
+    condition     = !var.enable_services || !var.enable_parser || can(regex("@sha256:[0-9a-f]{64}$", var.parser_image))
+    error_message = "parser_image must be an immutable @sha256 digest reference when the parser is enabled."
+  }
+}
+
+variable "migration_image" {
+  type        = string
+  description = "Database migration ECR image reference pinned with @sha256:."
+  default     = ""
+
+  validation {
+    condition     = !var.enable_services || can(regex("@sha256:[0-9a-f]{64}$", var.migration_image))
+    error_message = "migration_image must be an immutable @sha256 digest reference when services are enabled."
+  }
+}

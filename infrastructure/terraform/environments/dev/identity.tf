@@ -1,0 +1,135 @@
+data "aws_iam_policy_document" "ecs_tasks_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "task_execution" {
+  name               = "${local.name_prefix}-task-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "task_execution" {
+  role       = aws_iam_role.task_execution.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+data "aws_iam_policy_document" "task_execution_secrets" {
+  statement {
+    sid     = "ReadRuntimeSecrets"
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      aws_secretsmanager_secret.database_app.arn,
+      aws_secretsmanager_secret.field_encryption.arn,
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_execution_secrets" {
+  name   = "runtime-secrets"
+  role   = aws_iam_role.task_execution.id
+  policy = data.aws_iam_policy_document.task_execution_secrets.json
+}
+
+resource "aws_iam_role" "migration_execution" {
+  name               = "${local.name_prefix}-migration-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "migration_execution" {
+  role       = aws_iam_role.migration_execution.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+data "aws_iam_policy_document" "migration_secrets" {
+  statement {
+    sid     = "ReadMigrationSecrets"
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      local.rds_master_secret_arn,
+      aws_secretsmanager_secret.database_app.arn,
+      aws_secretsmanager_secret.database_migrator.arn,
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "migration_secrets" {
+  name   = "migration-secrets"
+  role   = aws_iam_role.migration_execution.id
+  policy = data.aws_iam_policy_document.migration_secrets.json
+}
+
+resource "aws_iam_role" "portal_task" {
+  name               = "${local.name_prefix}-portal-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+data "aws_iam_policy_document" "portal_task" {
+  statement {
+    sid       = "EnqueueApprovedSyntheticSync"
+    actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
+    resources = [aws_sqs_queue.sync.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "portal_task" {
+  name   = "portal-runtime"
+  role   = aws_iam_role.portal_task.id
+  policy = data.aws_iam_policy_document.portal_task.json
+}
+
+resource "aws_iam_role" "parser_task" {
+  name               = "${local.name_prefix}-parser-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role" "migration_task" {
+  name               = "${local.name_prefix}-migration-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_ecr_repository" "parser" {
+  name                 = "mortgage-income-parser"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+resource "aws_ecr_repository" "migration" {
+  name                 = "mortgage-database-migrations"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "portal" {
+  name              = "/ecs/${local.name_prefix}/portal"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "parser" {
+  name              = "/ecs/${local.name_prefix}/income-parser"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "migration" {
+  name              = "/ecs/${local.name_prefix}/database-migration"
+  retention_in_days = 30
+}

@@ -9,7 +9,7 @@ change is never a substitute for a reviewed Terraform change.
 
 | Environment | Purpose | AWS boundary | Current status |
 | --- | --- | --- | --- |
-| `dev` | Synthetic-data engineering and integration testing | Existing `mortgage-dev-*` account/VPC in `us-west-2` | Manually created; reconcile before Terraform manages it |
+| `dev` | Synthetic-data engineering and integration testing | Existing `mortgage-dev-*` account/VPC in `us-west-2` | Transitional Terraform live-test stack manages new resources around inventoried legacy resources |
 | `staging` | Production-like qualification and drills | Separate non-production account/VPC | Not created |
 | `production` | Customer workload | Dedicated production account/VPC | Not created |
 
@@ -25,13 +25,18 @@ infrastructure/terraform/
   environments/              # checked-in, non-secret per-environment contracts
 ```
 
-The next infrastructure slices add reviewed modules/stacks in this order:
+Infrastructure slices are added and qualified in this order:
 
-1. account baseline and CI deployment identity;
-2. network (VPC, subnets, routing, flow logs, endpoints, controlled egress);
-3. data (KMS, RDS, Secrets Manager, SQS/DLQ);
-4. edge (Route 53, ACM, WAF, ALB, Cognito);
-5. compute (ECR, ECS, service discovery, task and execution roles);
+1. account baseline and CI deployment identity (state foundation implemented;
+   GitHub OIDC remains);
+2. network (transitional dev routes and service security groups implemented;
+   full VPC import/endpoints/flow logs remain);
+3. data (dev runtime secrets and SQS/DLQ implemented; full RDS ownership and
+   production backup posture remain);
+4. edge (phased Route 53, ACM, ALB, and Cognito dev resources implemented; WAF
+   and production HA remain);
+5. compute (digest-gated portal, parser, and migration tasks implemented;
+   qualification and worker/appraisal services remain);
 6. observability and delivery policy.
 
 This order is intentional: no task definition, image, or service is production

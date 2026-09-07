@@ -9,6 +9,18 @@ test('document processor URL fails closed when protected runtime configuration i
   );
 });
 
+test('document processor URL fails closed when the parser feature is disabled', () => {
+  assert.throws(
+    () => resolveParserUrl({
+      NODE_ENV: 'production',
+      FREEFLOW_RUNTIME_ENV: 'development',
+      PARSER_ENABLED: 'false',
+      DOC_PARSER_URL: 'http://income-parser.freeflow.local:8080/api/underwrite/process',
+    }),
+    /Parser configuration is unavailable/,
+  );
+});
+
 test('document processor URL rejects loopback dependencies in protected runtimes', () => {
   assert.throws(
     () => resolveParserUrl({

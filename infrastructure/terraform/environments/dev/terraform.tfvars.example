@@ -1,0 +1,21 @@
+# Synthetic-data live testing only. This file contains no credentials.
+aws_region  = "us-west-2"
+aws_profile = null
+
+# Enable only after mb-ai.com DNS is hosted in Route 53 and provide its zone ID.
+enable_edge         = false
+enable_cognito_edge = false
+hosted_zone_id = null
+portal_hostname = "dev.mb-ai.com"
+
+# Temporary PLTE HTTP mode must be restricted to approved workstation /32s.
+plte_allowed_ipv4_cidrs = []
+
+# Enable after portal/parser/migration images have been pushed and replace each
+# value with the ECR repository URL plus the immutable image digest.
+enable_services = false
+enable_parser   = false
+portal_desired_count = 0
+portal_image     = ""
+parser_image     = ""
+migration_image  = ""

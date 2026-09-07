@@ -2,12 +2,11 @@ import { pathToFileURL } from 'node:url';
 
 const NON_PRODUCTION_MODES = new Set(['development', 'test']);
 const SUPPORTED_RUNTIME_MODES = new Set(['development', 'test', 'staging', 'production']);
-const REQUIRED_VARIABLES = [
+const CORE_REQUIRED_VARIABLES = [
   'APP_BASE_URL',
   'TRUSTED_ORIGIN',
   'AWS_REGION',
   'DATABASE_URL',
-  'REDIS_URL',
   'DOC_PARSER_URL',
   'DOC_PARSER_SERVICE_URL',
   'APPRAISAL_PARSER_URL',
@@ -15,14 +14,17 @@ const REQUIRED_VARIABLES = [
   'OIDC_CLIENT_ID',
   'OIDC_AUDIENCE',
   'ALB_OIDC_SIGNER_ARN',
+  'FIELD_ENCRYPTION_KEY',
+  'SYNC_QUEUE_URL',
+  'SYNC_DLQ_URL',
+];
+const PRODUCTION_INTEGRATION_VARIABLES = [
+  'REDIS_URL',
   'ENCOMPASS_BASE_URL',
   'ENCOMPASS_CLIENT_ID',
   'ENCOMPASS_CLIENT_SECRET',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
-  'FIELD_ENCRYPTION_KEY',
-  'SYNC_QUEUE_URL',
-  'SYNC_DLQ_URL',
 ];
 const FORBIDDEN_DEMO_FLAGS = [
   'ALLOW_DEMO_MODE',
@@ -95,11 +97,20 @@ export function validateProductionConfig(env) {
     errors.push('NODE_ENV must be production for staging and production runtimes.');
   }
 
-  for (const name of REQUIRED_VARIABLES) {
+  const requiredVariables = runtimeMode === 'production'
+    ? [...CORE_REQUIRED_VARIABLES, ...PRODUCTION_INTEGRATION_VARIABLES]
+    : CORE_REQUIRED_VARIABLES;
+  for (const name of requiredVariables) {
     const raw = value(env, name);
     if (!raw) {
       errors.push(`${name} is required.`);
     } else if (PLACEHOLDER_PATTERN.test(raw)) {
+      errors.push(`${name} contains a placeholder or mock value.`);
+    }
+  }
+  for (const name of PRODUCTION_INTEGRATION_VARIABLES) {
+    const raw = value(env, name);
+    if (raw && PLACEHOLDER_PATTERN.test(raw)) {
       errors.push(`${name} contains a placeholder or mock value.`);
     }
   }
@@ -147,10 +158,10 @@ export function validateProductionConfig(env) {
   if (value(env, 'OIDC_CLIENT_ID') && value(env, 'OIDC_AUDIENCE') !== value(env, 'OIDC_CLIENT_ID')) {
     errors.push('OIDC_AUDIENCE must match OIDC_CLIENT_ID for ALB-signed user claims.');
   }
-  if (!value(env, 'STRIPE_SECRET_KEY').startsWith('sk_live_')) {
+  if ((runtimeMode === 'production' || value(env, 'STRIPE_SECRET_KEY')) && !value(env, 'STRIPE_SECRET_KEY').startsWith('sk_live_')) {
     errors.push('STRIPE_SECRET_KEY must be a Stripe live-mode secret key.');
   }
-  if (!value(env, 'STRIPE_WEBHOOK_SECRET').startsWith('whsec_')) {
+  if ((runtimeMode === 'production' || value(env, 'STRIPE_WEBHOOK_SECRET')) && !value(env, 'STRIPE_WEBHOOK_SECRET').startsWith('whsec_')) {
     errors.push('STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.');
   }
   if (value(env, 'FIELD_ENCRYPTION_KEY').length < 32) {

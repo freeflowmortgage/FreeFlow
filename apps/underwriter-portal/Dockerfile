@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -36,7 +36,7 @@ RUN pnpm --filter @mortgage-pos/mortgage-engine build
 RUN pnpm --filter web build
 
 # 3. Production runner stage
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -63,7 +63,7 @@ USER nextjs
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["node", "-e", "require('http').get('http://127.0.0.1:3001', (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
+    CMD ["node", "-e", "require('http').get('http://127.0.0.1:' + (process.env.PORT || '3001'), (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
 WORKDIR /app/apps/underwriter-portal
 CMD ["node", "scripts/start.mjs"]
