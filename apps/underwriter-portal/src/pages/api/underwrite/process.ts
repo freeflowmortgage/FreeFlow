@@ -74,6 +74,9 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 export default withRequestContext('income:process', handler);
 
 export function resolveParserUrl(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PARSER_ENABLED?.trim().toLowerCase() === 'false') {
+    throw new ParserConfigurationError();
+  }
   const configured = env.DOC_PARSER_URL?.trim();
   if (!configured) {
     if (isProtectedRuntime(env)) {

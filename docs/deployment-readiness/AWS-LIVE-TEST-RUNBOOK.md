@@ -13,6 +13,24 @@ environment, not production approval.
 - The console and appraisal parser are not deployed in this slice.
 - Raw document and OCR retention canaries are still required before production.
 
+## Temporary PLTE exception (opened 2026-09-07)
+
+- Owner: FreeFlow Mortgage engineering.
+- Reason: permit production-like portal, API, database, networking, and logging
+  tests while upstream parser runtime packages have unresolved ECR findings.
+- Data boundary: synthetic data only; no borrower PII, tax documents, SSNs, bank
+  statements, or production loan files.
+- Compensating controls: the temporary HTTP ALB is restricted to approved
+  workstation `/32` CIDRs, development identity bypass is explicit and limited
+  to that endpoint, `PARSER_ENABLED=false`, and no parser task, target, or route
+  is created.
+- Migrator boundary: private subnets only, one-off execution, no public route,
+  and required exit-code/database verification before the portal test begins.
+- Remediation requirement: do not enable or promote the parser until its image
+  is rescanned and approved with no unresolved critical/high findings.
+- Review/expiration: 2026-09-14, or immediately before any non-synthetic pilot,
+  whichever occurs first.
+
 ## Implemented topology
 
 `dev.mb-ai.com` terminates TLS at an internet-facing ALB. The HTTPS listener
@@ -54,6 +72,12 @@ The checked-in example contains no credentials. Populate an ignored
 4. Compute: set `enable_services = true` and provide all three image references
    as `repository@sha256:digest`. Terraform rejects mutable tags.
 
+For the temporary PLTE exception, set `enable_edge = true`,
+`enable_cognito_edge = false`, `enable_parser = false`, and allowlist only the
+operator's current public IPv4 `/32`. The parser digest is not required. This
+mode uses the ALB-generated HTTP hostname and must be removed when Cognito/TLS
+is enabled.
+
 Never apply an unsaved plan. Every plan must contain zero destroys unless an
 approved teardown change explicitly names the resources being removed.
 
@@ -78,14 +102,17 @@ email, password, subject, or secret into Terraform variables or source control.
 
 ## Verification
 
-1. ECS reports one healthy portal task and one healthy parser task.
+1. ECS reports one healthy portal task; during the temporary exception, no
+   parser task or parser service exists.
 2. The target group reports the portal target healthy.
 3. HTTP redirects to HTTPS; unauthenticated HTTPS redirects to Cognito.
 4. The synthetic user completes login and reaches the portal.
 5. Anonymous API calls fail; forged identity headers fail; the seeded identity
    resolves one active tenant membership.
-6. A synthetic PDF traverses portal to parser, respects the 40 MiB limit, and
-   leaves no PDF/raw XML in database, queues, task filesystems, or logs.
+6. During the exception, document-processing requests fail closed with a 503.
+   After parser remediation, a synthetic PDF must traverse portal to parser,
+   respect the 40 MiB limit, and leave no PDF/raw XML in database, queues, task
+   filesystems, or logs.
 7. Billing and Encompass endpoints return their documented protected-runtime
    `503` responses.
 

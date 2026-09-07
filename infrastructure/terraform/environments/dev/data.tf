@@ -33,7 +33,7 @@ data "aws_ecr_repository" "portal" {
 }
 
 data "aws_route53_zone" "public" {
-  count   = var.enable_edge ? 1 : 0
+  count   = var.enable_edge && var.enable_cognito_edge ? 1 : 0
   zone_id = var.hosted_zone_id
 }
 
@@ -43,7 +43,7 @@ locals {
   rds_endpoint          = data.aws_db_instance.existing.address
   common_environment = [
     { name = "NODE_ENV", value = "production" },
-    { name = "FREEFLOW_RUNTIME_ENV", value = "staging" },
+    { name = "FREEFLOW_RUNTIME_ENV", value = var.enable_cognito_edge ? "staging" : "development" },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "LOG_LEVEL", value = "info" },
   ]

@@ -11,7 +11,7 @@ output "migration_repository_url" {
 }
 
 output "portal_url" {
-  value = var.enable_edge ? "https://${var.portal_hostname}" : null
+  value = var.enable_edge ? (var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}") : null
 }
 
 output "load_balancer_dns_name" {
@@ -19,11 +19,11 @@ output "load_balancer_dns_name" {
 }
 
 output "cognito_user_pool_id" {
-  value = var.enable_edge ? aws_cognito_user_pool.live_test[0].id : null
+  value = var.enable_edge && var.enable_cognito_edge ? aws_cognito_user_pool.live_test[0].id : null
 }
 
 output "cognito_login_domain" {
-  value = var.enable_edge ? "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com" : null
+  value = var.enable_edge && var.enable_cognito_edge ? "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com" : null
 }
 
 output "migration_task_definition_arn" {

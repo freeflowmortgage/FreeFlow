@@ -10,7 +10,7 @@ resource "terraform_data" "service_gate" {
 }
 
 resource "aws_ecs_task_definition" "parser" {
-  count = var.enable_services && var.enable_edge ? 1 : 0
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
 
   family                   = "${local.name_prefix}-income-parser"
   requires_compatibilities = ["FARGATE"]
@@ -105,17 +105,25 @@ resource "aws_ecs_task_definition" "portal" {
       environment = concat(local.common_environment, [
         { name = "PORT", value = "8000" },
         { name = "HOSTNAME", value = "0.0.0.0" },
-        { name = "APP_BASE_URL", value = "https://${var.portal_hostname}" },
-        { name = "TRUSTED_ORIGIN", value = "https://${var.portal_hostname}" },
+        { name = "APP_BASE_URL", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
+        { name = "TRUSTED_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
+        { name = "PARSER_ENABLED", value = var.enable_parser ? "true" : "false" },
         { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080/api/underwrite/process" },
         { name = "DOC_PARSER_SERVICE_URL", value = "http://income-parser.freeflow.local:8080/parse" },
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
+        { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
+        { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
+        ], var.enable_cognito_edge ? [
         { name = "OIDC_ISSUER", value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.live_test[0].id}" },
         { name = "OIDC_CLIENT_ID", value = aws_cognito_user_pool_client.alb[0].id },
         { name = "OIDC_AUDIENCE", value = aws_cognito_user_pool_client.alb[0].id },
         { name = "ALB_OIDC_SIGNER_ARN", value = aws_lb.portal[0].arn },
-        { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
-        { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
+        ] : [
+        { name = "ALLOW_DEV_AUTH_BYPASS", value = "true" },
+        { name = "DEV_AUTH_ROLE", value = "UNDERWRITER" },
+        { name = "DEV_AUTH_USER_ID", value = "00000000-0000-4000-8000-000000000101" },
+        { name = "DEV_AUTH_TENANT_ID", value = "00000000-0000-4000-8000-000000000100" },
+        { name = "DEV_AUTH_SUBJECT", value = "plte-dev-underwriter" },
       ])
       secrets = [
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:url::" },
@@ -200,7 +208,7 @@ resource "aws_ecs_task_definition" "migration" {
 }
 
 resource "aws_ecs_service" "parser" {
-  count = var.enable_services && var.enable_edge ? 1 : 0
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
 
   name             = "${local.name_prefix}-income-parser"
   cluster          = data.aws_ecs_cluster.existing.arn
@@ -255,7 +263,7 @@ resource "aws_ecs_service" "portal" {
     container_port   = 8000
   }
 
-  depends_on = [aws_lb_listener.https, aws_route.app_default, aws_ecs_service.parser]
+  depends_on = [aws_lb_listener.http_plte, aws_lb_listener.https, aws_route.app_default]
 }
 
 resource "aws_ecr_lifecycle_policy" "parser" {

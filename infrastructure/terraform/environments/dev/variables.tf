@@ -82,7 +82,35 @@ variable "hosted_zone_id" {
 
 variable "enable_edge" {
   type        = bool
-  description = "Creates ACM, Cognito, ALB, and DNS after domain control is confirmed."
+  description = "Creates the PLTE ALB. Cognito/TLS/DNS remain separately gated."
+  default     = false
+}
+
+variable "enable_cognito_edge" {
+  type        = bool
+  description = "Adds ACM, Route 53, and ALB Cognito authentication after domain control is confirmed."
+  default     = false
+}
+
+variable "plte_allowed_ipv4_cidrs" {
+  type        = list(string)
+  description = "Workstation IPv4 CIDRs allowed to reach the temporary HTTP PLTE endpoint."
+  default     = []
+
+  validation {
+    condition = (
+      !var.enable_edge || var.enable_cognito_edge ||
+      (length(var.plte_allowed_ipv4_cidrs) > 0 && alltrue([
+        for cidr in var.plte_allowed_ipv4_cidrs : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))
+      ]))
+    )
+    error_message = "Temporary HTTP PLTE edge requires at least one valid IPv4 CIDR allowlist entry."
+  }
+}
+
+variable "enable_parser" {
+  type        = bool
+  description = "Creates the parser task and service. Keep false while its image has unresolved findings."
   default     = false
 }
 
@@ -109,8 +137,8 @@ variable "parser_image" {
   default     = ""
 
   validation {
-    condition     = !var.enable_services || can(regex("@sha256:[0-9a-f]{64}$", var.parser_image))
-    error_message = "parser_image must be an immutable @sha256 digest reference when services are enabled."
+    condition     = !var.enable_services || !var.enable_parser || can(regex("@sha256:[0-9a-f]{64}$", var.parser_image))
+    error_message = "parser_image must be an immutable @sha256 digest reference when the parser is enabled."
   }
 }
 
