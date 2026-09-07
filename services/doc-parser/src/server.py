@@ -123,18 +123,49 @@ def health_check():
 
 async def _read_pdf_bytes(request: Request) -> tuple[bytes, str]:
     content_type = (request.headers.get("content-type") or "").lower()
-    if "application/pdf" in content_type:
-        data = await request.body()
-        name = request.headers.get("x-document-title") or "document.pdf"
-        return data, name
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_bytes = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid Content-Length header.") from exc
+        if declared_bytes < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid Content-Length header.")
+        if declared_bytes > MAX_PDF_BYTES:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
-    form = await request.form()
+    if "application/pdf" in content_type:
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > MAX_PDF_BYTES:
+                raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
+            body.extend(chunk)
+        name = request.headers.get("x-document-title") or "document.pdf"
+        return bytes(body), name
+
+    if content_length is None:
+        raise HTTPException(
+            status.HTTP_411_LENGTH_REQUIRED,
+            detail="Content-Length is required for multipart document uploads.",
+        )
+
+    form = await request.form(max_files=1, max_fields=0, max_part_size=MAX_PDF_BYTES)
     upload = form.get("file")
     if upload is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Expected application/pdf body or multipart file field.")
-    data = await upload.read()
-    name = getattr(upload, "filename", None) or "document.pdf"
-    return data, name
+    try:
+        upload_content_type = (getattr(upload, "content_type", None) or "").lower()
+        if upload_content_type != "application/pdf":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Only PDF files are authorized for ingestion.")
+        body = bytearray()
+        while chunk := await upload.read(1024 * 1024):
+            if len(body) + len(chunk) > MAX_PDF_BYTES:
+                raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
+            body.extend(chunk)
+        name = getattr(upload, "filename", None) or "document.pdf"
+        return bytes(body), name
+    finally:
+        await upload.close()
 
 
 @app.post("/parse", status_code=status.HTTP_200_OK)
@@ -148,7 +179,7 @@ async def process_document(request: Request):
         if not pdf_bytes:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Empty PDF body.")
         if len(pdf_bytes) > MAX_PDF_BYTES:
-            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF exceeds parser size limit.")
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
         convert_result = get_converter().convert_to_ai_ready(pdf_bytes)
         del pdf_bytes

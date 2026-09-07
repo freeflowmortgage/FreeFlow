@@ -105,6 +105,35 @@ async def test_parse_empty_pdf():
 
 
 @pytest.mark.asyncio
+async def test_parse_rejects_declared_oversize_pdf_before_reading_body():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/parse",
+            content=b"%PDF-1.4\n",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Length": str((40 * 1024 * 1024) + 1),
+                "x-document-title": "oversize.pdf",
+            },
+        )
+        assert res.status_code == 413
+        assert res.json()["detail"] == "PDF exceeds parser size limit."
+
+
+@pytest.mark.asyncio
+async def test_parse_rejects_multipart_content_type_spoofing():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/parse",
+            files={"file": ("fake.pdf", b"not a pdf", "text/plain")},
+        )
+        assert res.status_code == 400
+        assert res.json()["detail"] == "Only PDF files are authorized for ingestion."
+
+
+@pytest.mark.asyncio
 async def test_parse_valid_pdf_stream():
     pdf_bytes = create_minimal_pdf_bytes([
         "Form W-2 Wage and Tax Statement 2023",
