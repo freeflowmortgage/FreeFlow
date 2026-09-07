@@ -1,0 +1,15 @@
+# Synthetic-data live testing only. This file contains no credentials.
+aws_region  = "us-west-2"
+aws_profile = null
+
+# Enable only after mb-ai.com DNS is hosted in Route 53 and provide its zone ID.
+enable_edge   = false
+hosted_zone_id = null
+portal_hostname = "dev.mb-ai.com"
+
+# Enable after portal/parser/migration images have been pushed and replace each
+# value with the ECR repository URL plus the immutable image digest.
+enable_services = false
+portal_image     = ""
+parser_image     = ""
+migration_image  = ""

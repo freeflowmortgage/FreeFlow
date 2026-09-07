@@ -25,7 +25,8 @@ COPY src/server.py src/ai_pdf_converter.py src/pdf_splitter.py ./
 
 RUN groupadd -g 8888 appgroup && \
     useradd -u 8888 -g appgroup -s /usr/sbin/nologin -M appuser && \
-    chown -R appuser:appgroup /app
+    mkdir -p /tmp/freeflow && \
+    chown -R appuser:appgroup /app /tmp/freeflow
 
 USER appuser
 

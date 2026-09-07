@@ -21,6 +21,7 @@ tests.
 | [DATABASE-SPEC.md](DATABASE-SPEC.md) | Production schema, RLS, migration, retention, backup, and restore requirements |
 | [APPLICATION-SPEC.md](APPLICATION-SPEC.md) | Runtime boundaries, production capabilities, and functional gaps |
 | [AWS-ECS-DEPLOYMENT-SPEC.md](AWS-ECS-DEPLOYMENT-SPEC.md) | Target AWS topology and ECS/Fargate translation |
+| [AWS-LIVE-TEST-RUNBOOK.md](AWS-LIVE-TEST-RUNBOOK.md) | Synthetic-data dev deployment, verification, pause, and access procedures |
 | [RUNBOOKS.md](RUNBOOKS.md) | Deployment, rollback, incident, restore, rotation, and vulnerability procedures |
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
 | [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
@@ -41,10 +42,11 @@ tests.
 
 ## Release decision
 
-The local development stack runs, but that is not evidence of production
-readiness. Authentication is absent, multiple APIs are callable without a
-verified identity, tenant scope can be supplied by the caller, the database has
-no application tables or migrations, several routes return 500, and the current
-console image runs a Vite development server. All P0 items in the burndown must
-be closed with attached evidence before any production traffic or real borrower
-data is allowed.
+The local development stack and synthetic AWS dev foundation are not evidence
+of production readiness. Verified ALB identity handling, ordered PostgreSQL
+migrations, forced RLS, immutable audit events, retention migrations, and a
+phased ECS dev stack now exist, but substantial P0 work remains. In particular,
+provider workflows, shared links, parser output minimization, supply-chain
+controls, HA/restore qualification, observability, and independent security
+testing remain incomplete. All P0 items must close before production traffic or
+real borrower data is allowed.

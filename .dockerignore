@@ -13,6 +13,7 @@ build
 .DS_Store
 .git
 .github
+.pnpm-store
 coverage
 .pytest_cache
 __pycache__
@@ -23,3 +24,11 @@ __pycache__
 venv
 tmp
 /tmp
+.terraform
+**/.terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+**/backend.hcl
+*.tfvars
+!*.tfvars.example
