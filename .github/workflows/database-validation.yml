@@ -1,0 +1,83 @@
+name: Database validation
+
+on:
+  pull_request:
+    paths:
+      - 'apps/underwriter-portal/**'
+      - 'packages/database/**'
+      - '.github/workflows/database-validation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/underwriter-portal/**'
+      - 'packages/database/**'
+      - '.github/workflows/database-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  migrate-and-isolate:
+    name: Migrate from zero and verify isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: freeflow_validation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres-validation-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d freeflow_validation"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      ADMIN_DATABASE_URL: postgresql://postgres:postgres-validation-only@localhost:5432/freeflow_validation
+      MIGRATOR_DATABASE_URL: postgresql://freeflow_migrator_ci:migrator-validation-only@localhost:5432/freeflow_validation
+      APP_DATABASE_URL: postgresql://freeflow_app_ci:app-validation-only@localhost:5432/freeflow_validation
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v20
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install locked JavaScript dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Bootstrap database capability roles
+        run: |
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/bootstrap/roles.sql
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE freeflow_migrator_ci LOGIN PASSWORD 'migrator-validation-only';
+          GRANT freeflow_migrator TO freeflow_migrator_ci;
+          CREATE ROLE freeflow_app_ci LOGIN PASSWORD 'app-validation-only';
+          GRANT freeflow_app TO freeflow_app_ci;
+          SQL
+
+      - name: Apply every migration through the migrator login
+        env:
+          DATABASE_URL: ${{ env.MIGRATOR_DATABASE_URL }}
+        run: pnpm --dir packages/database exec prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Verify SQL RLS, immutable audit, and retention controls
+        run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/tests/tenant-rls-isolation.sql
+
+      - name: Verify Prisma application-role isolation
+        env:
+          DATABASE_URL: ${{ env.APP_DATABASE_URL }}
+        run: pnpm --dir apps/underwriter-portal exec tsx --test src/server/database/*.integration.test.ts

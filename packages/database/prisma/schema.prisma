@@ -183,14 +183,13 @@ model LoanDocument {
   loanId          String          @db.Uuid
   loanApplication LoanApplication @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Cascade)
 
-  fileName         String @db.VarChar(255)
-  fileType         String @db.VarChar(100) // e.g. "application/pdf"
-  s3BucketKey      String @db.Text // AWS S3 KMS-encrypted object key
-  documentCategory String @db.VarChar(100) // "TAX_RETURN_1040", "W2_WAGE", "PAYSTUB", "SSI_AWARD"
-
-  // OCR Parsing Data Structures
-  ocrParsedPayload Json? // Full JSON coordinates and numeric blocks
-  ocrConfidence    Decimal? @db.Decimal(5, 2) // Confidence score of local OCR output
+  fileType           String   @db.VarChar(100) // e.g. "application/pdf"
+  documentCategory   String   @db.VarChar(100) // "TAX_RETURN_1040", "W2_WAGE", "PAYSTUB", "SSI_AWARD"
+  sourceAttachmentId String?  @db.VarChar(255) // Encompass attachment ID, never an object key
+  sourceContentHash  String?  @db.Char(64) // SHA-256 of bytes held only in memory
+  sourcePageCount    Int?
+  parserVersion      String?  @db.VarChar(100)
+  ocrConfidence      Decimal? @db.Decimal(5, 2) // Aggregate confidence only; no OCR text or payload
 
   uploadedAt DateTime @default(now()) @db.Timestamptz
 
@@ -213,13 +212,13 @@ model OcrDiffHistory {
   documentId      String          @db.Uuid
   loanDocument    LoanDocument    @relation(fields: [tenantId, loanId, documentId], references: [tenantId, loanId, id], onDelete: Cascade)
 
-  // Tracking details
-  fieldName       String   @db.VarChar(100) // e.g. "Schedule C Line 31 Net Profit"
-  rawOcrValue     String   @db.Text // Original extracted value (e.g., "$102,000.00")
-  borrowerValue   String   @db.Text // Edited or verified value (e.g., "$105,000.00")
-  isOverridden    Boolean  @default(false)
-  confidenceScore Decimal  @db.Decimal(5, 2)
-  verifiedAt      DateTime @default(now()) @db.Timestamptz
+  // Tracking details: values are represented only by SHA-256 evidence hashes.
+  fieldName         String   @db.VarChar(100) // e.g. "Schedule C Line 31 Net Profit"
+  previousValueHash String?  @db.Char(64)
+  newValueHash      String?  @db.Char(64)
+  isOverridden      Boolean  @default(false)
+  confidenceScore   Decimal  @db.Decimal(5, 2)
+  verifiedAt        DateTime @default(now()) @db.Timestamptz
 
   @@index([tenantId, loanId])
   @@map("ocr_diff_histories")
@@ -241,9 +240,10 @@ model Form1084Audit {
   totalAnnualCashFlow     Decimal @db.Decimal(12, 2)
   qualifyingMonthlyIncome Decimal @db.Decimal(12, 2)
 
-  // Complex Data Streams
-  extractedTaxFields   Json // Full JSON layout mapping coordinate highlights
-  manualFieldOverrides Json? // Tracking logs: Array of { field, from, to, updatedBy, date }
+  // Allowlisted calculation provenance only; raw request/OCR/override payloads
+  // belong neither here nor in any other FreeFlow-managed store.
+  calculationSchemaVersion String @default("legacy-unknown") @db.VarChar(100)
+  calculationSource        String @default("legacy-unknown") @db.VarChar(100)
 
   // Liquidity and Risk Parameters (Schedule L check for Corporations)
   quickRatioComputed  Decimal? @db.Decimal(6, 2)

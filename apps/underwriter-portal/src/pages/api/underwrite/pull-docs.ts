@@ -116,8 +116,6 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
   }
 
   try {
-    console.log(`[Encompass Sync] Initiating secure metadata pull for Loan GUID: ${loanId} (Tenant: ${tenantId})`);
-
     // 1. Retrieve the Tenant's Encrypted Encompass API Credentials [cite: 28, 49]
     const { data: tenantConfig, error: configError } = await supabaseAdmin
       .from('tenant_configurations')
@@ -161,14 +159,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
       });
     }
 
-    console.log(`[Filter Cleared] Identified ${relevantDocuments.length} relevant files. Initiating memory-stream parser...`);
-
     const processedResults = [];
 
     // 5. Zero-Data-Retention Stream Pipeline: Transfer direct from Encompass to RAM Parser [cite: 30, 33, 102]
     for (const doc of relevantDocuments) {
-      console.log(`[Stream Pipeline] Downloading file: "${doc.title}" (ID: ${doc.attachmentId}) [cite: 102]`);
-
       // Request raw download URL or stream from Encompass [cite: 28, 102]
       const downloadEndpoint = `https://api.elliemae.com/encompass/v1/loans/${loanId}/attachments/${doc.attachmentId}/download`;
       
@@ -180,7 +174,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
       });
 
       if (!fileResponse.ok) {
-        console.error(`Failed to download binary for attachment ${doc.attachmentId}`);
+        console.error('[encompass-pull] attachment download failed', {
+          requestId: context.requestId,
+          status: fileResponse.status,
+        });
         continue;
       }
 
@@ -202,7 +199,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
       });
 
       if (!parserResponse.ok) {
-        console.error(`Local document parser returned error for file: ${doc.title}`);
+        console.error('[encompass-pull] parser rejected attachment', {
+          requestId: context.requestId,
+          status: parserResponse.status,
+        });
         continue;
       }
 
@@ -230,11 +230,18 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
     });
 
   } catch (error: any) {
+    // This legacy route remains disabled in protected runtimes. Normalize the
+    // caught value before the legacy response/log code below so neither can
+    // serialize an upstream body, credential, document title, or loan value.
+    error = { message: error instanceof Error ? error.name : 'UnknownError' };
     console.error(`❌ [Encompass Integration Error] ${error.message}`);
     return res.status(500).json({
       success: false,
-      error: 'Encompass connection or parsing failure',
-      details: error.message,
+      error: {
+        code: 'DOCUMENT_RETRIEVAL_FAILED',
+        message: 'Document retrieval could not be completed.',
+        requestId: context.requestId,
+      },
     });
   }
 }

@@ -141,14 +141,12 @@ DO $composite_fk$
 BEGIN
   BEGIN
     INSERT INTO "loan_documents" (
-      "id", "tenantId", "loanId", "fileName", "fileType", "s3BucketKey", "documentCategory"
+      "id", "tenantId", "loanId", "fileType", "documentCategory"
     ) VALUES (
       '12121212-1212-4121-8121-121212121212',
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       'ffffffff-ffff-4fff-8fff-ffffffffffff',
-      'forbidden.pdf',
       'application/pdf',
-      'forbidden',
       'TEST'
     );
     RAISE EXCEPTION 'Cross-tenant child relationship was accepted';
@@ -157,6 +155,28 @@ BEGIN
   END;
 END
 $composite_fk$;
+
+DO $zero_data_retention_schema$
+DECLARE
+  prohibited_columns integer;
+BEGIN
+  SELECT count(*) INTO prohibited_columns
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND (table_name, column_name) IN (
+      ('loan_documents', 'fileName'),
+      ('loan_documents', 's3BucketKey'),
+      ('loan_documents', 'ocrParsedPayload'),
+      ('ocr_diff_histories', 'rawOcrValue'),
+      ('ocr_diff_histories', 'borrowerValue'),
+      ('form_1084_audits', 'extractedTaxFields'),
+      ('form_1084_audits', 'manualFieldOverrides')
+    );
+  IF prohibited_columns <> 0 THEN
+    RAISE EXCEPTION 'Zero-data-retention migration left % prohibited columns', prohibited_columns;
+  END IF;
+END
+$zero_data_retention_schema$;
 
 INSERT INTO "audit_events" (
   "id", "tenantId", "loanId", "actorUserId", "action", "entityType", "entityId",
@@ -240,6 +260,7 @@ $append_only_trigger$;
 ROLLBACK;
 RESET ROLE;
 
+SET ROLE freeflow_app;
 DO $ddl_denial$
 BEGIN
   BEGIN
