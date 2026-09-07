@@ -44,9 +44,35 @@ if [ -n "${SEED_OIDC_SUBJECT:-}" ] || [ -n "${SEED_EMAIL:-}" ]; then
     echo "SEED_OIDC_SUBJECT and SEED_EMAIL must be supplied together." >&2
     exit 1
   fi
+
+  : "${SEED_TENANT_ID:=00000000-0000-4000-8000-000000000100}"
+  : "${SEED_USER_ID:=00000000-0000-4000-8000-000000000101}"
+  : "${SEED_FIRST_NAME:=Synthetic}"
+  : "${SEED_LAST_NAME:=Underwriter}"
+  : "${SEED_ROLE:=UNDERWRITER}"
+
+  case "$SEED_TENANT_ID:$SEED_USER_ID" in
+    *[!0-9a-fA-F:-]*)
+      echo "SEED_TENANT_ID and SEED_USER_ID must be UUIDs." >&2
+      exit 1
+      ;;
+  esac
+  case "$SEED_ROLE" in
+    SUPER_ADMIN|BROKER_OWNER|LOAN_OFFICER|PROCESSOR|UNDERWRITER|BORROWER) ;;
+    *)
+      echo "SEED_ROLE is not an allowed application role." >&2
+      exit 1
+      ;;
+  esac
+
   psql "$MIGRATOR_DATABASE_URL" --set=ON_ERROR_STOP=1 \
+    --set=tenant_id="$SEED_TENANT_ID" \
+    --set=user_id="$SEED_USER_ID" \
     --set=oidc_subject="$SEED_OIDC_SUBJECT" \
     --set=user_email="$SEED_EMAIL" \
+    --set=first_name="$SEED_FIRST_NAME" \
+    --set=last_name="$SEED_LAST_NAME" \
+    --set=user_role="$SEED_ROLE" \
     --file=/app/packages/database/prisma/bootstrap/seed-live-test.sql
 fi
 
