@@ -84,6 +84,10 @@ approved teardown change explicitly names the resources being removed.
 
 ## Database migration and synthetic user
 
+Run the private database-preflight task first. Proceed only if `mortgage_dev`
+is absent or it exits `0` with `PREFLIGHT_TOTAL_ROWS=0`. Exit `42` means rows
+exist and the rollout must stop for the full data-disposition approval.
+
 Run the Terraform-output migration task definition in the application subnets
 with the application security group. Wait for `STOPPED` and require exit code 0.
 The task creates `mortgage_dev`, capability/login roles, and applies every

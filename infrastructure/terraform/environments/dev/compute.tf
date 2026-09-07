@@ -207,6 +207,66 @@ resource "aws_ecs_task_definition" "migration" {
   ])
 }
 
+resource "aws_ecs_task_definition" "database_preflight" {
+  count = var.enable_services && var.enable_edge ? 1 : 0
+
+  family                   = "${local.name_prefix}-database-preflight"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.migration_execution.arn
+  task_role_arn            = aws_iam_role.migration_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name                   = "database-preflight"
+      image                  = var.migration_image
+      essential              = true
+      readonlyRootFilesystem = true
+      user                   = "1001"
+      entryPoint             = ["/bin/sh", "-c"]
+      command = [join("\n", [
+        "set -eu",
+        "export PGSSLMODE=require",
+        "database_exists=\"$(psql --dbname=postgres --tuples-only --no-align --command=\"SELECT 1 FROM pg_database WHERE datname = 'mortgage_dev'\")\"",
+        "if [ \"$database_exists\" != \"1\" ]; then echo 'PREFLIGHT_DATABASE=ABSENT'; exit 0; fi",
+        "tables=\"$(psql --dbname=\"$PGDATABASE\" --tuples-only --no-align --command=\"SELECT format('%I.%I', schemaname, relname) FROM pg_stat_user_tables ORDER BY 1\")\"",
+        "total=0",
+        "for table in $tables; do rows=\"$(psql --dbname=\"$PGDATABASE\" --tuples-only --no-align --command=\"SELECT count(*) FROM $table\")\"; echo \"PREFLIGHT_TABLE=$table ROWS=$rows\"; total=$((total + rows)); done",
+        "echo \"PREFLIGHT_TOTAL_ROWS=$total\"",
+        "if [ \"$total\" -ne 0 ]; then exit 42; fi",
+      ])]
+      environment = [
+        { name = "PGHOST", value = local.rds_endpoint },
+        { name = "PGPORT", value = "5432" },
+        { name = "PGDATABASE", value = "mortgage_dev" },
+      ]
+      secrets = [
+        { name = "PGUSER", valueFrom = "${local.rds_master_secret_arn}:username::" },
+        { name = "PGPASSWORD", valueFrom = "${local.rds_master_secret_arn}:password::" },
+      ]
+      linuxParameters = {
+        initProcessEnabled = true
+        capabilities       = { drop = ["ALL"] }
+      }
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.migration.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "preflight"
+        }
+      }
+    }
+  ])
+}
+
 resource "aws_ecs_service" "parser" {
   count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
 

@@ -30,6 +30,10 @@ output "migration_task_definition_arn" {
   value = var.enable_services && var.enable_edge ? aws_ecs_task_definition.migration[0].arn : null
 }
 
+output "database_preflight_task_definition_arn" {
+  value = var.enable_services && var.enable_edge ? aws_ecs_task_definition.database_preflight[0].arn : null
+}
+
 output "ecs_cluster_arn" {
   value = data.aws_ecs_cluster.existing.arn
 }
