@@ -38,7 +38,7 @@ resource "aws_ecs_task_definition" "parser" {
       user                   = "8888"
       linuxParameters = {
         initProcessEnabled = true
-        capabilities       = { drop = ["ALL"] }
+        capabilities       = { add = [], drop = ["ALL"] }
       }
       environment = [
         { name = "TMPDIR", value = "/tmp/freeflow" },
@@ -100,7 +100,7 @@ resource "aws_ecs_task_definition" "portal" {
       user                   = "1001"
       linuxParameters = {
         initProcessEnabled = true
-        capabilities       = { drop = ["ALL"] }
+        capabilities       = { add = [], drop = ["ALL"] }
       }
       environment = concat(local.common_environment, [
         { name = "PORT", value = "8000" },
@@ -179,7 +179,7 @@ resource "aws_ecs_task_definition" "migration" {
       user                   = "1001"
       linuxParameters = {
         initProcessEnabled = true
-        capabilities       = { drop = ["ALL"] }
+        capabilities       = { add = [], drop = ["ALL"] }
       }
       environment = [
         { name = "PGHOST", value = local.rds_endpoint },
@@ -253,7 +253,7 @@ resource "aws_ecs_task_definition" "database_preflight" {
       ]
       linuxParameters = {
         initProcessEnabled = true
-        capabilities       = { drop = ["ALL"] }
+        capabilities       = { add = [], drop = ["ALL"] }
       }
       logConfiguration = {
         logDriver = "awslogs"
