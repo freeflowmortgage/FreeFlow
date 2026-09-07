@@ -57,7 +57,7 @@ resource "aws_ecs_task_definition" "parser" {
         readOnly      = false
       }]
       healthCheck = {
-        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)\""]
+        command     = ["CMD-SHELL", "python3.11 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)\""]
         interval    = 30
         timeout     = 5
         retries     = 3
