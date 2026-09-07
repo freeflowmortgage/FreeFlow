@@ -260,6 +260,7 @@ $append_only_trigger$;
 ROLLBACK;
 RESET ROLE;
 
+SET ROLE freeflow_app;
 DO $ddl_denial$
 BEGIN
   BEGIN
