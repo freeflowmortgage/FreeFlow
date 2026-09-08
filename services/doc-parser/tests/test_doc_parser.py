@@ -137,6 +137,8 @@ def test_pdf_splitter_core_rules():
     w2_match = CORE_RULES["W-2"].search("2023 Form W-2 Wage and Tax Statement")
     assert w2_match is not None
     assert "Paystub" in CORE_RULES
+    assert "WVOE" in CORE_RULES
+    assert CORE_RULES["WVOE"].search("Written Verification of Employment") is not None
     assert CORE_RULES["Paystub"].search("Earnings Statement  Current Period  Net Pay") is not None
     assert CORE_RULES["Paystub"].search("Form W-2 Wage and Tax Statement") is None
 

@@ -63,6 +63,8 @@ describe('live packet routing', () => {
   test('classifies an unlabeled paystub from the file name', () => {
     expect(classifyDocument(response([page(0, [])]), 'March-paystub.pdf')).toContain('paystub');
     expect(classifyDocument(response([page(0, [])]), '2024-w2.pdf')).toContain('w2');
+    expect(classifyDocument(response([page(0, [])]), 'k1-1120s.pdf')).toContain('scorp');
+    expect(classifyDocument(response([page(0, [])]), 'k1-1065.pdf')).toContain('partnership');
   });
 
   test('keeps the paystub document when a tax return is added later', () => {

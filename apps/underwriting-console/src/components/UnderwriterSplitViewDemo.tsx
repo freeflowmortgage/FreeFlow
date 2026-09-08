@@ -8,7 +8,6 @@ import {
   Layers,
   UserCheck,
   FileSpreadsheet,
-  Eye,
   Activity,
   AlertCircle,
   Link,
@@ -27,6 +26,16 @@ import {
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
+import {
+  liveAssetPatch,
+  liveCCorpPatch,
+  liveFarmPatch,
+  livePartnershipPatch,
+  livePrevW2Patch,
+  liveSchCPatch,
+  liveSCorpPatch,
+  liveWagePatch,
+} from '../liveHydrate';
 import {
   allScheduleEExtracts,
   firstPageForKind,
@@ -122,6 +131,67 @@ interface W2Employer {
   w2Year2Bonus: number;
   w2Year2Ot: number;
 }
+
+function emptyW2Employer(id: string, patch: Partial<W2Employer> = {}): W2Employer {
+  return {
+    id,
+    employerName: 'Parsed employer',
+    ein: '',
+    employmentStartDate: '',
+    role: 'PRIMARY',
+    monthsAtJob: 12,
+    payFrequency: 'SEMIMONTHLY',
+    wageDocSource: 'PAYSTUB',
+    hourlyRate: 0,
+    weeklyHours: 40,
+    currentPeriodBasePay: 0,
+    baseYtd: 0,
+    bonusYtd: 0,
+    overtimeYtd: 0,
+    otherYtd: 0,
+    wvoeBonus: 0,
+    wvoeOvertime: 0,
+    wvoeOther: 0,
+    wvoeMonths: 12,
+    w2Year1Box1: 0,
+    w2Year1Bonus: 0,
+    w2Year1Ot: 0,
+    w2Year2Box1: 0,
+    w2Year2Bonus: 0,
+    w2Year2Ot: 0,
+    ...patch,
+  };
+}
+
+function emptySchCYear(year: number): SchCYear {
+  return { year, line31: 0, line13: 0, line30: 0, line44aMiles: 0, line24bMeals: 0 };
+}
+
+function emptyCorpYear(year: number): CorpYear {
+  return {
+    year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
+    depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+  };
+}
+
+function emptyCCorpYear(year: number): CCorpYear {
+  return {
+    year, taxableIncome: 0, totalTaxPaid: 0, depreciation: 0, depletion: 0, amortization: 0,
+    mealsM1: 0, nol: 0, w2Wages: 0, dividends: 0,
+  };
+}
+
+function emptyFarmYear(year: number): ScheduleFYear {
+  return {
+    year, netFarmProfitLoss: 0, depreciation: 0, depletion: 0, amortization: 0,
+    casualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 0, nonrecurringIncome: 0,
+  };
+}
+
+const EMPTY_SCHEDULE_L: ScheduleL = {
+  cash: 0, receivables: 0, allowance: 0, taxExempt: 0, otherCurrentAssets: 0,
+  accountsPayable: 0, notesLt1Yr: 0, otherCurrentLiab: 0,
+};
 
 interface BusinessEntity<TYear> {
   id: string;
@@ -415,7 +485,7 @@ export default function UnderwriterSplitViewDemo({
 
     return allTabs.filter(([id]) => {
       if (id === 'ENCOMPASS_SYNC') return true;
-      if (id === 'PAYSTUB_RECONCILIATION') return hasKind('paystub', 'w2', 'unknown');
+      if (id === 'PAYSTUB_RECONCILIATION') return true;
       if (id === 'SCHEDULE_C') return hasKind('schedule-c');
       if (id === 'SCORP') return hasKind('scorp');
       if (id === 'CCORP') return hasKind('ccorp');
@@ -440,6 +510,13 @@ export default function UnderwriterSplitViewDemo({
   const [wageDocKind, setWageDocKind] = useState<'paystub' | 'w2'>('paystub');
   const [inspectDocId, setInspectDocId] = useState<string | null>(null);
   const packetKey = packet.map((doc) => doc.id).join('|');
+  const [parserEngine, setParserEngine] = useState('checking…');
+  useEffect(() => {
+    void fetch('/health')
+      .then((response) => response.json())
+      .then((payload: { engine?: string }) => setParserEngine(payload.engine || 'unknown'))
+      .catch(() => setParserEngine('offline'));
+  }, []);
   const prevPacketKeyRef = useRef('');
   const skipPageResetRef = useRef(false);
   useEffect(() => {
@@ -826,6 +903,118 @@ export default function UnderwriterSplitViewDemo({
     else if (/FHA|HUD-92800|HUD 92900/i.test(documentLabels)) setLoanProgram('FHA');
     else if (/VA|Notice of Value|26-7/i.test(documentLabels)) setLoanProgram('VA');
   }, [isLive, packet.map((doc) => doc.id).join('|')]);
+
+  useEffect(() => {
+    if (!isLive) return;
+    const kinds = new Set(packet.flatMap((doc) => kindsOf(doc)));
+    const wage = liveWagePatch(mappedFields);
+    setW2Employers([
+      emptyW2Employer('w2-live', {
+        ...wage,
+        employerName: wage?.employerName || 'Parsed employer',
+        wageDocSource: wage?.wageDocSource ?? 'PAYSTUB',
+      }),
+    ]);
+    setActiveW2EmployerId('w2-live');
+    const prior = livePrevW2Patch(mappedFields);
+    if (prior) {
+      setPrevEmployerW2({
+        employerName: prior.employerName || 'Prior employer',
+        ein: prior.ein || '',
+        year: new Date().getFullYear() - 1,
+        box1Wages: prior.box1Wages ?? 0,
+        box12Bonus: 0,
+        box14Overtime: 0,
+      });
+      setMergePreviousEmployerVariable(true);
+    } else {
+      setPrevEmployerW2({ employerName: '', ein: '', year: 0, box1Wages: 0, box12Bonus: 0, box14Overtime: 0 });
+      setMergePreviousEmployerVariable(false);
+    }
+
+    const schC = liveSchCPatch(mappedFields);
+    setSchCEntities([
+      {
+        id: 'schc-live',
+        businessName: schC ? 'Parsed Schedule C' : 'No Schedule C in packet',
+        ein: '',
+        years: [
+          { ...emptySchCYear(2025), ...schC },
+          emptySchCYear(2024),
+        ],
+      },
+    ]);
+    setActiveSchCId('schc-live');
+
+    const scorp = liveSCorpPatch(mappedFields);
+    const { ownershipPct: scorpPct, ...scorpYear } = scorp ?? {};
+    setSCorpEntities([
+      {
+        id: 'scorp-live',
+        businessName: scorp ? 'Parsed S-Corp' : 'No S-Corp in packet',
+        ein: '',
+        ownershipPct: scorpPct ?? 100,
+        hasStableDistributions: true,
+        scheduleL: { ...EMPTY_SCHEDULE_L },
+        years: [{ ...emptyCorpYear(2025), ...scorpYear }, emptyCorpYear(2024)],
+      },
+    ]);
+    setActiveSCorpId('scorp-live');
+
+    const partnership = livePartnershipPatch(mappedFields);
+    const { profitPctEnd, capitalPctEnd, ownershipPct: _ignored, ...partnershipYear } = partnership ?? {};
+    setPartnershipEntities([
+      {
+        id: 'partnership-live',
+        businessName: partnership ? 'Parsed partnership' : 'No partnership in packet',
+        ein: '',
+        profitPctEnd: profitPctEnd ?? 100,
+        capitalPctEnd: capitalPctEnd ?? 100,
+        hasStableDistributions: true,
+        scheduleL: { ...EMPTY_SCHEDULE_L },
+        years: [{ ...emptyCorpYear(2025), ...partnershipYear }, emptyCorpYear(2024)],
+      },
+    ]);
+    setActivePartnershipId('partnership-live');
+
+    const ccorp = liveCCorpPatch(mappedFields);
+    setCCorpEntities([
+      {
+        id: 'ccorp-live',
+        businessName: ccorp ? 'Parsed C-Corp' : 'No C-Corp in packet',
+        ein: '',
+        ownershipPct: 100,
+        scheduleL: { ...EMPTY_SCHEDULE_L },
+        years: [{ ...emptyCCorpYear(2025), ...ccorp }, emptyCCorpYear(2024)],
+      },
+    ]);
+    setActiveCCorpId('ccorp-live');
+
+    const farm = liveFarmPatch(mappedFields);
+    setScheduleFEntities([
+      {
+        id: 'farm-live',
+        businessName: farm ? 'Parsed farm' : 'No Schedule F in packet',
+        ein: '',
+        years: [{ ...emptyFarmYear(2025), ...farm }, emptyFarmYear(2024)],
+      },
+    ]);
+    setActiveScheduleFId('farm-live');
+
+    const asset = liveAssetPatch(mappedFields);
+    setAssetIncomeYears([
+      { year: 2025, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0, ...asset },
+      { year: 2024, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0 },
+    ]);
+    setAssetIncomeIncluded(Boolean(asset) || kinds.has('asset'));
+    if (!kinds.has('schedule-e') && scheduleEExtracts.length === 0) {
+      setRentalProperties([]);
+    }
+    setSchCPnl(EMPTY_PNL);
+    setSCorpPnl(EMPTY_PNL);
+    setCCorpPnl(EMPTY_PNL);
+    setPartnershipPnl(EMPTY_PNL);
+  }, [isLive, mappedFields]);
 
   // Borrower Core Metadata Reference
   const borrowerMetadata = {
@@ -1728,16 +1917,7 @@ export default function UnderwriterSplitViewDemo({
 
   const addW2Employer = () => {
     const id = `w2-${crypto.randomUUID()}`;
-    setW2Employers((entries) => [
-      ...entries,
-      {
-        id, employerName: `New Employer ${entries.length + 1}`, ein: '', employmentStartDate: '',
-        role: 'SECONDARY', monthsAtJob: 12, payFrequency: 'SEMIMONTHLY', wageDocSource: 'PAYSTUB',
-        hourlyRate: 0, weeklyHours: 40, currentPeriodBasePay: 0, baseYtd: 0, bonusYtd: 0, overtimeYtd: 0, otherYtd: 0,
-        wvoeBonus: 0, wvoeOvertime: 0, wvoeOther: 0, wvoeMonths: 12,
-        w2Year1Box1: 0, w2Year1Bonus: 0, w2Year1Ot: 0, w2Year2Box1: 0, w2Year2Bonus: 0, w2Year2Ot: 0,
-      },
-    ]);
+    setW2Employers((entries) => [...entries, emptyW2Employer(id, { employerName: `New Employer ${entries.length + 1}`, role: 'SECONDARY' })]);
     setActiveW2EmployerId(id);
   };
 
@@ -2218,7 +2398,7 @@ export default function UnderwriterSplitViewDemo({
               B2B Professional Income Verification Workspace
             </h1>
             <span className="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold uppercase">
-              ZDR · v11
+              ZDR · {typeof __APP_REVISION__ === 'string' ? __APP_REVISION__ : 'dev'} · {parserEngine}
             </span>
           </div>
           <p className="text-sm text-slate-500 mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -2369,8 +2549,7 @@ export default function UnderwriterSplitViewDemo({
                     </button>
                   </div>
                 )}
-                {(activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') &&
-                  (!isLive ? Boolean(fixturePdf) : hasLivePaystub || hasLiveW2) && (
+                {(activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && (
                   <div className="flex rounded-md border border-slate-200 p-0.5">
                     <button
                       type="button"
@@ -2627,6 +2806,31 @@ export default function UnderwriterSplitViewDemo({
             ))}
           </div>
 
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-indigo-100 bg-white p-3 md:grid-cols-5">
+            {([
+              ['W-2 base', form1084CashFlow.w2BaseMonthly],
+              ['W-2 variable', form1084CashFlow.w2VariableMonthly],
+              ['Schedule C', form1084CashFlow.qualifyingMonthlySelfEmployed],
+              ['S-Corp', form1084CashFlow.sCorpShareholderDraw],
+              ['C-Corp', form1084CashFlow.cCorpMonthly],
+              ['Partnership', form1084CashFlow.partnershipMonthly],
+              ['Schedule F', form1084CashFlow.scheduleFMonthly],
+              ['Assets', form1084CashFlow.assetIncomeMonthly],
+              ['Rental', form1084CashFlow.rentalMonthly],
+            ] as Array<[string, number]>)
+              .filter(([, monthly]) => !isLive || monthly > 0)
+              .map(([label, monthly]) => (
+                <div key={label} className="rounded-md bg-slate-50 px-2 py-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+                  <p className="font-mono text-sm font-black text-slate-800">{usd(monthly)}/mo</p>
+                </div>
+              ))}
+            <div className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5">
+              <p className="text-[9px] font-black uppercase tracking-wider text-indigo-500">Total qualifying</p>
+              <p className="font-mono text-sm font-black text-indigo-900">{usd(form1084CashFlow.finalTotalQualifyingMonthly)}/mo</p>
+            </div>
+          </div>
+
           {/* ==================== TAB 1: 4-WAY BASE WAGE RECONCILIATION ==================== */}
           {activeTab === 'PAYSTUB_RECONCILIATION' && (
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-6">
@@ -2635,7 +2839,7 @@ export default function UnderwriterSplitViewDemo({
                   <h3 className="text-base font-extrabold text-slate-900">4-Way Base Wage Reconciliation</h3>
                 </div>
                 <span className="text-xs font-bold uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
-                  Verified Base: $3,600.00 / Semi-Monthly
+                  Verified Base: {usd(currentPeriodBasePay)} / {activeW2Employer.payFrequency === 'WEEKLY' ? 'Weekly' : activeW2Employer.payFrequency === 'BIWEEKLY' ? 'Biweekly' : activeW2Employer.payFrequency === 'MONTHLY' ? 'Monthly' : 'Semi-Monthly'}
                 </span>
               </div>
 
@@ -2688,22 +2892,34 @@ export default function UnderwriterSplitViewDemo({
                     <option value="MONTHLY">Monthly</option>
                   </select>
                 </label>
-                <label className="font-bold text-slate-500">
+                <label className="font-bold text-slate-500 md:col-span-2">
                   Wage source
-                  <select
-                    value={activeW2Employer.wageDocSource}
-                    onChange={(event) => patchW2Employer({ wageDocSource: event.target.value as W2Employer['wageDocSource'] })}
-                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
-                  >
-                    <option value="PAYSTUB">Paystub + W-2 (current YTD)</option>
-                    <option value="WVOE">WVOE (historical variable)</option>
-                  </select>
+                  <div className="mt-1 flex rounded-md border border-slate-300 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => patchW2Employer({ wageDocSource: 'PAYSTUB' })}
+                      className={`flex-1 rounded px-2 py-1.5 text-[10px] font-black uppercase ${
+                        activeW2Employer.wageDocSource === 'PAYSTUB' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      Paystub + W-2
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patchW2Employer({ wageDocSource: 'WVOE' })}
+                      className={`flex-1 rounded px-2 py-1.5 text-[10px] font-black uppercase ${
+                        activeW2Employer.wageDocSource === 'WVOE' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      WVOE
+                    </button>
+                  </div>
                 </label>
               </div>
 
               {/* Core interactive variable modification boxes */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
-                <div data-qa-field="ps-hourly-rate" className={highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-hourly-rate')}>
+                <div data-qa-field="ps-hourly-rate" className={`cursor-pointer ${highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hourly-rate')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Hourly Rate of Pay</label>
                   <input
                     type="number"
@@ -2711,36 +2927,30 @@ export default function UnderwriterSplitViewDemo({
                     onChange={(e) => setCurrentHourlyRate(Number(e.target.value))}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button onClick={() => handleInspectField('ps-hourly-rate')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="ps-hours-week" className={highlightFieldId === 'ps-hours-week' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-hours-week')}>
+                <div data-qa-field="ps-hours-week" className={`cursor-pointer ${highlightFieldId === 'ps-hours-week' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hours-week')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Standard Weekly Hours</label>
                   <input
                     type="number"
                     value={currentWeeklyHours}
                     onChange={(e) => setCurrentWeeklyHours(Number(e.target.value))}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button onClick={() => handleInspectField('ps-hours-week')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="ps-current-base" className={highlightFieldId === 'ps-current-base' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-current-base')}>
+                <div data-qa-field="ps-current-base" className={`cursor-pointer ${highlightFieldId === 'ps-current-base' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-current-base')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Current Period Base Pay</label>
                   <input
                     type="number"
                     value={currentPeriodBasePay}
                     onChange={(e) => setCurrentPeriodBasePay(Number(e.target.value))}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button onClick={() => handleInspectField('ps-current-base')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="ps-base-ytd" className={highlightFieldId === 'ps-base-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-base-ytd')}>
+                <div data-qa-field="ps-base-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-base-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-base-ytd')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Base Wages YTD</label>
                   <input
                     type="number"
                     value={currentBaseYtd}
@@ -2749,22 +2959,16 @@ export default function UnderwriterSplitViewDemo({
                       currentBaseYtd < 50000 ? 'border-rose-300 bg-rose-50' : 'border-slate-300'
                     }`}
                   />
-                  <button onClick={() => handleInspectField('ps-base-ytd')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="w2-box1" className={highlightFieldId === 'w2-box1' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box1')}>
+                <div data-qa-field="w2-box1" className={`cursor-pointer ${highlightFieldId === 'w2-box1' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box1')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 1</label>
                   <input
                     type="number"
-                    value={prevEmployerW2.box1Wages}
-                    onChange={(e) => setPrevEmployerW2({ ...prevEmployerW2, box1Wages: Number(e.target.value) })}
+                    value={activeW2Employer.w2Year1Box1}
+                    onChange={(e) => patchW2Employer({ w2Year1Box1: Number(e.target.value) })}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button type="button" onClick={() => handleInspectField('w2-box1')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
                 <div>
@@ -2858,8 +3062,39 @@ export default function UnderwriterSplitViewDemo({
                 <div className="space-y-4">
                   <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5 border-b pb-1">
                     <Activity className="h-4 w-4 text-indigo-500" />
-                    Current Job YTD Variable Extractions
+                    {activeW2Employer.wageDocSource === 'WVOE' ? 'WVOE variable history' : 'Current Job YTD Variable Extractions'}
                   </h4>
+                  {activeW2Employer.wageDocSource === 'WVOE' ? (
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE months</label>
+                      <input
+                        type="number"
+                        value={activeW2Employer.wvoeMonths}
+                        onChange={(e) => patchW2Employer({ wvoeMonths: Number(e.target.value) })}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE bonus</label>
+                      <input
+                        type="number"
+                        value={activeW2Employer.wvoeBonus}
+                        onChange={(e) => patchW2Employer({ wvoeBonus: Number(e.target.value) })}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE overtime</label>
+                      <input
+                        type="number"
+                        value={activeW2Employer.wvoeOvertime}
+                        onChange={(e) => patchW2Employer({ wvoeOvertime: Number(e.target.value) })}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  ) : (
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Bonus Income YTD</label>
@@ -2880,6 +3115,7 @@ export default function UnderwriterSplitViewDemo({
                       />
                     </div>
                   </div>
+                  )}
                   <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">
                     <span className="font-semibold text-slate-500">Current Monthly Variable Avg:</span>
                     <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo</span>
@@ -2893,7 +3129,7 @@ export default function UnderwriterSplitViewDemo({
                     Prior Job 2025 W-2 Variable Extractions
                   </h4>
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div data-qa-field="w2-box12-bonus" className={highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box12-bonus')}>
+                    <div data-qa-field="w2-box12-bonus" className={`cursor-pointer ${highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box12-bonus')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 12 Bonus History</label>
                       <input
                         type="number"
@@ -2902,11 +3138,8 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                         disabled={!mergePreviousEmployerVariable}
                       />
-                      <button type="button" onClick={() => handleInspectField('w2-box12-bonus')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                        <Eye className="h-3 w-3" /> Inspect Coordinates
-                      </button>
                     </div>
-                    <div data-qa-field="w2-box14-ot" className={highlightFieldId === 'w2-box14-ot' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box14-ot')}>
+                    <div data-qa-field="w2-box14-ot" className={`cursor-pointer ${highlightFieldId === 'w2-box14-ot' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box14-ot')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 14 Overtime History</label>
                       <input
                         type="number"
@@ -2915,9 +3148,6 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                         disabled={!mergePreviousEmployerVariable}
                       />
-                      <button type="button" onClick={() => handleInspectField('w2-box14-ot')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                        <Eye className="h-3 w-3" /> Inspect Coordinates
-                      </button>
                     </div>
                   </div>
                   <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">

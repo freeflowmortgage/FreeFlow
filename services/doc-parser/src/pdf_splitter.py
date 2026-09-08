@@ -49,6 +49,10 @@ CORE_RULES = {
         r"Year[- ]to[- ]Date\s+(?:Gross|Earnings)|Current Period|Net Pay",
         re.IGNORECASE,
     ),
+    "WVOE": re.compile(
+        r"Written Verification of Employment|Verification of Employment|The Work Number|\bWVOE\b",
+        re.IGNORECASE,
+    ),
 }
 
 SEE_STATEMENT = re.compile(

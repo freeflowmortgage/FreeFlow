@@ -50,7 +50,12 @@ function fileNameHints(fileName: string): DocKind[] {
   if (/pay\s*stub|paystub|earnings|wvoe|payroll/.test(name)) kinds.push('paystub');
   if (/(^|[^a-z0-9])w-?2([^a-z0-9]|$)/i.test(name)) kinds.push('w2');
   if (/schedule\s*e|f1040se/.test(name)) kinds.push('schedule-e');
-  if (/schedule\s*c/.test(name)) kinds.push('schedule-c');
+  if (/schedule\s*c|f1040sc/.test(name)) kinds.push('schedule-c');
+  if (/schedule\s*f|f1040sf/.test(name)) kinds.push('schedule-f');
+  if (/1120-?s|k-?1.*1120/.test(name)) kinds.push('scorp');
+  if (/(form\s*)?1065|k-?1.*1065/.test(name)) kinds.push('partnership');
+  if (/form\s*1120(?!-?s)|c-?corp/.test(name) && !kinds.includes('scorp')) kinds.push('ccorp');
+  if (/schedule\s*b|schedule\s*d/.test(name)) kinds.push('asset');
   return kinds;
 }
 
@@ -63,8 +68,8 @@ export function classifyDocument(result: ParseResponse, fileName = ''): DocKind[
   if (/\bW-?2\b/i.test(labels)) kinds.push('w2');
   if (/Schedule E/i.test(labels) || (result.scheduleEProperties?.length ?? 0) > 0) kinds.push('schedule-e');
   if (/Schedule C/i.test(labels)) kinds.push('schedule-c');
-  if (/1120-?S|S-Corporation/i.test(labels)) kinds.push('scorp');
-  if (/Form 1065|K-1 \(1065\)/i.test(labels)) kinds.push('partnership');
+  if (/1120-?S|S-Corporation|K-1 \(1120-?S\)/i.test(labels)) kinds.push('scorp');
+  if (/Form 1065|K-1 \(1065\)|Schedule K-1 \(1065\)/i.test(labels)) kinds.push('partnership');
   if (/1120 \(C-Corporation|C-Corporation Return/i.test(labels) && !/1120-?S/i.test(labels)) kinds.push('ccorp');
   if (/Schedule F/i.test(labels)) kinds.push('schedule-f');
   if (/Schedule B|Schedule D/i.test(labels)) kinds.push('asset');

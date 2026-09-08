@@ -70,7 +70,7 @@ function asRentalSchedule(value: unknown): IncomeSummaryRentalSchedule | undefin
         pitia: Number.isFinite(pitia) ? pitia : null,
       };
     })
-    .filter((row): row is IncomeSummaryRentalSchedule['properties'][number] => row !== null);
+    .filter((row): row is NonNullable<typeof row> => row !== null);
   const toIncome = Number(item.toIncome);
   const toLiability = Number(item.toLiability);
   const toHousing = Number(item.toHousing);
