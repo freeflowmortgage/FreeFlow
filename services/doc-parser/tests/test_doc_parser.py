@@ -165,6 +165,11 @@ def test_pdf_splitter_core_rules():
 
     w2_match = CORE_RULES["W-2"].search("2023 Form W-2 Wage and Tax Statement")
     assert w2_match is not None
+    assert "Paystub" in CORE_RULES
+    assert "WVOE" in CORE_RULES
+    assert CORE_RULES["WVOE"].search("Written Verification of Employment") is not None
+    assert CORE_RULES["Paystub"].search("Earnings Statement  Current Period  Net Pay") is not None
+    assert CORE_RULES["Paystub"].search("Form W-2 Wage and Tax Statement") is None
 
     sched_c = CORE_RULES["Schedule C (Page 1 - Profits)"].search("Schedule C Profit or Loss From Business")
     assert sched_c is not None
@@ -216,6 +221,20 @@ def test_pdf_splitter_classifies_schedule_f():
 
     assert split_res.target_pages == [0]
     assert "Schedule F (Farm Income)" in split_res.classifications[0]
+
+
+def test_pdf_splitter_classifies_paystub():
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=True,
+        plain_text="Earnings Statement Current Period Net Pay 1840.22 Year to Date Gross 22000.00",
+        words=[],
+    )
+    split_res = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
+    assert split_res.target_pages == [0]
+    assert "Paystub" in split_res.classifications[0]
 
 
 def test_mismo_xml_generation():

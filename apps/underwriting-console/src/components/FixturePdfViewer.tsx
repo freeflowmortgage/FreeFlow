@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFPageProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
@@ -268,26 +269,30 @@ export default function FixturePdfViewer({
           </p>
         )}
         <canvas ref={canvasRef} className="block h-auto max-w-full" />
-        {overlay.map((box) => (
-          <button
-            key={box.id}
-            type="button"
-            title={box.id}
-            data-box-id={box.id}
-            className={`absolute box-border rounded-sm ${
-              box.selected
-                ? 'z-10 border-2 border-emerald-600 bg-transparent'
-                : 'border border-emerald-500/80 bg-transparent hover:border-emerald-600'
-            }`}
-            style={{
-              left: `${box.x}%`,
-              top: `${box.y}%`,
-              width: `${Math.max(box.width, 1.2)}%`,
-              height: `${Math.max(box.height, 1.1)}%`,
-            }}
-            onClick={() => onSelect?.(box.id)}
-          />
-        ))}
+        {overlay.filter((box) => isUsableOverlayBox(box)).map((box) => {
+          const padded = padOverlayBox(box);
+          return (
+            <button
+              key={box.id}
+              type="button"
+              title={box.id}
+              data-box-id={box.id}
+              data-overlay-visible={box.selected ? 'true' : 'false'}
+              className={`absolute box-border rounded-sm ${
+                box.selected
+                  ? 'z-10 border-2 border-emerald-600 bg-emerald-400/10'
+                  : 'border-0 bg-transparent'
+              }`}
+              style={{
+                left: `${padded.x}%`,
+                top: `${padded.y}%`,
+                width: `${Math.max(padded.w, 1.2)}%`,
+                height: `${Math.max(padded.h, 1.1)}%`,
+              }}
+              onClick={() => onSelect?.(box.id)}
+            />
+          );
+        })}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord } from './parseTypes';
+import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
 
 export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
 
@@ -11,7 +11,7 @@ export type IncomeFieldDef = {
   category: 'wages' | 'withholding' | 'income' | 'addback' | 'mileage' | 'rental' | 'property' | 'identity' | 'asset' | 'farm';
   patterns: RegExp[];
   /** How the value is extracted from a matched line. Defaults to 'money'. */
-  capture?: 'money' | 'integer' | 'text' | 'percent';
+  capture?: 'money' | 'integer' | 'text' | 'percent' | 'ein';
 };
 
 const MONEY = /(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}|\((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\))/;
@@ -30,7 +30,7 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     lineNum: 'Box c',
     category: 'identity',
     capture: 'text',
-    patterns: [/employer(?:'s)? name(?:, address and zip code)?\s*[:#–—-]?\s*/i],
+    patterns: [/employer(?:['’]s)? name(?:,?\s*address(?:\s*,?\s*and\s+zip\s*code)?)?\s*[:#–—-]?\s*/i, /\bc\s+employer/i],
   },
   {
     id: 'w2-employer-ein',
@@ -39,8 +39,8 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Employer Identification Number (EIN)',
     lineNum: 'Box b',
     category: 'identity',
-    capture: 'text',
-    patterns: [/employer(?:'s)? identification number(?:\s*\(ein\))?\s*[:#–—-]?\s*/i],
+    capture: 'ein',
+    patterns: [/employer(?:'s)? identification number(?:\s*\(ein\))?\s*[:#–—-]?\s*/i, /\bb\s+employer/i],
   },
   {
     id: 'w2-box1',
@@ -49,7 +49,11 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Wages, Tips, Other Comp',
     lineNum: 'Box 1',
     category: 'wages',
-    patterns: [/box\s*1\b.{0,80}wages/i, /\b1\b.{0,24}wages.{0,40}tips/i],
+    patterns: [
+      /box\s*1\b.{0,80}wages/i,
+      /\b1\b.{0,24}wages.{0,40}tips/i,
+      /wages,?\s*tips,?\s*other\s+comp/i,
+    ],
   },
   {
     id: 'w2-box2',
@@ -440,7 +444,7 @@ export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
     lineNum: 'Item J · Profit',
     category: 'income',
     capture: 'percent',
-    patterns: [/\bprofit\b.{0,60}%/i],
+    patterns: [/item\s*j.{0,80}profit/i, /profit\s*(?:share|interest)?.{0,40}%/i, /ending.{0,20}profit.{0,20}%/i],
   },
   {
     id: 'pt-capital-pct',
@@ -450,7 +454,7 @@ export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
     lineNum: 'Item J · Capital',
     category: 'income',
     capture: 'percent',
-    patterns: [/\bcapital\b.{0,60}%/i],
+    patterns: [/item\s*j.{0,80}capital/i, /capital\s*(?:account|share)?.{0,40}%/i, /ending.{0,20}capital.{0,20}%/i],
   },
 ];
 
@@ -462,7 +466,16 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Hourly Rate of Pay',
     lineNum: 'Rate',
     category: 'wages',
-    patterns: [/hourly\s+(rate|pay)/i, /rate\s+of\s+pay/i],
+    patterns: [/hourly\s+(rate|pay)/i, /rate\s+of\s+pay/i, /base\s+rate/i],
+  },
+  {
+    id: 'ps-hours-week',
+    form: 'Paystub',
+    boxLabel: 'Hours',
+    fieldLabel: 'Standard Weekly Hours',
+    lineNum: 'Hours',
+    category: 'wages',
+    patterns: [/hr\/wk|hours?\s*\/\s*wk|weekly\s+hours/i],
   },
   {
     id: 'ps-current-base',
@@ -471,7 +484,7 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Current Period Base Pay',
     lineNum: 'Current',
     category: 'wages',
-    patterns: [/current\s+(period|earnings|pay)/i, /this\s+period/i],
+    patterns: [/current\s+(period|earnings|pay)\s+(?:base|gross|regular)/i, /this\s+period\s+(?:base|pay)/i],
   },
   {
     id: 'ps-base-ytd',
@@ -480,7 +493,25 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Base Wages YTD',
     lineNum: 'YTD',
     category: 'wages',
-    patterns: [/year[- ]to[- ]date/i, /\bytd\b.{0,20}(base|gross|wages)/i],
+    patterns: [/year[- ]to[- ]date.{0,40}(base|regular|gross)?/i, /(base|regular)\s+wages?\s+ytd/i],
+  },
+  {
+    id: 'ps-bonus-ytd',
+    form: 'Paystub',
+    boxLabel: 'Bonus YTD',
+    fieldLabel: 'Bonus Income YTD',
+    lineNum: 'Bonus',
+    category: 'wages',
+    patterns: [/bonus.{0,20}ytd|ytd.{0,20}bonus/i],
+  },
+  {
+    id: 'ps-ot-ytd',
+    form: 'Paystub',
+    boxLabel: 'OT YTD',
+    fieldLabel: 'Overtime Income YTD',
+    lineNum: 'OT',
+    category: 'wages',
+    patterns: [/overtime.{0,20}ytd|ytd.{0,20}overtime/i],
   },
 ];
 
@@ -532,6 +563,15 @@ export const FORM_1120_DEFS: IncomeFieldDef[] = [
     lineNum: 'Line 31',
     category: 'income',
     patterns: [/total tax/i],
+  },
+  {
+    id: 'c1120-dep',
+    form: 'Form 1120',
+    boxLabel: 'Line 20',
+    fieldLabel: 'Depreciation',
+    lineNum: 'Line 20',
+    category: 'addback',
+    patterns: [/line\s*20\b.{0,80}depreciation/i, /depreciation.{0,40}\d/i],
   },
 ];
 
@@ -616,7 +656,10 @@ function lineBox(line: LineCluster): { box: MappedIncomeField['box']; wordIndex:
 function amountBox(line: LineCluster, moneyMatch: RegExpMatchArray): { box: MappedIncomeField['box']; wordIndex: number } | null {
   const token = moneyMatch[0];
   const tokenIndex = moneyMatch.index ?? line.text.indexOf(token);
-  const containing = line.items.find((item) => item.word.text.includes(token.replace(/\s/g, '')) || MONEY.test(item.word.text));
+  const compactToken = token.replace(/\s/g, '');
+  const containing =
+    line.items.find((item) => item.word.text.replace(/\s/g, '').includes(compactToken)) ||
+    line.items.find((item) => MONEY.test(item.word.text));
   if (containing) {
     const word = containing.word;
     const inner = word.text.indexOf(token);
@@ -661,6 +704,8 @@ function amountBox(line: LineCluster, moneyMatch: RegExpMatchArray): { box: Mapp
 function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
   const blob = page.formIds.join(' ').toLowerCase();
   if (form === 'W-2') return /w-?2/.test(blob);
+  if (form === 'Paystub') return /paystub|pay stub|earnings statement|payroll/.test(blob);
+  if (form === 'WVOE') return /wvoe|verification of employment/.test(blob);
   if (form === 'Schedule B') return /schedule\s*b/.test(blob);
   if (form === 'Schedule C') return /schedule\s*c/.test(blob);
   if (form === 'Schedule D') return /schedule\s*d/.test(blob);
@@ -668,7 +713,164 @@ function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
   if (form === 'Schedule F') return /schedule\s*f/.test(blob);
   if (form === 'Form 1120-S') return /1120-?s/.test(blob);
   if (form === 'Form 1065') return /1065/.test(blob);
-  return /1040/.test(blob);
+  if (form === 'Form 1120') return /1120 \(c-corporation|c-corporation return/.test(blob);
+  if (form === 'Form 1040') return /1040/.test(blob);
+  return false;
+}
+
+function pagesForDef(
+  pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
+  form: IncomeForm,
+): Array<{ page: ParsePage; lines: LineCluster[] }> {
+  const preferred = pageLines.filter(({ page }) => pagePrefers(page, form));
+  if (preferred.length) return preferred;
+  if (form === 'W-2' || form === 'Paystub' || form === 'WVOE') {
+    return pageLines.filter(({ page }) => page.formIds.length === 0);
+  }
+  return [];
+}
+
+function moneyMatches(text: string): RegExpMatchArray[] {
+  return [...text.matchAll(new RegExp(MONEY.source, 'g'))].filter((match) => match[1]);
+}
+
+function estimatedMatchX(line: LineCluster, pattern: RegExp): number {
+  const match = line.text.match(pattern);
+  const first = line.items[0]?.word;
+  const last = line.items[line.items.length - 1]?.word;
+  if (!first || !last) return 0;
+  const width = Math.max(last.x + last.w - first.x, 0.04);
+  if (!match || match.index == null) return first.x;
+  return first.x + width * (match.index / Math.max(line.text.length, 1));
+}
+
+function moneyOnOrNear(lines: LineCluster[], lineIndex: number, takeLast = false): { line: LineCluster; match: RegExpMatchArray } | null {
+  const line = lines[lineIndex];
+  const sameLine = takeLast ? moneyMatches(line.text).pop() : line.text.match(MONEY);
+  if (sameLine && sameLine[1]) return { line, match: sameLine as RegExpMatchArray };
+  const y0 = line.y;
+  const labelRight = line.items[line.items.length - 1]?.word;
+  for (let index = lineIndex; index < Math.min(lineIndex + 4, lines.length); index += 1) {
+    const candidate = lines[index];
+    if (Math.abs(candidate.y - y0) > 0.04) continue;
+    const match = takeLast ? moneyMatches(candidate.text).pop() : candidate.text.match(MONEY);
+    if (!match || !match[1]) continue;
+    const amount = candidate.items.find((item) => MONEY.test(item.word.text))?.word;
+    if (labelRight && amount && amount.x + amount.w < labelRight.x) continue;
+    return { line: candidate, match: match as RegExpMatchArray };
+  }
+  return null;
+}
+
+/** Prefer the amount in the same form box (right of / below the label), not the first dollar on the row. */
+function moneyInColumn(
+  lines: LineCluster[],
+  lineIndex: number,
+  columnX: number,
+  columnWidth = 0.28,
+): { line: LineCluster; match: RegExpMatchArray } | null {
+  const y0 = lines[lineIndex].y;
+  const minX = columnX - 0.02;
+  const maxX = columnX + columnWidth;
+  for (let index = lineIndex; index < Math.min(lineIndex + 6, lines.length); index += 1) {
+    const candidate = lines[index];
+    if (candidate.y + 0.002 < y0) continue;
+    if (candidate.y - y0 > 0.06) continue;
+    for (const match of moneyMatches(candidate.text)) {
+      const located = amountBox(candidate, match as RegExpMatchArray);
+      if (!located) continue;
+      const mid = located.box.x + located.box.w / 2;
+      if (mid < minX || mid > maxX) continue;
+      return { line: candidate, match: match as RegExpMatchArray };
+    }
+  }
+  return null;
+}
+
+const EIN_TOKEN = /(\d{2}-\d{7}|\d{9})/;
+
+function einOnOrNear(lines: LineCluster[], lineIndex: number, columnX: number): { value: string; line: LineCluster; match: RegExpMatchArray } | null {
+  const y0 = lines[lineIndex].y;
+  for (let index = lineIndex; index < Math.min(lineIndex + 5, lines.length); index += 1) {
+    const candidate = lines[index];
+    if (candidate.y + 0.002 < y0) continue;
+    if (candidate.y - y0 > 0.09) continue;
+    const match = candidate.text.match(EIN_TOKEN);
+    if (!match) continue;
+    const located = amountBox(candidate, match);
+    const mid = located ? located.box.x + located.box.w / 2 : columnX;
+    if (Math.abs(mid - columnX) > 0.35 && index !== lineIndex) continue;
+    const raw = match[1];
+    const value = raw.includes('-') ? raw : `${raw.slice(0, 2)}-${raw.slice(2)}`;
+    return { value, line: candidate, match };
+  }
+  return null;
+}
+
+function paystubRowAmounts(line: LineCluster): number[] {
+  return moneyMatches(line.text).map((match) => parseMoneyValue(match[1]));
+}
+
+function fieldsFromPaystubTable(
+  pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
+): MappedIncomeField[] {
+  const found: MappedIncomeField[] = [];
+  const paystubPages = pageLines.filter(({ page }) => pagePrefers(page, 'Paystub') || page.formIds.length === 0);
+  for (const { page, lines } of paystubPages) {
+    if (!pagePrefers(page, 'Paystub') && page.formIds.length > 0) continue;
+    const push = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray) => {
+      if (!Number.isFinite(numeric) || found.some((field) => field.sourceFieldId === defId)) return;
+      const def = PAYSTUB_DEFS.find((item) => item.id === defId);
+      if (!def) return;
+      const located = match ? amountBox(line, match) : lineBox(line);
+      if (!located) return;
+      const entityId = formEntityId('Paystub', page.index);
+      found.push({
+        id: def.id,
+        entityId,
+        sourceFieldId: def.id,
+        form: def.form,
+        boxLabel: def.boxLabel,
+        fieldLabel: def.fieldLabel,
+        lineNum: def.lineNum,
+        category: def.category,
+        value: formatMoney(numeric),
+        numericValue: numeric,
+        pageIndex: page.index,
+        wordIndex: located.wordIndex,
+        box: located.box,
+      });
+    };
+    for (const line of lines) {
+      const amounts = paystubRowAmounts(line);
+      const matches = moneyMatches(line.text);
+      const label = line.text.replace(new RegExp(MONEY.source, 'g'), '').replace(/\s+/g, ' ').trim();
+      const hrs = line.text.match(/(\d+(?:\.\d+)?)\s*hr\/?\s*wk/i);
+      if (hrs) push('ps-hours-week', Number(hrs[1]), line);
+      if (/^(regular|base(?:\s+pay)?|salary)\b/i.test(label) && amounts.length >= 2) {
+        if (amounts.length >= 4) {
+          push('ps-hourly-rate', amounts[0], line, matches[0] as RegExpMatchArray);
+          push('ps-current-base', amounts[2], line, matches[2] as RegExpMatchArray);
+          push('ps-base-ytd', amounts[3], line, matches[3] as RegExpMatchArray);
+        } else if (amounts.length === 3 && amounts[0] < 200 && amounts[1] >= 200) {
+          push('ps-hourly-rate', amounts[0], line, matches[0] as RegExpMatchArray);
+          push('ps-current-base', amounts[1], line, matches[1] as RegExpMatchArray);
+          push('ps-base-ytd', amounts[2], line, matches[2] as RegExpMatchArray);
+        } else if (amounts.length === 3 && amounts[0] < 200 && amounts[1] < 200) {
+          push('ps-hourly-rate', amounts[0], line, matches[0] as RegExpMatchArray);
+          push('ps-current-base', amounts[2], line, matches[2] as RegExpMatchArray);
+        } else {
+          push('ps-current-base', amounts[0], line, matches[0] as RegExpMatchArray);
+          push('ps-base-ytd', amounts[amounts.length - 1], line, matches[matches.length - 1] as RegExpMatchArray);
+        }
+      } else if (/^bonus\b/i.test(label) && amounts.length) {
+        push('ps-bonus-ytd', amounts[amounts.length - 1], line, matches[matches.length - 1] as RegExpMatchArray);
+      } else if (/^(overtime|\bot\b)/i.test(label) && amounts.length) {
+        push('ps-ot-ytd', amounts[amounts.length - 1], line, matches[matches.length - 1] as RegExpMatchArray);
+      }
+    }
+  }
+  return found;
 }
 
 function formEntityId(form: IncomeForm, pageIndex: number): string {
@@ -683,22 +885,141 @@ function parseMoneyValue(raw: string): number {
   return Number(normalized);
 }
 
-export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
-  if (result.incomeFields?.length) {
-    return result.incomeFields;
-  }
+const GRID_LINE_TO_DEF: Record<string, string> = {
+  '3': 'ent2-rent',
+  '9': 'ent2-ins',
+  '12': 'ent2-int',
+  '16': 'ent2-tax',
+  '18': 'ent2-dep',
+  '19': 'ent2-hoa',
+  '20': 'ent2-exp',
+  '21': 'ent2-net',
+};
 
+export const RENTAL_YEAR_KEY_TO_SOURCE: Record<string, string> = {
+  rentsReceived: 'ent2-rent',
+  insurance: 'ent2-ins',
+  mortgageInterest: 'ent2-int',
+  taxes: 'ent2-tax',
+  depreciation: 'ent2-dep',
+  hoaDues: 'ent2-hoa',
+  totalExpenses: 'ent2-exp',
+  netIncomeLoss: 'ent2-net',
+  fairRentalDays: 'ent2-days',
+};
+
+const EMPTY_BOX: OverlayBox = { x: 0, y: 0, w: 0, h: 0 };
+
+export function scheduleEEntityId(pageIndex: number, column: string): string {
+  return `schedule-e-p${pageIndex}-${String(column).toLowerCase()}`;
+}
+
+function extractEmitsSource(prop: ScheduleEPropertyExtract, sourceFieldId: string): boolean {
+  if (sourceFieldId === 'ent2-address') return Boolean(prop.address);
+  if (sourceFieldId === 'ent2-type') return Boolean(prop.propertyType);
+  if (sourceFieldId === 'ent2-days') return Boolean(prop.fairRentalDays);
+  const line = Object.entries(GRID_LINE_TO_DEF).find(([, id]) => id === sourceFieldId)?.[0];
+  if (!line) return false;
+  const amount = prop.financials?.[line];
+  return amount != null && !(amount === 0 && line !== '21');
+}
+
+export function scheduleEGridFieldId(
+  extracts: ScheduleEPropertyExtract[],
+  pageIndex: number,
+  column: string,
+  sourceFieldId: string,
+): string {
+  const entityId = scheduleEEntityId(pageIndex, column);
+  const first = extracts.find((prop) => extractEmitsSource(prop, sourceFieldId));
+  if (first && first.pageIndex === pageIndex && first.column === column) return sourceFieldId;
+  return `${sourceFieldId}--${entityId}`;
+}
+
+function overlayBoxFor(prop: ScheduleEPropertyExtract, sourceFieldId: string): OverlayBox {
+  const boxes = prop.boxes;
+  if (!boxes) return EMPTY_BOX;
+  if (sourceFieldId === 'ent2-address') return boxes.address ?? EMPTY_BOX;
+  if (sourceFieldId === 'ent2-type') return boxes.type ?? EMPTY_BOX;
+  if (sourceFieldId === 'ent2-days') return boxes.days ?? EMPTY_BOX;
+  const line = Object.entries(GRID_LINE_TO_DEF).find(([, id]) => id === sourceFieldId)?.[0];
+  return (line ? boxes.financials?.[line] : undefined) ?? EMPTY_BOX;
+}
+
+function fieldsFromScheduleEGrid(extracts: ScheduleEPropertyExtract[]): MappedIncomeField[] {
   const found: MappedIncomeField[] = [];
+  for (const prop of extracts) {
+    const entityId = scheduleEEntityId(prop.pageIndex, prop.column);
+    const push = (
+      sourceFieldId: string,
+      boxLabel: string,
+      fieldLabel: string,
+      lineNum: string,
+      category: MappedIncomeField['category'],
+      value: string,
+      numericValue: number,
+    ) => {
+      found.push({
+        id: scheduleEGridFieldId(extracts, prop.pageIndex, prop.column, sourceFieldId),
+        entityId,
+        sourceFieldId,
+        form: 'Schedule E',
+        boxLabel,
+        fieldLabel,
+        lineNum,
+        category,
+        value,
+        numericValue,
+        pageIndex: prop.pageIndex,
+        wordIndex: 0,
+        box: overlayBoxFor(prop, sourceFieldId),
+      });
+    };
+    if (prop.address) {
+      push('ent2-address', 'Line 1a', 'Property Address (Line 1a)', 'Line 1a', 'property', prop.address, 0);
+    }
+    if (prop.propertyType) {
+      const typeCode = Number((prop.propertyType.match(/[1-8]/) || [])[0]);
+      push(
+        'ent2-type',
+        'Line 1b',
+        'Type of Property (Line 1b)',
+        'Line 1b',
+        'property',
+        PROPERTY_TYPE_CODES[typeCode] ? `${typeCode} — ${PROPERTY_TYPE_CODES[typeCode]}` : prop.propertyType,
+        Number.isFinite(typeCode) ? typeCode : 0,
+      );
+    }
+    if (prop.fairRentalDays) {
+      push('ent2-days', 'Line 2', 'Fair Rental Days (Line 2)', 'Line 2', 'property', String(prop.fairRentalDays), prop.fairRentalDays);
+    }
+    for (const [line, sourceId] of Object.entries(GRID_LINE_TO_DEF)) {
+      const def = SCHEDULE_E_DEFS.find((item) => item.id === sourceId);
+      const amount = prop.financials[line];
+      if (!def || amount == null || (amount === 0 && line !== '21')) continue;
+      push(sourceId, def.boxLabel, def.fieldLabel, def.lineNum, def.category, formatMoney(amount), amount);
+    }
+  }
+  return found;
+}
+
+export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
+  const gridFields = fieldsFromScheduleEGrid(result.scheduleEProperties ?? []);
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
+  const found: MappedIncomeField[] = [...gridFields, ...fieldsFromPaystubTable(pageLines)];
 
   for (const def of INCOME_FIELD_DEFS) {
-    const preferred = pageLines.filter(({ page }) => pagePrefers(page, def.form));
-    const ordered = preferred.length > 0 ? preferred : pageLines;
-    const allowMultipleEntities = preferred.length > 0;
+    if (gridFields.length && def.form === 'Schedule E') continue;
+    if (def.form === 'Paystub' && found.some((field) => field.sourceFieldId === def.id)) continue;
+    if (def.id === 'ps-hours-week') continue;
+    const ordered = pagesForDef(pageLines, def.form);
+    if (!ordered.length) continue;
+    const allowMultipleEntities = ordered.some(({ page }) => pagePrefers(page, def.form));
 
     for (const { page, lines } of ordered) {
       let mappedOnPage = false;
-      for (const line of lines) {
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        const line = lines[lineIndex];
         const matchedPattern = def.patterns.find((pattern) => pattern.test(line.text));
         if (!matchedPattern) continue;
 
@@ -708,12 +1029,22 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
         let located: { box: MappedIncomeField['box']; wordIndex: number } | null;
 
         if (capture === 'money') {
-          const moneyMatch = line.text.match(MONEY);
-          if (!moneyMatch) continue;
-          numeric = parseMoneyValue(moneyMatch[1]);
+          const columnX = estimatedMatchX(line, matchedPattern);
+          const foundMoney =
+            moneyInColumn(lines, lineIndex, columnX) ??
+            moneyOnOrNear(lines, lineIndex, def.id === 'ps-base-ytd');
+          if (!foundMoney) continue;
+          numeric = parseMoneyValue(foundMoney.match[1]);
           if (!Number.isFinite(numeric)) continue;
-          located = amountBox(line, moneyMatch);
+          located = amountBox(foundMoney.line, foundMoney.match);
           value = formatMoney(numeric);
+        } else if (capture === 'ein') {
+          const columnX = estimatedMatchX(line, matchedPattern);
+          const foundEin = einOnOrNear(lines, lineIndex, columnX);
+          if (!foundEin) continue;
+          numeric = 0;
+          located = amountBox(foundEin.line, foundEin.match) ?? lineBox(foundEin.line);
+          value = foundEin.value;
         } else if (capture === 'integer') {
           const intMatch = line.text.match(TRAILING_INT);
           if (!intMatch) continue;
@@ -737,13 +1068,41 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
         } else {
           // text capture: everything after the matched label on the line
           const labelMatch = line.text.match(matchedPattern);
-          const rest = line.text
+          let rest = line.text
             .slice((labelMatch?.index ?? 0) + (labelMatch?.[0].length ?? 0))
             .replace(/^[\s:,.()–—-]+/, '')
+            .replace(/\s+(?:[a-z]\s+)?(?:control number|employee(?:['’]s)? first name|employee(?:['’]s)? address).*$/i, '')
+            .replace(/^[a-z]$/i, '')
+            .replace(/^(?:,?\s*)?(?:address(?:\s*,?\s*and\s+zip\s*code)?|and zip code)\s*$/i, '')
             .trim();
+          const chrome = !rest || rest.length < 3 || /^(?:[a-z]\s+)?(?:control number|employee|address|and zip)/i.test(rest) || /\be\s+employee/i.test(rest);
+          if (chrome) {
+            const below = lines[lineIndex + 1];
+            const columnX = estimatedMatchX(line, matchedPattern);
+            const belowText = below
+              ? below.items
+                  .filter((item) => item.word.x < columnX + 0.45)
+                  .map((item) => item.word.text)
+                  .join(' ')
+                  .trim()
+              : '';
+            if (
+              below &&
+              below.y - line.y < 0.08 &&
+              belowText &&
+              !/^(?:[a-z]\s+)?(?:control|employee|wages|federal)/i.test(belowText)
+            ) {
+              rest = belowText.split(/\s{2,}|,\s+\d{5}/)[0].trim();
+              located = lineBox(below);
+            } else {
+              continue;
+            }
+          } else {
+            rest = rest.split(/\s{2,}|,\s+\d{5}/)[0].trim();
+            located = lineBox(line);
+          }
           if (!rest) continue;
           numeric = 0;
-          located = lineBox(line);
           value = rest;
         }
 

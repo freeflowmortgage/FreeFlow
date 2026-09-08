@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShieldCheck, History, ToggleRight, FileSearch, Building, MessageSquare } from 'lucide-react';
 import UnderwriterSplitViewDemo from './components/UnderwriterSplitViewDemo';
 import AuditTrailTable from './components/AuditTrailTable';
@@ -11,8 +11,9 @@ import Conversational1003 from './components/Conversational1003';
 import SplitDocPane from './components/SplitDocPane';
 import AppraisalDocPane from './components/AppraisalDocPane';
 import type { ConsoleView, SourceMode, Surface } from './appTypes';
-import type { LiveParseSession, ParseResponse } from './parseTypes';
+import type { LiveDocument } from './parseTypes';
 import { postParsePdf } from './postParsePdf';
+import { findDuplicate } from './livePacket';
 
 const NAV: { id: ConsoleView; label: string; icon: typeof ShieldCheck }[] = [
   { id: 'split', label: 'Income', icon: ShieldCheck },
@@ -72,6 +73,13 @@ function hashFor(view: ConsoleView): string {
   return view;
 }
 
+async function sha256File(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export default function App() {
   // Dedicated popped-out document pane windows (dual-monitor mode)
   const [docPaneKind] = useState<'income' | 'appraisal' | null>(() => {
@@ -84,7 +92,9 @@ export default function App() {
   const [surface, setSurface] = useState<Surface>(initial.surface);
   const [view, setView] = useState<ConsoleView>(initial.view);
   const [demoMode, setDemoMode] = useState<boolean>(initial.demo);
-  const [session, setSession] = useState<LiveParseSession | null>(null);
+  const [session, setSession] = useState<LiveDocument | null>(null);
+  const [documents, setDocuments] = useState<LiveDocument[]>([]);
+  const documentsRef = useRef<LiveDocument[]>([]);
   const [source, setSource] = useState<SourceMode>('demo');
   const [parseBusy, setParseBusy] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -116,19 +126,46 @@ export default function App() {
     window.location.hash = '';
   };
 
-  const parsePdf = async (file: File) => {
+  const parsePdfs = async (list: File[]) => {
+    if (!list.length) return;
     setParseBusy(true);
     setParseError(null);
+    const errors: string[] = [];
     try {
-      const payload = await postParsePdf(file);
-      setSession({ file, fileName: file.name, result: payload });
-      setSource('live');
-      enterWorkspace('split');
-    } catch (err) {
-      setParseError(err instanceof Error ? err.message : 'Parse failed');
+      for (const file of list) {
+        try {
+          const [sha256, payload] = await Promise.all([sha256File(file), postParsePdf(file)]);
+          const duplicate = findDuplicate(documentsRef.current, { sha256, fileName: file.name, result: payload });
+          if (duplicate) {
+            errors.push(duplicate.reason);
+            continue;
+          }
+          const next: LiveDocument = {
+            id: crypto.randomUUID(),
+            sha256,
+            file,
+            fileName: file.name,
+            result: payload,
+          };
+          documentsRef.current = [...documentsRef.current, next];
+          setDocuments([...documentsRef.current]);
+          setSession(next);
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : `Failed to parse ${file.name}`);
+        }
+      }
+      if (documentsRef.current.length) {
+        setSource('live');
+        enterWorkspace('split');
+      }
+      if (errors.length) setParseError(errors.join(' · '));
     } finally {
       setParseBusy(false);
     }
+  };
+
+  const parsePdf = async (file: File) => {
+    await parsePdfs([file]);
   };
 
   if (docPaneKind === 'income') {
@@ -167,12 +204,14 @@ export default function App() {
             <div className="h-[calc(100vh-6rem)] min-h-[780px]">
               <UnderwriterSplitViewDemo
                 liveSession={session}
+                liveDocuments={documents}
                 source={source}
                 parseBusy={parseBusy}
                 parseError={parseError}
                 onParseFile={(file) => void parsePdf(file)}
+                onParseFiles={(files) => void parsePdfs(files)}
                 onUseDemo={() => setSource('demo')}
-                onUseLive={() => session && setSource('live')}
+                onUseLive={() => documents.length && setSource('live')}
               />
             </div>
           )}
@@ -224,12 +263,14 @@ export default function App() {
           <div className="h-[calc(100vh-7rem)] min-h-[780px]">
             <UnderwriterSplitViewDemo
               liveSession={session}
+              liveDocuments={documents}
               source={source}
               parseBusy={parseBusy}
               parseError={parseError}
               onParseFile={(file) => void parsePdf(file)}
+              onParseFiles={(files) => void parsePdfs(files)}
               onUseDemo={() => setSource('demo')}
-              onUseLive={() => session && setSource('live')}
+              onUseLive={() => documents.length && setSource('live')}
             />
           </div>
         )}

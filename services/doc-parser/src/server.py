@@ -181,7 +181,18 @@ async def process_document(request: Request):
         if len(pdf_bytes) > MAX_PDF_BYTES:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
+        schedule_e_properties: list = []
+        try:
+            from schedule_e_grid import extract_schedule_e_pages
+        except ImportError:
+            from src.schedule_e_grid import extract_schedule_e_pages
+
         convert_result = get_converter().convert_to_ai_ready(pdf_bytes)
+        try:
+            schedule_e_properties = extract_schedule_e_pages(pdf_bytes, ocr_pages=convert_result.pages)
+        except Exception as grid_exc:
+            logger.warning("schedule_e_grid_skipped: %s", grid_exc)
+
         del pdf_bytes
 
         split_result = pre_split_tax_returns(convert_result)
@@ -228,6 +239,7 @@ async def process_document(request: Request):
                 "classifications": {str(k): v for k, v in split_result.classifications.items()},
                 "unresolved_statements": split_result.to_dict()["unresolved_statements"],
                 "pages": page_payload,
+                "scheduleEProperties": schedule_e_properties,
             }
         )
     except HTTPException:

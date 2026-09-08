@@ -26,6 +26,7 @@ build/
 test-docs/
 test-results/
 *.pdf
+!services/doc-parser/templates/*.pdf
 !docs/**/*.md
 
 # OS / IDE

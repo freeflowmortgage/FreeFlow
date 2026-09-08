@@ -8,7 +8,6 @@ import {
   Layers,
   UserCheck,
   FileSpreadsheet,
-  Eye,
   Activity,
   AlertCircle,
   Link,
@@ -22,10 +21,29 @@ import {
   MonitorX,
   Tractor,
   Coins,
+  Printer,
 } from 'lucide-react';
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
-import type { LiveParseSession } from '../parseTypes';
-import { mapIncomeFields } from '../incomeFieldMap';
+import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
+import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
+import {
+  liveAssetPatch,
+  liveCCorpPatch,
+  liveFarmPatch,
+  livePartnershipPatch,
+  livePrevW2Patch,
+  liveSchCPatch,
+  liveSCorpPatch,
+  liveWagePatch,
+} from '../liveHydrate';
+import {
+  allScheduleEExtracts,
+  firstPageForKind,
+  kindsOf,
+  pickDocumentForTab,
+  tabForKinds,
+  type WorkspaceTab,
+} from '../livePacket';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfPagePreview from './PdfPagePreview';
 import FixturePdfViewer from './FixturePdfViewer';
@@ -58,7 +76,11 @@ import {
   type ScheduleL,
   type YtdPnl,
 } from './selfEmployedIncome';
-import { computeRental1038CashFlow } from '@mortgage-pos/mortgage-engine';
+import {
+  compactSourceLines,
+  computeRental1038CashFlow,
+  qualifyingProgramNote,
+} from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
 
@@ -109,6 +131,67 @@ interface W2Employer {
   w2Year2Bonus: number;
   w2Year2Ot: number;
 }
+
+function emptyW2Employer(id: string, patch: Partial<W2Employer> = {}): W2Employer {
+  return {
+    id,
+    employerName: 'Parsed employer',
+    ein: '',
+    employmentStartDate: '',
+    role: 'PRIMARY',
+    monthsAtJob: 12,
+    payFrequency: 'SEMIMONTHLY',
+    wageDocSource: 'PAYSTUB',
+    hourlyRate: 0,
+    weeklyHours: 40,
+    currentPeriodBasePay: 0,
+    baseYtd: 0,
+    bonusYtd: 0,
+    overtimeYtd: 0,
+    otherYtd: 0,
+    wvoeBonus: 0,
+    wvoeOvertime: 0,
+    wvoeOther: 0,
+    wvoeMonths: 12,
+    w2Year1Box1: 0,
+    w2Year1Bonus: 0,
+    w2Year1Ot: 0,
+    w2Year2Box1: 0,
+    w2Year2Bonus: 0,
+    w2Year2Ot: 0,
+    ...patch,
+  };
+}
+
+function emptySchCYear(year: number): SchCYear {
+  return { year, line31: 0, line13: 0, line30: 0, line44aMiles: 0, line24bMeals: 0 };
+}
+
+function emptyCorpYear(year: number): CorpYear {
+  return {
+    year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
+    depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+  };
+}
+
+function emptyCCorpYear(year: number): CCorpYear {
+  return {
+    year, taxableIncome: 0, totalTaxPaid: 0, depreciation: 0, depletion: 0, amortization: 0,
+    mealsM1: 0, nol: 0, w2Wages: 0, dividends: 0,
+  };
+}
+
+function emptyFarmYear(year: number): ScheduleFYear {
+  return {
+    year, netFarmProfitLoss: 0, depreciation: 0, depletion: 0, amortization: 0,
+    casualtyLoss: 0, businessUseOfHome: 0, mealsExclusion: 0, nonrecurringIncome: 0,
+  };
+}
+
+const EMPTY_SCHEDULE_L: ScheduleL = {
+  cash: 0, receivables: 0, allowance: 0, taxExempt: 0, otherCurrentAssets: 0,
+  accountsPayable: 0, notesLt1Yr: 0, otherCurrentLiab: 0,
+};
 
 interface BusinessEntity<TYear> {
   id: string;
@@ -182,6 +265,8 @@ interface RentalPropertyYear {
   netIncomeLoss: number | null; // Line 21 – prefer this when parsed; null reconstructs from L3 − L20
   extraordinaryAddBack: number; // UW extraordinary / other allowed add-back (not an IRS line)
   fairRentalDays: number;   // Line 2  – (0 = full year / 365)
+  expenseDetermination?: ScheduleEExpenseDetermination;
+  source?: { documentId: string; pageIndex: number; column: 'A' | 'B' | 'C' };
 }
 
 interface RentalProperty {
@@ -210,13 +295,38 @@ interface RentalProperty {
 }
 
 /**
- * Simulated Encompass loan-detail REO section: address → full monthly PITIA.
- * When loan details arrive from Encompass with a PITIA for the property, the box
- * is prefilled; otherwise it stays blank for the underwriter to complete.
+ * PITIA parsed from the loan application (1003 / Encompass REO), not Schedule E.
+ * The 1038 calculator subtracts this after days-rented averaging.
+ * When the app has a PITIA for the property, the box is prefilled; otherwise it
+ * stays blank for the underwriter to complete.
  */
 const ENCOMPASS_REO_PITIA: Record<string, number> = {
   '742 Evergreen Terrace, Springfield, IL': 1450,
 };
+
+function normalizeReoAddress(address: string): string {
+  return address
+    .toLowerCase()
+    .replace(/\b(street|st|avenue|ave|road|rd|court|ct|drive|dr|boulevard|blvd|lane|ln|unit|apt|#)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Match Schedule E / REO addresses to the PITIA the income tool parsed from the app. */
+function pitiaFromApp(address: string): number | undefined {
+  if (!address) return undefined;
+  if (Object.prototype.hasOwnProperty.call(ENCOMPASS_REO_PITIA, address)) {
+    return ENCOMPASS_REO_PITIA[address];
+  }
+  const needle = normalizeReoAddress(address);
+  if (!needle) return undefined;
+  for (const [key, value] of Object.entries(ENCOMPASS_REO_PITIA)) {
+    const hay = normalizeReoAddress(key);
+    if (needle === hay || needle.startsWith(hay) || hay.startsWith(needle)) return value;
+  }
+  return undefined;
+}
 
 /**
  * Simulated Encompass proposed-loan PITIA for the subject property. The subject
@@ -225,32 +335,131 @@ const ENCOMPASS_REO_PITIA: Record<string, number> = {
  */
 const ENCOMPASS_SUBJECT_PROPOSED_PITIA = 2350;
 
+function emptyRentalYear(year: number): RentalPropertyYear {
+  return {
+    year,
+    rentsReceived: 0,
+    insurance: 0,
+    mortgageInterest: 0,
+    taxes: 0,
+    depreciation: 0,
+    hoaDues: 0,
+    totalExpenses: 0,
+    netIncomeLoss: null,
+    extraordinaryAddBack: 0,
+    fairRentalDays: 0,
+  };
+}
+
+function mapScheduleEPropertyType(raw: string): RentalProperty['propertyType'] {
+  const code = (raw.match(/[1-8]/) || [])[0];
+  if (code === '2') return 'DUPLEX';
+  if (code === '3') return 'VACATION';
+  if (code === '4') return 'COMMERCIAL';
+  return 'SFR';
+}
+
+function rentalYearFromExtract(extract: ScheduleEPropertyExtract & { documentId?: string }): RentalPropertyYear {
+  const financials = extract.financials || {};
+  return {
+    year: extract.year ?? 0,
+    rentsReceived: financials['3'] ?? 0,
+    insurance: financials['9'] ?? 0,
+    mortgageInterest: financials['12'] ?? 0,
+    taxes: financials['16'] ?? 0,
+    depreciation: financials['18'] ?? 0,
+    hoaDues: financials['19'] ?? 0,
+    totalExpenses: financials['20'] ?? 0,
+    netIncomeLoss: financials['21'] ?? null,
+    extraordinaryAddBack: 0,
+    fairRentalDays: extract.fairRentalDays || 0,
+    expenseDetermination: extract.determination,
+    source: extract.documentId
+      ? { documentId: extract.documentId, pageIndex: extract.pageIndex, column: extract.column }
+      : undefined,
+  };
+}
+
+/** Group every Schedule E column by address so two tax years become year1 / year2. */
+function rentalPropertiesFromExtracts(
+  extracts: Array<ScheduleEPropertyExtract & { documentId?: string }>,
+): RentalProperty[] {
+  const grouped = new Map<string, ScheduleEPropertyExtract[]>();
+  for (const extract of extracts) {
+    const address = extract.address.trim();
+    const key = address
+      ? address.toLowerCase().replace(/\s+/g, ' ')
+      : `column-${extract.column}-p${extract.pageIndex}`;
+    const rows = grouped.get(key) ?? [];
+    rows.push(extract);
+    grouped.set(key, rows);
+  }
+
+  return [...grouped.values()].map((rows, index) => {
+    const byYear = new Map<number, ScheduleEPropertyExtract>();
+    for (const row of rows) {
+      byYear.set(row.year ?? 0, row);
+    }
+    const newestFirst = [...byYear.values()].sort((left, right) => (right.year ?? 0) - (left.year ?? 0));
+    const latest = newestFirst[0];
+    const prior = newestFirst[1];
+    const address = latest.address.trim() || `Schedule E ${latest.column} · page ${latest.pageIndex + 1}`;
+    const encompassPitia = pitiaFromApp(address);
+    return {
+      id: `live-e-${index + 1}`,
+      address,
+      propertyType: mapScheduleEPropertyType(latest.propertyType),
+      isSubjectProperty: false,
+      subjectMethod: 'SCHEDULE_E' as const,
+      marketRent: 0,
+      isPrimary2To4: false,
+      pitia: encompassPitia ?? null,
+      pitiaSource: encompassPitia !== undefined ? ('ENCOMPASS' as const) : null,
+      year1: rentalYearFromExtract(latest),
+      year2: prior ? rentalYearFromExtract(prior) : emptyRentalYear((latest.year ?? 1) - 1),
+    };
+  });
+}
+
 export default function UnderwriterSplitViewDemo({
   liveSession = null,
+  liveDocuments = [],
   source = 'demo',
   parseBusy = false,
   parseError = null,
   onParseFile,
+  onParseFiles,
   onUseDemo,
   onUseLive,
 }: {
   liveSession?: LiveParseSession | null;
+  liveDocuments?: LiveDocument[];
   source?: SplitViewSource;
   parseBusy?: boolean;
   parseError?: string | null;
   onParseFile?: (file: File) => void;
+  onParseFiles?: (files: File[]) => void;
   onUseDemo?: () => void;
   onUseLive?: () => void;
 } = {}) {
-  const isLive = source === 'live' && liveSession !== null;
+  const packet: LiveDocument[] = liveDocuments.length
+    ? liveDocuments
+    : liveSession
+      ? [{ id: 'single', sha256: '', file: liveSession.file, fileName: liveSession.fileName, result: liveSession.result }]
+      : [];
+  const isLive = source === 'live' && packet.length > 0;
   const viewer = usePdfViewer(2);
   const [livePageIndex, setLivePageIndex] = useState(0);
   const activePdfPage = viewer.currentPage;
   const setActivePdfPage = viewer.setPage;
   const mappedFields = useMemo(
-    () => (liveSession ? mapIncomeFields(liveSession.result) : []),
-    [liveSession?.result.transaction_id],
+    () =>
+      packet.flatMap((doc) =>
+        mapIncomeFields(doc.result).map((field) => ({ ...field, documentId: doc.id })),
+      ),
+    [packet.map((doc) => doc.id).join('|')],
   );
+  const scheduleEExtracts = useMemo(() => allScheduleEExtracts(packet), [packet.map((doc) => doc.id).join('|')]);
 
   // 1. Navigation & View States
   const [activeTab, setActiveTab] = useState<IncomeTab>('PAYSTUB_RECONCILIATION');
@@ -271,28 +480,22 @@ export default function UnderwriterSplitViewDemo({
 
     if (!isLive) return allTabs; // Demo mode shows all tabs for walkthrough
 
-    const formTokens = [
-      ...mappedFields.map((f) => f.form),
-      ...(liveSession?.result.pages.flatMap((page) => page.formIds) ?? []),
-      ...Object.keys(liveSession?.result.classifications ?? {}),
-    ];
-    const hasDoc = (...patterns: RegExp[]) => formTokens.some((token) => patterns.some((pattern) => pattern.test(token)));
+    const packetKinds = packet.flatMap((doc) => kindsOf(doc));
+    const hasKind = (...want: Array<(typeof packetKinds)[number]>) => want.some((kind) => packetKinds.includes(kind));
 
     return allTabs.filter(([id]) => {
       if (id === 'ENCOMPASS_SYNC') return true;
-      if (id === 'PAYSTUB_RECONCILIATION') {
-        return hasDoc(/W-?2/i, /Paystub/i, /pay stub/i, /Earnings statement/i, /WVOE/i, /Verification of Employment/i);
-      }
-      if (id === 'SCHEDULE_C') return hasDoc(/Schedule C/i);
-      if (id === 'SCORP') return hasDoc(/1120-?S/i, /S-Corporation/i);
-      if (id === 'CCORP') return hasDoc(/1120 \(C-Corporation/i, /C-Corporation Return/i) && !hasDoc(/1120-?S/i);
-      if (id === 'PARTNERSHIP') return hasDoc(/Form 1065/i, /K-1 \(1065\)/i);
-      if (id === 'SCHEDULE_F') return hasDoc(/Schedule F/i);
-      if (id === 'ASSET_INCOME') return hasDoc(/Schedule B/i, /Schedule D/i);
-      if (id === 'SCHEDULE_E') return hasDoc(/Schedule E/i);
+      if (id === 'PAYSTUB_RECONCILIATION') return true;
+      if (id === 'SCHEDULE_C') return hasKind('schedule-c');
+      if (id === 'SCORP') return hasKind('scorp');
+      if (id === 'CCORP') return hasKind('ccorp');
+      if (id === 'PARTNERSHIP') return hasKind('partnership');
+      if (id === 'SCHEDULE_F') return hasKind('schedule-f');
+      if (id === 'ASSET_INCOME') return hasKind('asset');
+      if (id === 'SCHEDULE_E') return hasKind('schedule-e');
       return false;
     });
-  }, [isLive, mappedFields, liveSession]);
+  }, [isLive, packet]);
 
   // Ensure active tab is valid
   React.useEffect(() => {
@@ -305,6 +508,55 @@ export default function UnderwriterSplitViewDemo({
   /** Left-pane document style: interactive facsimile or the real filled source PDF. */
   const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('pdf');
   const [wageDocKind, setWageDocKind] = useState<'paystub' | 'w2'>('paystub');
+  const [inspectDocId, setInspectDocId] = useState<string | null>(null);
+  const packetKey = packet.map((doc) => doc.id).join('|');
+  const [parserEngine, setParserEngine] = useState('checking…');
+  useEffect(() => {
+    void fetch('/health')
+      .then((response) => response.json())
+      .then((payload: { engine?: string }) => setParserEngine(payload.engine || 'unknown'))
+      .catch(() => setParserEngine('offline'));
+  }, []);
+  const prevPacketKeyRef = useRef('');
+  const skipPageResetRef = useRef(false);
+  useEffect(() => {
+    if (!isLive || packetKey === prevPacketKeyRef.current) {
+      prevPacketKeyRef.current = packetKey;
+      return;
+    }
+    const addedId = packetKey.split('|').filter((id) => id && !prevPacketKeyRef.current.split('|').includes(id)).pop();
+    prevPacketKeyRef.current = packetKey;
+    const added = packet.find((doc) => doc.id === addedId);
+    if (!added) return;
+    const next = tabForKinds(kindsOf(added));
+    setActiveTab(next.tab);
+    if (next.wageDocKind) setWageDocKind(next.wageDocKind);
+    setInspectDocId(added.id);
+    setLivePageIndex(firstPageForKind(added.result, kindsOf(added)[0]));
+  }, [isLive, packetKey]);
+  const canvasDoc = pickDocumentForTab(packet, activeTab as WorkspaceTab, wageDocKind, inspectDocId);
+  const canvasFields = mappedFields.filter((field) => !canvasDoc || field.documentId === canvasDoc.id);
+  const hasLivePaystub = packet.some((doc) => kindsOf(doc).includes('paystub') || kindsOf(doc).includes('unknown'));
+  const hasLiveW2 = packet.some((doc) => kindsOf(doc).includes('w2'));
+  useEffect(() => {
+    if (!isLive || (activeTab !== 'PAYSTUB_RECONCILIATION' && activeTab !== 'ENCOMPASS_SYNC')) return;
+    if (wageDocKind === 'paystub' && !hasLivePaystub && hasLiveW2) setWageDocKind('w2');
+    if (wageDocKind === 'w2' && !hasLiveW2 && hasLivePaystub) setWageDocKind('paystub');
+  }, [isLive, activeTab, wageDocKind, hasLivePaystub, hasLiveW2]);
+  useEffect(() => {
+    if (!isLive || !canvasDoc) return;
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
+    const want =
+      activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC'
+        ? wageDocKind
+        : activeTab === 'SCHEDULE_E'
+          ? 'schedule-e'
+          : kindsOf(canvasDoc)[0];
+    setLivePageIndex(firstPageForKind(canvasDoc.result, want));
+  }, [isLive, canvasDoc?.id, activeTab, wageDocKind]);
   const [twoYearSchC, setTwoYearSchC] = useState(false);
   const [twoYearScorp, setTwoYearScorp] = useState(false);
   const [twoYearCCorp, setTwoYearCCorp] = useState(false);
@@ -339,9 +591,9 @@ export default function UnderwriterSplitViewDemo({
         year2: { year: 2024, rentsReceived: 34000, insurance: 1750, mortgageInterest: 7400, taxes: 4200, depreciation: 5200, hoaDues: 2400, totalExpenses: 22100, netIncomeLoss: 11900, extraordinaryAddBack: 0, fairRentalDays: 0 },
       },
     ];
-    // Prefill PITIA from Encompass loan details when the REO section has the property
+    // Prefill PITIA from the application REO parse when the property is on the 1003.
     return props.map((p) => {
-      const encompassPitia = ENCOMPASS_REO_PITIA[p.address];
+      const encompassPitia = pitiaFromApp(p.address);
       return {
         ...p,
         pitia: encompassPitia ?? null,
@@ -349,6 +601,17 @@ export default function UnderwriterSplitViewDemo({
       };
     });
   });
+
+  useEffect(() => {
+    const extracts = scheduleEExtracts;
+    if (!isLive || !extracts.length) return;
+    const next = rentalPropertiesFromExtracts(extracts);
+    setRentalProperties(next);
+    setTwoYearRental(next.some((property) => {
+      const prior = property.year2;
+      return Boolean(prior.rentsReceived || prior.totalExpenses || prior.netIncomeLoss || prior.fairRentalDays);
+    }));
+  }, [isLive, scheduleEExtracts]);
 
   const [w2BaseChoices, setW2BaseChoices] = useState<Record<string, string | null>>({});
   const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
@@ -623,7 +886,6 @@ export default function UnderwriterSplitViewDemo({
   const [partnershipPnl, setPartnershipPnl] = useState<YtdPnl>(EMPTY_PNL);
 
   const governmentTwoYear = loanProgram === 'FHA' || loanProgram === 'VA' || loanProgram === 'USDA';
-  const twoYearCaption = loanProgram === 'CONVENTIONAL' ? 'FNMA/Freddie default: 1 year' : 'FHA/VA default: 2 years';
 
   useEffect(() => {
     setTwoYearRental(governmentTwoYear);
@@ -635,12 +897,124 @@ export default function UnderwriterSplitViewDemo({
   }, [governmentTwoYear]);
 
   useEffect(() => {
-    if (!isLive || !liveSession) return;
-    const documentLabels = Object.values(liveSession.result.classifications).flat().join(' ');
+    if (!isLive || !packet.length) return;
+    const documentLabels = packet.flatMap((doc) => Object.values(doc.result.classifications).flat()).join(' ');
     if (/USDA|Rural Development|3555/i.test(documentLabels)) setLoanProgram('USDA');
     else if (/FHA|HUD-92800|HUD 92900/i.test(documentLabels)) setLoanProgram('FHA');
     else if (/VA|Notice of Value|26-7/i.test(documentLabels)) setLoanProgram('VA');
-  }, [isLive, liveSession?.result.transaction_id]);
+  }, [isLive, packet.map((doc) => doc.id).join('|')]);
+
+  useEffect(() => {
+    if (!isLive) return;
+    const kinds = new Set(packet.flatMap((doc) => kindsOf(doc)));
+    const wage = liveWagePatch(mappedFields);
+    setW2Employers([
+      emptyW2Employer('w2-live', {
+        ...wage,
+        employerName: wage?.employerName || 'Parsed employer',
+        wageDocSource: wage?.wageDocSource ?? 'PAYSTUB',
+      }),
+    ]);
+    setActiveW2EmployerId('w2-live');
+    const prior = livePrevW2Patch(mappedFields);
+    if (prior) {
+      setPrevEmployerW2({
+        employerName: prior.employerName || 'Prior employer',
+        ein: prior.ein || '',
+        year: new Date().getFullYear() - 1,
+        box1Wages: prior.box1Wages ?? 0,
+        box12Bonus: 0,
+        box14Overtime: 0,
+      });
+      setMergePreviousEmployerVariable(true);
+    } else {
+      setPrevEmployerW2({ employerName: '', ein: '', year: 0, box1Wages: 0, box12Bonus: 0, box14Overtime: 0 });
+      setMergePreviousEmployerVariable(false);
+    }
+
+    const schC = liveSchCPatch(mappedFields);
+    setSchCEntities([
+      {
+        id: 'schc-live',
+        businessName: schC ? 'Parsed Schedule C' : 'No Schedule C in packet',
+        ein: '',
+        years: [
+          { ...emptySchCYear(2025), ...schC },
+          emptySchCYear(2024),
+        ],
+      },
+    ]);
+    setActiveSchCId('schc-live');
+
+    const scorp = liveSCorpPatch(mappedFields);
+    const { ownershipPct: scorpPct, ...scorpYear } = scorp ?? {};
+    setSCorpEntities([
+      {
+        id: 'scorp-live',
+        businessName: scorp ? 'Parsed S-Corp' : 'No S-Corp in packet',
+        ein: '',
+        ownershipPct: scorpPct ?? 100,
+        hasStableDistributions: true,
+        scheduleL: { ...EMPTY_SCHEDULE_L },
+        years: [{ ...emptyCorpYear(2025), ...scorpYear }, emptyCorpYear(2024)],
+      },
+    ]);
+    setActiveSCorpId('scorp-live');
+
+    const partnership = livePartnershipPatch(mappedFields);
+    const { profitPctEnd, capitalPctEnd, ownershipPct: _ignored, ...partnershipYear } = partnership ?? {};
+    setPartnershipEntities([
+      {
+        id: 'partnership-live',
+        businessName: partnership ? 'Parsed partnership' : 'No partnership in packet',
+        ein: '',
+        profitPctEnd: profitPctEnd ?? 100,
+        capitalPctEnd: capitalPctEnd ?? 100,
+        hasStableDistributions: true,
+        scheduleL: { ...EMPTY_SCHEDULE_L },
+        years: [{ ...emptyCorpYear(2025), ...partnershipYear }, emptyCorpYear(2024)],
+      },
+    ]);
+    setActivePartnershipId('partnership-live');
+
+    const ccorp = liveCCorpPatch(mappedFields);
+    setCCorpEntities([
+      {
+        id: 'ccorp-live',
+        businessName: ccorp ? 'Parsed C-Corp' : 'No C-Corp in packet',
+        ein: '',
+        ownershipPct: 100,
+        scheduleL: { ...EMPTY_SCHEDULE_L },
+        years: [{ ...emptyCCorpYear(2025), ...ccorp }, emptyCCorpYear(2024)],
+      },
+    ]);
+    setActiveCCorpId('ccorp-live');
+
+    const farm = liveFarmPatch(mappedFields);
+    setScheduleFEntities([
+      {
+        id: 'farm-live',
+        businessName: farm ? 'Parsed farm' : 'No Schedule F in packet',
+        ein: '',
+        years: [{ ...emptyFarmYear(2025), ...farm }, emptyFarmYear(2024)],
+      },
+    ]);
+    setActiveScheduleFId('farm-live');
+
+    const asset = liveAssetPatch(mappedFields);
+    setAssetIncomeYears([
+      { year: 2025, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0, ...asset },
+      { year: 2024, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0 },
+    ]);
+    setAssetIncomeIncluded(Boolean(asset) || kinds.has('asset'));
+    if (!kinds.has('schedule-e') && scheduleEExtracts.length === 0) {
+      setRentalProperties([]);
+    }
+    setSchCPnl(EMPTY_PNL);
+    setSCorpPnl(EMPTY_PNL);
+    setCCorpPnl(EMPTY_PNL);
+    setPartnershipPnl(EMPTY_PNL);
+  }, [isLive, mappedFields]);
 
   // Borrower Core Metadata Reference
   const borrowerMetadata = {
@@ -1311,6 +1685,53 @@ export default function UnderwriterSplitViewDemo({
       rentalChosen.monthly,
   };
 
+  const summarySourceLines = compactSourceLines([
+    { source: 'W-2 base', method: w2BaseChosen.label, monthly: form1084CashFlow.w2BaseMonthly },
+    { source: 'W-2 variable', method: w2VarChosen.label, monthly: form1084CashFlow.w2VariableMonthly },
+    { source: 'Schedule C', method: schCChosen.label, monthly: form1084CashFlow.qualifyingMonthlySelfEmployed },
+    { source: 'S-Corp', method: sCorpChosen.label, monthly: form1084CashFlow.sCorpShareholderDraw },
+    { source: 'C-Corp', method: cCorpChosen.label, monthly: form1084CashFlow.cCorpMonthly },
+    { source: 'Partnership', method: partnershipChosen.label, monthly: form1084CashFlow.partnershipMonthly },
+    { source: 'Schedule F', method: scheduleFChosen.label, monthly: form1084CashFlow.scheduleFMonthly },
+    { source: 'Asset income', method: assetIncomeChosen.label, monthly: form1084CashFlow.assetIncomeMonthly },
+  ]);
+
+  const chosenRentalRouting = rentalPicks.routingByOption[rentalChosen.id] ?? rentalFlow.routing;
+  const rentalSchedule = {
+    properties: rentalProperties.map((property) => {
+      const result = rentalFlow.properties.find((row) => row.id === property.id);
+      return {
+        address: property.address,
+        rent: property.year1.rentsReceived,
+        form1038: result?.netMonthly ?? 0,
+        pitia: property.pitia,
+      };
+    }),
+    toIncome: chosenRentalRouting.incomeMonthly,
+    toLiability: chosenRentalRouting.liabilityDebtMonthly,
+    toHousing: chosenRentalRouting.housingExpenseAdjustment,
+  };
+
+  const printIncomeSummary = async () => {
+    const response = await fetch('/api/underwrite/summary-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        loanId: borrowerMetadata.loanId,
+        primaryBorrowerName: borrowerMetadata.borrowerName,
+        programUsed: loanProgram,
+        calculatedIncome: form1084CashFlow.finalTotalQualifyingMonthly,
+        sourceLines: summarySourceLines,
+        rentalSchedule,
+        programNote: qualifyingProgramNote(loanProgram),
+      }),
+    });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+  };
+
   const usdaSelfEmployment = useMemo(
     () => [
       ...schCEntities.map((entity) => ({
@@ -1456,13 +1877,25 @@ export default function UnderwriterSplitViewDemo({
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
-  const handleInspectField = (fieldId: string) => {
+  const handleInspectField = (fieldId: string, documentId?: string) => {
+    skipPageResetRef.current = true;
     setHighlightFieldId(fieldId);
     setDocMode('pdf');
-    if (fieldId.startsWith('w2-')) setWageDocKind('w2');
+    if (fieldId.startsWith('w2-') || fieldId.startsWith('ent2-')) {
+      if (fieldId.startsWith('w2-')) setWageDocKind('w2');
+      if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
+    }
     if (fieldId.startsWith('ps-')) setWageDocKind('paystub');
-    const live = mappedFields.find((field) => field.id === fieldId || field.sourceFieldId === fieldId);
+    const live = mappedFields.find(
+      (field) =>
+        (field.id === fieldId || field.sourceFieldId === fieldId) &&
+        (!documentId || field.documentId === documentId),
+    );
+    if (live?.documentId) setInspectDocId(live.documentId);
+    else if (documentId) setInspectDocId(documentId);
     if (live) setLivePageIndex(live.pageIndex);
+    const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
+    if (!live && fromEntity) setLivePageIndex(Number(fromEntity[1]));
     const target = fieldCoordinatesMapping.find((f) => f.id === fieldId);
     if (target) setActivePdfPage(target.boxCoordinates.page);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
@@ -1484,16 +1917,7 @@ export default function UnderwriterSplitViewDemo({
 
   const addW2Employer = () => {
     const id = `w2-${crypto.randomUUID()}`;
-    setW2Employers((entries) => [
-      ...entries,
-      {
-        id, employerName: `New Employer ${entries.length + 1}`, ein: '', employmentStartDate: '',
-        role: 'SECONDARY', monthsAtJob: 12, payFrequency: 'SEMIMONTHLY', wageDocSource: 'PAYSTUB',
-        hourlyRate: 0, weeklyHours: 40, currentPeriodBasePay: 0, baseYtd: 0, bonusYtd: 0, overtimeYtd: 0, otherYtd: 0,
-        wvoeBonus: 0, wvoeOvertime: 0, wvoeOther: 0, wvoeMonths: 12,
-        w2Year1Box1: 0, w2Year1Bonus: 0, w2Year1Ot: 0, w2Year2Box1: 0, w2Year2Bonus: 0, w2Year2Ot: 0,
-      },
-    ]);
+    setW2Employers((entries) => [...entries, emptyW2Employer(id, { employerName: `New Employer ${entries.length + 1}`, role: 'SECONDARY' })]);
     setActiveW2EmployerId(id);
   };
 
@@ -1613,19 +2037,20 @@ export default function UnderwriterSplitViewDemo({
         ytd: currentBaseYtd,
       },
       live:
-        isLive && liveSession
+        isLive && canvasDoc
           ? {
-              file: liveSession.file,
-              fileName: liveSession.fileName,
+              file: canvasDoc.file,
+              fileName: canvasDoc.fileName,
               pageIndex: livePageIndex,
-              pageCount: liveSession.result.total_pages_scanned,
-              fields: mappedFields,
+              pageCount: canvasDoc.result.total_pages_scanned,
+              fields: canvasFields,
             }
           : null,
     }),
     [
       isLive,
       liveSession,
+      canvasDoc,
       activeTab,
       canvasYearIndex,
       twoYearForCanvas,
@@ -1641,6 +2066,7 @@ export default function UnderwriterSplitViewDemo({
       currentBaseYtd,
       livePageIndex,
       mappedFields,
+      canvasFields,
     ],
   );
 
@@ -1800,7 +2226,7 @@ export default function UnderwriterSplitViewDemo({
         const next = { ...p, ...patch };
         // Address changed: re-check Encompass loan details for a PITIA unless the UW keyed one manually
         if (patch.address !== undefined && !next.isSubjectProperty && next.pitiaSource !== 'UW') {
-          const encompassPitia = ENCOMPASS_REO_PITIA[patch.address];
+          const encompassPitia = pitiaFromApp(patch.address);
           if (encompassPitia !== undefined) {
             next.pitia = encompassPitia;
             next.pitiaSource = 'ENCOMPASS';
@@ -1813,7 +2239,7 @@ export default function UnderwriterSplitViewDemo({
             next.pitia = ENCOMPASS_SUBJECT_PROPOSED_PITIA;
             next.pitiaSource = 'ENCOMPASS';
           } else {
-            const encompassPitia = ENCOMPASS_REO_PITIA[next.address];
+            const encompassPitia = pitiaFromApp(next.address);
             next.pitia = encompassPitia ?? null;
             next.pitiaSource = encompassPitia !== undefined ? 'ENCOMPASS' : null;
           }
@@ -1972,7 +2398,7 @@ export default function UnderwriterSplitViewDemo({
               B2B Professional Income Verification Workspace
             </h1>
             <span className="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold uppercase">
-              ZDR · v11
+              ZDR · {typeof __APP_REVISION__ === 'string' ? __APP_REVISION__ : 'dev'} · {parserEngine}
             </span>
           </div>
           <p className="text-sm text-slate-500 mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -2001,6 +2427,14 @@ export default function UnderwriterSplitViewDemo({
               <option value="USDA">USDA Rural Development</option>
             </select>
           </label>
+          <button
+            type="button"
+            onClick={() => void printIncomeSummary()}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <Printer className="h-4 w-4" />
+            Print summary
+          </button>
           {!docPopout ? (
             <button
               type="button"
@@ -2027,15 +2461,19 @@ export default function UnderwriterSplitViewDemo({
             <input
               type="file"
               accept="application/pdf"
+              multiple
               className="hidden"
               disabled={parseBusy}
               onChange={(event) => {
-                const next = event.target.files?.[0];
-                if (next) onParseFile?.(next);
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = '';
+                if (!files.length) return;
+                if (onParseFiles) onParseFiles(files);
+                else files.forEach((file) => onParseFile?.(file));
               }}
             />
           </label>
-          {liveSession ? (
+          {packet.length > 0 ? (
             <button
               type="button"
               onClick={() => (isLive ? onUseDemo?.() : onUseLive?.())}
@@ -2052,6 +2490,30 @@ export default function UnderwriterSplitViewDemo({
           </button>
         </div>
         {parseError ? <p className="w-full text-xs text-rose-600">{parseError}</p> : null}
+        {isLive && packet.length > 0 ? (
+          <div className="flex w-full flex-wrap gap-1.5">
+            {packet.map((doc) => (
+              <button
+                key={doc.id}
+                type="button"
+                onClick={() => {
+                  const next = tabForKinds(kindsOf(doc));
+                  setActiveTab(next.tab);
+                  if (next.wageDocKind) setWageDocKind(next.wageDocKind);
+                  setInspectDocId(doc.id);
+                  setLivePageIndex(firstPageForKind(doc.result, kindsOf(doc)[0]));
+                }}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                  canvasDoc?.id === doc.id
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+                }`}
+              >
+                {doc.fileName}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
@@ -2087,18 +2549,24 @@ export default function UnderwriterSplitViewDemo({
                     </button>
                   </div>
                 )}
-                {!isLive && fixturePdf && (activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && (
+                {(activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && (
                   <div className="flex rounded-md border border-slate-200 p-0.5">
                     <button
                       type="button"
-                      onClick={() => setWageDocKind('paystub')}
+                      onClick={() => {
+                        setWageDocKind('paystub');
+                        setInspectDocId(null);
+                      }}
                       className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${wageDocKind === 'paystub' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
                     >
                       Paystub
                     </button>
                     <button
                       type="button"
-                      onClick={() => setWageDocKind('w2')}
+                      onClick={() => {
+                        setWageDocKind('w2');
+                        setInspectDocId(null);
+                      }}
                       className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${wageDocKind === 'w2' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
                     >
                       W-2
@@ -2127,16 +2595,20 @@ export default function UnderwriterSplitViewDemo({
               </div>
             </div>
 
-            {isLive && liveSession ? (
+            {isLive && canvasDoc ? (
               <PdfPagePreview
-                file={liveSession.file}
+                file={canvasDoc.file}
                 pageIndex={livePageIndex}
-                pageCount={liveSession.result.total_pages_scanned}
-                fields={mappedFields}
+                pageCount={canvasDoc.result.total_pages_scanned}
+                fields={canvasFields}
                 selectedFieldId={highlightFieldId}
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
               />
+            ) : isLive ? (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-500">
+                No {activeTab === 'PAYSTUB_RECONCILIATION' && wageDocKind === 'w2' ? 'W-2' : activeTab === 'PAYSTUB_RECONCILIATION' ? 'paystub' : 'matching'} PDF on file for this tab. Load live PDF keeps each document — it does not replace the last one.
+              </p>
             ) : docMode === 'pdf' && fixturePdf ? (
               <div className="space-y-2">
                 {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
@@ -2320,6 +2792,7 @@ export default function UnderwriterSplitViewDemo({
                 type="button"
                 onClick={() => {
                   setActiveTab(id);
+                  setInspectDocId(null);
                   setHighlightFieldId(null);
                   setCanvasYearIndex(0);
                 }}
@@ -2333,16 +2806,40 @@ export default function UnderwriterSplitViewDemo({
             ))}
           </div>
 
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-indigo-100 bg-white p-3 md:grid-cols-5">
+            {([
+              ['W-2 base', form1084CashFlow.w2BaseMonthly],
+              ['W-2 variable', form1084CashFlow.w2VariableMonthly],
+              ['Schedule C', form1084CashFlow.qualifyingMonthlySelfEmployed],
+              ['S-Corp', form1084CashFlow.sCorpShareholderDraw],
+              ['C-Corp', form1084CashFlow.cCorpMonthly],
+              ['Partnership', form1084CashFlow.partnershipMonthly],
+              ['Schedule F', form1084CashFlow.scheduleFMonthly],
+              ['Assets', form1084CashFlow.assetIncomeMonthly],
+              ['Rental', form1084CashFlow.rentalMonthly],
+            ] as Array<[string, number]>)
+              .filter(([, monthly]) => !isLive || monthly > 0)
+              .map(([label, monthly]) => (
+                <div key={label} className="rounded-md bg-slate-50 px-2 py-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+                  <p className="font-mono text-sm font-black text-slate-800">{usd(monthly)}/mo</p>
+                </div>
+              ))}
+            <div className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5">
+              <p className="text-[9px] font-black uppercase tracking-wider text-indigo-500">Total qualifying</p>
+              <p className="font-mono text-sm font-black text-indigo-900">{usd(form1084CashFlow.finalTotalQualifyingMonthly)}/mo</p>
+            </div>
+          </div>
+
           {/* ==================== TAB 1: 4-WAY BASE WAGE RECONCILIATION ==================== */}
           {activeTab === 'PAYSTUB_RECONCILIATION' && (
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-6">
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">4-Way Base Wage Reconciliation</h3>
-                  <p className="text-xs text-slate-400 mt-1">Cross-references paystub hourly pay rates against annualized parameters and YTD balances</p>
                 </div>
                 <span className="text-xs font-bold uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
-                  Verified Base: $3,600.00 / Semi-Monthly
+                  Verified Base: {usd(currentPeriodBasePay)} / {activeW2Employer.payFrequency === 'WEEKLY' ? 'Weekly' : activeW2Employer.payFrequency === 'BIWEEKLY' ? 'Biweekly' : activeW2Employer.payFrequency === 'MONTHLY' ? 'Monthly' : 'Semi-Monthly'}
                 </span>
               </div>
 
@@ -2395,22 +2892,34 @@ export default function UnderwriterSplitViewDemo({
                     <option value="MONTHLY">Monthly</option>
                   </select>
                 </label>
-                <label className="font-bold text-slate-500">
+                <label className="font-bold text-slate-500 md:col-span-2">
                   Wage source
-                  <select
-                    value={activeW2Employer.wageDocSource}
-                    onChange={(event) => patchW2Employer({ wageDocSource: event.target.value as W2Employer['wageDocSource'] })}
-                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
-                  >
-                    <option value="PAYSTUB">Paystub + W-2 (current YTD)</option>
-                    <option value="WVOE">WVOE (historical variable)</option>
-                  </select>
+                  <div className="mt-1 flex rounded-md border border-slate-300 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => patchW2Employer({ wageDocSource: 'PAYSTUB' })}
+                      className={`flex-1 rounded px-2 py-1.5 text-[10px] font-black uppercase ${
+                        activeW2Employer.wageDocSource === 'PAYSTUB' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      Paystub + W-2
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patchW2Employer({ wageDocSource: 'WVOE' })}
+                      className={`flex-1 rounded px-2 py-1.5 text-[10px] font-black uppercase ${
+                        activeW2Employer.wageDocSource === 'WVOE' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      WVOE
+                    </button>
+                  </div>
                 </label>
               </div>
 
               {/* Core interactive variable modification boxes */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
-                <div data-qa-field="ps-hourly-rate" className={highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-hourly-rate')}>
+                <div data-qa-field="ps-hourly-rate" className={`cursor-pointer ${highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hourly-rate')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Hourly Rate of Pay</label>
                   <input
                     type="number"
@@ -2418,36 +2927,30 @@ export default function UnderwriterSplitViewDemo({
                     onChange={(e) => setCurrentHourlyRate(Number(e.target.value))}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button onClick={() => handleInspectField('ps-hourly-rate')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="ps-hours-week" className={highlightFieldId === 'ps-hours-week' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-hours-week')}>
+                <div data-qa-field="ps-hours-week" className={`cursor-pointer ${highlightFieldId === 'ps-hours-week' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hours-week')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Standard Weekly Hours</label>
                   <input
                     type="number"
                     value={currentWeeklyHours}
                     onChange={(e) => setCurrentWeeklyHours(Number(e.target.value))}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button onClick={() => handleInspectField('ps-hours-week')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="ps-current-base" className={highlightFieldId === 'ps-current-base' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-current-base')}>
+                <div data-qa-field="ps-current-base" className={`cursor-pointer ${highlightFieldId === 'ps-current-base' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-current-base')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Current Period Base Pay</label>
                   <input
                     type="number"
                     value={currentPeriodBasePay}
                     onChange={(e) => setCurrentPeriodBasePay(Number(e.target.value))}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button onClick={() => handleInspectField('ps-current-base')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="ps-base-ytd" className={highlightFieldId === 'ps-base-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('ps-base-ytd')}>
+                <div data-qa-field="ps-base-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-base-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-base-ytd')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Base Wages YTD</label>
                   <input
                     type="number"
                     value={currentBaseYtd}
@@ -2456,22 +2959,16 @@ export default function UnderwriterSplitViewDemo({
                       currentBaseYtd < 50000 ? 'border-rose-300 bg-rose-50' : 'border-slate-300'
                     }`}
                   />
-                  <button onClick={() => handleInspectField('ps-base-ytd')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
-                <div data-qa-field="w2-box1" className={highlightFieldId === 'w2-box1' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box1')}>
+                <div data-qa-field="w2-box1" className={`cursor-pointer ${highlightFieldId === 'w2-box1' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box1')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 1</label>
                   <input
                     type="number"
-                    value={prevEmployerW2.box1Wages}
-                    onChange={(e) => setPrevEmployerW2({ ...prevEmployerW2, box1Wages: Number(e.target.value) })}
+                    value={activeW2Employer.w2Year1Box1}
+                    onChange={(e) => patchW2Employer({ w2Year1Box1: Number(e.target.value) })}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
-                  <button type="button" onClick={() => handleInspectField('w2-box1')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                    <Eye className="h-3 w-3" /> Inspect Coordinates
-                  </button>
                 </div>
 
                 <div>
@@ -2565,8 +3062,39 @@ export default function UnderwriterSplitViewDemo({
                 <div className="space-y-4">
                   <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5 border-b pb-1">
                     <Activity className="h-4 w-4 text-indigo-500" />
-                    Current Job YTD Variable Extractions
+                    {activeW2Employer.wageDocSource === 'WVOE' ? 'WVOE variable history' : 'Current Job YTD Variable Extractions'}
                   </h4>
+                  {activeW2Employer.wageDocSource === 'WVOE' ? (
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE months</label>
+                      <input
+                        type="number"
+                        value={activeW2Employer.wvoeMonths}
+                        onChange={(e) => patchW2Employer({ wvoeMonths: Number(e.target.value) })}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE bonus</label>
+                      <input
+                        type="number"
+                        value={activeW2Employer.wvoeBonus}
+                        onChange={(e) => patchW2Employer({ wvoeBonus: Number(e.target.value) })}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE overtime</label>
+                      <input
+                        type="number"
+                        value={activeW2Employer.wvoeOvertime}
+                        onChange={(e) => patchW2Employer({ wvoeOvertime: Number(e.target.value) })}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  ) : (
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Bonus Income YTD</label>
@@ -2587,6 +3115,7 @@ export default function UnderwriterSplitViewDemo({
                       />
                     </div>
                   </div>
+                  )}
                   <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">
                     <span className="font-semibold text-slate-500">Current Monthly Variable Avg:</span>
                     <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo</span>
@@ -2600,7 +3129,7 @@ export default function UnderwriterSplitViewDemo({
                     Prior Job 2025 W-2 Variable Extractions
                   </h4>
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div data-qa-field="w2-box12-bonus" className={highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box12-bonus')}>
+                    <div data-qa-field="w2-box12-bonus" className={`cursor-pointer ${highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box12-bonus')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 12 Bonus History</label>
                       <input
                         type="number"
@@ -2609,11 +3138,8 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                         disabled={!mergePreviousEmployerVariable}
                       />
-                      <button type="button" onClick={() => handleInspectField('w2-box12-bonus')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                        <Eye className="h-3 w-3" /> Inspect Coordinates
-                      </button>
                     </div>
-                    <div data-qa-field="w2-box14-ot" className={highlightFieldId === 'w2-box14-ot' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''} onClick={() => handleInspectField('w2-box14-ot')}>
+                    <div data-qa-field="w2-box14-ot" className={`cursor-pointer ${highlightFieldId === 'w2-box14-ot' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box14-ot')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 14 Overtime History</label>
                       <input
                         type="number"
@@ -2622,9 +3148,6 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                         disabled={!mergePreviousEmployerVariable}
                       />
-                      <button type="button" onClick={() => handleInspectField('w2-box14-ot')} className="text-[10px] text-indigo-500 hover:underline mt-1 flex items-center gap-1">
-                        <Eye className="h-3 w-3" /> Inspect Coordinates
-                      </button>
                     </div>
                   </div>
                   <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">
@@ -2649,13 +3172,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'SCHEDULE_C' && (
             <SelfEmployedPanel
               title="Schedule C · sole proprietor"
-              subtitle="Form 1084 cash flow. No Schedule L liquidity test — that applies to 1120-S / 1065 only."
               twoYears={twoYearSchC}
               onTwoYears={(next) => {
                 setTwoYearSchC(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={schCPicks.options}
               recommendedId={schCPicks.recommendedId}
               reason={schCPicks.reason}
@@ -2710,13 +3231,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'SCORP' && (
             <SelfEmployedPanel
               title="S-Corp · Form 1120-S / K-1"
-              subtitle="Two-year K-1 analysis first. Schedule L liquidity sits underneath — if it fails, only officer W-2 qualifies."
               twoYears={twoYearScorp}
               onTwoYears={(next) => {
                 setTwoYearScorp(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={sCorpPicks.options}
               recommendedId={sCorpPicks.recommendedId}
               reason={sCorpPicks.reason}
@@ -2804,13 +3323,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'CCORP' && (
             <SelfEmployedPanel
               title="C-Corp · Form 1120"
-              subtitle="Taxable income less tax, plus non-cash add-backs, times ownership. Schedule L quick ratio ≥ 1.0 required at ≥25%. W-2 and dividends still count if liquidity fails."
               twoYears={twoYearCCorp}
               onTwoYears={(next) => {
                 setTwoYearCCorp(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={cCorpPicks.options}
               recommendedId={cCorpPicks.recommendedId}
               reason={cCorpPicks.reason}
@@ -2873,13 +3390,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'PARTNERSHIP' && (
             <SelfEmployedPanel
               title="Partnership · Form 1065 / K-1"
-              subtitle="Two-year K-1 first. Schedule L liquidity below. Guaranteed payments still count if liquidity fails."
               twoYears={twoYearPartnership}
               onTwoYears={(next) => {
                 setTwoYearPartnership(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={partnershipPicks.options}
               recommendedId={partnershipPicks.recommendedId}
               reason={partnershipPicks.reason}
@@ -3002,13 +3517,11 @@ export default function UnderwriterSplitViewDemo({
           {activeTab === 'SCHEDULE_F' && (
             <SelfEmployedPanel
               title="Schedule F · farm income"
-              subtitle="Farm profit or loss with Form 1084 non-cash and nonrecurring adjustments, tracked separately for each farm."
               twoYears={twoYearScheduleF}
               onTwoYears={(next) => {
                 setTwoYearScheduleF(next);
                 if (!next) setCanvasYearIndex(0);
               }}
-              twoYearCaption={twoYearCaption}
               choiceOptions={scheduleFPicks.options}
               recommendedId={scheduleFPicks.recommendedId}
               reason={scheduleFPicks.reason}
@@ -3072,7 +3585,6 @@ export default function UnderwriterSplitViewDemo({
                       <Coins className="h-5 w-5 text-amber-600" />
                       Interest, Dividends & Capital Gains
                     </h3>
-                    <p className="mt-1 text-xs text-slate-500">Schedule B / Schedule D values remain visible whether or not the UW elects to qualify them.</p>
                   </div>
                   <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
                     <button type="button" onClick={() => setTwoYearAssetIncome(false)} className={`rounded px-2 py-1 text-[10px] font-black uppercase ${!twoYearAssetIncome ? 'bg-slate-900 text-white' : 'text-slate-500'}`}>1 year</button>
@@ -3136,14 +3648,10 @@ export default function UnderwriterSplitViewDemo({
                     <Home className="h-5 w-5 text-indigo-600" />
                     Rental Income · Schedule E Page 1
                   </h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Form 1038 / 1038A · Line 21 net + Insurance (L9) + Mortgage interest (L12) + Taxes (L16) + Depreciation (L18) + HOA (L19) + UW extraordinary ÷ rental months (L2) − PITIA
-                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Loan Program Badge */}
                   <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-[10px] font-black uppercase text-indigo-700">
-                    {borrowerMetadata.loanProgram} Rules
+                    {borrowerMetadata.loanProgram}
                   </span>
                   {/* 1 / 2 year toggle */}
                   <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
@@ -3161,7 +3669,6 @@ export default function UnderwriterSplitViewDemo({
                     >
                       2 years
                     </button>
-                    <span className="hidden text-[10px] text-slate-500 sm:inline">{twoYearCaption}</span>
                   </div>
                 </div>
               </div>
@@ -3194,6 +3701,14 @@ export default function UnderwriterSplitViewDemo({
                           type="text"
                           value={prop.address}
                           placeholder="Property address"
+                          onFocus={() => {
+                            const src = prop.year1.source;
+                            if (!src) return;
+                            handleInspectField(
+                              scheduleEGridFieldId(scheduleEExtracts, src.pageIndex, src.column, 'ent2-address'),
+                              src.documentId,
+                            );
+                          }}
                           onChange={(e) => patchRentalProperty(prop.id, { address: e.target.value })}
                           className="flex-1 min-w-[200px] rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
                         />
@@ -3287,12 +3802,7 @@ export default function UnderwriterSplitViewDemo({
                       }`}>
                         <span className="font-mono text-[10px] font-black uppercase text-slate-500 w-[4.5rem] shrink-0">PITIA</span>
                         <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800">
-                          {prop.isSubjectProperty ? 'Proposed PITIA (subject loan)' : 'Full monthly housing expense'}
-                          <span className="ml-1 font-normal text-slate-400">
-                            {prop.isSubjectProperty
-                              ? '· proposed payment on the new loan'
-                              : '· principal, interest, taxes, insurance, association dues'}
-                          </span>
+                          {prop.isSubjectProperty ? 'Proposed PITIA (subject loan)' : 'Monthly housing expense'}
                         </span>
                         {prop.pitiaSource === 'ENCOMPASS' ? (
                           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-black uppercase text-indigo-700">
@@ -3348,20 +3858,37 @@ export default function UnderwriterSplitViewDemo({
 
                               {/* Line fields — full Form 1084 Schedule E line set */}
                               {[
-                                { line: 'Line 3', label: 'Rents received', key: 'rentsReceived' as const, hint: 'Gross rental income' },
-                                { line: 'Line 9', label: 'Insurance', key: 'insurance' as const, hint: 'Add-back' },
-                                { line: 'Line 12', label: 'Mortgage interest', key: 'mortgageInterest' as const, hint: 'Add-back' },
-                                { line: 'Line 16', label: 'Taxes', key: 'taxes' as const, hint: 'Add-back' },
-                                { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const, hint: 'Add-back' },
-                                { line: 'Line 19', label: 'HOA dues', key: 'hoaDues' as const, hint: 'Add-back if in PITIA' },
-                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const, hint: 'As listed — do not rebuild' },
-                                { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const, hint: '0 = full year' },
-                              ].map(({ line, label, key, hint }) => (
-                                <div key={key} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2.5 py-2">
+                                { line: 'Line 3', label: 'Rents received', key: 'rentsReceived' as const },
+                                { line: 'Line 9', label: 'Insurance', key: 'insurance' as const },
+                                { line: 'Line 12', label: 'Mortgage interest', key: 'mortgageInterest' as const },
+                                { line: 'Line 16', label: 'Taxes', key: 'taxes' as const },
+                                { line: 'Line 18', label: 'Depreciation', key: 'depreciation' as const },
+                                { line: 'Line 19', label: 'HOA dues', key: 'hoaDues' as const },
+                                { line: 'Line 20', label: 'Total expenses', key: 'totalExpenses' as const },
+                                { line: 'Line 2', label: 'Fair rental days', key: 'fairRentalDays' as const },
+                              ].map(({ line, label, key }) => (
+                                <div
+                                  key={key}
+                                  data-qa-field={y.source ? scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, RENTAL_YEAR_KEY_TO_SOURCE[key]) : undefined}
+                                  className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
+                                    y.source &&
+                                    highlightFieldId ===
+                                      scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, RENTAL_YEAR_KEY_TO_SOURCE[key])
+                                      ? 'border-emerald-300 bg-emerald-50'
+                                      : 'border-slate-100 bg-slate-50'
+                                  }`}
+                                  onClick={() => {
+                                    if (!y.source) return;
+                                    const sourceId = RENTAL_YEAR_KEY_TO_SOURCE[key];
+                                    handleInspectField(
+                                      scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, sourceId),
+                                      y.source.documentId,
+                                    );
+                                  }}
+                                >
                                   <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">{line}</span>
                                   <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                     {label}
-                                    <span className="ml-1 font-normal text-slate-400">· {hint}</span>
                                   </span>
                                   <input
                                     type="number"
@@ -3372,11 +3899,60 @@ export default function UnderwriterSplitViewDemo({
                                 </div>
                               ))}
 
-                              <div className="flex items-center gap-2 rounded border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
+                              {y.expenseDetermination?.daysStatus && (
+                                <p
+                                  className={`rounded-md px-2.5 py-1.5 text-[10px] font-semibold ${
+                                    y.expenseDetermination.daysStatus === 'missing'
+                                      ? 'border border-amber-200 bg-amber-50 text-amber-900'
+                                      : 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                  }`}
+                                >
+                                  {y.expenseDetermination.daysStatus === 'missing'
+                                    ? 'Line 2 blank · 12 months'
+                                    : y.expenseDetermination.daysStatus === 'full-year'
+                                      ? `Line 2 · ${y.expenseDetermination.fairRentalDays} days · 12 months`
+                                      : `Line 2 · ${y.expenseDetermination.fairRentalDays} days · ${y.expenseDetermination.rentalMonths} months`}
+                                </p>
+                              )}
+                              {y.expenseDetermination && y.expenseDetermination.status !== 'incomplete' && (
+                                <p
+                                  className={`rounded-md px-2.5 py-1.5 text-[10px] font-semibold ${
+                                    y.expenseDetermination.status === 'confirmed'
+                                      ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                      : y.expenseDetermination.status === 'reconstructed'
+                                        ? 'border border-indigo-200 bg-indigo-50 text-indigo-800'
+                                        : 'border border-amber-200 bg-amber-50 text-amber-900'
+                                  }`}
+                                >
+                                  {y.expenseDetermination.status === 'confirmed' && (
+                                    y.expenseDetermination.recheckValidated
+                                      ? `Form re-read L${y.expenseDetermination.recheckedLine} · ${y.expenseDetermination.recheckedFrom?.toLocaleString('en-US')} → ${y.expenseDetermination.recheckedTo?.toLocaleString('en-US')}`
+                                      : 'Parse confirmed'
+                                  )}
+                                  {y.expenseDetermination.status === 'reconstructed' && 'Line 20 filled from itemized'}
+                                  {y.expenseDetermination.status === 'mismatch' && 'Line 20 kept · itemized differs'}
+                                </p>
+                              )}
+
+                              <div
+                                className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
+                                  y.source &&
+                                  highlightFieldId ===
+                                    scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, 'ent2-net')
+                                    ? 'border-indigo-300 bg-indigo-50'
+                                    : 'border-indigo-100 bg-indigo-50/50'
+                                }`}
+                                onClick={() => {
+                                  if (!y.source) return;
+                                  handleInspectField(
+                                    scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, 'ent2-net'),
+                                    y.source.documentId,
+                                  );
+                                }}
+                              >
                                 <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-slate-500">Line 21</span>
                                 <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                   Net income / (loss)
-                                  <span className="ml-1 font-normal text-slate-400">· prefer parsed L21; blank reconstructs L3 − L20</span>
                                 </span>
                                 <input
                                   type="number"
@@ -3394,7 +3970,6 @@ export default function UnderwriterSplitViewDemo({
                                 <span className="w-[4.5rem] shrink-0 font-mono text-[10px] font-black uppercase text-amber-700">UW</span>
                                 <span className="min-w-0 flex-1 text-xs font-semibold text-slate-800 truncate">
                                   Extraordinary / other add-back
-                                  <span className="ml-1 font-normal text-slate-400">· not an IRS line</span>
                                 </span>
                                 <input
                                   type="number"
@@ -3407,7 +3982,7 @@ export default function UnderwriterSplitViewDemo({
                               {/* Annual 1038 adjusted cash flow summary */}
                               <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs space-y-1">
                                 <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                  <span>Add-backs (L9 + L12 + L16 + L18 + L19 + UW extra)</span>
+                                  <span>Add-backs</span>
                                   <span className="font-mono font-bold text-slate-500">
                                     +{cf.addBacks.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                                   </span>
@@ -3512,25 +4087,6 @@ export default function UnderwriterSplitViewDemo({
                 );
               })()}
 
-              {/* Loan-program guidance note */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
-                <p className="font-black uppercase text-slate-800 text-[10px] tracking-wider">Loan-Program Guidelines Applied</p>
-                {borrowerMetadata.loanProgram === 'FHA' && (
-                  <p><strong>FHA / HUD 4000.1:</strong> Default two years. 2–4 unit decline ≤ 5% → 24-month avg; 5–20% → most recent year; &gt;20% → disqualified. Other rental types use the 24-month average with a decline warning only.</p>
-                )}
-                {borrowerMetadata.loanProgram === 'CONVENTIONAL' && (
-                  <p><strong>Conventional / FNMA 1038:</strong> Default one year. Two years in file → 24-month average. Decline is a warning and does not switch to the lower year. Add back L9/L12/L16/L18/L19 from Line 20; do not rebuild expenses.</p>
-                )}
-                {borrowerMetadata.loanProgram === 'VA' && (
-                  <p><strong>VA:</strong> Default two years. Two years in file → 24-month average. Decline warns only. Depreciation and PITIA add-backs apply.</p>
-                )}
-                {borrowerMetadata.loanProgram === 'USDA' && (
-                  <p><strong>USDA:</strong> Default two years. Two years in file → 24-month average. Subject purchase with a new rental agreement may use 75% of market rent.</p>
-                )}
-                <p>
-                  <strong>Subject vs non-subject:</strong> Non-subject (REO) rentals use Schedule E history against the property's actual PITIA; an aggregate loss {borrowerMetadata.loanProgram === 'VA' ? 'reduces gross income directly (VA)' : 'is clamped to $0 income and redirected as a proposed liability'}. The subject property uses the proposed PITIA of the new loan — with Schedule E history on a refinance, or 75% of Form 1007/1025 market rent on a purchase. A subject deficit on a 2–4 unit primary adjusts the housing expense; a subject investment deficit maps to a proposed liability.
-                </p>
-              </div>
             </div>
           )}
 

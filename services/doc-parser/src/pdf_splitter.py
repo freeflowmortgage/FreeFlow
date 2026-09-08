@@ -44,6 +44,15 @@ CORE_RULES = {
     "Schedule M-1": re.compile(r"Schedule M-1", re.IGNORECASE),
     "Schedule M-2": re.compile(r"Schedule M-2", re.IGNORECASE),
     "W-2": re.compile(r"Wage and Tax Statement|Form\s+W-2", re.IGNORECASE),
+    "Paystub": re.compile(
+        r"Earnings Statement|Pay\s*Stub|Paystub|Payroll Statement|"
+        r"Year[- ]to[- ]Date\s+(?:Gross|Earnings)|Current Period|Net Pay",
+        re.IGNORECASE,
+    ),
+    "WVOE": re.compile(
+        r"Written Verification of Employment|Verification of Employment|The Work Number|\bWVOE\b",
+        re.IGNORECASE,
+    ),
 }
 
 SEE_STATEMENT = re.compile(
