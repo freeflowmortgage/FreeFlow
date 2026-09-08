@@ -33,13 +33,13 @@ data "aws_ecr_repository" "portal" {
 }
 
 data "aws_route53_zone" "public" {
-  count   = var.enable_edge && var.enable_cognito_edge && !var.create_hosted_zone ? 1 : 0
+  count   = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) && !var.create_hosted_zone && !var.dns_managed_externally ? 1 : 0
   zone_id = var.hosted_zone_id
 }
 
 locals {
   name_prefix           = "freeflow-${var.environment}"
-  public_hosted_zone_id = var.create_hosted_zone ? aws_route53_zone.public[0].zone_id : (var.enable_cognito_edge ? data.aws_route53_zone.public[0].zone_id : null)
+  public_hosted_zone_id = var.create_hosted_zone ? aws_route53_zone.public[0].zone_id : (var.dns_managed_externally ? null : ((var.enable_https_certificate || var.enable_cognito_edge) ? data.aws_route53_zone.public[0].zone_id : null))
   rds_master_secret_arn = data.aws_db_instance.existing.master_user_secret[0].secret_arn
   rds_endpoint          = data.aws_db_instance.existing.address
   common_environment = [

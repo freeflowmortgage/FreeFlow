@@ -3,52 +3,54 @@
 ## Purpose
 
 This runbook replaces the IP-restricted HTTP PLTE endpoint with
-`https://dev.mb-ai.com`, Cognito MFA, and explicit application/database
+`https://dev.freeflowmortgage.com`, Cognito MFA, and explicit application/database
 memberships. It does not authorize real borrower data.
 
 ## Required operator decisions
 
 Before applying either phase, record:
 
-- confirmation that FreeFlow controls `mb-ai.com` at its registrar and can
-  change nameservers;
+- confirmation that FreeFlow controls `freeflowmortgage.com` in Wix and can add
+  DNS records;
 - the approved operations-alert email address;
 - each tester's email, application role, tenant, and access owner.
 
-Do not infer ownership from parked Afternic nameservers. Do not create users or
+Do not change Wix nameservers or migrate the existing marketing site. Do not create users or
 send invitations until the intended recipients are approved.
 
-## Phase 1: delegate DNS
+## Phase 1: validate the certificate in Wix
 
 1. In the ignored development `terraform.tfvars`, set:
 
    ```hcl
-   domain_name           = "mb-ai.com"
-   portal_hostname       = "dev.mb-ai.com"
-   create_hosted_zone    = true
+   domain_name               = "freeflowmortgage.com"
+   portal_hostname           = "dev.freeflowmortgage.com"
+   dns_managed_externally    = true
+   enable_https_certificate  = true
+   create_hosted_zone        = false
    enable_cognito_edge   = false
    operations_alert_email = "approved-operations-address@example.com"
    ```
 
-2. Create and review a saved Terraform plan. It must create the Route 53 public
-   hosted zone and email subscription without replacing live compute.
-3. Apply the saved plan. Copy `public_hosted_zone_name_servers` from Terraform
+2. Create and review a saved Terraform plan. It must create only the ACM
+   certificate and make no live listener, compute, database, or DNS changes.
+3. Apply the saved plan. Copy `external_acm_validation_records` from Terraform
    output.
-4. At the domain registrar, replace the current authoritative nameservers with
-   all four Route 53 nameservers exactly as output.
+4. In Wix DNS, add each output CNAME exactly. Do not change Wix nameservers.
 5. Confirm the SNS subscription from the approved mailbox.
-6. Wait until public `NS mb-ai.com` queries return the Route 53 nameservers from
-   multiple resolvers. DNS propagation can take hours; do not enable phase 2
-   merely because the registrar UI says the change was saved.
+6. Wait for ACM to report the certificate `ISSUED`. DNS propagation can take
+   hours; do not enable phase 2 merely because Wix shows the record as saved.
 
 ## Phase 2: HTTPS and Cognito
 
-1. Keep `create_hosted_zone = true` and set `enable_cognito_edge = true`.
+1. Keep `enable_https_certificate = true`,
+   `dns_managed_externally = true`, and set `enable_cognito_edge = true`.
 2. Review the saved plan. Expected changes include ACM validation records and
    certificate, the Cognito pool/client/domain, authenticated ALB security
-   group/listeners, portal DNS alias, and a new portal task definition with
+   group/listeners, and a new portal task definition with
    identity bypass disabled. Investigate any unexpected destroy.
-3. Apply and wait for the ECS deployment and ACM certificate to become healthy.
+3. Apply and copy `external_portal_dns_record` from Terraform output. Add that
+   CNAME in Wix, then wait for it to resolve publicly.
 4. Verify HTTP redirects to HTTPS, anonymous HTTPS redirects to Cognito, and
    direct requests with forged identity headers are denied.
 

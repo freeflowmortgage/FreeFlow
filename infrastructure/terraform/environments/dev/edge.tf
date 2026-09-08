@@ -82,7 +82,7 @@ resource "aws_cognito_user_pool_domain" "live_test" {
 }
 
 resource "aws_acm_certificate" "portal" {
-  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  count = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) ? 1 : 0
 
   domain_name       = var.portal_hostname
   validation_method = "DNS"
@@ -93,7 +93,7 @@ resource "aws_acm_certificate" "portal" {
 }
 
 resource "aws_route53_record" "certificate_validation" {
-  for_each = var.enable_edge && var.enable_cognito_edge ? {
+  for_each = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) && !var.dns_managed_externally ? {
     for option in aws_acm_certificate.portal[0].domain_validation_options : option.domain_name => {
       name   = option.resource_record_name
       record = option.resource_record_value
@@ -109,7 +109,7 @@ resource "aws_route53_record" "certificate_validation" {
 }
 
 resource "aws_acm_certificate_validation" "portal" {
-  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  count = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) && !var.dns_managed_externally ? 1 : 0
 
   certificate_arn         = aws_acm_certificate.portal[0].arn
   validation_record_fqdns = [for record in aws_route53_record.certificate_validation : record.fqdn]
@@ -265,7 +265,7 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.portal[0].certificate_arn
+  certificate_arn   = var.dns_managed_externally ? aws_acm_certificate.portal[0].arn : aws_acm_certificate_validation.portal[0].certificate_arn
 
   default_action {
     order = 1
@@ -290,7 +290,7 @@ resource "aws_lb_listener" "https" {
 }
 
 resource "aws_route53_record" "portal" {
-  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  count = var.enable_edge && var.enable_cognito_edge && !var.dns_managed_externally ? 1 : 0
 
   zone_id = local.public_hosted_zone_id
   name    = var.portal_hostname

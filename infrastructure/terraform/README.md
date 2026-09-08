@@ -85,18 +85,19 @@ Approved hostname pattern:
 
 | Environment | Portal | API | Cognito domain |
 | --- | --- | --- | --- |
-| production | `app.mb-ai.com` | `api.mb-ai.com` | `auth.mb-ai.com` |
-| development | `dev.mb-ai.com` | `api-dev.mb-ai.com` | `auth-dev.mb-ai.com` |
+| production | `app.freeflowmortgage.com` | `api.freeflowmortgage.com` | `auth.freeflowmortgage.com` |
+| development | `dev.freeflowmortgage.com` | `api-dev.freeflowmortgage.com` | AWS-hosted Cognito domain initially |
 
 Each environment has its own Cognito user pool and app client. Cognito proves
 identity; FreeFlow's application/database membership model continues to resolve
 tenant and role authorization. ALB authenticates users with Cognito and the
 portal verifies the resulting signed identity assertion server-side.
 
-Domain activation is deliberately two-phase. First set
-`create_hosted_zone = true` while Cognito remains disabled, apply, and delegate
-the registrar to the output nameservers. Only after public delegation resolves
-should `enable_cognito_edge = true` create ACM, Cognito, HTTPS, and the DNS alias.
+Wix remains authoritative for `freeflowmortgage.com`; do not change its
+nameservers. Domain activation is deliberately two-phase: first set
+`enable_https_certificate = true` while Cognito remains disabled, apply, and add
+the output ACM validation CNAME in Wix. Once ACM issues the certificate, set
+`enable_cognito_edge = true`, apply, and add the output portal CNAME in Wix.
 See the [domain and user-access runbook](../../docs/deployment-readiness/DOMAIN-COGNITO-USER-ACCESS-RUNBOOK.md).
 
 ## Required inputs before an environment apply

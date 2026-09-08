@@ -34,7 +34,7 @@ environment, not production approval.
 ## Implemented topology
 
 The current temporary endpoint is an IP-restricted HTTP ALB. The checked-in
-target topology makes `dev.mb-ai.com` terminate TLS at that ALB; its HTTPS
+target topology makes `dev.freeflowmortgage.com` terminate TLS at that ALB; its HTTPS
 listener authenticates through a dedicated Cognito user pool and forwards only
 to the portal task on port 8000. The portal and parser run without public IPs
 in the two existing application subnets. The parser accepts port 8080 only from
@@ -50,9 +50,9 @@ migrator logins. Runtime tasks never receive the administrative secret.
 1. `aws login --profile freeflow-dev-deploy` succeeds and
    `aws sts get-caller-identity --profile freeflow-dev-deploy` identifies the
    intended development account.
-2. The operator controls DNS for `mb-ai.com`. If Route 53 is authoritative, set
-   `hosted_zone_id`; otherwise delegate the development subdomain to a Route 53
-   hosted zone before enabling the edge.
+2. The operator controls DNS for `freeflowmortgage.com` in Wix. Keep Wix
+   authoritative; add the ACM validation and portal CNAME records output by
+   Terraform before enabling the HTTPS edge.
 3. Docker Desktop is running.
 4. The release commit passes portal, database, and Terraform CI.
 5. No real borrower document or external production credential is present.

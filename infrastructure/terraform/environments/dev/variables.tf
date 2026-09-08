@@ -75,14 +75,25 @@ variable "portal_hostname" {
 
 variable "domain_name" {
   type        = string
-  description = "Registered parent domain delegated to the Route 53 public hosted zone."
-  default     = "mb-ai.com"
+  description = "Registered parent domain for the portal hostname."
+  default     = "freeflowmortgage.com"
+}
+
+variable "dns_managed_externally" {
+  type        = bool
+  description = "True when the registrar/DNS provider, such as Wix, remains authoritative and DNS records are added outside Route 53."
+  default     = true
 }
 
 variable "create_hosted_zone" {
   type        = bool
-  description = "Creates the public Route 53 zone as a separate first phase before registrar delegation."
+  description = "Creates a Route 53 public zone. Do not enable while an external provider remains authoritative."
   default     = false
+
+  validation {
+    condition     = !(var.create_hosted_zone && var.dns_managed_externally)
+    error_message = "create_hosted_zone cannot be used while dns_managed_externally is true."
+  }
 }
 
 variable "hosted_zone_id" {
@@ -110,11 +121,31 @@ variable "enable_cognito_edge" {
 
   validation {
     condition = (
-      !var.enable_cognito_edge ||
+      !var.enable_cognito_edge || (
+        var.enable_https_certificate && (
+          var.create_hosted_zone ||
+          var.dns_managed_externally ||
+          (var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != "")
+        )
+      )
+    )
+    error_message = "Cognito/HTTPS requires enable_https_certificate=true and either external DNS, create_hosted_zone=true, or an existing hosted_zone_id."
+  }
+}
+
+variable "enable_https_certificate" {
+  type        = bool
+  description = "Requests the ACM certificate before switching the live ALB to HTTPS/Cognito."
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_https_certificate ||
+      var.dns_managed_externally ||
       var.create_hosted_zone ||
       (var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != "")
     )
-    error_message = "Cognito/HTTPS requires either create_hosted_zone=true or an existing hosted_zone_id."
+    error_message = "HTTPS certificate creation requires external DNS, create_hosted_zone=true, or an existing hosted_zone_id."
   }
 }
 
