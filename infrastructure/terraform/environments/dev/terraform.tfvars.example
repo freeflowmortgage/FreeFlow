@@ -2,11 +2,17 @@
 aws_region  = "us-west-2"
 aws_profile = null
 
-# Enable only after mb-ai.com DNS is hosted in Route 53 and provide its zone ID.
+# Wix currently remains authoritative for freeflowmortgage.com. Phase 1 requests
+# ACM only and outputs a CNAME validation record to add in Wix. After validation,
+# phase 2 enables Cognito/HTTPS and outputs the portal CNAME for Wix.
 enable_edge         = false
 enable_cognito_edge = false
-hosted_zone_id = null
-portal_hostname = "dev.mb-ai.com"
+enable_https_certificate = false
+dns_managed_externally   = true
+create_hosted_zone  = false
+hosted_zone_id      = null
+domain_name         = "freeflowmortgage.com"
+portal_hostname     = "dev.freeflowmortgage.com"
 
 # Temporary PLTE HTTP mode must be restricted to approved workstation /32s.
 plte_allowed_ipv4_cidrs = []
@@ -15,7 +21,11 @@ plte_allowed_ipv4_cidrs = []
 # value with the ECR repository URL plus the immutable image digest.
 enable_services = false
 enable_parser   = false
+enable_console  = false
+enable_monitoring = false
+operations_alert_email = null
 portal_desired_count = 0
 portal_image     = ""
 parser_image     = ""
+console_image    = ""
 migration_image  = ""

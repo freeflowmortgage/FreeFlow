@@ -105,6 +105,35 @@ async def test_parse_empty_pdf():
 
 
 @pytest.mark.asyncio
+async def test_parse_rejects_declared_oversize_pdf_before_reading_body():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/parse",
+            content=b"%PDF-1.4\n",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Length": str((40 * 1024 * 1024) + 1),
+                "x-document-title": "oversize.pdf",
+            },
+        )
+        assert res.status_code == 413
+        assert res.json()["detail"] == "PDF exceeds parser size limit."
+
+
+@pytest.mark.asyncio
+async def test_parse_rejects_multipart_content_type_spoofing():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/parse",
+            files={"file": ("fake.pdf", b"not a pdf", "text/plain")},
+        )
+        assert res.status_code == 400
+        assert res.json()["detail"] == "Only PDF files are authorized for ingestion."
+
+
+@pytest.mark.asyncio
 async def test_parse_valid_pdf_stream():
     pdf_bytes = create_minimal_pdf_bytes([
         "Form W-2 Wage and Tax Statement 2023",
@@ -136,6 +165,11 @@ def test_pdf_splitter_core_rules():
 
     w2_match = CORE_RULES["W-2"].search("2023 Form W-2 Wage and Tax Statement")
     assert w2_match is not None
+    assert "Paystub" in CORE_RULES
+    assert "WVOE" in CORE_RULES
+    assert CORE_RULES["WVOE"].search("Written Verification of Employment") is not None
+    assert CORE_RULES["Paystub"].search("Earnings Statement  Current Period  Net Pay") is not None
+    assert CORE_RULES["Paystub"].search("Form W-2 Wage and Tax Statement") is None
 
     sched_c = CORE_RULES["Schedule C (Page 1 - Profits)"].search("Schedule C Profit or Loss From Business")
     assert sched_c is not None
@@ -187,6 +221,20 @@ def test_pdf_splitter_classifies_schedule_f():
 
     assert split_res.target_pages == [0]
     assert "Schedule F (Farm Income)" in split_res.classifications[0]
+
+
+def test_pdf_splitter_classifies_paystub():
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=True,
+        plain_text="Earnings Statement Current Period Net Pay 1840.22 Year to Date Gross 22000.00",
+        words=[],
+    )
+    split_res = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
+    assert split_res.target_pages == [0]
+    assert "Paystub" in split_res.classifications[0]
 
 
 def test_mismo_xml_generation():

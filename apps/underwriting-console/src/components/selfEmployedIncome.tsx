@@ -631,7 +631,7 @@ export function InspectNote() {
   return (
     <p className="flex items-start gap-1.5 text-[11px] text-slate-500">
       <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-      Click a line label or the PDF box. Amount stays on the same row — type to override.
+      Click a worksheet line to show its padded box on the source PDF. Amount stays on the same row — type to override.
     </p>
   );
 }
@@ -693,7 +693,7 @@ export function SelfEmployedPanel({
   onChoice,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   twoYears: boolean;
   onTwoYears: (next: boolean) => void;
   twoYearCaption?: string;
@@ -710,7 +710,7 @@ export function SelfEmployedPanel({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
           <h3 className="text-base font-extrabold text-slate-900">{title}</h3>
-          <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
+          {subtitle ? <p className="mt-1 text-xs text-slate-500">{subtitle}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {extra}

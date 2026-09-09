@@ -1,10 +1,18 @@
+resource "aws_route53_zone" "public" {
+  count = var.create_hosted_zone ? 1 : 0
+
+  name          = var.domain_name
+  force_destroy = false
+}
+
 resource "aws_cognito_user_pool" "live_test" {
   count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
 
   name                     = "${local.name_prefix}-users"
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
-  mfa_configuration        = "OPTIONAL"
+  mfa_configuration        = "ON"
+  deletion_protection      = "ACTIVE"
 
   software_token_mfa_configuration {
     enabled = true
@@ -23,10 +31,21 @@ resource "aws_cognito_user_pool" "live_test" {
     allow_admin_create_user_only = true
   }
 
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = ["email"]
+  }
+
   lifecycle {
     precondition {
-      condition     = var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != ""
-      error_message = "hosted_zone_id is required before the HTTPS/Cognito edge can be enabled."
+      condition     = endswith(var.portal_hostname, ".${var.domain_name}")
+      error_message = "portal_hostname must be a subdomain of domain_name."
     }
   }
 }
@@ -63,7 +82,7 @@ resource "aws_cognito_user_pool_domain" "live_test" {
 }
 
 resource "aws_acm_certificate" "portal" {
-  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  count = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) ? 1 : 0
 
   domain_name       = var.portal_hostname
   validation_method = "DNS"
@@ -74,7 +93,7 @@ resource "aws_acm_certificate" "portal" {
 }
 
 resource "aws_route53_record" "certificate_validation" {
-  for_each = var.enable_edge && var.enable_cognito_edge ? {
+  for_each = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) && !var.dns_managed_externally ? {
     for option in aws_acm_certificate.portal[0].domain_validation_options : option.domain_name => {
       name   = option.resource_record_name
       record = option.resource_record_value
@@ -82,7 +101,7 @@ resource "aws_route53_record" "certificate_validation" {
     }
   } : {}
 
-  zone_id = data.aws_route53_zone.public[0].zone_id
+  zone_id = local.public_hosted_zone_id
   name    = each.value.name
   type    = each.value.type
   ttl     = 60
@@ -90,7 +109,7 @@ resource "aws_route53_record" "certificate_validation" {
 }
 
 resource "aws_acm_certificate_validation" "portal" {
-  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  count = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) && !var.dns_managed_externally ? 1 : 0
 
   certificate_arn         = aws_acm_certificate.portal[0].arn
   validation_record_fqdns = [for record in aws_route53_record.certificate_validation : record.fqdn]
@@ -102,10 +121,48 @@ resource "aws_lb" "portal" {
   name                       = "${local.name_prefix}-portal"
   internal                   = false
   load_balancer_type         = "application"
-  security_groups            = var.enable_cognito_edge ? [var.alb_security_group_id] : [aws_security_group.plte_alb[0].id]
+  security_groups            = var.enable_cognito_edge ? [aws_security_group.authenticated_alb[0].id] : [aws_security_group.plte_alb[0].id]
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
   enable_deletion_protection = false
+}
+
+resource "aws_security_group" "authenticated_alb" {
+  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+
+  name        = "${local.name_prefix}-authenticated-alb-sg"
+  description = "Public HTTPS edge protected by Cognito authentication"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    description = "HTTP redirect to HTTPS"
+    protocol    = "tcp"
+    from_port   = 80
+    to_port     = 80
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Authenticated HTTPS portal"
+    protocol    = "tcp"
+    from_port   = 443
+    to_port     = 443
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description     = "ALB to portal tasks only"
+    protocol        = "tcp"
+    from_port       = 8000
+    to_port         = 8000
+    security_groups = [var.app_security_group_id]
+  }
+
+  # Preserve the explicit temporary-console rules below while the portal
+  # traffic remains managed inline.
+  lifecycle {
+    ignore_changes = [ingress, egress]
+  }
 }
 
 resource "aws_security_group" "plte_alb" {
@@ -130,6 +187,13 @@ resource "aws_security_group" "plte_alb" {
     to_port         = 8000
     security_groups = [var.app_security_group_id]
   }
+
+  # The temporary console listener and ALB-to-console path are managed as
+  # standalone, destination-scoped rules below. Preserve them while the
+  # original HTTP/portal rules remain inline.
+  lifecycle {
+    ignore_changes = [ingress, egress]
+  }
 }
 
 resource "aws_security_group_rule" "portal_from_plte_alb" {
@@ -142,6 +206,53 @@ resource "aws_security_group_rule" "portal_from_plte_alb" {
   to_port                  = 8000
   security_group_id        = var.app_security_group_id
   source_security_group_id = aws_security_group.plte_alb[0].id
+}
+
+resource "aws_security_group_rule" "console_from_plte_workstations" {
+  count             = var.enable_console ? 1 : 0
+  type              = "ingress"
+  description       = "Approved workstation access to temporary underwriting console"
+  protocol          = "tcp"
+  from_port         = 3000
+  to_port           = 3000
+  security_group_id = var.enable_cognito_edge ? aws_security_group.authenticated_alb[0].id : aws_security_group.plte_alb[0].id
+  cidr_blocks       = var.plte_allowed_ipv4_cidrs
+}
+
+# The listener is IP-restricted at the ALB.  The task itself accepts traffic
+# only from that ALB security group, never directly from a workstation.
+resource "aws_security_group_rule" "console_from_plte_alb" {
+  count                    = var.enable_console ? 1 : 0
+  type                     = "ingress"
+  description              = "Temporary PLTE ALB to underwriting console"
+  protocol                 = "tcp"
+  from_port                = 3000
+  to_port                  = 3000
+  security_group_id        = aws_security_group.console[0].id
+  source_security_group_id = var.enable_cognito_edge ? aws_security_group.authenticated_alb[0].id : aws_security_group.plte_alb[0].id
+}
+
+resource "aws_security_group_rule" "plte_alb_to_console" {
+  count                    = var.enable_console ? 1 : 0
+  type                     = "egress"
+  description              = "Temporary PLTE ALB to underwriting console"
+  protocol                 = "tcp"
+  from_port                = 3000
+  to_port                  = 3000
+  security_group_id        = var.enable_cognito_edge ? aws_security_group.authenticated_alb[0].id : aws_security_group.plte_alb[0].id
+  source_security_group_id = aws_security_group.console[0].id
+}
+
+resource "aws_security_group_rule" "portal_from_authenticated_alb" {
+  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+
+  type                     = "ingress"
+  description              = "Authenticated ALB to portal"
+  protocol                 = "tcp"
+  from_port                = 8000
+  to_port                  = 8000
+  security_group_id        = var.app_security_group_id
+  source_security_group_id = aws_security_group.authenticated_alb[0].id
 }
 
 resource "aws_lb_target_group" "portal" {
@@ -195,6 +306,21 @@ resource "aws_lb_listener" "http_plte" {
   }
 }
 
+resource "aws_lb_listener" "console_plte" {
+  # Keep the temporary, IP-restricted HTTP test path available while the
+  # browser-facing path moves to Cognito-protected HTTPS.
+  count = var.enable_console ? 1 : 0
+
+  load_balancer_arn = aws_lb.portal[0].arn
+  port              = 3000
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.console[0].arn
+  }
+}
+
 resource "aws_lb_listener" "https" {
   count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
 
@@ -202,7 +328,7 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.portal[0].certificate_arn
+  certificate_arn   = var.dns_managed_externally ? aws_acm_certificate.portal[0].arn : aws_acm_certificate_validation.portal[0].certificate_arn
 
   default_action {
     order = 1
@@ -222,14 +348,14 @@ resource "aws_lb_listener" "https" {
   default_action {
     order            = 2
     type             = "forward"
-    target_group_arn = aws_lb_target_group.portal[0].arn
+    target_group_arn = var.enable_console ? aws_lb_target_group.console[0].arn : aws_lb_target_group.portal[0].arn
   }
 }
 
 resource "aws_route53_record" "portal" {
-  count = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  count = var.enable_edge && var.enable_cognito_edge && !var.dns_managed_externally ? 1 : 0
 
-  zone_id = data.aws_route53_zone.public[0].zone_id
+  zone_id = local.public_hosted_zone_id
   name    = var.portal_hostname
   type    = "A"
 

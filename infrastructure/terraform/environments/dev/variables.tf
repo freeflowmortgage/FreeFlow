@@ -73,11 +73,39 @@ variable "portal_hostname" {
   default     = "dev.mb-ai.com"
 }
 
+variable "domain_name" {
+  type        = string
+  description = "Registered parent domain for the portal hostname."
+  default     = "freeflowmortgage.com"
+}
+
+variable "dns_managed_externally" {
+  type        = bool
+  description = "True when the registrar/DNS provider, such as Wix, remains authoritative and DNS records are added outside Route 53."
+  default     = true
+}
+
+variable "create_hosted_zone" {
+  type        = bool
+  description = "Creates a Route 53 public zone. Do not enable while an external provider remains authoritative."
+  default     = false
+
+  validation {
+    condition     = !(var.create_hosted_zone && var.dns_managed_externally)
+    error_message = "create_hosted_zone cannot be used while dns_managed_externally is true."
+  }
+}
+
 variable "hosted_zone_id" {
   type        = string
-  description = "Route 53 public hosted-zone ID for the portal hostname. Required when enable_edge is true."
+  description = "Existing Route 53 public hosted-zone ID. Leave null when create_hosted_zone is true."
   default     = null
   nullable    = true
+
+  validation {
+    condition     = !(var.create_hosted_zone && var.hosted_zone_id != null)
+    error_message = "Set only one of create_hosted_zone or hosted_zone_id."
+  }
 }
 
 variable "enable_edge" {
@@ -90,6 +118,35 @@ variable "enable_cognito_edge" {
   type        = bool
   description = "Adds ACM, Route 53, and ALB Cognito authentication after domain control is confirmed."
   default     = false
+
+  validation {
+    condition = (
+      !var.enable_cognito_edge || (
+        var.enable_https_certificate && (
+          var.create_hosted_zone ||
+          var.dns_managed_externally ||
+          (var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != "")
+        )
+      )
+    )
+    error_message = "Cognito/HTTPS requires enable_https_certificate=true and either external DNS, create_hosted_zone=true, or an existing hosted_zone_id."
+  }
+}
+
+variable "enable_https_certificate" {
+  type        = bool
+  description = "Requests the ACM certificate before switching the live ALB to HTTPS/Cognito."
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_https_certificate ||
+      var.dns_managed_externally ||
+      var.create_hosted_zone ||
+      (var.hosted_zone_id != null && trimspace(var.hosted_zone_id) != "")
+    )
+    error_message = "HTTPS certificate creation requires external DNS, create_hosted_zone=true, or an existing hosted_zone_id."
+  }
 }
 
 variable "plte_allowed_ipv4_cidrs" {
@@ -112,6 +169,43 @@ variable "enable_parser" {
   type        = bool
   description = "Creates the parser task and service. Keep false while its image has unresolved findings."
   default     = false
+}
+
+variable "enable_console" {
+  type        = bool
+  description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."
+  default     = false
+
+  validation {
+    condition     = !var.enable_console || (var.enable_edge && var.enable_services)
+    error_message = "The underwriting console requires edge and services."
+  }
+}
+
+variable "enable_monitoring" {
+  type        = bool
+  description = "Creates the low-cost PLTE CloudWatch dashboard, alarms, and encrypted SNS topic."
+  default     = false
+
+  validation {
+    condition     = !var.enable_monitoring || (var.enable_edge && var.enable_services)
+    error_message = "enable_edge and enable_services must both be true before monitoring is enabled."
+  }
+}
+
+variable "operations_alert_email" {
+  type        = string
+  description = "Optional operator email for alarm notifications. Keep in ignored tfvars; the recipient must confirm the SNS subscription."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.operations_alert_email == null ||
+      can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.operations_alert_email))
+    )
+    error_message = "operations_alert_email must be null or a syntactically valid email address."
+  }
 }
 
 variable "enable_services" {
@@ -150,6 +244,17 @@ variable "parser_image" {
   validation {
     condition     = !var.enable_services || !var.enable_parser || can(regex("@sha256:[0-9a-f]{64}$", var.parser_image))
     error_message = "parser_image must be an immutable @sha256 digest reference when the parser is enabled."
+  }
+}
+
+variable "console_image" {
+  type        = string
+  description = "Underwriting console ECR image reference pinned with @sha256:."
+  default     = ""
+
+  validation {
+    condition     = !var.enable_console || can(regex("@sha256:[0-9a-f]{64}$", var.console_image))
+    error_message = "console_image must be an immutable @sha256 digest reference when the console is enabled."
   }
 }
 

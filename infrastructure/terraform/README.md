@@ -37,7 +37,8 @@ Infrastructure slices are added and qualified in this order:
    and production HA remain);
 5. compute (digest-gated portal, parser, and migration tasks implemented;
    qualification and worker/appraisal services remain);
-6. observability and delivery policy.
+6. observability (encrypted SNS topic, dashboard, and seven dev alarms deployed;
+   subscription/drill and log-masking evidence remain) and delivery policy.
 
 This order is intentional: no task definition, image, or service is production
 ready until its network, identities, secrets, database, and alarms exist.
@@ -84,13 +85,20 @@ Approved hostname pattern:
 
 | Environment | Portal | API | Cognito domain |
 | --- | --- | --- | --- |
-| production | `app.mb-ai.com` | `api.mb-ai.com` | `auth.mb-ai.com` |
-| development | `dev.mb-ai.com` | `api-dev.mb-ai.com` | `auth-dev.mb-ai.com` |
+| production | `app.freeflowmortgage.com` | `api.freeflowmortgage.com` | `auth.freeflowmortgage.com` |
+| development | `dev.freeflowmortgage.com` | `api-dev.freeflowmortgage.com` | AWS-hosted Cognito domain initially |
 
 Each environment has its own Cognito user pool and app client. Cognito proves
 identity; FreeFlow's application/database membership model continues to resolve
 tenant and role authorization. ALB authenticates users with Cognito and the
 portal verifies the resulting signed identity assertion server-side.
+
+Wix remains authoritative for `freeflowmortgage.com`; do not change its
+nameservers. Domain activation is deliberately two-phase: first set
+`enable_https_certificate = true` while Cognito remains disabled, apply, and add
+the output ACM validation CNAME in Wix. Once ACM issues the certificate, set
+`enable_cognito_edge = true`, apply, and add the output portal CNAME in Wix.
+See the [domain and user-access runbook](../../docs/deployment-readiness/DOMAIN-COGNITO-USER-ACCESS-RUNBOOK.md).
 
 ## Required inputs before an environment apply
 

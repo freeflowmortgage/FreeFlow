@@ -13,29 +13,30 @@ environment, not production approval.
 - The console and appraisal parser are not deployed in this slice.
 - Raw document and OCR retention canaries are still required before production.
 
-## Temporary PLTE exception (opened 2026-09-07)
+## Temporary PLTE boundary (updated 2026-09-07)
 
 - Owner: FreeFlow Mortgage engineering.
-- Reason: permit production-like portal, API, database, networking, and logging
-  tests while upstream parser runtime packages have unresolved ECR findings.
+- Reason: permit production-like portal, parser, API, database, networking, and
+  logging tests before the environment is approved for real borrower data.
 - Data boundary: synthetic data only; no borrower PII, tax documents, SSNs, bank
   statements, or production loan files.
 - Compensating controls: the temporary HTTP ALB is restricted to approved
-  workstation `/32` CIDRs, development identity bypass is explicit and limited
-  to that endpoint, `PARSER_ENABLED=false`, and no parser task, target, or route
-  is created.
+  workstation `/32` CIDRs and development identity bypass is explicit and
+  limited to that endpoint. The remediated parser runs only in private subnets,
+  has no ALB target/public IP, and accepts traffic only from the portal.
 - Migrator boundary: private subnets only, one-off execution, no public route,
   and required exit-code/database verification before the portal test begins.
-- Remediation requirement: do not enable or promote the parser until its image
-  is rescanned and approved with no unresolved critical/high findings.
+- Parser image requirement: pin by digest and require an ECR scan with no
+  critical/high findings. The currently deployed digest satisfies this gate.
 - Review/expiration: 2026-09-14, or immediately before any non-synthetic pilot,
   whichever occurs first.
 
 ## Implemented topology
 
-`dev.mb-ai.com` terminates TLS at an internet-facing ALB. The HTTPS listener
-authenticates through a dedicated Cognito user pool and forwards only to the
-portal task on port 8000. The portal and parser run without public IP addresses
+The current temporary endpoint is an IP-restricted HTTP ALB. The checked-in
+target topology makes `dev.freeflowmortgage.com` terminate TLS at that ALB; its HTTPS
+listener authenticates through a dedicated Cognito user pool and forwards only
+to the portal task on port 8000. The portal and parser run without public IPs
 in the two existing application subnets. The parser accepts port 8080 only from
 the portal security group and registers as `income-parser.freeflow.local`.
 
@@ -49,9 +50,9 @@ migrator logins. Runtime tasks never receive the administrative secret.
 1. `aws login --profile freeflow-dev-deploy` succeeds and
    `aws sts get-caller-identity --profile freeflow-dev-deploy` identifies the
    intended development account.
-2. The operator controls DNS for `mb-ai.com`. If Route 53 is authoritative, set
-   `hosted_zone_id`; otherwise delegate the development subdomain to a Route 53
-   hosted zone before enabling the edge.
+2. The operator controls DNS for `freeflowmortgage.com` in Wix. Keep Wix
+   authoritative; add the ACM validation and portal CNAME records output by
+   Terraform before enabling the HTTPS edge.
 3. Docker Desktop is running.
 4. The release commit passes portal, database, and Terraform CI.
 5. No real borrower document or external production credential is present.
@@ -72,9 +73,10 @@ The checked-in example contains no credentials. Populate an ignored
 4. Compute: set `enable_services = true` and provide all three image references
    as `repository@sha256:digest`. Terraform rejects mutable tags.
 
-For the temporary PLTE exception, set `enable_edge = true`,
-`enable_cognito_edge = false`, `enable_parser = false`, and allowlist only the
-operator's current public IPv4 `/32`. The parser digest is not required. This
+For the temporary PLTE boundary, set `enable_edge = true`,
+`enable_cognito_edge = false`, `enable_parser = true`, and allowlist only the
+operator's current public IPv4 `/32`. The parser image must be digest-pinned and
+scan clean. This
 mode uses the ALB-generated HTTP hostname and must be removed when Cognito/TLS
 is enabled. Keep `portal_desired_count = 0` for the first apply, run and verify
 the private migration, then set it to `1` and apply a second reviewed plan.
@@ -102,22 +104,23 @@ SEED_OIDC_SUBJECT=<Cognito sub>
 SEED_EMAIL=<synthetic test user email>
 ```
 
-The seed uses fixed synthetic tenant/user UUIDs and is idempotent. Do not put an
-email, password, subject, or secret into Terraform variables or source control.
+Specify unique `SEED_USER_ID` values for additional users. `SEED_TENANT_ID`
+chooses their organization; use the same tenant UUID to grant controlled access
+to the same synthetic workspace. `SEED_ROLE` must be an application role such
+as `UNDERWRITER` or `BROKER_OWNER`. The seed is idempotent. Do not put an email,
+password, subject, or secret into Terraform variables or source control. Follow
+the dedicated user-access runbook for the complete procedure.
 
 ## Verification
 
-1. ECS reports one healthy portal task; during the temporary exception, no
-   parser task or parser service exists.
+1. ECS reports one healthy portal task and one healthy private parser task.
 2. The target group reports the portal target healthy.
 3. HTTP redirects to HTTPS; unauthenticated HTTPS redirects to Cognito.
 4. The synthetic user completes login and reaches the portal.
 5. Anonymous API calls fail; forged identity headers fail; the seeded identity
    resolves one active tenant membership.
-6. During the exception, document-processing requests fail closed with a 503.
-   After parser remediation, a synthetic PDF must traverse portal to parser,
-   respect the 40 MiB limit, and leave no PDF/raw XML in database, queues, task
-   filesystems, or logs.
+6. A synthetic PDF traverses portal to parser, respects the 40 MiB limit, and
+   leaves no PDF/raw XML in database, queues, task filesystems, or logs.
 7. Billing and Encompass endpoints return their documented protected-runtime
    `503` responses.
 

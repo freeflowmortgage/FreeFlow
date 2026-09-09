@@ -9,6 +9,8 @@ export type ParseWord = {
 
 export type MappedIncomeField = {
   id: string;
+  /** Owning live-upload document when several PDFs are on the file. */
+  documentId?: string;
   /** Stable page-scoped document entity. Present on fields mapped by current parsers. */
   entityId?: string;
   /** Legacy field definition ID before entity scoping. */
@@ -50,12 +52,62 @@ export type ParseResponse = {
   incomeFields?: MappedIncomeField[];
   parser_engine?: 'python-ocr' | 'native-pdf';
   original_filename?: string;
+  /** Every Schedule E Page 1 property column (A/B/C) across all years in the package. */
+  scheduleEProperties?: ScheduleEPropertyExtract[];
+};
+
+export type ScheduleEExpenseDetermination = {
+  status: 'confirmed' | 'reconstructed' | 'mismatch' | 'incomplete';
+  itemizedExpenses: number;
+  reportedLine20: number;
+  line20Source: 'visual' | 'itemized-sum';
+  expensesBalanced: boolean;
+  calculatedNet: number;
+  netBalanced: boolean;
+  fairRentalDays?: number;
+  personalUseDays?: number;
+  rentalMonths?: number;
+  daysStatus?: 'accepted' | 'full-year' | 'missing';
+  daysBalanced?: boolean;
+  recheckedLine?: string;
+  recheckedFrom?: number;
+  recheckedTo?: number;
+  recheckValidated?: boolean;
+  recheckSource?: 'form-bound';
+};
+
+export type OverlayBox = { x: number; y: number; w: number; h: number };
+
+export type ScheduleEPropertyBoxes = {
+  address?: OverlayBox;
+  type?: OverlayBox;
+  days?: OverlayBox;
+  financials?: Record<string, OverlayBox>;
+};
+
+export type ScheduleEPropertyExtract = {
+  pageIndex: number;
+  column: 'A' | 'B' | 'C';
+  year: number | null;
+  address: string;
+  propertyType: string;
+  fairRentalDays: number;
+  financials: Record<string, number>;
+  determination?: ScheduleEExpenseDetermination;
+  /** Official f1040se clip boxes, 0–1 relative to the parsed page. */
+  boxes?: ScheduleEPropertyBoxes;
 };
 
 export type LiveParseSession = {
   file: File;
   fileName: string;
   result: ParseResponse;
+};
+
+/** One PDF in the live income packet. Load live PDF appends; it does not replace. */
+export type LiveDocument = LiveParseSession & {
+  id: string;
+  sha256: string;
 };
 
 export function pageLooksLikeW2(page: ParsePage): boolean {

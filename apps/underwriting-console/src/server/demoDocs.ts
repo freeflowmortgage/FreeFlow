@@ -13,14 +13,29 @@ import { PDFDocument, StandardFonts, type PDFForm, type PDFPage } from 'pdf-lib'
 // The Vite dev server runs with the app directory as cwd; import.meta.url is
 // unreliable here because Vite bundles the config (and this middleware) into a
 // temporary file.
-const FORMS_DIR = path.resolve(process.cwd(), 'src/server/forms');
+const FORM_DIRS = [
+  path.resolve(process.cwd(), 'src/server/forms'),
+  path.resolve(process.cwd(), '../../services/doc-parser/templates'),
+];
 
 const blankCache = new Map<string, Promise<Uint8Array>>();
+
+async function readFirstExisting(file: string): Promise<Uint8Array> {
+  const errors: string[] = [];
+  for (const dir of FORM_DIRS) {
+    try {
+      return new Uint8Array(await readFile(path.join(dir, file)));
+    } catch (error) {
+      errors.push(`${dir}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`Missing form ${file}. Looked in ${FORM_DIRS.join(', ')}. ${errors.join(' | ')}`);
+}
 
 function loadBlank(file: string): Promise<Uint8Array> {
   let cached = blankCache.get(file);
   if (!cached) {
-    cached = readFile(path.join(FORMS_DIR, file)).then((b) => new Uint8Array(b));
+    cached = readFirstExisting(file);
     blankCache.set(file, cached);
   }
   return cached;
