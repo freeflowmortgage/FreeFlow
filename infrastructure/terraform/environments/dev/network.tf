@@ -75,7 +75,7 @@ resource "aws_security_group_rule" "parser_from_console" {
 resource "aws_security_group" "console_aws_endpoints" {
   count       = var.enable_console ? 1 : 0
   name        = "${local.name_prefix}-console-aws-endpoints-sg"
-  description = "Private AWS API endpoints reachable from the console and portal"
+  description = "Private AWS API endpoints reachable from the underwriting console"
   vpc_id      = data.aws_vpc.existing.id
 
   ingress {
