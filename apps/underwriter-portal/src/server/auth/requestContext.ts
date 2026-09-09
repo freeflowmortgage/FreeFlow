@@ -55,6 +55,21 @@ export function withRequestContext(
     const requestId = randomUUID();
     res.setHeader('X-Request-Id', requestId);
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+
+    try {
+      enforceTrustedOrigin(req);
+    } catch (error) {
+      const originError = normalizeAuthenticationError(error);
+      return res.status(originError.status).json({
+        error: {
+          code: originError.code,
+          message: originError.publicMessage,
+          requestId,
+        },
+      });
+    }
 
     let context: RequestContext;
     try {
@@ -90,6 +105,41 @@ export function withRequestContext(
       });
     }
   };
+}
+
+/**
+ * ALB authentication protects the session, but browsers attach that session to
+ * cross-site requests as well. Every unsafe portal API operation therefore
+ * requires an exact Origin match in protected runtimes. This intentionally
+ * fails closed when a browser, proxy, or future endpoint omits the header.
+ */
+function enforceTrustedOrigin(req: NextApiRequest): void {
+  if (!isProtectedRuntime() || !isUnsafeMethod(req.method)) return;
+
+  const configuredOrigin = requiredEnvironment('TRUSTED_ORIGIN');
+  let expectedOrigin: string;
+  try {
+    const parsed = new URL(configuredOrigin);
+    if (parsed.origin === 'null' || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+      throw new Error('TRUSTED_ORIGIN must be an origin.');
+    }
+    expectedOrigin = parsed.origin;
+  } catch {
+    throw new RequestAuthenticationError(503, 'ORIGIN_VALIDATION_UNAVAILABLE', 'Request validation is temporarily unavailable.');
+  }
+
+  const origin = singleHeader(req, 'origin');
+  if (!origin) {
+    throw new RequestAuthenticationError(403, 'ORIGIN_REQUIRED', 'The request origin could not be verified.');
+  }
+
+  if (origin !== expectedOrigin) {
+    throw new RequestAuthenticationError(403, 'ORIGIN_NOT_ALLOWED', 'The request origin is not permitted.');
+  }
+}
+
+function isUnsafeMethod(method: string | undefined): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
 
 export async function createRequestContext(

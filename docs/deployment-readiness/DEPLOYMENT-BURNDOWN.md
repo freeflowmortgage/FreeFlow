@@ -8,7 +8,7 @@ enough. No P0 may be accepted as risk for initial production launch.
 
 | ID | Status | Work item | Acceptance evidence | Owner |
 |---|---|---|---|---|
-| P0-01 | IN PROGRESS | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests all deny | Security/backend TBD |
+| P0-01 | IN PROGRESS | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests deny; protected unsafe requests require one exact `TRUSTED_ORIGIN` Origin header and reject missing/cross-site values; live Cognito and full route/object matrix evidence remain | Security/backend TBD |
 | P0-02 | IN PROGRESS | Enforce tenant-qualified repository and object authorization | Complete two-tenant API/job/share/export negative matrix passes | Backend TBD |
 | P0-03 | DONE | Create one ordered database migration baseline and restricted roles | [Role bootstrap](../../packages/database/prisma/bootstrap/roles.sql), [ordered migrations](../../packages/database/prisma/migrations), and [isolation test](../../packages/database/prisma/tests/tenant-rls-isolation.sql) prove empty-DB deploy/clean drift and non-owner/non-BYPASSRLS roles | Repository evidence; reviewer required |
 | P0-04 | IN PROGRESS | Add tenant columns, composite FKs/indexes, FORCE RLS to every domain table | Direct Prisma and SQL isolation tests pass; worker/admin and complete joined-path matrix remain | Database TBD |

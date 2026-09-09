@@ -5,18 +5,27 @@ import { createRequestContext, withRequestContext } from './requestContext';
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalRuntimeEnv = process.env.FREEFLOW_RUNTIME_ENV;
-process.env.NODE_ENV = 'production';
-process.env.FREEFLOW_RUNTIME_ENV = 'production';
+const originalTrustedOrigin = process.env.TRUSTED_ORIGIN;
+const mutableEnvironment = process.env as Record<string, string | undefined>;
+mutableEnvironment.NODE_ENV = 'production';
+mutableEnvironment.FREEFLOW_RUNTIME_ENV = 'production';
+mutableEnvironment.TRUSTED_ORIGIN = 'https://app.freeflowmortgage.com';
 
 test.after(() => {
-  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
-  else process.env.NODE_ENV = originalNodeEnv;
-  if (originalRuntimeEnv === undefined) delete process.env.FREEFLOW_RUNTIME_ENV;
-  else process.env.FREEFLOW_RUNTIME_ENV = originalRuntimeEnv;
+  if (originalNodeEnv === undefined) delete mutableEnvironment.NODE_ENV;
+  else mutableEnvironment.NODE_ENV = originalNodeEnv;
+  if (originalRuntimeEnv === undefined) delete mutableEnvironment.FREEFLOW_RUNTIME_ENV;
+  else mutableEnvironment.FREEFLOW_RUNTIME_ENV = originalRuntimeEnv;
+  if (originalTrustedOrigin === undefined) delete mutableEnvironment.TRUSTED_ORIGIN;
+  else mutableEnvironment.TRUSTED_ORIGIN = originalTrustedOrigin;
 });
 
-function request(headers: Record<string, string> = {}): NextApiRequest {
-  return { headers } as unknown as NextApiRequest;
+function request(headers: Record<string, string> = {}, method = 'GET'): NextApiRequest {
+  return { headers, method } as unknown as NextApiRequest;
+}
+
+function protectedPost(headers: Record<string, string> = {}): NextApiRequest {
+  return request({ origin: 'https://app.freeflowmortgage.com', ...headers }, 'POST');
 }
 
 function response() {
@@ -53,6 +62,8 @@ const identity = {
   authTime: new Date('2026-09-05T12:59:00.000Z'),
   expiresAt: new Date('2026-09-05T13:05:00.000Z'),
 };
+const TENANT_ID = '00000000-0000-4000-8000-000000000100';
+const USER_ID = '00000000-0000-4000-8000-000000000101';
 
 test('rejects anonymous requests', async () => {
   await assert.rejects(
@@ -66,7 +77,7 @@ test('rejects anonymous requests', async () => {
 
 test('uses the verified membership and ignores caller tenant and role headers', async () => {
   const context = await createRequestContext(
-    request({
+    protectedPost({
       'x-amzn-oidc-data': 'signed-token',
       'x-tenant-id': 'attacker-tenant',
       'x-user-role': 'SUPER_ADMIN',
@@ -87,6 +98,63 @@ test('uses the verified membership and ignores caller tenant and role headers', 
   assert.equal(context.membershipId, 'membership-1');
   assert.ok(context.permissions.includes('income:calculate'));
   assert.ok(Object.isFrozen(context));
+});
+
+test('rejects an unsafe request with no Origin header before the handler runs', async () => {
+  const wrapped = withRequestContext(
+    'income:calculate',
+    async () => {
+      throw new Error('handler must not run');
+    },
+    {
+      verifyToken: async () => ({ subject: 'subject-1', authTime: new Date(), expiresAt: new Date() }),
+      resolveMembership: async () => ({ id: USER_ID, tenantId: TENANT_ID, role: 'UNDERWRITER' }),
+    },
+  );
+  const { res, state } = response();
+
+  await wrapped(request({ 'x-amzn-oidc-data': 'signed-token' }, 'POST'), res);
+
+  assert.equal(state.status, 403);
+  assert.equal((state.body as { error: { code: string } }).error.code, 'ORIGIN_REQUIRED');
+});
+
+test('rejects a cross-site unsafe request even when its identity assertion is valid', async () => {
+  const wrapped = withRequestContext(
+    'income:calculate',
+    async () => {
+      throw new Error('handler must not run');
+    },
+    {
+      verifyToken: async () => ({ subject: 'subject-1', authTime: new Date(), expiresAt: new Date() }),
+      resolveMembership: async () => ({ id: USER_ID, tenantId: TENANT_ID, role: 'UNDERWRITER' }),
+    },
+  );
+  const { res, state } = response();
+
+  await wrapped(protectedPost({ origin: 'https://attacker.example', 'x-amzn-oidc-data': 'signed-token' }), res);
+
+  assert.equal(state.status, 403);
+  assert.equal((state.body as { error: { code: string } }).error.code, 'ORIGIN_NOT_ALLOWED');
+});
+
+test('allows a same-origin unsafe request after identity and membership verification', async () => {
+  let handlerRan = false;
+  const wrapped = withRequestContext(
+    'income:calculate',
+    async () => {
+      handlerRan = true;
+    },
+    {
+      verifyToken: async () => ({ subject: 'subject-1', authTime: new Date(), expiresAt: new Date() }),
+      resolveMembership: async () => ({ id: USER_ID, tenantId: TENANT_ID, role: 'UNDERWRITER' }),
+    },
+  );
+  const { res } = response();
+
+  await wrapped(protectedPost({ 'x-amzn-oidc-data': 'signed-token' }), res);
+
+  assert.equal(handlerRan, true);
 });
 
 test('rejects verified subjects without an active membership', async () => {
@@ -143,4 +211,6 @@ test('converts an authenticated handler failure into a stable 500 envelope', asy
   assert.doesNotMatch(JSON.stringify(state.body), /database details/);
   assert.ok(state.headers['x-request-id']);
   assert.equal(state.headers['cache-control'], 'no-store');
+  assert.equal(state.headers['x-content-type-options'], 'nosniff');
+  assert.equal(state.headers['referrer-policy'], 'no-referrer');
 });

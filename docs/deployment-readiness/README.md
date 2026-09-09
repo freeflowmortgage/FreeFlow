@@ -23,6 +23,7 @@ tests.
 | [AWS-ECS-DEPLOYMENT-SPEC.md](AWS-ECS-DEPLOYMENT-SPEC.md) | Target AWS topology and ECS/Fargate translation |
 | [AWS-LIVE-TEST-RUNBOOK.md](AWS-LIVE-TEST-RUNBOOK.md) | Synthetic-data dev deployment, verification, pause, and access procedures |
 | [PLTE-DEPLOYMENT-EVIDENCE-2026-09-07.md](PLTE-DEPLOYMENT-EVIDENCE-2026-09-07.md) | Recorded AWS PLTE deployment, migration, scan, and smoke-test evidence |
+| [DEV-BASELINE-VERIFICATION-2026-09-09.md](DEV-BASELINE-VERIFICATION-2026-09-09.md) | Current synthetic-dev service, digest, and target-health baseline |
 | [RUNBOOKS.md](RUNBOOKS.md) | Deployment, rollback, incident, restore, rotation, and vulnerability procedures |
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
 | [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
