@@ -397,11 +397,11 @@ resource "aws_ecs_service" "parser" {
 resource "aws_ecs_service" "portal" {
   count = var.enable_services && var.enable_edge ? 1 : 0
 
-  name                              = "${local.name_prefix}-portal"
-  cluster                           = data.aws_ecs_cluster.existing.arn
-  task_definition                   = aws_ecs_task_definition.portal[0].arn
-  desired_count                     = var.portal_desired_count
-  launch_type                       = "FARGATE"
+  name            = "${local.name_prefix}-portal"
+  cluster         = data.aws_ecs_cluster.existing.arn
+  task_definition = aws_ecs_task_definition.portal[0].arn
+  desired_count   = var.portal_desired_count
+  launch_type     = "FARGATE"
   # Keep portal application rollouts from silently changing the Fargate
   # platform version. Upgrade the platform through its own reviewed dev plan.
   platform_version                  = "1.4.0"
