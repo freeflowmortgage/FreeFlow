@@ -41,12 +41,16 @@ export type LivePrevW2Patch = {
 };
 
 export type LiveSchCPatch = {
+  businessName?: string;
+  ein?: string;
   line31?: number;
   line13?: number;
   line44aMiles?: number;
 };
 
 export type LiveCorpPatch = {
+  businessName?: string;
+  ein?: string;
   ordinaryIncome?: number;
   netRentalRealEstate?: number;
   otherNetRental?: number;
@@ -58,12 +62,16 @@ export type LiveCorpPatch = {
 };
 
 export type LiveCCorpPatch = {
+  businessName?: string;
+  ein?: string;
   taxableIncome?: number;
   totalTaxPaid?: number;
   depreciation?: number;
 };
 
 export type LiveFarmPatch = {
+  businessName?: string;
+  ein?: string;
   netFarmProfitLoss?: number;
   depreciation?: number;
 };
@@ -114,8 +122,25 @@ export function livePrevW2Patch(fields: MappedIncomeField[]): LivePrevW2Patch | 
   });
 }
 
+export function groupFieldsByEntityId(
+  fields: MappedIncomeField[],
+  form?: MappedIncomeField['form'],
+): Array<{ entityId: string; fields: MappedIncomeField[] }> {
+  const groups = new Map<string, MappedIncomeField[]>();
+  for (const field of fields) {
+    if (form && field.form !== form) continue;
+    const key = field.entityId || `${field.form}-p${field.pageIndex}`;
+    const list = groups.get(key) ?? [];
+    list.push(field);
+    groups.set(key, list);
+  }
+  return [...groups.entries()].map(([entityId, grouped]) => ({ entityId, fields: grouped }));
+}
+
 export function liveSchCPatch(fields: MappedIncomeField[]): LiveSchCPatch | null {
   return compact({
+    businessName: text(fields, 'ent1-name'),
+    ein: text(fields, 'ent1-ein'),
     line31: num(fields, 'ent1-net'),
     line13: num(fields, 'ent1-dep'),
     line44aMiles: num(fields, 'ent1-miles'),
@@ -124,6 +149,8 @@ export function liveSchCPatch(fields: MappedIncomeField[]): LiveSchCPatch | null
 
 export function liveSCorpPatch(fields: MappedIncomeField[]): LiveCorpPatch | null {
   return compact({
+    businessName: text(fields, 'scorp-name'),
+    ein: text(fields, 'scorp-ein'),
     ordinaryIncome: num(fields, 'scorp-ord'),
     netRentalRealEstate: num(fields, 'scorp-rre'),
     otherNetRental: num(fields, 'scorp-onr'),
@@ -134,6 +161,8 @@ export function liveSCorpPatch(fields: MappedIncomeField[]): LiveCorpPatch | nul
 
 export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch | null {
   return compact({
+    businessName: text(fields, 'pt-name'),
+    ein: text(fields, 'pt-ein'),
     ordinaryIncome: num(fields, 'pt-ord'),
     netRentalRealEstate: num(fields, 'pt-rre'),
     otherNetRental: num(fields, 'pt-onr'),
@@ -146,6 +175,8 @@ export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch
 
 export function liveCCorpPatch(fields: MappedIncomeField[]): LiveCCorpPatch | null {
   return compact({
+    businessName: text(fields, 'c1120-name'),
+    ein: text(fields, 'c1120-ein'),
     taxableIncome: num(fields, 'c1120-taxable'),
     totalTaxPaid: num(fields, 'c1120-tax'),
     depreciation: num(fields, 'c1120-dep'),
@@ -154,9 +185,49 @@ export function liveCCorpPatch(fields: MappedIncomeField[]): LiveCCorpPatch | nu
 
 export function liveFarmPatch(fields: MappedIncomeField[]): LiveFarmPatch | null {
   return compact({
+    businessName: text(fields, 'schedule-f-name'),
+    ein: text(fields, 'schedule-f-ein'),
     netFarmProfitLoss: num(fields, 'schedule-f-net'),
     depreciation: num(fields, 'schedule-f-depreciation'),
   });
+}
+
+function patchesFor<T extends Record<string, unknown>>(
+  fields: MappedIncomeField[],
+  form: MappedIncomeField['form'],
+  patchFn: (group: MappedIncomeField[]) => T | null,
+): Array<T & { entityId: string }> {
+  return groupFieldsByEntityId(fields, form).flatMap(({ entityId, fields: group }) => {
+    const patch = patchFn(group);
+    return patch ? [{ entityId, ...patch }] : [];
+  });
+}
+
+export function liveWagePatches(fields: MappedIncomeField[]): Array<LiveWagePatch & { entityId: string }> {
+  return groupFieldsByEntityId(fields, 'W-2').flatMap(({ entityId, fields: group }) => {
+    const patch = liveWagePatch(group);
+    return patch ? [{ entityId, ...patch }] : [];
+  });
+}
+
+export function liveSchCPatches(fields: MappedIncomeField[]): Array<LiveSchCPatch & { entityId: string }> {
+  return patchesFor(fields, 'Schedule C', liveSchCPatch);
+}
+
+export function liveSCorpPatches(fields: MappedIncomeField[]): Array<LiveCorpPatch & { entityId: string }> {
+  return patchesFor(fields, 'Form 1120-S', liveSCorpPatch);
+}
+
+export function livePartnershipPatches(fields: MappedIncomeField[]): Array<LiveCorpPatch & { entityId: string }> {
+  return patchesFor(fields, 'Form 1065', livePartnershipPatch);
+}
+
+export function liveCCorpPatches(fields: MappedIncomeField[]): Array<LiveCCorpPatch & { entityId: string }> {
+  return patchesFor(fields, 'Form 1120', liveCCorpPatch);
+}
+
+export function liveFarmPatches(fields: MappedIncomeField[]): Array<LiveFarmPatch & { entityId: string }> {
+  return patchesFor(fields, 'Schedule F', liveFarmPatch);
 }
 
 export function liveAssetPatch(fields: MappedIncomeField[]): LiveAssetPatch | null {

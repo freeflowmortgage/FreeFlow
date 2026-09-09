@@ -26,16 +26,7 @@ import {
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
-import {
-  liveAssetPatch,
-  liveCCorpPatch,
-  liveFarmPatch,
-  livePartnershipPatch,
-  livePrevW2Patch,
-  liveSchCPatch,
-  liveSCorpPatch,
-  liveWagePatch,
-} from '../liveHydrate';
+import { liveAssetPatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
   firstPageForKind,
@@ -44,6 +35,18 @@ import {
   tabForKinds,
   type WorkspaceTab,
 } from '../livePacket';
+import { DEMO_URLA_ENTITIES, employmentEntitiesFromUrlA, namesMatch } from '../urlaEmploymentRoster';
+import { discoveredSelectId, locateIncomeEntities, pagesFromParsePages, type LocateResult, type LocatedMatch } from '../locateIncomeEntities';
+import {
+  seedCCorpFromLocation,
+  seedFarmFromLocation,
+  seedPartnershipFromLocation,
+  seedSCorpFromLocation,
+  seedScheduleCFromLocation,
+  seedW2FromLocation,
+} from '../hydrateFromUrlA';
+import { loadIntakeSession } from '../intake/sessionStore';
+import UrlAEntityRoster from './UrlAEntityRoster';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfPagePreview from './PdfPagePreview';
 import FixturePdfViewer from './FixturePdfViewer';
@@ -460,6 +463,83 @@ export default function UnderwriterSplitViewDemo({
     [packet.map((doc) => doc.id).join('|')],
   );
   const scheduleEExtracts = useMemo(() => allScheduleEExtracts(packet), [packet.map((doc) => doc.id).join('|')]);
+  const urlARoster = useMemo(
+    () => (isLive ? employmentEntitiesFromUrlA(loadIntakeSession()?.answers) : DEMO_URLA_ENTITIES),
+    [isLive],
+  );
+  const locateResult: LocateResult = useMemo(() => {
+    if (!isLive) {
+      return {
+        roster: DEMO_URLA_ENTITIES.map((entity) => {
+          const kind =
+            entity.kind === 'wages'
+              ? 'w2'
+              : entity.kind === 'rental'
+                ? 'schedule-e'
+                : /farm/i.test(entity.name)
+                  ? 'schedule-f'
+                  : /advisory/i.test(entity.name)
+                    ? 'scorp'
+                    : /horizon|property partners/i.test(entity.name)
+                      ? 'partnership'
+                      : /summit|manufacturing/i.test(entity.name)
+                        ? 'ccorp'
+                        : 'schedule-c';
+          const form =
+            kind === 'w2'
+              ? 'W-2'
+              : kind === 'schedule-e'
+                ? 'Schedule E'
+                : kind === 'schedule-f'
+                  ? 'Schedule F'
+                  : kind === 'scorp'
+                    ? 'Form 1120-S'
+                    : kind === 'partnership'
+                      ? 'Form 1065'
+                      : kind === 'ccorp'
+                        ? 'Form 1120'
+                        : 'Schedule C';
+          return {
+            entity,
+            located: true,
+            matches: [
+              {
+                entityId: entity.id,
+                form: form as LocatedMatch['form'],
+                kind,
+                pageIndex: 0,
+                name: entity.name,
+                ein: entity.ein,
+                fields: [],
+              },
+            ],
+          };
+        }),
+        discovered: [
+          {
+            entityId: 'partnership-undisclosed-side',
+            form: 'Form 1065',
+            kind: 'partnership',
+            pageIndex: 0,
+            name: 'Undisclosed Side LLC',
+            ein: '11-2233445',
+            fields: [],
+          },
+        ],
+      };
+    }
+    return locateIncomeEntities({
+      roster: urlARoster,
+      fields: mappedFields,
+      pages: packet.flatMap((doc) => pagesFromParsePages(doc.result.pages, doc.id)),
+      rentals: scheduleEExtracts.map((extract) => ({
+        address: extract.address,
+        pageIndex: extract.pageIndex,
+        documentId: extract.documentId,
+        column: extract.column,
+      })),
+    });
+  }, [isLive, urlARoster, mappedFields, packet, scheduleEExtracts]);
 
   // 1. Navigation & View States
   const [activeTab, setActiveTab] = useState<IncomeTab>('PAYSTUB_RECONCILIATION');
@@ -791,6 +871,14 @@ export default function UnderwriterSplitViewDemo({
         { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
       ],
     },
+    {
+      id: 'partnership-undisclosed-side', businessName: 'Undisclosed Side LLC', ein: '11-2233445',
+      profitPctEnd: 25, capitalPctEnd: 25, hasStableDistributions: true, scheduleL: basePartnershipScheduleL,
+      years: [
+        { year: 2025, ordinaryIncome: 41000, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 4000, depletion: 0, mealsM1: 200, guaranteedPayments: 8000, otherNoncash: 0, w2Wages: 0, distributions: 12000 },
+        { year: 2024, ordinaryIncome: 38000, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 3800, depletion: 0, mealsM1: 180, guaranteedPayments: 8000, otherNoncash: 0, w2Wages: 0, distributions: 11000 },
+      ],
+    },
   ]);
   const [activePartnershipId, setActivePartnershipId] = useState('partnership-horizon');
   const activePartnership = partnershipEntities.find((entry) => entry.id === activePartnershipId) ?? partnershipEntities[0];
@@ -907,99 +995,153 @@ export default function UnderwriterSplitViewDemo({
   useEffect(() => {
     if (!isLive) return;
     const kinds = new Set(packet.flatMap((doc) => kindsOf(doc)));
-    const wage = liveWagePatch(mappedFields);
-    setW2Employers([
-      emptyW2Employer('w2-live', {
-        ...wage,
-        employerName: wage?.employerName || 'Parsed employer',
-        wageDocSource: wage?.wageDocSource ?? 'PAYSTUB',
+    const { current, previous } = seedW2FromLocation(locateResult, mappedFields);
+    const w2Rows = current.map((seed) =>
+      emptyW2Employer(seed.id, {
+        ...seed.patch,
+        employerName: seed.employerName,
+        ein: seed.ein,
+        role: seed.role,
+        wageDocSource: seed.patch?.wageDocSource ?? 'PAYSTUB',
       }),
-    ]);
-    setActiveW2EmployerId('w2-live');
-    const prior = livePrevW2Patch(mappedFields);
-    if (prior) {
+    );
+    setW2Employers(w2Rows.length ? w2Rows : [emptyW2Employer('w2-live')]);
+    setActiveW2EmployerId(w2Rows[0]?.id ?? 'w2-live');
+    if (previous) {
       setPrevEmployerW2({
-        employerName: prior.employerName || 'Prior employer',
-        ein: prior.ein || '',
+        employerName: previous.employerName || 'Prior employer',
+        ein: previous.ein || '',
         year: new Date().getFullYear() - 1,
-        box1Wages: prior.box1Wages ?? 0,
+        box1Wages: previous.box1Wages ?? 0,
         box12Bonus: 0,
         box14Overtime: 0,
       });
-      setMergePreviousEmployerVariable(true);
+      setMergePreviousEmployerVariable(Boolean(previous.box1Wages));
     } else {
       setPrevEmployerW2({ employerName: '', ein: '', year: 0, box1Wages: 0, box12Bonus: 0, box14Overtime: 0 });
       setMergePreviousEmployerVariable(false);
     }
 
-    const schC = liveSchCPatch(mappedFields);
-    setSchCEntities([
-      {
-        id: 'schc-live',
-        businessName: schC ? 'Parsed Schedule C' : 'No Schedule C in packet',
-        ein: '',
-        years: [
-          { ...emptySchCYear(2025), ...schC },
-          emptySchCYear(2024),
-        ],
-      },
-    ]);
-    setActiveSchCId('schc-live');
+    const schCSeeds = seedScheduleCFromLocation(locateResult);
+    setSchCEntities(
+      schCSeeds.length
+        ? schCSeeds.map((seed) => ({
+            id: seed.id,
+            businessName: seed.businessName,
+            ein: seed.ein,
+            years: [
+              { ...emptySchCYear(2025), ...seed.years[0] },
+              { ...emptySchCYear(2024), ...seed.years[1] },
+            ],
+          }))
+        : [{ id: 'schc-live', businessName: 'No Schedule C in packet', ein: '', years: [emptySchCYear(2025), emptySchCYear(2024)] }],
+    );
+    setActiveSchCId(schCSeeds[0]?.id ?? 'schc-live');
 
-    const scorp = liveSCorpPatch(mappedFields);
-    const { ownershipPct: scorpPct, ...scorpYear } = scorp ?? {};
-    setSCorpEntities([
-      {
-        id: 'scorp-live',
-        businessName: scorp ? 'Parsed S-Corp' : 'No S-Corp in packet',
-        ein: '',
-        ownershipPct: scorpPct ?? 100,
-        hasStableDistributions: true,
-        scheduleL: { ...EMPTY_SCHEDULE_L },
-        years: [{ ...emptyCorpYear(2025), ...scorpYear }, emptyCorpYear(2024)],
-      },
-    ]);
-    setActiveSCorpId('scorp-live');
+    const scorpSeeds = seedSCorpFromLocation(locateResult);
+    setSCorpEntities(
+      scorpSeeds.length
+        ? scorpSeeds.map((seed) => {
+            const year1 = seed.years[0] ?? {};
+            const year2 = seed.years[1] ?? {};
+            const { ownershipPct, businessName: _n1, ein: _e1, ...rest1 } = year1;
+            const { ownershipPct: _o2, businessName: _n2, ein: _e2, ...rest2 } = year2;
+            return {
+              id: seed.id,
+              businessName: seed.businessName,
+              ein: seed.ein,
+              ownershipPct: ownershipPct ?? 100,
+              hasStableDistributions: true,
+              scheduleL: { ...EMPTY_SCHEDULE_L },
+              years: [{ ...emptyCorpYear(2025), ...rest1 }, { ...emptyCorpYear(2024), ...rest2 }] as [CorpYear, CorpYear],
+            };
+          })
+        : [{
+            id: 'scorp-live',
+            businessName: 'No S-Corp in packet',
+            ein: '',
+            ownershipPct: 100,
+            hasStableDistributions: true,
+            scheduleL: { ...EMPTY_SCHEDULE_L },
+            years: [emptyCorpYear(2025), emptyCorpYear(2024)],
+          }],
+    );
+    setActiveSCorpId(scorpSeeds[0]?.id ?? 'scorp-live');
 
-    const partnership = livePartnershipPatch(mappedFields);
-    const { profitPctEnd, capitalPctEnd, ownershipPct: _ignored, ...partnershipYear } = partnership ?? {};
-    setPartnershipEntities([
-      {
-        id: 'partnership-live',
-        businessName: partnership ? 'Parsed partnership' : 'No partnership in packet',
-        ein: '',
-        profitPctEnd: profitPctEnd ?? 100,
-        capitalPctEnd: capitalPctEnd ?? 100,
-        hasStableDistributions: true,
-        scheduleL: { ...EMPTY_SCHEDULE_L },
-        years: [{ ...emptyCorpYear(2025), ...partnershipYear }, emptyCorpYear(2024)],
-      },
-    ]);
-    setActivePartnershipId('partnership-live');
+    const partnershipSeeds = seedPartnershipFromLocation(locateResult);
+    setPartnershipEntities(
+      partnershipSeeds.length
+        ? partnershipSeeds.map((seed) => {
+            const year1 = seed.years[0] ?? {};
+            const year2 = seed.years[1] ?? {};
+            const { profitPctEnd, capitalPctEnd, ownershipPct: _o1, businessName: _n1, ein: _e1, ...rest1 } = year1;
+            const { profitPctEnd: _p2, capitalPctEnd: _c2, ownershipPct: _o2, businessName: _n2, ein: _e2, ...rest2 } = year2;
+            return {
+              id: seed.id,
+              businessName: seed.businessName,
+              ein: seed.ein,
+              profitPctEnd: profitPctEnd ?? 100,
+              capitalPctEnd: capitalPctEnd ?? 100,
+              hasStableDistributions: true,
+              scheduleL: { ...EMPTY_SCHEDULE_L },
+              years: [{ ...emptyCorpYear(2025), ...rest1 }, { ...emptyCorpYear(2024), ...rest2 }] as [CorpYear, CorpYear],
+            };
+          })
+        : [{
+            id: 'partnership-live',
+            businessName: 'No partnership in packet',
+            ein: '',
+            profitPctEnd: 100,
+            capitalPctEnd: 100,
+            hasStableDistributions: true,
+            scheduleL: { ...EMPTY_SCHEDULE_L },
+            years: [emptyCorpYear(2025), emptyCorpYear(2024)],
+          }],
+    );
+    setActivePartnershipId(partnershipSeeds[0]?.id ?? 'partnership-live');
 
-    const ccorp = liveCCorpPatch(mappedFields);
-    setCCorpEntities([
-      {
-        id: 'ccorp-live',
-        businessName: ccorp ? 'Parsed C-Corp' : 'No C-Corp in packet',
-        ein: '',
-        ownershipPct: 100,
-        scheduleL: { ...EMPTY_SCHEDULE_L },
-        years: [{ ...emptyCCorpYear(2025), ...ccorp }, emptyCCorpYear(2024)],
-      },
-    ]);
-    setActiveCCorpId('ccorp-live');
+    const ccorpSeeds = seedCCorpFromLocation(locateResult);
+    setCCorpEntities(
+      ccorpSeeds.length
+        ? ccorpSeeds.map((seed) => {
+            const { businessName: _n1, ein: _e1, ...rest1 } = seed.years[0] ?? {};
+            const { businessName: _n2, ein: _e2, ...rest2 } = seed.years[1] ?? {};
+            return {
+              id: seed.id,
+              businessName: seed.businessName,
+              ein: seed.ein,
+              ownershipPct: 100,
+              scheduleL: { ...EMPTY_SCHEDULE_L },
+              years: [{ ...emptyCCorpYear(2025), ...rest1 }, { ...emptyCCorpYear(2024), ...rest2 }] as [CCorpYear, CCorpYear],
+            };
+          })
+        : [{
+            id: 'ccorp-live',
+            businessName: 'No C-Corp in packet',
+            ein: '',
+            ownershipPct: 100,
+            scheduleL: { ...EMPTY_SCHEDULE_L },
+            years: [emptyCCorpYear(2025), emptyCCorpYear(2024)],
+          }],
+    );
+    setActiveCCorpId(ccorpSeeds[0]?.id ?? 'ccorp-live');
 
-    const farm = liveFarmPatch(mappedFields);
-    setScheduleFEntities([
-      {
-        id: 'farm-live',
-        businessName: farm ? 'Parsed farm' : 'No Schedule F in packet',
-        ein: '',
-        years: [{ ...emptyFarmYear(2025), ...farm }, emptyFarmYear(2024)],
-      },
-    ]);
-    setActiveScheduleFId('farm-live');
+    const farmSeeds = seedFarmFromLocation(locateResult);
+    setScheduleFEntities(
+      farmSeeds.length
+        ? farmSeeds.map((seed) => {
+            const { businessName: _n1, ein: _e1, ...rest1 } = seed.years[0] ?? {};
+            const { businessName: _n2, ein: _e2, ...rest2 } = seed.years[1] ?? {};
+            return {
+              id: seed.id,
+              businessName: seed.businessName,
+              ein: seed.ein,
+              years: [{ ...emptyFarmYear(2025), ...rest1 }, { ...emptyFarmYear(2024), ...rest2 }] as [ScheduleFYear, ScheduleFYear],
+            };
+          })
+        : [{ id: 'farm-live', businessName: 'No Schedule F in packet', ein: '', years: [emptyFarmYear(2025), emptyFarmYear(2024)] }],
+    );
+    setActiveScheduleFId(farmSeeds[0]?.id ?? 'farm-live');
 
     const asset = liveAssetPatch(mappedFields);
     setAssetIncomeYears([
@@ -1014,7 +1156,7 @@ export default function UnderwriterSplitViewDemo({
     setSCorpPnl(EMPTY_PNL);
     setCCorpPnl(EMPTY_PNL);
     setPartnershipPnl(EMPTY_PNL);
-  }, [isLive, mappedFields]);
+  }, [isLive, mappedFields, locateResult, packet, scheduleEExtracts]);
 
   // Borrower Core Metadata Reference
   const borrowerMetadata = {
@@ -1909,11 +2051,86 @@ export default function UnderwriterSplitViewDemo({
   const asEntityOptions = <T extends { id: string; businessName?: string; employerName?: string; ein?: string }>(
     entries: T[],
   ): IncomeEntityOption[] =>
-    entries.map((entry) => ({
-      id: entry.id,
-      name: entry.businessName ?? entry.employerName ?? 'Unnamed entity',
-      ein: entry.ein,
-    }));
+    entries.map((entry) => {
+      const name = entry.businessName ?? entry.employerName ?? '';
+      const on1003 = locateResult.roster.find(
+        (row) => row.entity.id === entry.id || namesMatch(row.entity.name, name),
+      );
+      const onReturn = locateResult.discovered.find(
+        (match) => match.entityId === entry.id || namesMatch(match.name ?? '', name),
+      );
+      return {
+        id: entry.id,
+        name: name || 'Unnamed entity',
+        ein: entry.ein,
+        detail: on1003
+          ? on1003.located
+            ? 'From 1003 · located'
+            : 'From 1003 · not in packet'
+          : onReturn
+            ? 'Undisclosed · on return, not on 1003'
+            : undefined,
+      };
+    });
+
+  const selectLocatedKind = (
+    kind: LocatedMatch['kind'] | undefined,
+    name: string,
+    id: string,
+    rentalFallback = false,
+  ) => {
+    if (kind === 'w2' || kind === 'paystub') {
+      setActiveTab('PAYSTUB_RECONCILIATION');
+      const match = w2Employers.find((entry) => entry.id === id || namesMatch(entry.employerName, name));
+      if (match) setActiveW2EmployerId(match.id);
+      return;
+    }
+    if (kind === 'schedule-c') {
+      setActiveTab('SCHEDULE_C');
+      const match = schCEntities.find((entry) => entry.id === id || namesMatch(entry.businessName, name));
+      if (match) setActiveSchCId(match.id);
+      return;
+    }
+    if (kind === 'scorp') {
+      setActiveTab('SCORP');
+      const match = sCorpEntities.find((entry) => entry.id === id || namesMatch(entry.businessName, name));
+      if (match) setActiveSCorpId(match.id);
+      return;
+    }
+    if (kind === 'partnership') {
+      setActiveTab('PARTNERSHIP');
+      const match = partnershipEntities.find((entry) => entry.id === id || namesMatch(entry.businessName, name));
+      if (match) setActivePartnershipId(match.id);
+      return;
+    }
+    if (kind === 'ccorp') {
+      setActiveTab('CCORP');
+      const match = cCorpEntities.find((entry) => entry.id === id || namesMatch(entry.businessName, name));
+      if (match) setActiveCCorpId(match.id);
+      return;
+    }
+    if (kind === 'schedule-f') {
+      setActiveTab('SCHEDULE_F');
+      const match = scheduleFEntities.find((entry) => entry.id === id || namesMatch(entry.businessName, name));
+      if (match) setActiveScheduleFId(match.id);
+      return;
+    }
+    if (kind === 'schedule-e' || rentalFallback) {
+      setActiveTab('SCHEDULE_E');
+    }
+  };
+
+  const selectUrlAEntity = (rosterId: string) => {
+    const row = locateResult.roster.find((item) => item.entity.id === rosterId);
+    if (row) {
+      const kind = row.matches[0]?.kind ?? (row.entity.kind === 'wages' ? 'w2' : row.entity.kind === 'rental' ? 'schedule-e' : undefined);
+      selectLocatedKind(kind, row.entity.name, rosterId, row.entity.kind === 'rental');
+      return;
+    }
+    const discovered = locateResult.discovered.find((match) => discoveredSelectId(match) === rosterId);
+    if (!discovered) return;
+    selectLocatedKind(discovered.kind, discovered.name ?? '', discovered.entityId);
+  };
 
   const addW2Employer = () => {
     const id = `w2-${crypto.randomUUID()}`;
@@ -2515,6 +2732,8 @@ export default function UnderwriterSplitViewDemo({
           </div>
         ) : null}
       </div>
+
+      <UrlAEntityRoster result={locateResult} onSelect={selectUrlAEntity} />
 
       {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
       <div className="flex min-h-0 flex-1">
