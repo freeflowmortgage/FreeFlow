@@ -29,7 +29,7 @@ enough. No P0 may be accepted as risk for initial production launch.
 | P0-19 | OPEN | Execute staging security/privacy qualification | Independent pen test and ZDR flow review have no unresolved critical/high | Security/privacy TBD |
 | P0-20 | OPEN | Execute deploy/rollback/rotation/outage/DLQ runbooks | Recorded staging drill evidence and named on-call ownership | SRE TBD |
 | P0-21 | DONE | Separate production configuration contract from tracked development config | `.env.production` ignored, placeholder example tracked, `.env*` excluded from builds | Repository evidence |
-| P0-22 | IN PROGRESS | Remove suppressed build/test failures and establish hermetic CI test stages | Required builds fail on error; all JS/Python/integration suites run green | Engineering TBD |
+| P0-22 | IN PROGRESS | Remove suppressed build/test failures and establish hermetic CI test stages | Required builds fail on error; the database job generates Prisma before application-role isolation tests; all JS/Python/integration suites run green | Engineering TBD |
 
 ## P1 — Required operational maturity
 
