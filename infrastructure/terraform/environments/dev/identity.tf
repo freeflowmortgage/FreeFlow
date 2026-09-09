@@ -88,6 +88,11 @@ resource "aws_iam_role" "parser_task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
+resource "aws_iam_role" "console_task" {
+  name               = "${local.name_prefix}-console-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
 resource "aws_iam_role" "migration_task" {
   name               = "${local.name_prefix}-migration-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
@@ -119,6 +124,19 @@ resource "aws_ecr_repository" "migration" {
   }
 }
 
+resource "aws_ecr_repository" "console" {
+  name                 = "mortgage-underwriting-console"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
 resource "aws_cloudwatch_log_group" "portal" {
   name              = "/ecs/${local.name_prefix}/portal"
   retention_in_days = 14
@@ -126,6 +144,11 @@ resource "aws_cloudwatch_log_group" "portal" {
 
 resource "aws_cloudwatch_log_group" "parser" {
   name              = "/ecs/${local.name_prefix}/income-parser"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "console" {
+  name              = "/ecs/${local.name_prefix}/underwriting-console"
   retention_in_days = 14
 }
 

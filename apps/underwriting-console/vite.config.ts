@@ -14,7 +14,13 @@ const revision = (() => {
   }
 })();
 
+const allowedHosts = (process.env.VITE_ALLOWED_HOSTS || '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean);
+
 export default defineConfig({
+  cacheDir: process.env.VITE_CACHE_DIR || 'node_modules/.vite',
   define: {
     __APP_REVISION__: JSON.stringify(revision),
   },
@@ -39,5 +45,8 @@ export default defineConfig({
     port: Number(process.env.PORT) || 3000,
     host: true,
     strictPort: true,
+    // Do not disable Vite's Host-header protection. ECS supplies the known
+    // ALB and custom-domain hosts through VITE_ALLOWED_HOSTS at deployment.
+    allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
   },
 });

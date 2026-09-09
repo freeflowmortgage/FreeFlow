@@ -171,6 +171,17 @@ variable "enable_parser" {
   default     = false
 }
 
+variable "enable_console" {
+  type        = bool
+  description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."
+  default     = false
+
+  validation {
+    condition     = !var.enable_console || (var.enable_edge && var.enable_services)
+    error_message = "The underwriting console requires edge and services."
+  }
+}
+
 variable "enable_monitoring" {
   type        = bool
   description = "Creates the low-cost PLTE CloudWatch dashboard, alarms, and encrypted SNS topic."
@@ -233,6 +244,17 @@ variable "parser_image" {
   validation {
     condition     = !var.enable_services || !var.enable_parser || can(regex("@sha256:[0-9a-f]{64}$", var.parser_image))
     error_message = "parser_image must be an immutable @sha256 digest reference when the parser is enabled."
+  }
+}
+
+variable "console_image" {
+  type        = string
+  description = "Underwriting console ECR image reference pinned with @sha256:."
+  default     = ""
+
+  validation {
+    condition     = !var.enable_console || can(regex("@sha256:[0-9a-f]{64}$", var.console_image))
+    error_message = "console_image must be an immutable @sha256 digest reference when the console is enabled."
   }
 }
 

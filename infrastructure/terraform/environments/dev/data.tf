@@ -5,6 +5,10 @@ data "aws_vpc" "existing" {
   id = var.vpc_id
 }
 
+data "aws_prefix_list" "s3" {
+  name = "com.amazonaws.${var.aws_region}.s3"
+}
+
 data "aws_subnet" "public" {
   for_each = toset(var.public_subnet_ids)
   id       = each.value

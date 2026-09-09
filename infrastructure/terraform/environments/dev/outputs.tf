@@ -6,12 +6,20 @@ output "parser_repository_url" {
   value = aws_ecr_repository.parser.repository_url
 }
 
+output "console_repository_url" {
+  value = aws_ecr_repository.console.repository_url
+}
+
 output "migration_repository_url" {
   value = aws_ecr_repository.migration.repository_url
 }
 
 output "portal_url" {
   value = var.enable_edge ? (var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}") : null
+}
+
+output "console_url" {
+  value = var.enable_edge && var.enable_console && !var.enable_cognito_edge ? "http://${aws_lb.portal[0].dns_name}:3000" : null
 }
 
 output "load_balancer_dns_name" {
