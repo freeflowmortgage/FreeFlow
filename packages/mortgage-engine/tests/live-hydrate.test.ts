@@ -3,9 +3,11 @@ import {
   liveCCorpPatch,
   liveFarmPatch,
   livePartnershipPatch,
+  livePartnershipPatches,
   livePrevW2Patch,
   liveSchCPatch,
   liveSCorpPatch,
+  liveSCorpPatches,
   liveWagePatch,
 } from '../../../apps/underwriting-console/src/liveHydrate';
 import type { MappedIncomeField } from '../../../apps/underwriting-console/src/parseTypes';
@@ -58,5 +60,16 @@ describe('live worksheet hydration', () => {
     expect(liveCCorpPatch([field('c1120-taxable', 200000, { form: 'Form 1120' })])?.taxableIncome).toBe(200000);
     expect(liveFarmPatch([field('schedule-f-net', 64000, { form: 'Schedule F' })])?.netFarmProfitLoss).toBe(64000);
     expect(liveAssetPatch([field('schedule-b-interest', 4200, { form: 'Schedule B' })])?.interestIncome).toBe(4200);
+  });
+
+  test('hydrates a worksheet patch per 1120-S and 1065 entity instead of the first only', () => {
+    const fields: MappedIncomeField[] = [
+      field('scorp-ord', 142000, { form: 'Form 1120-S', entityId: 'form-1120-s-p0' }),
+      field('scorp-ord', 88000, { form: 'Form 1120-S', entityId: 'form-1120-s-p1', id: 'scorp-ord--form-1120-s-p1' }),
+      field('pt-gp', 24000, { form: 'Form 1065', entityId: 'form-1065-p2' }),
+      field('pt-gp', 12000, { form: 'Form 1065', entityId: 'form-1065-p3', id: 'pt-gp--form-1065-p3' }),
+    ];
+    expect(liveSCorpPatches(fields).map((patch) => patch.ordinaryIncome)).toEqual([142000, 88000]);
+    expect(livePartnershipPatches(fields).map((patch) => patch.guaranteedPayments)).toEqual([24000, 12000]);
   });
 });
