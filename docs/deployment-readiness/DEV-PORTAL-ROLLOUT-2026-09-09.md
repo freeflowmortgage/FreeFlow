@@ -28,7 +28,7 @@ The portal Fargate platform was explicitly pinned to the verified `1.4.0` value
 before planning so no platform upgrade could ride along with the application
 rollout.
 
-## Current result: incomplete — do not mark deployed
+## Initial result: incomplete
 
 Terraform applied the reviewed plan and ECS registered portal task-definition
 revision `5`. The replacement task received a private ENI and has network
@@ -42,3 +42,32 @@ Do not treat this entry as a successful deployment or production-readiness
 closure. Continue with ECS/Fargate provisioning diagnosis, then record a new
 healthy-task, target-health, authenticated synthetic smoke, and negative-test
 result before accepting the rollout.
+
+## Remediation and verified availability
+
+The stopped replacement task reported an ECR authorization timeout. The console
+had created private-DNS ECR and CloudWatch Logs interface endpoints whose
+security group admitted only the console. Portal tasks resolved those endpoints
+but were denied their HTTPS path.
+
+Commits `c6567d7` and `5de301b` retain the existing endpoint security group
+and attachments, then add the portal application security group to its existing
+HTTPS ingress rule. The reviewed remediation plan was one in-place security
+group update with no resource replacement.
+
+After the remediation:
+
+- ECS started portal task-definition revision `5`.
+- The new portal container is `RUNNING` and `HEALTHY` on image digest
+  `sha256:50b9f99a7f5b83afc6efd6c6f13918a7704ad49064ca495592464dd1544e98a2`.
+- The new target is healthy; the old portal target is draining normally.
+- A header-only unauthenticated request to `https://dev.freeflowmortgage.com/`
+  returned an ALB `302` to the configured Cognito hosted domain, not portal
+  content.
+- The income-parser remains on revision `2` and was not modified.
+
+ECS subsequently reached `COMPLETED` steady state on portal revision `5`. The
+deployment is verified healthy at the infrastructure and unauthenticated-edge
+layers. Authenticated synthetic smoke and protected-route negative-test
+evidence remain required before it can be counted as a fully verified dev
+rollout.
