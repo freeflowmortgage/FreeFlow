@@ -255,6 +255,21 @@ resource "aws_security_group_rule" "portal_from_authenticated_alb" {
   source_security_group_id = aws_security_group.authenticated_alb[0].id
 }
 
+# ALB-hosted Cognito authentication exchanges the authorization code with the
+# Cognito hosted domain after the browser returns to /oauth2/idpresponse.
+# Cognito's hosted domain is public, so this is restricted to outbound HTTPS
+# only; application traffic remains destination-scoped to its task groups.
+resource "aws_security_group_rule" "authenticated_alb_to_cognito" {
+  count             = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  type              = "egress"
+  description       = "HTTPS from ALB to Cognito hosted authentication"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.authenticated_alb[0].id
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
 resource "aws_lb_target_group" "portal" {
   count = var.enable_edge ? 1 : 0
 

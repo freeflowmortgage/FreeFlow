@@ -40,6 +40,11 @@ to the portal task on port 8000. The portal and parser run without public IPs
 in the two existing application subnets. The parser accepts port 8080 only from
 the portal security group and registers as `income-parser.freeflow.local`.
 
+The Cognito-enabled ALB is allowed outbound HTTPS only so it can complete the
+hosted-domain authorization-code exchange. Its authentication session remains
+one hour; longer sessions require an explicit security review and compensating
+controls.
+
 The existing private RDS instance is reached only through the application
 security group. A one-off, read-only-root-filesystem migration task consumes the
 RDS-managed administrative secret and creates restricted application and
