@@ -352,6 +352,43 @@ resource "aws_lb_listener" "https" {
   }
 }
 
+# Keep the legacy portal/API target group attached to the authenticated ALB
+# while the underwriting console is the HTTPS default.  This permits ECS to
+# maintain the portal service and makes any future /api/* route subject to the
+# same Cognito session as the console.
+resource "aws_lb_listener_rule" "portal_api_https" {
+  count        = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 100
+
+  action {
+    order = 1
+    type  = "authenticate-cognito"
+
+    authenticate_cognito {
+      user_pool_arn              = aws_cognito_user_pool.live_test[0].arn
+      user_pool_client_id        = aws_cognito_user_pool_client.alb[0].id
+      user_pool_domain           = aws_cognito_user_pool_domain.live_test[0].domain
+      on_unauthenticated_request = "authenticate"
+      scope                      = "openid email profile"
+      session_cookie_name        = "FreeFlowDevAuth"
+      session_timeout            = 3600
+    }
+  }
+
+  action {
+    order            = 2
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.portal[0].arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
+  }
+}
+
 resource "aws_route53_record" "portal" {
   count = var.enable_edge && var.enable_cognito_edge && !var.dns_managed_externally ? 1 : 0
 
