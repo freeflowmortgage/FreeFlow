@@ -85,6 +85,11 @@ Keep the Fargate platform version explicit during an application rollout. A
 platform-version upgrade requires its own reviewed plan and verification rather
 than riding along with an image change.
 
+When the private-DNS ECR and CloudWatch Logs interface endpoints are enabled
+for the console, allow the portal application security group to reach those
+same endpoints on HTTPS. Otherwise portal replacement tasks resolve the private
+endpoint but cannot pull ECR authorization or emit logs.
+
 For the temporary PLTE boundary, set `enable_edge = true`,
 `enable_cognito_edge = false`, `enable_parser = true`, and allowlist only the
 operator's current public IPv4 `/32`. The parser image must be digest-pinned and
