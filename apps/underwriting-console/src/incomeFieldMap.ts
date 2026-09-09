@@ -104,6 +104,26 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
 
 export const SCHEDULE_C_DEFS: IncomeFieldDef[] = [
   {
+    id: 'ent1-name',
+    form: 'Schedule C',
+    boxLabel: 'Line C',
+    fieldLabel: 'Business Name',
+    lineNum: 'Line C',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/\bc\s+business name/i, /business name\.?\s+if no separate/i],
+  },
+  {
+    id: 'ent1-ein',
+    form: 'Schedule C',
+    boxLabel: 'Line B',
+    fieldLabel: 'Employer Identification Number (EIN)',
+    lineNum: 'Line B',
+    category: 'identity',
+    capture: 'ein',
+    patterns: [/\bb\s+employer(?:['’]s)? (?:id|identification)/i, /employer(?:['’]s)? identification number/i],
+  },
+  {
     id: 'ent1-net',
     form: 'Schedule C',
     boxLabel: 'Line 31',
@@ -166,6 +186,26 @@ export const SCHEDULE_D_DEFS: IncomeFieldDef[] = [
 ];
 
 export const SCHEDULE_F_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'schedule-f-name',
+    form: 'Schedule F',
+    boxLabel: 'Line C',
+    fieldLabel: 'Farm Name',
+    lineNum: 'Line C',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/\bc\s+farm name/i, /farm name/i],
+  },
+  {
+    id: 'schedule-f-ein',
+    form: 'Schedule F',
+    boxLabel: 'EIN',
+    fieldLabel: 'Employer Identification Number (EIN)',
+    lineNum: 'EIN',
+    category: 'identity',
+    capture: 'ein',
+    patterns: [/\bb\s+employer(?:['’]s)? (?:id|identification)/i, /employer(?:['’]s)? identification number/i],
+  },
   {
     id: 'schedule-f-net',
     form: 'Schedule F',
@@ -337,6 +377,26 @@ export const SCHEDULE_E_DEFS: IncomeFieldDef[] = [
  */
 export const SCORP_DEFS: IncomeFieldDef[] = [
   {
+    id: 'scorp-name',
+    form: 'Form 1120-S',
+    boxLabel: 'Box B',
+    fieldLabel: "Corporation's Name",
+    lineNum: 'Box B',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/corporation(?:['’]s)? name/i],
+  },
+  {
+    id: 'scorp-ein',
+    form: 'Form 1120-S',
+    boxLabel: 'Box A',
+    fieldLabel: "Corporation's EIN",
+    lineNum: 'Box A',
+    category: 'identity',
+    capture: 'ein',
+    patterns: [/corporation(?:['’]s)? employer identification number/i],
+  },
+  {
     id: 'scorp-ord',
     form: 'Form 1120-S',
     boxLabel: 'Box 1',
@@ -391,6 +451,26 @@ export const SCORP_DEFS: IncomeFieldDef[] = [
  * never used; the percent capture takes the last (Ending column) value on the line.
  */
 export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'pt-name',
+    form: 'Form 1065',
+    boxLabel: 'Box B',
+    fieldLabel: "Partnership's Name",
+    lineNum: 'Box B',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/partnership(?:['’]s)? name/i],
+  },
+  {
+    id: 'pt-ein',
+    form: 'Form 1065',
+    boxLabel: 'Box A',
+    fieldLabel: "Partnership's EIN",
+    lineNum: 'Box A',
+    category: 'identity',
+    capture: 'ein',
+    patterns: [/partnership(?:['’]s)? employer identification number/i],
+  },
   {
     id: 'pt-ord',
     form: 'Form 1065',
@@ -546,6 +626,26 @@ export const WVOE_DEFS: IncomeFieldDef[] = [
 ];
 
 export const FORM_1120_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'c1120-name',
+    form: 'Form 1120',
+    boxLabel: 'Name',
+    fieldLabel: 'Corporation Name',
+    lineNum: 'Name',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/name of corporation/i, /legal name of corporation/i],
+  },
+  {
+    id: 'c1120-ein',
+    form: 'Form 1120',
+    boxLabel: 'EIN',
+    fieldLabel: 'Employer Identification Number (EIN)',
+    lineNum: 'EIN',
+    category: 'identity',
+    capture: 'ein',
+    patterns: [/employer identification number/i],
+  },
   {
     id: 'c1120-taxable',
     form: 'Form 1120',
@@ -1071,6 +1171,7 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
           let rest = line.text
             .slice((labelMatch?.index ?? 0) + (labelMatch?.[0].length ?? 0))
             .replace(/^[\s:,.()–—-]+/, '')
+            .replace(/^(?:address(?:,?\s*city)?(?:,?\s*state)?(?:,?\s*and\s+zip\s*code)?)\s*/i, '')
             .replace(/\s+(?:[a-z]\s+)?(?:control number|employee(?:['’]s)? first name|employee(?:['’]s)? address).*$/i, '')
             .replace(/^[a-z]$/i, '')
             .replace(/^(?:,?\s*)?(?:address(?:\s*,?\s*and\s+zip\s*code)?|and zip code)\s*$/i, '')
