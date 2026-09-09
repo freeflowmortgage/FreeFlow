@@ -402,7 +402,9 @@ resource "aws_ecs_service" "portal" {
   task_definition                   = aws_ecs_task_definition.portal[0].arn
   desired_count                     = var.portal_desired_count
   launch_type                       = "FARGATE"
-  platform_version                  = "LATEST"
+  # Keep portal application rollouts from silently changing the Fargate
+  # platform version. Upgrade the platform through its own reviewed dev plan.
+  platform_version                  = "1.4.0"
   health_check_grace_period_seconds = 90
 
   deployment_circuit_breaker {

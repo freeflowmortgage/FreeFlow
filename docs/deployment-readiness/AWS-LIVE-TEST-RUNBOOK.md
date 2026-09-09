@@ -81,6 +81,10 @@ The checked-in example contains no credentials. Populate an ignored
 4. Compute: set `enable_services = true` and provide all three image references
    as `repository@sha256:digest`. Terraform rejects mutable tags.
 
+Keep the Fargate platform version explicit during an application rollout. A
+platform-version upgrade requires its own reviewed plan and verification rather
+than riding along with an image change.
+
 For the temporary PLTE boundary, set `enable_edge = true`,
 `enable_cognito_edge = false`, `enable_parser = true`, and allowlist only the
 operator's current public IPv4 `/32`. The parser image must be digest-pinned and
