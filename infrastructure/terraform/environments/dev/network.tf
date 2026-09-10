@@ -69,8 +69,9 @@ resource "aws_security_group_rule" "parser_from_console" {
 }
 
 # Keep the temporary console private while still allowing Fargate to retrieve
-# its image and emit logs.  The console may use HTTPS only to these VPC
-# endpoints; it receives no unrestricted internet egress.
+# its image and emit logs. Private DNS makes these endpoints the ECR and Logs
+# path for every task in the VPC, so the portal application group must also be
+# admitted while the endpoints exist.
 resource "aws_security_group" "console_aws_endpoints" {
   count       = var.enable_console ? 1 : 0
   name        = "${local.name_prefix}-console-aws-endpoints-sg"
@@ -78,11 +79,11 @@ resource "aws_security_group" "console_aws_endpoints" {
   vpc_id      = data.aws_vpc.existing.id
 
   ingress {
-    description     = "HTTPS from underwriting console"
+    description     = "HTTPS from underwriting console and portal"
     protocol        = "tcp"
     from_port       = 443
     to_port         = 443
-    security_groups = [aws_security_group.console[0].id]
+    security_groups = [aws_security_group.console[0].id, var.app_security_group_id]
   }
 }
 

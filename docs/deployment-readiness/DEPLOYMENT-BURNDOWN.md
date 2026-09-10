@@ -8,7 +8,7 @@ enough. No P0 may be accepted as risk for initial production launch.
 
 | ID | Status | Work item | Acceptance evidence | Owner |
 |---|---|---|---|---|
-| P0-01 | IN PROGRESS | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests all deny | Security/backend TBD |
+| P0-01 | IN PROGRESS | Implement verified OIDC/session and server-derived tenant/permission context | Forged, anonymous, expired, wrong issuer/audience/signer tests deny; protected unsafe requests require one exact `TRUSTED_ORIGIN` Origin header and reject missing/cross-site values; live Cognito and full route/object matrix evidence remain | Security/backend TBD |
 | P0-02 | IN PROGRESS | Enforce tenant-qualified repository and object authorization | Complete two-tenant API/job/share/export negative matrix passes | Backend TBD |
 | P0-03 | DONE | Create one ordered database migration baseline and restricted roles | [Role bootstrap](../../packages/database/prisma/bootstrap/roles.sql), [ordered migrations](../../packages/database/prisma/migrations), and [isolation test](../../packages/database/prisma/tests/tenant-rls-isolation.sql) prove empty-DB deploy/clean drift and non-owner/non-BYPASSRLS roles | Repository evidence; reviewer required |
 | P0-04 | IN PROGRESS | Add tenant columns, composite FKs/indexes, FORCE RLS to every domain table | Direct Prisma and SQL isolation tests pass; worker/admin and complete joined-path matrix remain | Database TBD |
@@ -29,7 +29,7 @@ enough. No P0 may be accepted as risk for initial production launch.
 | P0-19 | OPEN | Execute staging security/privacy qualification | Independent pen test and ZDR flow review have no unresolved critical/high | Security/privacy TBD |
 | P0-20 | OPEN | Execute deploy/rollback/rotation/outage/DLQ runbooks | Recorded staging drill evidence and named on-call ownership | SRE TBD |
 | P0-21 | DONE | Separate production configuration contract from tracked development config | `.env.production` ignored, placeholder example tracked, `.env*` excluded from builds | Repository evidence |
-| P0-22 | IN PROGRESS | Remove suppressed build/test failures and establish hermetic CI test stages | Required builds fail on error; all JS/Python/integration suites run green | Engineering TBD |
+| P0-22 | IN PROGRESS | Remove suppressed build/test failures and establish hermetic CI test stages | Required builds fail on error; the database job generates Prisma before application-role isolation tests; all JS/Python/integration suites run green | Engineering TBD |
 
 ## P1 — Required operational maturity
 

@@ -158,7 +158,7 @@ export default function App() {
         setSource('live');
         enterWorkspace('split');
       }
-      if (errors.length) setParseError(errors.join(' · '));
+      if (errors.length) setParseError([...new Set(errors)].join(' · '));
     } finally {
       setParseBusy(false);
     }

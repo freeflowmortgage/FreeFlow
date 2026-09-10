@@ -34,6 +34,14 @@ Route handlers MUST receive it from middleware and MUST NOT reconstruct it from
 headers or request data. Internal calls additionally require service identity,
 timestamp, body digest, and replay protection.
 
+In protected runtimes, the middleware also applies an exact-origin browser
+control to every `POST`, `PUT`, `PATCH`, and `DELETE`: the request MUST supply a
+single `Origin` header exactly equal to `TRUSTED_ORIGIN`. Missing, duplicate, or
+cross-site origins fail closed with `ORIGIN_REQUIRED` or `ORIGIN_NOT_ALLOWED`.
+This check runs before a route handler can read a request body. The middleware
+also sets `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and
+`Referrer-Policy: no-referrer` for protected API responses.
+
 ## API conventions
 
 - Base path: `/api/v1`. JSON uses `application/json`; upload endpoints accept
@@ -51,6 +59,9 @@ timestamp, body digest, and replay protection.
   jobs are also bounded.
 - Return `Cache-Control: no-store` for borrower/workflow data and PDFs. Summary
   filenames derive from validated identifiers, never raw caller text.
+- Browser mutations require an exact `Origin` equal to `TRUSTED_ORIGIN`; do not
+  add an origin exception for an embedded UI without a separately reviewed
+  anti-CSRF design.
 - Demo fixtures and fallback data MUST be unavailable when
   `NODE_ENV=production`.
 
