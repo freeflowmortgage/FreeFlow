@@ -10,7 +10,7 @@ change is never a substitute for a reviewed Terraform change.
 | Environment | Purpose | AWS boundary | Current status |
 | --- | --- | --- | --- |
 | `dev` | Synthetic-data engineering and integration testing | Existing `mortgage-dev-*` account/VPC in `us-west-2` | Transitional Terraform live-test stack manages new resources around inventoried legacy resources |
-| `staging` | Production-like qualification and drills | Separate non-production account/VPC | Not created |
+| `staging` | Production-like qualification and drills | Separate non-production account/VPC | State foundation created 2026-09-09; platform stack not yet created |
 | `production` | Customer workload | Dedicated production account/VPC | Not created |
 
 `dev` must never receive production borrower data. Production does not inherit
@@ -52,10 +52,15 @@ long-lived root user and its credentials must not be placed in this repository.
 
 1. Copy `bootstrap/terraform.tfvars.example` to a local
    `bootstrap/terraform.tfvars` and choose a globally unique bucket name.
-2. Review the plan in the intended account and apply it.
-3. Secure the bootstrap state according to the change record, then configure
-   each environment backend from `environments/<environment>/backend.hcl.example`.
-4. Commit only backend examples and non-secret contracts. Never commit a state
+2. Run `terraform init -backend=false`, review the plan in the intended account,
+   and apply it. This is the only permitted local-state bootstrap step.
+3. Immediately run `terraform init -migrate-state` with an environment-specific
+   S3 backend key such as `bootstrap/staging.tfstate`; confirm migration before
+   deleting the local bootstrap state file.
+4. Configure each platform backend from
+   `environments/<environment>/backend.hcl.example`. Bootstrap and platform
+   state keys must remain distinct.
+5. Commit only backend examples and non-secret contracts. Never commit a state
    file, plan file, populated tfvars file, secret, account credential, or
    Cognito client secret.
 

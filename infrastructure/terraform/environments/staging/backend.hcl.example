@@ -1,5 +1,6 @@
-# Staging uses its own account and state bucket. Do not point this at dev state.
-bucket         = "replace-with-freeflow-staging-tf-state-bucket"
+# Staging uses account 977323999161 and must never point at dev or production
+# state. The bucket is created by the staging bootstrap stack.
+bucket         = "freeflow-staging-977323999161-tf-state-usw2"
 key            = "platform/staging.tfstate"
 region         = "us-west-2"
 encrypt        = true
