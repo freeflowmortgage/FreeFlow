@@ -53,7 +53,7 @@ describe('entity-scoped income field mapping', () => {
           words: words([
             "c Employer's name Acme Systems LLC",
             "b Employer identification number (EIN) 11-1111111",
-            'Box 1 Wages tips other compensation 60000.00'
+            'Box 5 Medicare wages and tips 64500.00'
           ])
         },
         {
@@ -66,19 +66,19 @@ describe('entity-scoped income field mapping', () => {
           words: words([
             "c Employer's name Weekend Health Inc",
             "b Employer identification number (EIN) 22-2222222",
-            'Box 1 Wages tips other compensation 24000.00'
+            'Box 5 Medicare wages and tips 25500.00'
           ])
         }
       ])
     );
 
-    const wages = fields.filter((field) => field.sourceFieldId === 'w2-box1');
+    const wages = fields.filter((field) => field.sourceFieldId === 'w2-box5');
     const names = fields.filter((field) => field.sourceFieldId === 'w2-employer-name');
 
     expect(wages).toHaveLength(2);
-    expect(wages[0].id).toBe('w2-box1');
-    expect(wages[1].id).toBe('w2-box1--w-2-p1');
-    expect(wages.map((field) => field.numericValue)).toEqual([60000, 24000]);
+    expect(wages[0].id).toBe('w2-box5');
+    expect(wages[1].id).toBe('w2-box5--w-2-p1');
+    expect(wages.map((field) => field.numericValue)).toEqual([64500, 25500]);
     expect(names.map((field) => field.value)).toEqual([
       'Acme Systems LLC',
       'Weekend Health Inc'
@@ -181,7 +181,7 @@ describe('entity-scoped income field mapping', () => {
           flags: [],
           words: words([
             'Form W-2 Wage and Tax Statement',
-            'Box 1 Wages tips other compensation 60000.00',
+            'Box 5 Medicare wages and tips 60000.00',
             'Profit sharing 12% Current Period Net Pay 1840.22'
           ])
         },
@@ -200,7 +200,7 @@ describe('entity-scoped income field mapping', () => {
       ])
     );
     expect(fields.some((field) => field.form === 'Form 1065')).toBe(false);
-    expect(fields.find((field) => field.sourceFieldId === 'w2-box1')?.numericValue).toBe(60000);
+    expect(fields.find((field) => field.sourceFieldId === 'w2-box5')?.numericValue).toBe(60000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
   });
 
@@ -225,7 +225,7 @@ describe('entity-scoped income field mapping', () => {
             at('W2-2025-0447', 0.55, 0.22, 0.18),
             at("c Employer's name, address, and ZIP code", 0.08, 0.28, 0.4),
             at('Apex Technology Partners LLC', 0.08, 0.32, 0.4),
-            at('1 Wages, tips, other compensation', 0.52, 0.42, 0.22),
+            at('5 Medicare wages and tips', 0.52, 0.42, 0.22),
             at('2 Federal income tax withheld', 0.76, 0.42, 0.2),
             at('78,500.00', 0.52, 0.47, 0.16),
             at('9,420.00', 0.76, 0.47, 0.16),
@@ -235,7 +235,7 @@ describe('entity-scoped income field mapping', () => {
     );
     expect(fields.find((field) => field.sourceFieldId === 'w2-employer-ein')?.value).toBe('74-1234567');
     expect(fields.find((field) => field.sourceFieldId === 'w2-employer-name')?.value).toMatch(/Apex Technology/);
-    expect(fields.find((field) => field.sourceFieldId === 'w2-box1')?.numericValue).toBe(78500);
+    expect(fields.find((field) => field.sourceFieldId === 'w2-box5')?.numericValue).toBe(78500);
     expect(fields.find((field) => field.sourceFieldId === 'w2-box2')?.numericValue).toBe(9420);
   });
 
@@ -254,7 +254,7 @@ describe('entity-scoped income field mapping', () => {
             at("e Employee’s first name and initial / Last name", 0.59, 0.229, 0.35),
             at('Digital Solutions Corp', 0.03, 0.262, 0.35),
             at('Sarah K. Vance', 0.59, 0.262, 0.28),
-            at('1 Wages, tips, other compensation', 0.59, 0.37, 0.22),
+            at('5 Medicare wages and tips', 0.59, 0.37, 0.22),
             at('78,500.00', 0.59, 0.40, 0.16),
           ],
         },
@@ -297,5 +297,267 @@ describe('entity-scoped income field mapping', () => {
     expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBe(3600);
     expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(12500);
+  });
+
+  test('uses Regular YTD as base wages, not Gross pay YTD', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words([
+            'Earnings Statement Semi-monthly (24/yr)',
+            'Regular 45.00 86.67 3,600.00 54,000.00',
+            'Overtime 67.50 0.00 0.00 4,200.00',
+            'Bonus 0.00 12,500.00',
+            'Gross pay 3,600.00 70,700.00',
+            'Year to Date 70,700.00',
+          ]),
+        },
+      ]),
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hourly-rate')?.numericValue).toBe(45);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hours-week')?.numericValue).toBeCloseTo(40, 5);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBe(3600);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-ot-ytd')?.numericValue).toBe(4200);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(12500);
+  });
+
+  test('adds shift/PTO/holiday/retro to base, bonus classifiers, and variable tips/commission/RSU', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words([
+            'Earnings Statement',
+            'Regular 45.00 80.00 3,600.00 50,000.00',
+            'Shift Differential 5.00 8.00 40.00 1,200.00',
+            'Weekend Premium 20.00 800.00',
+            'PTO 0.00 2,000.00',
+            'Holiday 0.00 500.00',
+            'Retro Pay 0.00 300.00',
+            'AIP 0.00 4,000.00',
+            'Quarterly 0.00 1,500.00',
+            'Annual Pay 0.00 2,000.00',
+            'Incentive 0.00 500.00',
+            'Bonus 0.00 3,000.00',
+            'Spot Bonus 0.00 9,999.00',
+            'Relocation 0.00 8,888.00',
+            'Tips 120.00 1,800.00',
+            'Commission 0.00 6,000.00',
+            'RSU 0.00 7,500.00',
+          ]),
+        },
+      ]),
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54800);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBe(3660);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(11000);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-tips-ytd')?.numericValue).toBe(1800);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-commission-ytd')?.numericValue).toBe(6000);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-rsu-ytd')?.numericValue).toBe(7500);
+    expect(fields.some((field) => field.numericValue === 9999 || field.numericValue === 8888)).toBe(false);
+  });
+
+  test('classifies OT, double time, 1.5 hourly, and worked holiday as overtime', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words([
+            'Earnings Statement',
+            'Regular 0.00 50,000.00',
+            'Holiday 0.00 500.00',
+            'OT 0.00 1,000.00',
+            'Overtime 0.00 800.00',
+            'Double Time 0.00 400.00',
+            '1.5 Hourly 0.00 300.00',
+            'Worked Holiday 0.00 200.00',
+          ]),
+        },
+      ]),
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(50500);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-ot-ytd')?.numericValue).toBe(2700);
+  });
+
+  test('prefers Form 8825 Line 14 extracts and takes the totals-column amount from words', () => {
+    const fromExtracts = mapIncomeFields({
+      ...response([
+        {
+          index: 0,
+          formIds: ['Form 8825 (Corporate Rentals)'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words(['Form 8825 Rental Real Estate Income and Expenses']),
+        },
+      ]),
+      formExtracts: [
+        {
+          pageIndex: 0,
+          form: 'Form 8825',
+          sourceFieldId: 'form-8825-dep',
+          boxLabel: 'Line 14',
+          fieldLabel: 'Form 8825 Depreciation (Line 14)',
+          lineNum: 'Line 14',
+          category: 'addback',
+          value: '$8,200.00',
+          numericValue: 8200,
+          box: { x: 0.7, y: 0.4, w: 0.1, h: 0.02 },
+          entityId: 'form-8825-p0',
+        },
+      ],
+    });
+    expect(fromExtracts.find((field) => field.sourceFieldId === 'form-8825-dep')?.numericValue).toBe(8200);
+
+    const fromWords = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Form 8825 (Corporate Rentals)'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words(['Form 8825 Rental Real Estate Income and Expenses', '14 Depreciation 400.00 600.00 8,200.00']),
+        },
+      ]),
+    );
+    expect(fromWords.find((field) => field.sourceFieldId === 'form-8825-dep')?.numericValue).toBe(8200);
+  });
+
+  test('keeps Form 8825 property-column extracts and a second paystub employer', () => {
+    const fields = mapIncomeFields({
+      ...response([
+        {
+          index: 0,
+          formIds: ['Form 8825 (Corporate Rentals)'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words(['Form 8825 Rental Real Estate Income and Expenses']),
+        },
+        {
+          index: 1,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: [
+            { text: 'Employer: Hidden Payroll Inc', x: 0.08, y: 0.12, w: 0.4, h: 0.02, confidence: 99 },
+            { text: 'Regular', x: 0.08, y: 0.28, w: 0.14, h: 0.018, confidence: 99 },
+            { text: '45.00', x: 0.3, y: 0.28, w: 0.1, h: 0.018, confidence: 99 },
+            { text: '86.67', x: 0.45, y: 0.28, w: 0.1, h: 0.018, confidence: 99 },
+            { text: '3,600.00', x: 0.6, y: 0.28, w: 0.12, h: 0.018, confidence: 99 },
+            { text: '54,000.00', x: 0.78, y: 0.28, w: 0.12, h: 0.018, confidence: 99 },
+          ],
+        },
+        {
+          index: 2,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: [
+            { text: 'Employer: Weekend Health Inc', x: 0.08, y: 0.12, w: 0.4, h: 0.02, confidence: 99 },
+            { text: 'Regular', x: 0.08, y: 0.28, w: 0.14, h: 0.018, confidence: 99 },
+            { text: '20.00', x: 0.3, y: 0.28, w: 0.1, h: 0.018, confidence: 99 },
+            { text: '40.00', x: 0.45, y: 0.28, w: 0.1, h: 0.018, confidence: 99 },
+            { text: '800.00', x: 0.6, y: 0.28, w: 0.12, h: 0.018, confidence: 99 },
+            { text: '9,600.00', x: 0.78, y: 0.28, w: 0.12, h: 0.018, confidence: 99 },
+          ],
+        },
+      ]),
+      formExtracts: [
+        {
+          pageIndex: 0,
+          form: 'Form 8825',
+          sourceFieldId: 'form-8825-dep-A',
+          boxLabel: 'Line 14 · A',
+          fieldLabel: 'Form 8825 Line 14 Column A',
+          lineNum: 'Line 14 · A',
+          category: 'addback',
+          value: '$400.00',
+          numericValue: 400,
+          box: { x: 0.4, y: 0.4, w: 0.08, h: 0.02 },
+          entityId: 'form-8825-p0',
+        },
+        {
+          pageIndex: 0,
+          form: 'Form 8825',
+          sourceFieldId: 'form-8825-dep',
+          boxLabel: 'Line 14 · Totals',
+          fieldLabel: 'Form 8825 Line 14 Totals',
+          lineNum: 'Line 14',
+          category: 'addback',
+          value: '$8,200.00',
+          numericValue: 8200,
+          box: { x: 0.7, y: 0.4, w: 0.1, h: 0.02 },
+          entityId: 'form-8825-p0',
+        },
+      ],
+    });
+    expect(fields.find((field) => field.sourceFieldId === 'form-8825-dep-A')?.numericValue).toBe(400);
+    expect(fields.find((field) => field.sourceFieldId === 'form-8825-dep')?.numericValue).toBe(8200);
+    const ytd = fields.filter((field) => field.sourceFieldId === 'ps-base-ytd');
+    expect(ytd.map((field) => field.numericValue)).toEqual([54000, 9600]);
+    expect(fields.filter((field) => field.sourceFieldId === 'ps-employer-name').map((field) => field.value)).toEqual([
+      'Hidden Payroll Inc',
+      'Weekend Health Inc',
+    ]);
+  });
+
+  test('prefers formExtracts overlay boxes for a filled W-2', () => {
+    const fields = mapIncomeFields({
+      ...response([
+        {
+          index: 0,
+          formIds: ['W-2'],
+          isNativeText: true,
+          meanConfidence: 100,
+          skewDegrees: 0,
+          flags: ['acroform_merged'],
+          words: words(['Form W-2 Wage and Tax Statement']),
+        },
+      ]),
+      formExtracts: [
+        {
+          pageIndex: 0,
+          form: 'W-2',
+          sourceFieldId: 'w2-box5',
+          boxLabel: 'Box 5',
+          fieldLabel: 'Medicare Wages and Tips',
+          lineNum: 'Box 5',
+          category: 'wages',
+          value: '$78,500.00',
+          numericValue: 78500,
+          box: { x: 0.52, y: 0.24, w: 0.18, h: 0.02 },
+          entityId: 'w-2-p0',
+        },
+      ],
+    });
+    const wages = fields.find((field) => field.sourceFieldId === 'w2-box5');
+    expect(wages?.numericValue).toBe(78500);
+    expect(wages?.box.x).toBeCloseTo(0.52);
   });
 });

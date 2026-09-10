@@ -201,3 +201,25 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         unresolved_statements=unresolved,
         flags=flags,
     )
+
+
+def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult) -> set[int]:
+    """OCR only keep-set pages that still need it. Scan packets with no labels OCR all."""
+    pages = list(inspected)
+    needs = {
+        int(getattr(page, "index", index))
+        for index, page in enumerate(pages)
+        if getattr(page, "use_ocr", False)
+    }
+    if not needs:
+        return set()
+    kept = set(split_result.target_pages)
+    if kept:
+        selected = needs & kept
+        logger.info("ocr_gated keep=%s ocr=%s skipped=%s", sorted(kept), sorted(selected), sorted(needs - selected))
+        return selected
+    if len(needs) * 2 >= max(len(pages), 1):
+        logger.info("ocr_ungated_scan_packet pages=%s", sorted(needs))
+        return needs
+    logger.info("ocr_skipped_unrecognized needs=%s", sorted(needs))
+    return set()
