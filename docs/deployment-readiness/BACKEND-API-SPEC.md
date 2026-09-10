@@ -92,7 +92,7 @@ exception messages.
 | `POST /api/v1/loans/{loanId}/income-calculations` | `income:calculate` | Load tenant-scoped loan and validated extraction; run versioned deterministic rules server-side |
 | `POST /api/v1/loans/{loanId}/income-approvals` | `income:approve` | Append approval/override event with reason and optimistic version; never update history |
 | `GET /api/v1/loans/{loanId}/income-summary` | `loan:read` | Return only real tenant-scoped state; 404/503 rather than fixture fallback |
-| `GET /api/v1/loans/{loanId}/income-summary.pdf` | `loan:read` | Render from an approved/versioned calculation; `no-store`; audit export |
+| `GET /api/v1/loans/{loanId}/income-summary.pdf` | `loan:read` | Render from an approved/versioned calculation; `no-store`; audit export. Until that source exists, protected runtimes return `503 SUMMARY_DATA_UNAVAILABLE` rather than render synthetic fields |
 | `POST /api/v1/loans/{loanId}/encompass-syncs` | `encompass:sync` | Enqueue approved audit ID and expected version; return 202 and job ID |
 | `GET /api/v1/encompass-syncs/{jobId}` | `encompass:sync` | Return tenant-scoped job state and safe failure code |
 | `POST /api/v1/appraisals/audits` | `appraisal:review` | Strict PDF extraction plus versioned rules; domain-isolated storage |
