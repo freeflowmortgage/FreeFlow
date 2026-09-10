@@ -61,13 +61,25 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 
 export default withRequestContext('loan:read', handler);
 
-async function loadSummaryData(loanId: string, context: RequestContext): Promise<IncomeSummaryPdfData> {
+export async function loadSummaryData(
+  loanId: string,
+  context: RequestContext,
+  protectedRuntime = isProtectedRuntime(),
+): Promise<IncomeSummaryPdfData> {
   const fallback: IncomeSummaryPdfData = { ...DEMO_INCOME_SUMMARY, loanId };
 
+  // The current export template contains synthetic calculation fields. Never
+  // combine those with real borrower identity in a protected runtime; a
+  // production export must be sourced from an approved, versioned calculation.
+  if (protectedRuntime) {
+    throw new SummaryDataError(
+      503,
+      'SUMMARY_DATA_UNAVAILABLE',
+      'An approved income summary is not available for export.',
+    );
+  }
+
   if (!process.env.DATABASE_URL) {
-    if (isProtectedRuntime()) {
-      throw new SummaryDataError(503, 'DATABASE_UNAVAILABLE', 'The summary data service is unavailable.');
-    }
     return fallback;
   }
 
@@ -80,12 +92,7 @@ async function loadSummaryData(loanId: string, context: RequestContext): Promise
       }),
     );
 
-    if (!loanApp) {
-      if (isProtectedRuntime()) {
-        throw new SummaryDataError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
-      }
-      return fallback;
-    }
+    if (!loanApp) return fallback;
 
     return {
       ...fallback,
@@ -95,14 +102,11 @@ async function loadSummaryData(loanId: string, context: RequestContext): Promise
     };
   } catch (error) {
     if (error instanceof SummaryDataError) throw error;
-    if (isProtectedRuntime()) {
-      throw new SummaryDataError(503, 'DATABASE_UNAVAILABLE', 'The summary data service is unavailable.');
-    }
     return fallback;
   }
 }
 
-class SummaryDataError extends Error {
+export class SummaryDataError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
