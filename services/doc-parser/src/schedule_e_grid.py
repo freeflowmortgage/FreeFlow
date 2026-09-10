@@ -825,7 +825,7 @@ def extract_schedule_e_pages(
     supplied: dict[int, Any] = {}
     for page_result in ocr_pages or []:
         index = getattr(page_result, "index", None)
-        if index is None or getattr(page_result, "is_native_text", False):
+        if index is None:
             continue
         supplied[int(index)] = page_result
     doc = _open_pdf(pymupdf, pdf_input)

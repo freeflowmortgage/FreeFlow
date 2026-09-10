@@ -29,6 +29,7 @@ tests.
 | [RUNBOOKS.md](RUNBOOKS.md) | Deployment, rollback, incident, restore, rotation, and vulnerability procedures |
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
 | [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
+| [GO-LIVE-MAP.md](GO-LIVE-MAP.md) | Integration go-live instructions: RapidOCR, MISMO, Encompass web/desktop, appraisal, billing, identity |
 
 ## Non-negotiable invariants
 
@@ -53,4 +54,6 @@ phased ECS dev stack now exist, but substantial P0 work remains. In particular,
 provider workflows, shared links, parser output minimization, supply-chain
 controls, HA/restore qualification, observability, and independent security
 testing remain incomplete. All P0 items must close before production traffic or
-real borrower data is allowed.
+real borrower data is allowed. Integration-by-integration launch steps
+(RapidOCR, MISMO 3.4, Encompass Developer Connect vs desktop, D1C, appraisal)
+are in [GO-LIVE-MAP.md](GO-LIVE-MAP.md).

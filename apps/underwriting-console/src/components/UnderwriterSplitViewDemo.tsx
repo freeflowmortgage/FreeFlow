@@ -102,7 +102,7 @@ interface PrevEmployerW2 {
   employerName: string;
   ein: string;
   year: number;
-  box1Wages: number;
+  box5Wages: number;
   box12Bonus: number;
   box14Overtime: number;
 }
@@ -122,15 +122,18 @@ interface W2Employer {
   baseYtd: number;
   bonusYtd: number;
   overtimeYtd: number;
+  tipsYtd: number;
+  commissionYtd: number;
+  rsuYtd: number;
   otherYtd: number;
   wvoeBonus: number;
   wvoeOvertime: number;
   wvoeOther: number;
   wvoeMonths: number;
-  w2Year1Box1: number;
+  w2Year1Box5: number;
   w2Year1Bonus: number;
   w2Year1Ot: number;
-  w2Year2Box1: number;
+  w2Year2Box5: number;
   w2Year2Bonus: number;
   w2Year2Ot: number;
 }
@@ -151,15 +154,18 @@ function emptyW2Employer(id: string, patch: Partial<W2Employer> = {}): W2Employe
     baseYtd: 0,
     bonusYtd: 0,
     overtimeYtd: 0,
+    tipsYtd: 0,
+    commissionYtd: 0,
+    rsuYtd: 0,
     otherYtd: 0,
     wvoeBonus: 0,
     wvoeOvertime: 0,
     wvoeOther: 0,
     wvoeMonths: 12,
-    w2Year1Box1: 0,
+    w2Year1Box5: 0,
     w2Year1Bonus: 0,
     w2Year1Ot: 0,
-    w2Year2Box1: 0,
+    w2Year2Box5: 0,
     w2Year2Bonus: 0,
     w2Year2Ot: 0,
     ...patch,
@@ -710,7 +716,7 @@ export default function UnderwriterSplitViewDemo({
     employerName: 'Digital Solutions Corp',
     ein: '94-87654321',
     year: 2025,
-    box1Wages: 78500,
+    box5Wages: 78500,
     box12Bonus: 18000,     // Previous bonus history
     box14Overtime: 6000     // Previous overtime history
   });
@@ -731,15 +737,18 @@ export default function UnderwriterSplitViewDemo({
       baseYtd: 54000,
       bonusYtd: 12500,
       overtimeYtd: 4200,
+      tipsYtd: 0,
+      commissionYtd: 0,
+      rsuYtd: 0,
       otherYtd: 0,
       wvoeBonus: 18000,
       wvoeOvertime: 6000,
       wvoeOther: 0,
       wvoeMonths: 12,
-      w2Year1Box1: 78500,
+      w2Year1Box5: 78500,
       w2Year1Bonus: 18000,
       w2Year1Ot: 6000,
-      w2Year2Box1: 74200,
+      w2Year2Box5: 74200,
       w2Year2Bonus: 15000,
       w2Year2Ot: 4800,
     },
@@ -758,15 +767,18 @@ export default function UnderwriterSplitViewDemo({
       baseYtd: 7920,
       bonusYtd: 0,
       overtimeYtd: 0,
+      tipsYtd: 0,
+      commissionYtd: 0,
+      rsuYtd: 0,
       otherYtd: 0,
       wvoeBonus: 0,
       wvoeOvertime: 0,
       wvoeOther: 0,
       wvoeMonths: 24,
-      w2Year1Box1: 11440,
+      w2Year1Box5: 11440,
       w2Year1Bonus: 0,
       w2Year1Ot: 0,
-      w2Year2Box1: 10920,
+      w2Year2Box5: 10920,
       w2Year2Bonus: 0,
       w2Year2Ot: 0,
     },
@@ -781,6 +793,9 @@ export default function UnderwriterSplitViewDemo({
   const currentBaseYtd = activeW2Employer.baseYtd;
   const currentBonusYtd = activeW2Employer.bonusYtd;
   const currentOtYtd = activeW2Employer.overtimeYtd;
+  const currentTipsYtd = activeW2Employer.tipsYtd;
+  const currentCommissionYtd = activeW2Employer.commissionYtd;
+  const currentRsuYtd = activeW2Employer.rsuYtd;
   const currentOtherYtd = activeW2Employer.otherYtd;
   const monthsAtCurrentJob = activeW2Employer.monthsAtJob;
   const setCurrentHourlyRate = (value: number) => patchW2Employer({ hourlyRate: value });
@@ -789,6 +804,9 @@ export default function UnderwriterSplitViewDemo({
   const setCurrentBaseYtd = (value: number) => patchW2Employer({ baseYtd: value });
   const setCurrentBonusYtd = (value: number) => patchW2Employer({ bonusYtd: value });
   const setCurrentOtYtd = (value: number) => patchW2Employer({ overtimeYtd: value });
+  const setCurrentTipsYtd = (value: number) => patchW2Employer({ tipsYtd: value });
+  const setCurrentCommissionYtd = (value: number) => patchW2Employer({ commissionYtd: value });
+  const setCurrentRsuYtd = (value: number) => patchW2Employer({ rsuYtd: value, otherYtd: value });
   const setCurrentOtherYtd = (value: number) => patchW2Employer({ otherYtd: value });
   const setMonthsAtCurrentJob = (value: number) => patchW2Employer({ monthsAtJob: value });
   const w2BaseChoice = w2BaseChoices[activeW2Employer.id] ?? null;
@@ -1012,13 +1030,13 @@ export default function UnderwriterSplitViewDemo({
         employerName: previous.employerName || 'Prior employer',
         ein: previous.ein || '',
         year: new Date().getFullYear() - 1,
-        box1Wages: previous.box1Wages ?? 0,
+        box5Wages: previous.box5Wages ?? 0,
         box12Bonus: 0,
         box14Overtime: 0,
       });
-      setMergePreviousEmployerVariable(Boolean(previous.box1Wages));
+      setMergePreviousEmployerVariable(Boolean(previous.box5Wages));
     } else {
-      setPrevEmployerW2({ employerName: '', ein: '', year: 0, box1Wages: 0, box12Bonus: 0, box14Overtime: 0 });
+      setPrevEmployerW2({ employerName: '', ein: '', year: 0, box5Wages: 0, box12Bonus: 0, box14Overtime: 0 });
       setMergePreviousEmployerVariable(false);
     }
 
@@ -1200,7 +1218,7 @@ export default function UnderwriterSplitViewDemo({
     const hourlyMethod = (currentHourlyRate * currentWeeklyHours * 52) / 12; // Standard Hourly Pay Rate Method
     const periodAnnualizedMethod = (currentPeriodBasePay * payPeriodsPerYear) / 12;
     const ytdAverageMethod = currentBaseYtd / 7.5; // August 15 represents 7.5 elapsed months of the year
-    const priorYearW2Average = (activeW2Employer.w2Year1Box1 || prevEmployerW2.box1Wages) / 12;
+    const priorYearW2Average = (activeW2Employer.w2Year1Box5 || prevEmployerW2.box5Wages) / 12;
 
     return {
       hourlyMethod,
@@ -1209,14 +1227,14 @@ export default function UnderwriterSplitViewDemo({
       priorYearW2Average,
       maxVariancePct: Math.abs(((hourlyMethod - ytdAverageMethod) / hourlyMethod) * 100)
     };
-  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box1Wages, payPeriodsPerYear, activeW2Employer.w2Year1Box1]);
+  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box5Wages, payPeriodsPerYear, activeW2Employer.w2Year1Box5]);
 
   // B. Variable Income Rolling & Continuity (Job Transition Adapter) [cite: 177]
   const variableContinuityCalculations = useMemo(() => {
     const fromWvoe = activeW2Employer.wageDocSource === 'WVOE';
     const currentBonusOtTotal = fromWvoe
       ? activeW2Employer.wvoeBonus + activeW2Employer.wvoeOvertime
-      : currentBonusYtd + currentOtYtd;
+      : currentBonusYtd + currentOtYtd + currentTipsYtd + currentCommissionYtd;
     const currentMonths = fromWvoe ? Math.max(activeW2Employer.wvoeMonths, 1) : monthsAtCurrentJob;
     const currentMonthlyVariableAvg = currentBonusOtTotal / currentMonths;
 
@@ -1240,7 +1258,7 @@ export default function UnderwriterSplitViewDemo({
       aggregatedVariableTotal,
       totalRollingMonths
     };
-  }, [currentBonusYtd, currentOtYtd, monthsAtCurrentJob, mergePreviousEmployerVariable, prevEmployerW2, activeW2Employer.wageDocSource, activeW2Employer.wvoeBonus, activeW2Employer.wvoeOvertime, activeW2Employer.wvoeMonths]);
+  }, [currentBonusYtd, currentOtYtd, currentTipsYtd, currentCommissionYtd, monthsAtCurrentJob, mergePreviousEmployerVariable, prevEmployerW2, activeW2Employer.wageDocSource, activeW2Employer.wvoeBonus, activeW2Employer.wvoeOvertime, activeW2Employer.wvoeMonths]);
 
   const schCFlow = useMemo(() => {
     const y1 = schCAnnual(schCYears[0]);
@@ -1255,7 +1273,7 @@ export default function UnderwriterSplitViewDemo({
         .reduce(
           (totals, entry) => ({
             base: totals.base + (entry.hourlyRate * entry.weeklyHours * 52) / 12,
-            variable: totals.variable + (entry.bonusYtd + entry.overtimeYtd) / Math.max(entry.monthsAtJob, 1),
+            variable: totals.variable + (entry.bonusYtd + entry.overtimeYtd + entry.tipsYtd + entry.commissionYtd) / Math.max(entry.monthsAtJob, 1),
           }),
           { base: 0, variable: 0 },
         ),
@@ -1666,7 +1684,7 @@ export default function UnderwriterSplitViewDemo({
       { id: 'hourly', label: 'Hourly rate', monthly: baseWageReconciliation.hourlyMethod, formula: '(Rate × hours × 52) / 12' },
       { id: 'period', label: 'Pay period annualized', monthly: baseWageReconciliation.periodAnnualizedMethod, formula: '(Period pay × 24) / 12' },
       { id: 'ytd', label: 'YTD average', monthly: baseWageReconciliation.ytdAverageMethod, formula: 'YTD base / 7.5 months elapsed' },
-      { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: '2025 W-2 Box 1 / 12' },
+      { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: '2025 W-2 Box 5 / 12' },
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
     if (baseWageReconciliation.maxVariancePct > 10) {
@@ -2499,7 +2517,8 @@ export default function UnderwriterSplitViewDemo({
               employer: prevEmployerW2.employerName,
               ein: prevEmployerW2.ein,
               borrower: borrowerMetadata.borrowerName,
-              box1: prevEmployerW2.box1Wages,
+              box1: Math.max(0, prevEmployerW2.box5Wages - 4500),
+              box5: prevEmployerW2.box5Wages,
               bonus: prevEmployerW2.box12Bonus,
               ot: prevEmployerW2.box14Overtime,
             })}`,
@@ -2853,7 +2872,7 @@ export default function UnderwriterSplitViewDemo({
                     activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC'
                       ? wageDocKind === 'w2'
                         ? [
-                            { id: 'w2-box1', needle: prevEmployerW2.box1Wages.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+                            { id: 'w2-box5', needle: prevEmployerW2.box5Wages.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
                             { id: 'w2-box12-bonus', needle: prevEmployerW2.box12Bonus.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), lineHint: 'BONUS' },
                             { id: 'w2-box14-ot', needle: prevEmployerW2.box14Overtime.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), lineHint: 'OT  ' },
                           ]
@@ -3180,12 +3199,12 @@ export default function UnderwriterSplitViewDemo({
                   />
                 </div>
 
-                <div data-qa-field="w2-box1" className={`cursor-pointer ${highlightFieldId === 'w2-box1' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box1')}>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 1</label>
+                <div data-qa-field="w2-box5" className={`cursor-pointer ${highlightFieldId === 'w2-box5' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box5')}>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 5</label>
                   <input
                     type="number"
-                    value={activeW2Employer.w2Year1Box1}
-                    onChange={(e) => patchW2Employer({ w2Year1Box1: Number(e.target.value) })}
+                    value={activeW2Employer.w2Year1Box5}
+                    onChange={(e) => patchW2Employer({ w2Year1Box5: Number(e.target.value) })}
                     className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -3315,7 +3334,7 @@ export default function UnderwriterSplitViewDemo({
                   </div>
                   ) : (
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div>
+                    <div data-qa-field="ps-bonus-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-bonus-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-bonus-ytd')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Bonus Income YTD</label>
                       <input
                         type="number"
@@ -3324,12 +3343,39 @@ export default function UnderwriterSplitViewDemo({
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                       />
                     </div>
-                    <div>
+                    <div data-qa-field="ps-ot-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-ot-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-ot-ytd')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Overtime Income YTD</label>
                       <input
                         type="number"
                         value={currentOtYtd}
                         onChange={(e) => setCurrentOtYtd(Number(e.target.value))}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div data-qa-field="ps-tips-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-tips-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-tips-ytd')}>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Tips YTD</label>
+                      <input
+                        type="number"
+                        value={currentTipsYtd}
+                        onChange={(e) => setCurrentTipsYtd(Number(e.target.value))}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div data-qa-field="ps-commission-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-commission-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-commission-ytd')}>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Commission YTD</label>
+                      <input
+                        type="number"
+                        value={currentCommissionYtd}
+                        onChange={(e) => setCurrentCommissionYtd(Number(e.target.value))}
+                        className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
+                      />
+                    </div>
+                    <div data-qa-field="ps-rsu-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-rsu-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-rsu-ytd')}>
+                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">RSU YTD</label>
+                      <input
+                        type="number"
+                        value={currentRsuYtd}
+                        onChange={(e) => setCurrentRsuYtd(Number(e.target.value))}
                         className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none"
                       />
                     </div>

@@ -6,6 +6,8 @@ export interface W2Values {
   ein: string;
   borrower: string;
   box1: number;
+  /** Medicare wages (Box 5). Qualifying gross when present. */
+  box5?: number;
   bonus: number;
   overtime: number;
 }
@@ -19,7 +21,7 @@ const usd = (v: number) =>
 /**
  * Drawn Copy-B style W-2 for the demo (no IRS blank required). Values come
  * from the Base Income prior-year fields so Inspect Coordinates can land on
- * Box 1 / Box 14 the same way the paystub does.
+ * Box 5 / Box 14 the same way the paystub does.
  */
 export function generateW2Pdf(values: W2Values): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -29,7 +31,8 @@ export function generateW2Pdf(values: W2Values): Promise<Uint8Array> {
     doc.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
     doc.on('error', reject);
 
-    const ssWages = values.box1 + values.bonus + values.overtime;
+    const medicareWages = values.box5 ?? values.box1 + values.bonus + values.overtime;
+    const ssWages = medicareWages;
     const fed = values.box1 * 0.12;
     const ssTax = ssWages * 0.062;
     const medicare = ssWages * 0.0145;
@@ -59,7 +62,7 @@ export function generateW2Pdf(values: W2Values): Promise<Uint8Array> {
     cell(476, 144, 120, 40, '2 Federal income tax withheld', usd(fed));
     cell(356, 184, 120, 40, '3 Social security wages', usd(ssWages));
     cell(476, 184, 120, 40, '4 Social security tax withheld', usd(ssTax));
-    cell(356, 224, 120, 40, '5 Medicare wages and tips', usd(ssWages));
+    cell(356, 224, 120, 40, '5 Medicare wages and tips', usd(medicareWages));
     cell(476, 224, 120, 40, '6 Medicare tax withheld', usd(medicare));
 
     cell(16, 184, 170, 40, '12a See instructions for box 12', `D  ${usd(4500)}`);

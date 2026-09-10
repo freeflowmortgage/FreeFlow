@@ -1,5 +1,10 @@
 import { mapIncomeFields } from '../../../apps/underwriting-console/src/incomeFieldMap';
-import { locateIncomeEntities, uniqueDiscoveredBusinesses } from '../../../apps/underwriting-console/src/locateIncomeEntities';
+import {
+  formFromPageLabels,
+  formToDocKind,
+  locateIncomeEntities,
+  uniqueDiscoveredBusinesses,
+} from '../../../apps/underwriting-console/src/locateIncomeEntities';
 import {
   seedCCorpFromLocation,
   seedFarmFromLocation,
@@ -105,7 +110,8 @@ describe('locate 1003 entities in the income packet', () => {
       page(0, ['W-2'], [
         "c Employer's name Digital Solutions Corp",
         'b Employer identification number (EIN) 94-8765432',
-        'Box 1 Wages tips other compensation 24000.00',
+        'Box 1 Wages tips other compensation 21000.00',
+        'Box 5 Medicare wages and tips 24000.00',
       ]),
       page(1, ['Schedule K-1 (1120-S)'], [
         "Corporation's name Apex Advisory Holdings LLC",
@@ -150,6 +156,7 @@ describe('locate 1003 entities in the income packet', () => {
     expect(partnerships.map((seed) => seed.businessName).join(' ')).toMatch(/Undisclosed Side/);
     expect(partnerships.find((seed) => seed.businessName?.includes('Undisclosed Side'))?.undisclosed).toBe(true);
     expect(wages.previous?.employerName).toMatch(/Digital Solutions/);
+    expect(wages.previous?.box5Wages).toBe(24000);
   });
 
   test('keeps a 1003 entity listed when the packet does not contain it', () => {
@@ -163,7 +170,8 @@ describe('locate 1003 entities in the income packet', () => {
       page(0, ['W-2'], [
         "c Employer's name Apex Technology Partners LLC",
         'b Employer identification number (EIN) 74-1234567',
-        'Box 1 Wages tips other compensation 78500.00',
+        'Box 1 Wages tips other compensation 74000.00',
+        'Box 5 Medicare wages and tips 78500.00',
       ]),
     ];
     const located = locateIncomeEntities({
@@ -209,7 +217,8 @@ describe('undisclosed businesses on returns', () => {
       page(0, ['W-2'], [
         "c Employer's name Hidden Payroll Inc",
         'b Employer identification number (EIN) 99-1111111',
-        'Box 1 Wages tips other compensation 51000.00',
+        'Box 1 Wages tips other compensation 46000.00',
+        'Box 5 Medicare wages and tips 51000.00',
       ]),
       page(1, ['Schedule C'], [
         'C Business name Hidden Consulting LLC',
@@ -300,6 +309,100 @@ describe('undisclosed businesses on returns', () => {
     expect(partnerships[0].undisclosed).toBe(true);
     expect(partnerships[0].years[0]).toMatchObject({ ordinaryIncome: 41000 });
     expect(partnerships[0].years[1]).toMatchObject({ ordinaryIncome: 38000 });
+  });
+
+  test('recognizes Form 8825 pages without treating them as a separate business', () => {
+    expect(formFromPageLabels(['Form 8825 (Corporate Rentals)'])).toBe('Form 8825');
+    expect(formToDocKind('Form 8825')).toBe('unknown');
+    const { located } = locatePages([
+      page(0, ['Schedule K-1 (1120-S)'], [
+        "Corporation's name Apex Advisory Holdings",
+        "Corporation's employer identification number 74-9876543",
+        'Ordinary business income 142000.00',
+      ]),
+      page(1, ['Form 8825 (Corporate Rentals)'], [
+        'Form 8825 Rental Real Estate Income and Expenses',
+        '14 Depreciation 400.00 600.00 8,200.00',
+      ]),
+    ]);
+    expect(located.discovered.every((match) => match.form !== 'Form 8825')).toBe(true);
+    expect(located.discovered.some((match) => match.form === 'Form 1120-S')).toBe(true);
+    const scorp = located.discovered.find((match) => match.form === 'Form 1120-S');
+    expect(scorp?.fields.some((field) => field.sourceFieldId === 'form-8825-dep' && field.numericValue === 8200)).toBe(true);
+    expect(seedSCorpFromLocation(located)[0].years[0]).toMatchObject({ ordinaryIncome: 142000, depreciation: 8200 });
+  });
+
+  test('keeps an 8825 packet that never appeared on the 1003 as a discovered business', () => {
+    const { located } = locatePages([
+      page(0, ['Form 8825 (Corporate Rentals)'], [
+        'Form 8825 Rental Real Estate Income and Expenses',
+        'Name of partnership or S corporation Lakeside Dental Group',
+        'Employer identification number 36-1112223',
+        '14 Depreciation 400.00 600.00 8,200.00',
+      ]),
+    ]);
+    expect(located.roster).toHaveLength(0);
+    expect(located.discovered).toHaveLength(1);
+    expect(located.discovered[0].kind).toBe('scorp');
+    expect(located.discovered[0].name).toMatch(/Lakeside Dental/);
+    expect(located.discovered[0].fields.some((field) => field.sourceFieldId === 'form-8825-dep')).toBe(true);
+    const scorps = seedSCorpFromLocation(located);
+    expect(scorps).toHaveLength(1);
+    expect(scorps[0].undisclosed).toBe(true);
+    expect(scorps[0].years[0]).toMatchObject({ depreciation: 8200, businessName: expect.stringMatching(/Lakeside Dental/) });
+  });
+
+  test('keeps two undisclosed W-2 jobs and folds each paystub onto the matching employer', () => {
+    const pages = [
+      page(0, ['W-2'], [
+        "c Employer's name Hidden Payroll Inc",
+        'b Employer identification number (EIN) 99-1111111',
+        'Box 1 Wages tips other compensation 46000.00',
+        'Box 5 Medicare wages and tips 51000.00',
+      ]),
+      page(1, ['W-2'], [
+        "c Employer's name Weekend Health Inc",
+        'b Employer identification number (EIN) 22-2222222',
+        'Box 1 Wages tips other compensation 21000.00',
+        'Box 5 Medicare wages and tips 24000.00',
+      ]),
+      page(2, ['Paystub'], [
+        'Employer: Hidden Payroll Inc',
+        'Regular 45.00 80.00 3,600.00 54,000.00',
+      ]),
+      page(3, ['Paystub'], [
+        'Employer: Weekend Health Inc',
+        'Regular 20.00 40.00 800.00 9,600.00',
+      ]),
+    ];
+    const { located, fields } = locatePages(pages);
+    expect(located.discovered.filter((match) => match.kind === 'w2')).toHaveLength(2);
+    const wages = seedW2FromLocation(located, fields);
+    expect(wages.current).toHaveLength(2);
+    const hidden = wages.current.find((seed) => seed.employerName.includes('Hidden Payroll'));
+    const weekend = wages.current.find((seed) => seed.employerName.includes('Weekend Health'));
+    expect(hidden?.patch).toMatchObject({ w2Year1Box5: 51000, baseYtd: 54000 });
+    expect(weekend?.patch).toMatchObject({ w2Year1Box5: 24000, baseYtd: 9600 });
+  });
+
+  test('keeps two undisclosed Schedule C businesses on separate worksheets', () => {
+    const { located } = locatePages([
+      page(0, ['Schedule C'], [
+        'C Business name Hidden Consulting LLC',
+        'B Employer identification number 99-2222222',
+        'Line 31 Net profit or loss 18000.00',
+      ]),
+      page(1, ['Schedule C'], [
+        'C Business name Night Market Stand',
+        'B Employer identification number 99-4444444',
+        'Line 31 Net profit or loss 6200.00',
+      ]),
+    ]);
+    const businesses = seedScheduleCFromLocation(located);
+    expect(businesses).toHaveLength(2);
+    expect(businesses.map((seed) => seed.businessName).join(' ')).toMatch(/Hidden Consulting/);
+    expect(businesses.map((seed) => seed.businessName).join(' ')).toMatch(/Night Market/);
+    expect(businesses.every((seed) => seed.undisclosed)).toBe(true);
   });
 });
 
