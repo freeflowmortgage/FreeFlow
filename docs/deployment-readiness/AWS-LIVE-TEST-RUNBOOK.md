@@ -40,6 +40,11 @@ to the portal task on port 8000. The portal and parser run without public IPs
 in the two existing application subnets. The parser accepts port 8080 only from
 the portal security group and registers as `income-parser.freeflow.local`.
 
+The Cognito-enabled ALB is allowed outbound HTTPS only so it can complete the
+hosted-domain authorization-code exchange. Its authentication session remains
+one hour; longer sessions require an explicit security review and compensating
+controls.
+
 The existing private RDS instance is reached only through the application
 security group. A one-off, read-only-root-filesystem migration task consumes the
 RDS-managed administrative secret and creates restricted application and
@@ -54,7 +59,9 @@ migrator logins. Runtime tasks never receive the administrative secret.
    authoritative; add the ACM validation and portal CNAME records output by
    Terraform before enabling the HTTPS edge.
 3. Docker Desktop is running.
-4. The release commit passes portal, database, and Terraform CI.
+4. The release commit passes portal, database, and Terraform CI. The portal
+   validation job must run the API/security regression suite and a production
+   portal build from the same commit that is used to create the image.
 5. No real borrower document or external production credential is present.
 
 ## Terraform phases
@@ -68,10 +75,20 @@ The checked-in example contains no credentials. Populate an ignored
 2. Edge: set the Route 53 zone ID and `enable_edge = true`. Review and apply.
    Wait for ACM validation, Cognito, the HTTPS listener, and the DNS alias.
 3. Images: build the portal, parser, and migration images from one reviewed
-   commit. Push an immutable git-SHA tag to the Terraform output repositories.
-   Resolve each ECR manifest digest.
+   commit after its validation jobs are green. Push an immutable git-SHA tag to
+   the Terraform output repositories. Resolve each ECR manifest digest and
+   record the commit SHA and digest together in the deployment evidence.
 4. Compute: set `enable_services = true` and provide all three image references
    as `repository@sha256:digest`. Terraform rejects mutable tags.
+
+Keep the Fargate platform version explicit during an application rollout. A
+platform-version upgrade requires its own reviewed plan and verification rather
+than riding along with an image change.
+
+When the private-DNS ECR and CloudWatch Logs interface endpoints are enabled
+for the console, allow the portal application security group to reach those
+same endpoints on HTTPS. Otherwise portal replacement tasks resolve the private
+endpoint but cannot pull ECR authorization or emit logs.
 
 For the temporary PLTE boundary, set `enable_edge = true`,
 `enable_cognito_edge = false`, `enable_parser = true`, and allowlist only the

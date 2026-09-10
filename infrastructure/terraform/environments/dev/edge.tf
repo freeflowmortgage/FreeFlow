@@ -255,6 +255,21 @@ resource "aws_security_group_rule" "portal_from_authenticated_alb" {
   source_security_group_id = aws_security_group.authenticated_alb[0].id
 }
 
+# ALB-hosted Cognito authentication exchanges the authorization code with the
+# Cognito hosted domain after the browser returns to /oauth2/idpresponse.
+# Cognito's hosted domain is public, so this is restricted to outbound HTTPS
+# only; application traffic remains destination-scoped to its task groups.
+resource "aws_security_group_rule" "authenticated_alb_to_cognito" {
+  count             = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  type              = "egress"
+  description       = "HTTPS from ALB to Cognito hosted authentication"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.authenticated_alb[0].id
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
 resource "aws_lb_target_group" "portal" {
   count = var.enable_edge ? 1 : 0
 
@@ -349,6 +364,43 @@ resource "aws_lb_listener" "https" {
     order            = 2
     type             = "forward"
     target_group_arn = var.enable_console ? aws_lb_target_group.console[0].arn : aws_lb_target_group.portal[0].arn
+  }
+}
+
+# Keep the legacy portal/API target group attached to the authenticated ALB
+# while the underwriting console is the HTTPS default.  This permits ECS to
+# maintain the portal service and makes any future /api/* route subject to the
+# same Cognito session as the console.
+resource "aws_lb_listener_rule" "portal_api_https" {
+  count        = var.enable_edge && var.enable_cognito_edge ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 100
+
+  action {
+    order = 1
+    type  = "authenticate-cognito"
+
+    authenticate_cognito {
+      user_pool_arn              = aws_cognito_user_pool.live_test[0].arn
+      user_pool_client_id        = aws_cognito_user_pool_client.alb[0].id
+      user_pool_domain           = aws_cognito_user_pool_domain.live_test[0].domain
+      on_unauthenticated_request = "authenticate"
+      scope                      = "openid email profile"
+      session_cookie_name        = "FreeFlowDevAuth"
+      session_timeout            = 3600
+    }
+  }
+
+  action {
+    order            = 2
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.portal[0].arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
   }
 }
 

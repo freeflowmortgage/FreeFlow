@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFPageProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { describeRequestFailure, reloadFreeFlow } from '../requestError';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -157,12 +158,14 @@ export default function FixturePdfViewer({
   const [pageIndex, setPageIndex] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [located, setLocated] = useState<FixtureBox[]>([]);
   const locateKey = JSON.stringify(locate);
 
   useEffect(() => {
     let cancelled = false;
     setStatus('loading');
+    setErrorMessage(null);
     setPageIndex(0);
     setLocated([]);
     pdfRef.current?.destroy().catch(() => undefined);
@@ -170,7 +173,7 @@ export default function FixturePdfViewer({
 
     void fetch(url)
       .then((res) => {
-        if (!res.ok) throw new Error(`fixture ${res.status}`);
+        if (!res.ok) throw new Error(`Loading the ${label} source document failed (HTTP ${res.status}).`);
         return res.arrayBuffer();
       })
       .then((data) => getDocument({ data }).promise)
@@ -183,8 +186,11 @@ export default function FixturePdfViewer({
         setPageCount(pdf.numPages);
         setStatus('ready');
       })
-      .catch(() => {
-        if (!cancelled) setStatus('error');
+      .catch((error) => {
+        if (!cancelled) {
+          setErrorMessage(describeRequestFailure(error, `Loading the ${label} source document`));
+          setStatus('error');
+        }
       });
 
     return () => {
@@ -192,7 +198,7 @@ export default function FixturePdfViewer({
       pdfRef.current?.destroy().catch(() => undefined);
       pdfRef.current = null;
     };
-  }, [url]);
+  }, [url, label]);
 
   useEffect(() => {
     const pdf = pdfRef.current;
@@ -224,9 +230,16 @@ export default function FixturePdfViewer({
 
   if (status === 'error') {
     return (
-      <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-        Could not load the {label} source document.
-      </p>
+      <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+        <p>{errorMessage || `Could not load the ${label} source document.`}</p>
+        <button
+          type="button"
+          onClick={reloadFreeFlow}
+          className="mt-2 rounded-md border border-rose-300 bg-white px-2.5 py-1 font-bold text-rose-700 hover:bg-rose-100"
+        >
+          Reload FreeFlow
+        </button>
+      </div>
     );
   }
 

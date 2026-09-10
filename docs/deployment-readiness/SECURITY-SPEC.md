@@ -29,6 +29,11 @@ requirements. The security owner must record and expire any exception.
 - Sessions MUST use `Secure`, `HttpOnly`, and an appropriate `SameSite` setting.
   State-changing browser calls MUST have CSRF protection and an exact origin
   check. Session and refresh-token rotation MUST be supported.
+- The portal API middleware enforces the exact-origin portion for protected
+  `POST`, `PUT`, `PATCH`, and `DELETE` requests: a single `Origin` header MUST
+  exactly match `TRUSTED_ORIGIN`; absent, duplicate, malformed, or cross-site
+  values fail closed. This is not authorization and does not relax the
+  verified-identity, membership, permission, or object checks.
 - Authorization MUST be deny-by-default. Required permissions are operation
   names, not broad UI roles; for example `loan:read`, `income:approve`,
   `encompass:sync`, `billing:admin`, and `appraisal:review`.

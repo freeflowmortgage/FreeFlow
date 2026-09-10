@@ -76,6 +76,9 @@ jobs:
           DATABASE_URL: ${{ env.MIGRATOR_DATABASE_URL }}
         run: pnpm --dir packages/database exec prisma migrate deploy --schema prisma/schema.prisma
 
+      - name: Generate Prisma client for application-role tests
+        run: pnpm --dir packages/database exec prisma generate --schema prisma/schema.prisma
+
       - name: Verify SQL RLS, immutable audit, and retention controls
         run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/tests/tenant-rls-isolation.sql
 
