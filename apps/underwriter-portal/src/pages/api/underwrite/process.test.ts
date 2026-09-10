@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveParserUrl } from './process';
+import { requireTenantLoanAccess, resolveParserUrl, TenantLoanAccessError } from './process';
+
+const context = {
+  requestId: 'request-1', subject: 'subject-1',
+  tenantId: '00000000-0000-4000-8000-000000000100',
+  membershipId: '00000000-0000-4000-8000-000000000101',
+  permissions: ['income:process'] as const, authTime: new Date(),
+};
 
 test('document processor URL fails closed when protected runtime configuration is missing', () => {
   assert.throws(
@@ -48,4 +55,17 @@ test('document processor URL accepts a private service endpoint in protected run
     }),
     'http://income-parser.freeflow.local:8080/api/underwrite/process',
   );
+});
+
+test('tenant loan access rejects a loan not owned by the authenticated tenant', async () => {
+  const previous = process.env.FREEFLOW_RUNTIME_ENV;
+  process.env.FREEFLOW_RUNTIME_ENV = 'production';
+  try {
+    await assert.rejects(
+      () => requireTenantLoanAccess('00000000-0000-4000-8000-000000000200', context, async () => false),
+      (error: unknown) => error instanceof TenantLoanAccessError && error.status === 404 && error.code === 'LOAN_NOT_FOUND',
+    );
+  } finally {
+    process.env.FREEFLOW_RUNTIME_ENV = previous;
+  }
 });

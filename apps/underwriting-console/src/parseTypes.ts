@@ -15,7 +15,7 @@ export type MappedIncomeField = {
   entityId?: string;
   /** Legacy field definition ID before entity scoping. */
   sourceFieldId?: string;
-  form: 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
+  form: 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120' | 'Form 8825';
   boxLabel: string;
   fieldLabel: string;
   lineNum: string;
@@ -54,6 +54,8 @@ export type ParseResponse = {
   original_filename?: string;
   /** Every Schedule E Page 1 property column (A/B/C) across all years in the package. */
   scheduleEProperties?: ScheduleEPropertyExtract[];
+  /** Label-anchored IRS fields with overlay boxes (W-2, C, F, K-1, 1120, 1040, …). */
+  formExtracts?: FormFieldExtract[];
 };
 
 export type ScheduleEExpenseDetermination = {
@@ -77,6 +79,20 @@ export type ScheduleEExpenseDetermination = {
 };
 
 export type OverlayBox = { x: number; y: number; w: number; h: number };
+
+export type FormFieldExtract = {
+  pageIndex: number;
+  form: MappedIncomeField['form'];
+  sourceFieldId: string;
+  boxLabel: string;
+  fieldLabel: string;
+  lineNum: string;
+  category: string;
+  value: string;
+  numericValue: number;
+  box: OverlayBox;
+  entityId?: string;
+};
 
 export type ScheduleEPropertyBoxes = {
   address?: OverlayBox;

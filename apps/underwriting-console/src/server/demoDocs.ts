@@ -116,12 +116,13 @@ export async function fillW2(params: URLSearchParams): Promise<Uint8Array> {
   const employer = str(params, 'employer', 'Digital Solutions Corp');
   const ein = str(params, 'ein', '94-8765432');
   const year = str(params, 'year', '2025');
-  const box1 = num(params, 'box1', 78500);
+  const box1 = num(params, 'box1', 74000);
   const bonus = num(params, 'bonus', 18000);
   const overtime = num(params, 'ot', 6000);
   const retirement = num(params, 'retirement', 4500);
-
-  const ssMedicareWages = box1 + bonus + overtime;
+  const box5Param = params.get('box5');
+  const ssMedicareWages =
+    box5Param != null && box5Param !== '' ? num(params, 'box5', 78500) : box1 + bonus + overtime;
   const fedWithheld = Math.round(box1 * 0.12);
   const ssTax = ssMedicareWages * 0.062;
   const medicareTax = ssMedicareWages * 0.0145;

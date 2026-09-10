@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { isProtectedRuntime } from '../../../server/runtimeMode';
 import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
+import { withTenantTransaction } from '../../../server/database/client';
 
 export const config = {
   api: {
@@ -37,7 +38,12 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
     };
     const loanId = req.headers['x-loan-id'];
     const loanProgram = req.headers['x-loan-program'];
-    if (typeof loanId === 'string') headers['x-loan-id'] = loanId;
+    if (typeof loanId === 'string') {
+      await requireTenantLoanAccess(loanId, context);
+      headers['x-loan-id'] = loanId;
+    } else if (isProtectedRuntime()) {
+      throw new TenantLoanAccessError(400, 'LOAN_ID_REQUIRED', 'A loan identifier is required.');
+    }
     if (typeof loanProgram === 'string') headers['x-loan-program'] = loanProgram;
 
     const upstream = await fetch(parserUrl, {
@@ -52,13 +58,19 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
       requestId: context.requestId,
       errorType: error instanceof Error ? error.name : 'UnknownError',
     });
-    const status = error instanceof RequestTooLargeError ? 413 : 503;
+    const status = error instanceof TenantLoanAccessError
+      ? error.status
+      : error instanceof RequestTooLargeError ? 413 : 503;
     const code = error instanceof ParserConfigurationError
       ? 'DOCUMENT_PROCESSOR_UNAVAILABLE'
+      : error instanceof TenantLoanAccessError
+        ? error.code
       : error instanceof RequestTooLargeError
         ? 'PAYLOAD_TOO_LARGE'
         : 'DOCUMENT_PROCESSOR_UNAVAILABLE';
-    const message = error instanceof RequestTooLargeError
+    const message = error instanceof TenantLoanAccessError
+      ? error.publicMessage
+      : error instanceof RequestTooLargeError
       ? 'Document exceeds the allowed size.'
       : 'Document processing is temporarily unavailable.';
     return res.status(status).json({
@@ -72,6 +84,41 @@ async function handler(req: NextApiRequest, res: NextApiResponse, context: Reque
 }
 
 export default withRequestContext('income:process', handler);
+
+export class TenantLoanAccessError extends Error {
+  constructor(
+    readonly status: 400 | 404,
+    readonly code: 'LOAN_ID_REQUIRED' | 'LOAN_NOT_FOUND',
+    readonly publicMessage: string,
+  ) {
+    super(code);
+    this.name = 'TenantLoanAccessError';
+  }
+}
+
+export async function requireTenantLoanAccess(
+  loanId: string,
+  context: RequestContext,
+  lookup: (loanId: string, context: RequestContext) => Promise<boolean> = tenantOwnsLoan,
+): Promise<void> {
+  if (!loanId.trim()) {
+    throw new TenantLoanAccessError(400, 'LOAN_ID_REQUIRED', 'A loan identifier is required.');
+  }
+  if (!isProtectedRuntime() || await lookup(loanId, context)) return;
+  // Deliberately indistinguishable for absent and cross-tenant records.
+  throw new TenantLoanAccessError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
+}
+
+async function tenantOwnsLoan(loanId: string, context: RequestContext): Promise<boolean> {
+  const loan = await withTenantTransaction(
+    { tenantId: context.tenantId, principalId: context.membershipId },
+    (transaction) => transaction.loanApplication.findFirst({
+      where: { id: loanId, tenantId: context.tenantId },
+      select: { id: true },
+    }),
+  );
+  return loan !== null;
+}
 
 export function resolveParserUrl(env: NodeJS.ProcessEnv = process.env): string {
   if (env.PARSER_ENABLED?.trim().toLowerCase() === 'false') {

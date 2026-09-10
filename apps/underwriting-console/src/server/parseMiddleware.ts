@@ -13,6 +13,7 @@ const DEFAULT_DOC_PARSER_URL = 'http://127.0.0.1:8080';
 const PYTHON_PARSE = `${(process.env.DOC_PARSER_URL || process.env.DOC_PARSER_SERVICE_URL || DEFAULT_DOC_PARSER_URL).replace(/\/+$/, '')}/parse`;
 const PYTHON_HEALTH = `${(process.env.DOC_PARSER_URL || process.env.DOC_PARSER_SERVICE_URL || DEFAULT_DOC_PARSER_URL).replace(/\/+$/, '')}/health`;
 const MAX_PDF_BYTES = 40 * 1024 * 1024;
+const PARSER_TIMEOUT_MS = Number(process.env.DOC_PARSER_TIMEOUT_MS || 90_000);
 
 const CLASSIFIERS: Array<[string, RegExp]> = [
   ['Form 1040 (Individual Return)', /Form\s+1040|U\.S\.\s+Individual Income Tax Return/i],
@@ -136,6 +137,36 @@ async function extractNativePages(bytes: Buffer): Promise<ParsePage[]> {
           confidence: 100,
         });
       }
+      const annotFlags: string[] = [];
+      try {
+        const annotations = await page.getAnnotations();
+        for (const annot of annotations as Array<Record<string, unknown>>) {
+          const raw = annot.fieldValue ?? annot.buttonValue ?? annot.contents;
+          const value = String(Array.isArray(raw) ? raw.filter(Boolean).join(' ') : raw ?? '').trim();
+          if (!value || /^(off|none|null)$/i.test(value)) continue;
+          const rect = Array.isArray(annot.rect) ? (annot.rect as number[]) : [];
+          if (rect.length < 4) continue;
+          const converted =
+            typeof viewport.convertToViewportRectangle === 'function'
+              ? viewport.convertToViewportRectangle(rect)
+              : rect;
+          const left = Math.min(converted[0], converted[2]);
+          const top = Math.min(converted[1], converted[3]);
+          const right = Math.max(converted[0], converted[2]);
+          const bottom = Math.max(converted[1], converted[3]);
+          words.push({
+            text: value,
+            x: Math.max(0, Math.min(1, left / viewport.width)),
+            y: Math.max(0, Math.min(1, top / viewport.height)),
+            w: Math.max(0, Math.min(1, (right - left) / viewport.width)),
+            h: Math.max(0, Math.min(1, (bottom - top) / viewport.height)),
+            confidence: 100,
+          });
+          if (!annotFlags.includes('acroform_merged')) annotFlags.push('acroform_merged');
+        }
+      } catch {
+        // Annotation dictionaries are optional; content-stream words still classify the page.
+      }
       const text = words.map((word) => word.text).join(' ');
       const formIds = classifyText(text);
       pages.push({
@@ -146,7 +177,7 @@ async function extractNativePages(bytes: Buffer): Promise<ParsePage[]> {
         meanConfidence: 100,
         skewDegrees: 0,
         words,
-        flags: [],
+        flags: annotFlags,
       });
     }
   } finally {
@@ -171,7 +202,9 @@ function toParseResponse(pages: ParsePage[], filename: string, engine: ParseResp
     extracted_page_indices: extracted,
     ocr_page_count: engine === 'python-ocr' ? pages.filter((page) => !page.isNativeText).length : 0,
     has_business_returns: pages.some((page) =>
-      page.formIds.some((label) => /schedule c|schedule e|schedule f|form 1120|form 1065|k-1/i.test(label)),
+      page.formIds.some((label) =>
+        /schedule c|schedule e|schedule f|form 1120|form 1065|k-1|form 8825|form 4562/i.test(label),
+      ),
     ),
     flags: extracted.length ? [] : ['no_core_forms_detected'],
     classifications,
@@ -184,7 +217,7 @@ function toParseResponse(pages: ParsePage[], filename: string, engine: ParseResp
   return payload;
 }
 
-async function tryPythonParse(bytes: Buffer, name: string): Promise<ParseResponse | null> {
+async function tryPythonParse(bytes: Buffer, name: string): Promise<{ payload: ParseResponse } | { timeout: true } | null> {
   try {
     const response = await fetch(PYTHON_PARSE, {
       method: 'POST',
@@ -193,14 +226,16 @@ async function tryPythonParse(bytes: Buffer, name: string): Promise<ParseRespons
         'X-Document-Title': name,
       },
       body: new Uint8Array(bytes),
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(Number.isFinite(PARSER_TIMEOUT_MS) ? PARSER_TIMEOUT_MS : 90_000),
     });
     if (!response.ok) return null;
     const payload = (await response.json()) as ParseResponse;
     payload.parser_engine = 'python-ocr';
     payload.incomeFields = mapIncomeFields(payload);
-    return payload;
-  } catch {
+    return { payload };
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') return { timeout: true };
     return null;
   }
 }
@@ -278,7 +313,8 @@ export function parseMiddleware(): Connect.NextHandleFunction {
               employer: params.get('employer') || 'Digital Solutions Corp',
               ein: params.get('ein') || '94-8765432',
               borrower: params.get('borrower') || 'Sarah K. Vance',
-              box1: num(params, 'box1', 78500),
+              box1: num(params, 'box1', 74000),
+              box5: num(params, 'box5', 78500),
               bonus: num(params, 'bonus', 18000),
               overtime: num(params, 'ot', 6000),
             }),
@@ -345,12 +381,17 @@ export function parseMiddleware(): Connect.NextHandleFunction {
           return;
         }
         const python = await tryPythonParse(bytes, name);
-        if (python) {
-          sendJson(res, 200, python);
+        if (python && 'payload' in python) {
+          sendJson(res, 200, python.payload);
           return;
         }
         const pages = await extractNativePages(bytes);
-        sendJson(res, 200, toParseResponse(pages, name, 'native-pdf'));
+        const fallback = toParseResponse(pages, name, 'native-pdf');
+        fallback.flags = [
+          ...fallback.flags,
+          python && 'timeout' in python ? 'python_parse_timeout' : 'python_parse_unavailable',
+        ];
+        sendJson(res, 200, fallback);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Document processing failed.';
         sendJson(res, 500, { detail: message });

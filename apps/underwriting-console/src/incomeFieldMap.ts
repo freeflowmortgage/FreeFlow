@@ -1,6 +1,6 @@
 import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
 
-export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120';
+export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120' | 'Form 8825';
 
 export type IncomeFieldDef = {
   id: string;
@@ -11,7 +11,7 @@ export type IncomeFieldDef = {
   category: 'wages' | 'withholding' | 'income' | 'addback' | 'mileage' | 'rental' | 'property' | 'identity' | 'asset' | 'farm';
   patterns: RegExp[];
   /** How the value is extracted from a matched line. Defaults to 'money'. */
-  capture?: 'money' | 'integer' | 'text' | 'percent' | 'ein';
+  capture?: 'money' | 'money_last' | 'integer' | 'text' | 'percent' | 'ein';
 };
 
 const MONEY = /(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}|\((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\))/;
@@ -41,19 +41,6 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     category: 'identity',
     capture: 'ein',
     patterns: [/employer(?:'s)? identification number(?:\s*\(ein\))?\s*[:#–—-]?\s*/i, /\bb\s+employer/i],
-  },
-  {
-    id: 'w2-box1',
-    form: 'W-2',
-    boxLabel: 'Box 1',
-    fieldLabel: 'Wages, Tips, Other Comp',
-    lineNum: 'Box 1',
-    category: 'wages',
-    patterns: [
-      /box\s*1\b.{0,80}wages/i,
-      /\b1\b.{0,24}wages.{0,40}tips/i,
-      /wages,?\s*tips,?\s*other\s+comp/i,
-    ],
   },
   {
     id: 'w2-box2',
@@ -149,6 +136,51 @@ export const SCHEDULE_C_DEFS: IncomeFieldDef[] = [
     lineNum: 'Line 44a',
     category: 'mileage',
     patterns: [/line\s*44a\b.{0,80}(miles|add-?back)/i, /business miles.{0,40}\d/i],
+  },
+  {
+    id: 'ent1-depletion',
+    form: 'Schedule C',
+    boxLabel: 'Line 12',
+    fieldLabel: 'Depletion (Line 12)',
+    lineNum: 'Line 12',
+    category: 'addback',
+    patterns: [/line\s*12\b.{0,80}depletion/i, /\b12\b\s+depletion/i],
+  },
+  {
+    id: 'ent1-meals',
+    form: 'Schedule C',
+    boxLabel: 'Line 24b',
+    fieldLabel: 'Meals Exclusion (Line 24b)',
+    lineNum: 'Line 24b',
+    category: 'addback',
+    patterns: [/line\s*24b\b.{0,80}meals/i, /deductible meals/i],
+  },
+  {
+    id: 'ent1-home',
+    form: 'Schedule C',
+    boxLabel: 'Line 30',
+    fieldLabel: 'Business Use of Home (Line 30)',
+    lineNum: 'Line 30',
+    category: 'addback',
+    patterns: [/line\s*30\b.{0,80}home/i, /business use of your home/i],
+  },
+  {
+    id: 'ent1-other-income',
+    form: 'Schedule C',
+    boxLabel: 'Line 6',
+    fieldLabel: 'Other Income (Line 6)',
+    lineNum: 'Line 6',
+    category: 'income',
+    patterns: [/line\s*6\b.{0,80}other income/i, /other income, including federal/i],
+  },
+  {
+    id: 'ent1-amort',
+    form: 'Schedule C',
+    boxLabel: 'Line 27a',
+    fieldLabel: 'Amortization / Casualty (Line 27a)',
+    lineNum: 'Line 27a',
+    category: 'addback',
+    patterns: [/line\s*27a\b.{0,80}other expenses/i, /amortization/i],
   },
 ];
 
@@ -250,6 +282,24 @@ export const SCHEDULE_F_DEFS: IncomeFieldDef[] = [
     lineNum: 'Line 32',
     category: 'addback',
     patterns: [/line\s*32\b.{0,80}other expenses|other expenses.{0,40}\d/i],
+  },
+  {
+    id: 'schedule-f-home',
+    form: 'Schedule F',
+    boxLabel: 'Line 32',
+    fieldLabel: 'Business Use of Home',
+    lineNum: 'Line 32',
+    category: 'addback',
+    patterns: [/business use of your home/i],
+  },
+  {
+    id: 'schedule-f-amort',
+    form: 'Schedule F',
+    boxLabel: 'Add-back',
+    fieldLabel: 'Amortization / Casualty / Depletion',
+    lineNum: 'Add-back',
+    category: 'addback',
+    patterns: [/\bamortization\b/i, /\bcasualty\b/i],
   },
 ];
 
@@ -442,6 +492,33 @@ export const SCORP_DEFS: IncomeFieldDef[] = [
     capture: 'percent',
     patterns: [/percentage of stock ownership/i, /current year allocation percentage/i, /stock ownership.{0,40}%/i],
   },
+  {
+    id: 'scorp-179',
+    form: 'Form 1120-S',
+    boxLabel: 'Box 11',
+    fieldLabel: 'Section 179 Deduction',
+    lineNum: 'Box 11',
+    category: 'addback',
+    patterns: [/section\s*179\s+deduction/i, /box\s*11\b.{0,40}section\s*179/i],
+  },
+  {
+    id: 'scorp-depletion',
+    form: 'Form 1120-S',
+    boxLabel: 'Box 15c',
+    fieldLabel: 'Depletion',
+    lineNum: 'Box 15c',
+    category: 'addback',
+    patterns: [/\bdepletion\b/i],
+  },
+  {
+    id: 'scorp-meals',
+    form: 'Form 1120-S',
+    boxLabel: 'M-1',
+    fieldLabel: 'Non-Deductible Meals',
+    lineNum: 'M-1',
+    category: 'addback',
+    patterns: [/travel and entertainment/i, /meals and entertainment/i],
+  },
 ];
 
 /**
@@ -536,9 +613,46 @@ export const PARTNERSHIP_DEFS: IncomeFieldDef[] = [
     capture: 'percent',
     patterns: [/item\s*j.{0,80}capital/i, /capital\s*(?:account|share)?.{0,40}%/i, /ending.{0,20}capital.{0,20}%/i],
   },
+  {
+    id: 'pt-179',
+    form: 'Form 1065',
+    boxLabel: 'Box 12',
+    fieldLabel: 'Section 179 Deduction',
+    lineNum: 'Box 12',
+    category: 'addback',
+    patterns: [/section\s*179\s+deduction/i, /box\s*12\b.{0,40}section\s*179/i],
+  },
+  {
+    id: 'pt-depletion',
+    form: 'Form 1065',
+    boxLabel: 'Box 17',
+    fieldLabel: 'Depletion',
+    lineNum: 'Box 17',
+    category: 'addback',
+    patterns: [/\bdepletion\b/i],
+  },
+  {
+    id: 'pt-meals',
+    form: 'Form 1065',
+    boxLabel: 'M-1',
+    fieldLabel: 'Non-Deductible Meals',
+    lineNum: 'M-1',
+    category: 'addback',
+    patterns: [/travel and entertainment/i, /meals and entertainment/i],
+  },
 ];
 
 export const PAYSTUB_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'ps-employer-name',
+    form: 'Paystub',
+    boxLabel: 'Employer',
+    fieldLabel: 'Employer Name',
+    lineNum: 'Employer',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employer(?:['’]s)?(?:\s+name)?\s*[:#–—-]?\s*/i, /company\s*[:#–—-]?\s*/i],
+  },
   {
     id: 'ps-hourly-rate',
     form: 'Paystub',
@@ -564,7 +678,7 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Current Period Base Pay',
     lineNum: 'Current',
     category: 'wages',
-    patterns: [/current\s+(period|earnings|pay)\s+(?:base|gross|regular)/i, /this\s+period\s+(?:base|pay)/i],
+    patterns: [/current\s+(period|earnings|pay)\s+(?:base|regular)/i, /this\s+period\s+(?:base|regular|pay)/i],
   },
   {
     id: 'ps-base-ytd',
@@ -573,7 +687,7 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Base Wages YTD',
     lineNum: 'YTD',
     category: 'wages',
-    patterns: [/year[- ]to[- ]date.{0,40}(base|regular|gross)?/i, /(base|regular)\s+wages?\s+ytd/i],
+    patterns: [/ytd\s+(base|regular)\b/i, /(base|regular)\s+wages?\s+ytd/i, /year[- ]to[- ]date\s+(base|regular)/i],
   },
   {
     id: 'ps-bonus-ytd',
@@ -592,6 +706,33 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     lineNum: 'OT',
     category: 'wages',
     patterns: [/overtime.{0,20}ytd|ytd.{0,20}overtime/i],
+  },
+  {
+    id: 'ps-tips-ytd',
+    form: 'Paystub',
+    boxLabel: 'Tips YTD',
+    fieldLabel: 'Tips YTD',
+    lineNum: 'Tips',
+    category: 'wages',
+    patterns: [/\btips?\b.{0,20}ytd|ytd.{0,20}\btips?\b/i],
+  },
+  {
+    id: 'ps-commission-ytd',
+    form: 'Paystub',
+    boxLabel: 'Commission YTD',
+    fieldLabel: 'Commission YTD',
+    lineNum: 'Commission',
+    category: 'wages',
+    patterns: [/commission.{0,20}ytd|ytd.{0,20}commission/i],
+  },
+  {
+    id: 'ps-rsu-ytd',
+    form: 'Paystub',
+    boxLabel: 'RSU YTD',
+    fieldLabel: 'RSU / Stock Award YTD',
+    lineNum: 'RSU',
+    category: 'wages',
+    patterns: [/\brsu\b|restricted\s+stock|stock\s+unit|stock\s+award/i],
   },
 ];
 
@@ -671,7 +812,214 @@ export const FORM_1120_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Depreciation',
     lineNum: 'Line 20',
     category: 'addback',
-    patterns: [/line\s*20\b.{0,80}depreciation/i, /depreciation.{0,40}\d/i],
+    patterns: [/line\s*20\b.{0,80}depreciation/i, /\b20\b\s+depreciation/i],
+  },
+  {
+    id: 'c1120-depletion',
+    form: 'Form 1120',
+    boxLabel: 'Line 21',
+    fieldLabel: 'Depletion',
+    lineNum: 'Line 21',
+    category: 'addback',
+    patterns: [/line\s*21\b.{0,80}depletion/i, /\b21\b\s+depletion/i],
+  },
+  {
+    id: 'c1120-amort',
+    form: 'Form 1120',
+    boxLabel: 'Line 26',
+    fieldLabel: 'Amortization',
+    lineNum: 'Line 26',
+    category: 'addback',
+    patterns: [/line\s*26\b.{0,80}other deductions/i, /\bamortization\b/i],
+  },
+  {
+    id: 'c1120-meals',
+    form: 'Form 1120',
+    boxLabel: 'M-1',
+    fieldLabel: 'Non-Deductible Meals',
+    lineNum: 'M-1',
+    category: 'addback',
+    patterns: [/travel and entertainment/i, /meals and entertainment/i],
+  },
+  {
+    id: 'c1120-nol',
+    form: 'Form 1120',
+    boxLabel: 'Line 29b',
+    fieldLabel: 'NOL / Special Deductions',
+    lineNum: 'Line 29b',
+    category: 'addback',
+    patterns: [/line\s*29b\b.{0,80}special deductions/i, /net operating loss/i],
+  },
+];
+
+export const FORM_1040_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'f1040-wages',
+    form: 'Form 1040',
+    boxLabel: 'Line 1z',
+    fieldLabel: 'Wages, Salaries, Tips',
+    lineNum: 'Line 1z',
+    category: 'wages',
+    patterns: [/1z\s+add lines 1a through 1h/i, /wages, salaries, tips/i],
+  },
+  {
+    id: 'f1040-ss-total',
+    form: 'Form 1040',
+    boxLabel: 'Line 6a',
+    fieldLabel: 'Social Security Benefits',
+    lineNum: 'Line 6a',
+    category: 'income',
+    patterns: [/social security benefits/i],
+  },
+  {
+    id: 'f1040-ss-taxable',
+    form: 'Form 1040',
+    boxLabel: 'Line 6b',
+    fieldLabel: 'Taxable Social Security',
+    lineNum: 'Line 6b',
+    category: 'income',
+    patterns: [/line\s*6b\b.{0,80}taxable/i],
+  },
+  {
+    id: 'f1040-pensions-total',
+    form: 'Form 1040',
+    boxLabel: 'Line 5a',
+    fieldLabel: 'Pensions and Annuities',
+    lineNum: 'Line 5a',
+    category: 'income',
+    patterns: [/pensions and annuities/i],
+  },
+  {
+    id: 'f1040-pensions-taxable',
+    form: 'Form 1040',
+    boxLabel: 'Line 5b',
+    fieldLabel: 'Taxable Pensions',
+    lineNum: 'Line 5b',
+    category: 'income',
+    patterns: [/line\s*5b\b.{0,80}taxable/i],
+  },
+];
+
+export const FORM_8825_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'form-8825-name',
+    form: 'Form 8825',
+    boxLabel: 'Name',
+    fieldLabel: 'Partnership or S Corporation Name',
+    lineNum: 'Name',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/name of partnership or s corporation/i, /name of partnership/i, /name of s corporation/i],
+  },
+  {
+    id: 'form-8825-ein',
+    form: 'Form 8825',
+    boxLabel: 'EIN',
+    fieldLabel: 'Employer Identification Number (EIN)',
+    lineNum: 'EIN',
+    category: 'identity',
+    capture: 'ein',
+    patterns: [/employer identification number/i],
+  },
+  {
+    id: 'form-8825-dep',
+    form: 'Form 8825',
+    boxLabel: 'Line 14',
+    fieldLabel: 'Form 8825 Depreciation (Line 14)',
+    lineNum: 'Line 14',
+    category: 'addback',
+    capture: 'money_last',
+    patterns: [/line\s*14\b.{0,80}depreciation/i, /\b14\b\s+depreciation/i, /form\s+8825.{0,40}depreciation/i],
+  },
+  {
+    id: 'form-8825-rents',
+    form: 'Form 8825',
+    boxLabel: 'Line 2',
+    fieldLabel: 'Form 8825 Gross Rents (Line 2)',
+    lineNum: 'Line 2',
+    category: 'rental',
+    capture: 'money_last',
+    patterns: [/line\s*2\b.{0,80}gross rents/i, /gross rents/i],
+  },
+  {
+    id: 'form-8825-total-exp',
+    form: 'Form 8825',
+    boxLabel: 'Line 16',
+    fieldLabel: 'Form 8825 Total Expenses (Line 16)',
+    lineNum: 'Line 16',
+    category: 'rental',
+    capture: 'money_last',
+    patterns: [/line\s*16\b.{0,80}total expenses/i, /\b16\b\s+total expenses/i],
+  },
+  {
+    id: 'form-8825-net',
+    form: 'Form 8825',
+    boxLabel: 'Line 21',
+    fieldLabel: 'Form 8825 Net Income or Loss (Line 21)',
+    lineNum: 'Line 21',
+    category: 'rental',
+    capture: 'money_last',
+    patterns: [/line\s*21\b.{0,80}net income/i, /net income \(loss\)/i],
+  },
+];
+
+export const FORM_4562_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'form-4562-179',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 12',
+    fieldLabel: 'Form 4562 Section 179',
+    lineNum: 'Line 12',
+    category: 'addback',
+    patterns: [/section\s*179\s+expense deduction/i, /line\s*12\b.{0,80}section\s*179/i],
+  },
+  {
+    id: 'form-4562-dep',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 22',
+    fieldLabel: 'Form 4562 Depreciation',
+    lineNum: 'Line 22',
+    category: 'addback',
+    patterns: [/total depreciation/i, /line\s*22\b.{0,80}depreciation/i],
+  },
+];
+
+export const SCHEDULE_L_DEFS: IncomeFieldDef[] = [
+  {
+    id: 'sch-l-cash',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 1',
+    fieldLabel: 'Cash',
+    lineNum: 'Line 1',
+    category: 'asset',
+    patterns: [/schedule l.{0,40}\bcash\b/i, /\b1\b\s+cash\b.{0,40}\d/i],
+  },
+  {
+    id: 'sch-l-ar',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 2a',
+    fieldLabel: 'Accounts Receivable',
+    lineNum: 'Line 2a',
+    category: 'asset',
+    patterns: [/trade notes and accounts receivable/i],
+  },
+  {
+    id: 'sch-l-securities',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 4',
+    fieldLabel: 'Tax-Exempt Securities',
+    lineNum: 'Line 4',
+    category: 'asset',
+    patterns: [/tax-exempt securities/i],
+  },
+  {
+    id: 'sch-l-ap',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 16',
+    fieldLabel: 'Accounts Payable',
+    lineNum: 'Line 16',
+    category: 'asset',
+    patterns: [/accounts payable/i],
   },
 ];
 
@@ -687,6 +1035,10 @@ export const INCOME_FIELD_DEFS: IncomeFieldDef[] = [
   ...SCORP_DEFS,
   ...PARTNERSHIP_DEFS,
   ...FORM_1120_DEFS,
+  ...FORM_1040_DEFS,
+  ...FORM_8825_DEFS,
+  ...FORM_4562_DEFS,
+  ...SCHEDULE_L_DEFS,
 ];
 
 type LineCluster = {
@@ -811,10 +1163,11 @@ function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
   if (form === 'Schedule D') return /schedule\s*d/.test(blob);
   if (form === 'Schedule E') return /schedule\s*e/.test(blob);
   if (form === 'Schedule F') return /schedule\s*f/.test(blob);
-  if (form === 'Form 1120-S') return /1120-?s/.test(blob);
+  if (form === 'Form 1120-S') return /1120-?s|form 4562|schedule l/.test(blob);
   if (form === 'Form 1065') return /1065/.test(blob);
   if (form === 'Form 1120') return /1120 \(c-corporation|c-corporation return/.test(blob);
   if (form === 'Form 1040') return /1040/.test(blob);
+  if (form === 'Form 8825') return /8825/.test(blob);
   return false;
 }
 
@@ -911,6 +1264,70 @@ function paystubRowAmounts(line: LineCluster): number[] {
   return moneyMatches(line.text).map((match) => parseMoneyValue(match[1]));
 }
 
+const PAYSTUB_EXCLUDE_ROW =
+  /spot\s*bonus|\breloc(?:ation)?\b|^(gross|net\b|total|federal|social security|medicare|401|deduct|tax|health|dental|pre[- ]tax|after[- ]tax|sick)\b/i;
+const PAYSTUB_BASE_ROW =
+  /\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|straight\s*time|sunday|weekend(?:\s+premium)?|night(?:\s+diff(?:erential)?)?|shift(?:\s+diff(?:erential)?)?|pto|holiday|leave|vacation|retro(?:\s+pay)?)\b/i;
+const PAYSTUB_PRIMARY_RATE_ROW =
+  /\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|straight\s*time)\b/i;
+const PAYSTUB_BONUS_ROW = /\b(aip|annual\s+incentive|quarterly|annual\s+pay|incentive|bonus)\b/i;
+const PAYSTUB_OT_ROW =
+  /\bover\s*time\b|\bot(?:[- ]?1\.5(?:0+)?)?\b|\bdouble\s*time\b|\bdbl\s*time\b|\b1\.5(?:0+)?\s*(?:x|hourly|hours?|ot)\b|\btime\s+and\s+a\s+half\b|\bworked\s+holiday\b|\bholiday\s+worked\b/i;
+const PAYSTUB_TIPS_ROW = /\btips?\b|\bgratuity\b/i;
+const PAYSTUB_COMMISSION_ROW = /\bcommission/i;
+const PAYSTUB_RSU_ROW = /\brsu\b|restricted\s+stock|stock\s+unit|stock\s+award/i;
+
+type PaystubRowKind = 'regular' | 'bonus' | 'ot' | 'tips' | 'commission' | 'rsu';
+
+function paystubPaysPerYear(text: string): number | undefined {
+  if (/semi[- ]?month/i.test(text)) return 24;
+  if (/bi[- ]?week/i.test(text)) return 26;
+  if (/\bweekly\b/i.test(text)) return 52;
+  if (/\bmonthly\b/i.test(text)) return 12;
+  return undefined;
+}
+
+function weeklyHoursFromPeriod(periodHours: number, paysPerYear?: number): number | undefined {
+  if (periodHours >= 20 && periodHours <= 50) return periodHours;
+  if (paysPerYear) return Math.round((periodHours * paysPerYear) / 52 * 100) / 100;
+  return undefined;
+}
+
+function paystubRowKind(label: string): PaystubRowKind | null {
+  const stripped = label.replace(/[$,0-9.\-—/]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!stripped || PAYSTUB_EXCLUDE_ROW.test(stripped)) return null;
+  // Match OT on the original label so "1.5 Hourly" is not stripped down to base "hourly".
+  if (PAYSTUB_OT_ROW.test(label) || PAYSTUB_OT_ROW.test(stripped)) return 'ot';
+  if (PAYSTUB_RSU_ROW.test(stripped)) return 'rsu';
+  if (PAYSTUB_TIPS_ROW.test(stripped)) return 'tips';
+  if (PAYSTUB_COMMISSION_ROW.test(stripped)) return 'commission';
+  if (PAYSTUB_BONUS_ROW.test(stripped)) return 'bonus';
+  if (PAYSTUB_BASE_ROW.test(stripped)) return 'regular';
+  return null;
+}
+
+function assignPaystubAmounts(
+  amounts: number[],
+  matches: RegExpMatchArray[],
+  label: string,
+  kind: PaystubRowKind,
+): Partial<Record<'rate' | 'hours' | 'current' | 'ytd', { numeric: number; match: RegExpMatchArray }>> {
+  const slot = (index: number) => ({ numeric: amounts[index], match: matches[index] as RegExpMatchArray });
+  if (amounts.length >= 4) return { rate: slot(0), hours: slot(1), current: slot(2), ytd: slot(3) };
+  if (amounts.length === 3 && amounts[0] < 200 && amounts[1] >= 200) {
+    return { rate: slot(0), current: slot(1), ytd: slot(2) };
+  }
+  if (amounts.length === 3 && amounts[0] < 200 && amounts[1] < 200) {
+    return { rate: slot(0), hours: slot(1), current: slot(2) };
+  }
+  if (amounts.length >= 2) return { current: slot(0), ytd: slot(amounts.length - 1) };
+  if (amounts.length === 1) {
+    if (kind !== 'regular' || /ytd|year[- ]to[- ]date/i.test(label)) return { ytd: slot(0) };
+    return { current: slot(0) };
+  }
+  return {};
+}
+
 function fieldsFromPaystubTable(
   pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
 ): MappedIncomeField[] {
@@ -918,15 +1335,20 @@ function fieldsFromPaystubTable(
   const paystubPages = pageLines.filter(({ page }) => pagePrefers(page, 'Paystub') || page.formIds.length === 0);
   for (const { page, lines } of paystubPages) {
     if (!pagePrefers(page, 'Paystub') && page.formIds.length > 0) continue;
-    const push = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray) => {
-      if (!Number.isFinite(numeric) || found.some((field) => field.sourceFieldId === defId)) return;
+    const entityId = formEntityId('Paystub', page.index);
+    const pageText = lines.map((line) => line.text).join(' ');
+    const paysPerYear = paystubPaysPerYear(pageText);
+    const hasGross = /\bgross\b/i.test(pageText);
+    const push = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray, value?: string) => {
+      if (value == null && !Number.isFinite(numeric)) return;
+      if (found.some((field) => field.sourceFieldId === defId && field.pageIndex === page.index)) return;
       const def = PAYSTUB_DEFS.find((item) => item.id === defId);
       if (!def) return;
       const located = match ? amountBox(line, match) : lineBox(line);
       if (!located) return;
-      const entityId = formEntityId('Paystub', page.index);
+      const isFirst = !found.some((field) => field.sourceFieldId === def.id);
       found.push({
-        id: def.id,
+        id: isFirst ? def.id : `${def.id}--${entityId}`,
         entityId,
         sourceFieldId: def.id,
         form: def.form,
@@ -934,12 +1356,22 @@ function fieldsFromPaystubTable(
         fieldLabel: def.fieldLabel,
         lineNum: def.lineNum,
         category: def.category,
-        value: formatMoney(numeric),
+        value: value ?? formatMoney(numeric),
         numericValue: numeric,
         pageIndex: page.index,
         wordIndex: located.wordIndex,
         box: located.box,
       });
+    };
+    const addMoney = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray) => {
+      if (!Number.isFinite(numeric)) return;
+      const existing = found.find((field) => field.sourceFieldId === defId && field.pageIndex === page.index);
+      if (existing) {
+        existing.numericValue += numeric;
+        existing.value = formatMoney(existing.numericValue);
+        return;
+      }
+      push(defId, numeric, line, match);
     };
     for (const line of lines) {
       const amounts = paystubRowAmounts(line);
@@ -947,26 +1379,44 @@ function fieldsFromPaystubTable(
       const label = line.text.replace(new RegExp(MONEY.source, 'g'), '').replace(/\s+/g, ' ').trim();
       const hrs = line.text.match(/(\d+(?:\.\d+)?)\s*hr\/?\s*wk/i);
       if (hrs) push('ps-hours-week', Number(hrs[1]), line);
-      if (/^(regular|base(?:\s+pay)?|salary)\b/i.test(label) && amounts.length >= 2) {
-        if (amounts.length >= 4) {
-          push('ps-hourly-rate', amounts[0], line, matches[0] as RegExpMatchArray);
-          push('ps-current-base', amounts[2], line, matches[2] as RegExpMatchArray);
-          push('ps-base-ytd', amounts[3], line, matches[3] as RegExpMatchArray);
-        } else if (amounts.length === 3 && amounts[0] < 200 && amounts[1] >= 200) {
-          push('ps-hourly-rate', amounts[0], line, matches[0] as RegExpMatchArray);
-          push('ps-current-base', amounts[1], line, matches[1] as RegExpMatchArray);
-          push('ps-base-ytd', amounts[2], line, matches[2] as RegExpMatchArray);
-        } else if (amounts.length === 3 && amounts[0] < 200 && amounts[1] < 200) {
-          push('ps-hourly-rate', amounts[0], line, matches[0] as RegExpMatchArray);
-          push('ps-current-base', amounts[2], line, matches[2] as RegExpMatchArray);
-        } else {
-          push('ps-current-base', amounts[0], line, matches[0] as RegExpMatchArray);
-          push('ps-base-ytd', amounts[amounts.length - 1], line, matches[matches.length - 1] as RegExpMatchArray);
+      const employer = line.text.match(/employer(?:['’]s)?(?:\s+name)?\s*[:#–—-]?\s+(.+)/i);
+      if (employer?.[1]) {
+        const name = employer[1].replace(/\s+/g, ' ').trim();
+        if (name.length >= 2) push('ps-employer-name', 0, line, undefined, name);
+      }
+      const kind = paystubRowKind(label);
+      if (!kind || !amounts.length) continue;
+      const slots = assignPaystubAmounts(amounts, matches, label, kind);
+      if (kind === 'regular') {
+        if (slots.rate && PAYSTUB_PRIMARY_RATE_ROW.test(label)) {
+          push('ps-hourly-rate', slots.rate.numeric, line, slots.rate.match);
         }
-      } else if (/^bonus\b/i.test(label) && amounts.length) {
-        push('ps-bonus-ytd', amounts[amounts.length - 1], line, matches[matches.length - 1] as RegExpMatchArray);
-      } else if (/^(overtime|\bot\b)/i.test(label) && amounts.length) {
-        push('ps-ot-ytd', amounts[amounts.length - 1], line, matches[matches.length - 1] as RegExpMatchArray);
+        if (slots.current) addMoney('ps-current-base', slots.current.numeric, line, slots.current.match);
+        if (slots.ytd) addMoney('ps-base-ytd', slots.ytd.numeric, line, slots.ytd.match);
+        if (slots.hours && PAYSTUB_PRIMARY_RATE_ROW.test(label)) {
+          const weekly = weeklyHoursFromPeriod(slots.hours.numeric, paysPerYear);
+          if (weekly != null) push('ps-hours-week', weekly, line, slots.hours.match);
+        }
+      } else if (kind === 'bonus' && slots.ytd) {
+        addMoney('ps-bonus-ytd', slots.ytd.numeric, line, slots.ytd.match);
+      } else if (kind === 'ot' && slots.ytd) {
+        addMoney('ps-ot-ytd', slots.ytd.numeric, line, slots.ytd.match);
+      } else if (kind === 'tips' && slots.ytd) {
+        addMoney('ps-tips-ytd', slots.ytd.numeric, line, slots.ytd.match);
+      } else if (kind === 'commission' && slots.ytd) {
+        addMoney('ps-commission-ytd', slots.ytd.numeric, line, slots.ytd.match);
+      } else if (kind === 'rsu' && slots.ytd) {
+        addMoney('ps-rsu-ytd', slots.ytd.numeric, line, slots.ytd.match);
+      }
+    }
+    if (!found.some((field) => field.sourceFieldId === 'ps-base-ytd' && field.pageIndex === page.index) && !hasGross) {
+      for (const line of lines) {
+        if (!/year[- ]to[- ]date|\bytd\b/i.test(line.text)) continue;
+        const matches = moneyMatches(line.text);
+        const last = matches[matches.length - 1];
+        if (!last) continue;
+        push('ps-base-ytd', parseMoneyValue(last[1]), line, last as RegExpMatchArray);
+        break;
       }
     }
   }
@@ -1103,20 +1553,46 @@ function fieldsFromScheduleEGrid(extracts: ScheduleEPropertyExtract[]): MappedIn
   return found;
 }
 
+function fieldsFromFormExtracts(extracts: ParseResponse['formExtracts']): MappedIncomeField[] {
+  const found: MappedIncomeField[] = [];
+  for (const extract of extracts ?? []) {
+    const entityId = extract.entityId || `${extract.form.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-p${extract.pageIndex}`;
+    const isFirst = !found.some((field) => field.sourceFieldId === extract.sourceFieldId);
+    found.push({
+      id: isFirst ? extract.sourceFieldId : `${extract.sourceFieldId}--${entityId}`,
+      entityId,
+      sourceFieldId: extract.sourceFieldId,
+      form: extract.form,
+      boxLabel: extract.boxLabel,
+      fieldLabel: extract.fieldLabel,
+      lineNum: extract.lineNum,
+      category: extract.category,
+      value: extract.value,
+      numericValue: extract.numericValue,
+      pageIndex: extract.pageIndex,
+      wordIndex: 0,
+      box: extract.box,
+    });
+  }
+  return found;
+}
+
 export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
   const gridFields = fieldsFromScheduleEGrid(result.scheduleEProperties ?? []);
+  const extractFields = fieldsFromFormExtracts(result.formExtracts);
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
-  const found: MappedIncomeField[] = [...gridFields, ...fieldsFromPaystubTable(pageLines)];
+  const found: MappedIncomeField[] = [...gridFields, ...extractFields, ...fieldsFromPaystubTable(pageLines)];
+  const claimed = new Set(found.map((field) => `${field.pageIndex}:${field.sourceFieldId}`));
 
   for (const def of INCOME_FIELD_DEFS) {
     if (gridFields.length && def.form === 'Schedule E') continue;
-    if (def.form === 'Paystub' && found.some((field) => field.sourceFieldId === def.id)) continue;
     if (def.id === 'ps-hours-week') continue;
     const ordered = pagesForDef(pageLines, def.form);
     if (!ordered.length) continue;
     const allowMultipleEntities = ordered.some(({ page }) => pagePrefers(page, def.form));
 
     for (const { page, lines } of ordered) {
+      if (claimed.has(`${page.index}:${def.id}`)) continue;
       let mappedOnPage = false;
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
         const line = lines[lineIndex];
@@ -1128,16 +1604,26 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
         let numeric: number;
         let located: { box: MappedIncomeField['box']; wordIndex: number } | null;
 
-        if (capture === 'money') {
-          const columnX = estimatedMatchX(line, matchedPattern);
-          const foundMoney =
-            moneyInColumn(lines, lineIndex, columnX) ??
-            moneyOnOrNear(lines, lineIndex, def.id === 'ps-base-ytd');
-          if (!foundMoney) continue;
-          numeric = parseMoneyValue(foundMoney.match[1]);
-          if (!Number.isFinite(numeric)) continue;
-          located = amountBox(foundMoney.line, foundMoney.match);
-          value = formatMoney(numeric);
+        if (capture === 'money' || capture === 'money_last') {
+          if (capture === 'money_last') {
+            const matches = moneyMatches(line.text);
+            const last = matches[matches.length - 1];
+            if (!last) continue;
+            numeric = parseMoneyValue(last[1]);
+            if (!Number.isFinite(numeric)) continue;
+            located = amountBox(line, last);
+            value = formatMoney(numeric);
+          } else {
+            const columnX = estimatedMatchX(line, matchedPattern);
+            const foundMoney =
+              moneyInColumn(lines, lineIndex, columnX) ??
+              moneyOnOrNear(lines, lineIndex, def.id === 'ps-base-ytd');
+            if (!foundMoney) continue;
+            numeric = parseMoneyValue(foundMoney.match[1]);
+            if (!Number.isFinite(numeric)) continue;
+            located = amountBox(foundMoney.line, foundMoney.match);
+            value = formatMoney(numeric);
+          }
         } else if (capture === 'ein') {
           const columnX = estimatedMatchX(line, matchedPattern);
           const foundEin = einOnOrNear(lines, lineIndex, columnX);

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import threading
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -19,15 +21,21 @@ logging.getLogger("freeflow.splitter").setLevel(logging.INFO)
 MAX_PDF_BYTES = 40 * 1024 * 1024
 AIPDFConverter = None
 pre_split_tax_returns = None
+extract_irs_form_fields = None
+select_ocr_page_indices = None
 _engine_error: str | None = None
 try:
     from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-    from pdf_splitter import pre_split_tax_returns
+    from irs_form_extract import extract_irs_form_fields
+    from pdf_splitter import pre_split_tax_returns, select_ocr_page_indices
 except Exception as exc:
     try:
         from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
-        from src.pdf_splitter import pre_split_tax_returns
+        from src.irs_form_extract import extract_irs_form_fields
+        from src.pdf_splitter import pre_split_tax_returns, select_ocr_page_indices
     except Exception:
+        extract_irs_form_fields = None  # type: ignore[assignment]
+        select_ocr_page_indices = None  # type: ignore[assignment]
         _engine_error = str(exc)
         logger.warning("OCR engine unavailable; /parse disabled: %s", _engine_error)
 
@@ -100,6 +108,17 @@ def get_converter():
     return _converter
 
 
+@app.on_event("startup")
+def _warmup_ocr_in_background() -> None:
+    def run() -> None:
+        try:
+            get_converter().warmup()
+        except Exception:
+            logger.warning("converter_warmup_skipped")
+
+    threading.Thread(target=run, daemon=True, name="ocr-warmup").start()
+
+
 @app.get("/", response_model=None)
 def root(request: Request):
     """Browsers opening :8080 used to get FastAPI's empty 404. Serve a real page."""
@@ -121,6 +140,46 @@ def health_check():
     return {"status": "HEALTHY", "service": "FreeFlow Document Processing Engine", "version": "5.0.0"}
 
 
+def _parse_multipart_pdf(buffer: bytes, content_type: str) -> tuple[bytes, str] | None:
+    match = re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type, re.I)
+    if not match:
+        return None
+    boundary = f"--{(match.group(1) or match.group(2)).strip()}".encode()
+    cursor = 0
+    while cursor < len(buffer):
+        start = buffer.find(boundary, cursor)
+        if start < 0:
+            break
+        next_part = buffer.find(boundary, start + len(boundary))
+        part = buffer[start + len(boundary) : next_part if next_part >= 0 else len(buffer)]
+        cursor = next_part if next_part >= 0 else len(buffer)
+        header_end = part.find(b"\r\n\r\n")
+        sep_len = 4
+        if header_end < 0:
+            header_end = part.find(b"\n\n")
+            sep_len = 2
+        if header_end < 0:
+            continue
+        header = part[:header_end].decode("utf-8", "ignore")
+        if not re.search(r"filename=", header, re.I) and not re.search(r'name="?file"?', header, re.I):
+            continue
+        filename_match = re.search(r'filename="([^"]+)"', header, re.I) or re.search(r"filename=([^\s;]+)", header, re.I)
+        name = filename_match.group(1) if filename_match else "document.pdf"
+        part_type = ""
+        type_match = re.search(r"content-type:\s*([^\r\n]+)", header, re.I)
+        if type_match:
+            part_type = type_match.group(1).strip().lower()
+        body = part[header_end + sep_len :]
+        if body.endswith(b"\r\n"):
+            body = body[:-2]
+        if body.startswith(b"\r\n"):
+            body = body[2:]
+        if part_type and part_type != "application/pdf":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Only PDF files are authorized for ingestion.")
+        return body, name
+    return None
+
+
 async def _read_pdf_bytes(request: Request) -> tuple[bytes, str]:
     content_type = (request.headers.get("content-type") or "").lower()
     content_length = request.headers.get("content-length")
@@ -134,38 +193,26 @@ async def _read_pdf_bytes(request: Request) -> tuple[bytes, str]:
         if declared_bytes > MAX_PDF_BYTES:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
-    if "application/pdf" in content_type:
-        body = bytearray()
-        async for chunk in request.stream():
-            if len(body) + len(chunk) > MAX_PDF_BYTES:
-                raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
-            body.extend(chunk)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_PDF_BYTES:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
+        body.extend(chunk)
+    payload = bytes(body)
+
+    if "application/pdf" in content_type or payload[:5] == b"%PDF-":
         name = request.headers.get("x-document-title") or "document.pdf"
-        return bytes(body), name
+        return payload, name
 
-    if content_length is None:
-        raise HTTPException(
-            status.HTTP_411_LENGTH_REQUIRED,
-            detail="Content-Length is required for multipart document uploads.",
-        )
+    if "multipart/form-data" in content_type:
+        parsed = _parse_multipart_pdf(payload, content_type)
+        if parsed is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Expected application/pdf body or multipart file field.")
+        if not parsed[0]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Empty PDF body.")
+        return parsed
 
-    form = await request.form(max_files=1, max_fields=0, max_part_size=MAX_PDF_BYTES)
-    upload = form.get("file")
-    if upload is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Expected application/pdf body or multipart file field.")
-    try:
-        upload_content_type = (getattr(upload, "content_type", None) or "").lower()
-        if upload_content_type != "application/pdf":
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Only PDF files are authorized for ingestion.")
-        body = bytearray()
-        while chunk := await upload.read(1024 * 1024):
-            if len(body) + len(chunk) > MAX_PDF_BYTES:
-                raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
-            body.extend(chunk)
-        name = getattr(upload, "filename", None) or "document.pdf"
-        return bytes(body), name
-    finally:
-        await upload.close()
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Expected application/pdf body or multipart file field.")
 
 
 @app.post("/parse", status_code=status.HTTP_200_OK)
@@ -187,11 +234,27 @@ async def process_document(request: Request):
         except ImportError:
             from src.schedule_e_grid import extract_schedule_e_pages
 
-        convert_result = get_converter().convert_to_ai_ready(pdf_bytes)
+        converter = get_converter()
+        inspected = converter.inspect_pages(pdf_bytes)
+        preview = converter.inspect_as_convert_result(inspected)
+        preview_split = pre_split_tax_returns(preview)
+        ocr_indices = select_ocr_page_indices(inspected, preview_split) if select_ocr_page_indices else None
+        convert_result = converter.convert_to_ai_ready(
+            pdf_bytes,
+            inspected=inspected,
+            ocr_page_indices=ocr_indices,
+        )
         try:
             schedule_e_properties = extract_schedule_e_pages(pdf_bytes, ocr_pages=convert_result.pages)
         except Exception as grid_exc:
             logger.warning("schedule_e_grid_skipped: %s", grid_exc)
+
+        form_extracts: list = []
+        if extract_irs_form_fields is not None:
+            try:
+                form_extracts = extract_irs_form_fields(pdf_bytes, ocr_pages=convert_result.pages)
+            except Exception as extract_exc:
+                logger.warning("irs_form_extract_skipped: %s", extract_exc)
 
         del pdf_bytes
 
@@ -213,7 +276,10 @@ async def process_document(request: Request):
             )
 
         has_business = any(
-            any(label.startswith(("Schedule C", "Schedule E", "Form 1120", "Form 1065", "Schedule K-1")) for label in labels)
+            any(
+                label.startswith(("Schedule C", "Schedule E", "Form 1120", "Form 1065", "Schedule K-1", "Form 8825"))
+                for label in labels
+            )
             for labels in split_result.classifications.values()
         )
 
@@ -240,6 +306,7 @@ async def process_document(request: Request):
                 "unresolved_statements": split_result.to_dict()["unresolved_statements"],
                 "pages": page_payload,
                 "scheduleEProperties": schedule_e_properties,
+                "formExtracts": form_extracts,
             }
         )
     except HTTPException:

@@ -44,11 +44,13 @@ export type LocateResult = {
 
 const IDENTITY_NAME_IDS = new Set([
   'w2-employer-name',
+  'ps-employer-name',
   'ent1-name',
   'scorp-name',
   'pt-name',
   'c1120-name',
   'schedule-f-name',
+  'form-8825-name',
 ]);
 
 const IDENTITY_EIN_IDS = new Set([
@@ -58,7 +60,22 @@ const IDENTITY_EIN_IDS = new Set([
   'pt-ein',
   'c1120-ein',
   'schedule-f-ein',
+  'form-8825-ein',
 ]);
+
+const SUPPORTING_FORMS = new Set<MappedIncomeField['form']>(['Paystub', 'WVOE', 'Form 8825']);
+
+const CORP_KINDS = new Set<DocKind>(['scorp', 'partnership', 'ccorp']);
+
+function sourceId(field: MappedIncomeField): string {
+  return field.sourceFieldId ?? field.id;
+}
+
+function isSupportingField(field: MappedIncomeField): boolean {
+  const id = sourceId(field);
+  if (SUPPORTING_FORMS.has(field.form)) return true;
+  return id.startsWith('form-8825-') || id.startsWith('form-4562-') || id.startsWith('sch-l-');
+}
 
 const BUSINESS_FORMS = new Set<MappedIncomeField['form']>([
   'W-2',
@@ -78,6 +95,7 @@ export function formToDocKind(form: MappedIncomeField['form']): DocKind {
   if (form === 'Form 1065') return 'partnership';
   if (form === 'Form 1120') return 'ccorp';
   if (form === 'Schedule B' || form === 'Schedule D') return 'asset';
+  // Form 8825 is an addback attachment, not its own 1003 business kind.
   return 'unknown';
 }
 
@@ -90,6 +108,7 @@ export function formFromPageLabels(formIds: string[]): MappedIncomeField['form']
   if (/1120-?S|K-1 \(1120/i.test(labels)) return 'Form 1120-S';
   if (/Form 1065|K-1 \(1065\)/i.test(labels)) return 'Form 1065';
   if (/1120 \(C-Corporation|C-Corporation Return/i.test(labels)) return 'Form 1120';
+  if (/8825/i.test(labels)) return 'Form 8825';
   return undefined;
 }
 
@@ -117,11 +136,14 @@ export function fallbackUndisclosedName(form: MappedIncomeField['form']): string
 export function groupFieldsByEntity(
   fields: MappedIncomeField[],
   form?: MappedIncomeField['form'],
+  pages?: LocatePage[],
 ): LocatedMatch[] {
   const groups = new Map<string, MappedIncomeField[]>();
+  const supporting: MappedIncomeField[] = [];
   for (const field of fields) {
     if (form && field.form !== form) continue;
-    if (field.form === 'Paystub' || field.form === 'WVOE' || field.form === 'Schedule B' || field.form === 'Schedule D') {
+    if (isSupportingField(field)) {
+      supporting.push(field);
       continue;
     }
     const key = `${field.documentId ?? ''}::${field.entityId || `${field.form}-p${field.pageIndex}`}`;
@@ -130,10 +152,10 @@ export function groupFieldsByEntity(
     groups.set(key, list);
   }
 
-  return [...groups.values()].map((group) => {
+  const matches = [...groups.values()].map((group) => {
     const head = group[0];
-    const nameField = group.find((field) => IDENTITY_NAME_IDS.has(field.sourceFieldId ?? field.id));
-    const einField = group.find((field) => IDENTITY_EIN_IDS.has(field.sourceFieldId ?? field.id));
+    const nameField = group.find((field) => IDENTITY_NAME_IDS.has(sourceId(field)));
+    const einField = group.find((field) => IDENTITY_EIN_IDS.has(sourceId(field)));
     return {
       entityId: head.entityId || `${head.form.toLowerCase()}-p${head.pageIndex}`,
       form: head.form,
@@ -143,8 +165,171 @@ export function groupFieldsByEntity(
       name: nameField?.value?.trim() || undefined,
       ein: einField?.value?.trim() || undefined,
       fields: group,
-    };
+    } satisfies LocatedMatch;
   });
+
+  return attachSupportingFields(matches, supporting, pages);
+}
+
+function pageTextFor(field: MappedIncomeField, pages?: LocatePage[]): string {
+  return (
+    pages?.find(
+      (page) => page.pageIndex === field.pageIndex && (page.documentId ?? '') === (field.documentId ?? ''),
+    )?.text ?? ''
+  );
+}
+
+function identityFromFields(fields: MappedIncomeField[]): { name?: string; ein?: string } {
+  const name = fields.find((field) => IDENTITY_NAME_IDS.has(sourceId(field)))?.value?.trim();
+  const ein = fields.find((field) => IDENTITY_EIN_IDS.has(sourceId(field)))?.value?.trim();
+  return { name: name || undefined, ein: ein || undefined };
+}
+
+function compatibleKinds(field: MappedIncomeField): DocKind[] {
+  const id = sourceId(field);
+  if (field.form === 'Form 8825' || id.startsWith('form-8825-') || id.startsWith('form-4562-') || id.startsWith('sch-l-')) {
+    return [...CORP_KINDS];
+  }
+  if (field.form === 'Paystub' || field.form === 'WVOE') return ['w2'];
+  return [];
+}
+
+function formForKind(kind: DocKind): MappedIncomeField['form'] {
+  if (kind === 'partnership') return 'Form 1065';
+  if (kind === 'ccorp') return 'Form 1120';
+  if (kind === 'w2') return 'W-2';
+  if (kind === 'schedule-c') return 'Schedule C';
+  if (kind === 'schedule-f') return 'Schedule F';
+  return 'Form 1120-S';
+}
+
+function kindFromSupportingBundle(bundle: MappedIncomeField[], pages?: LocatePage[]): DocKind {
+  if (bundle.some((field) => field.form === 'Form 1065')) return 'partnership';
+  if (bundle.some((field) => field.form === 'Form 1120')) return 'ccorp';
+  if (bundle.some((field) => field.form === 'Form 1120-S')) return 'scorp';
+  const text = `${pageTextFor(bundle[0], pages)} ${bundle.map((field) => field.value).join(' ')}`;
+  if (/schedule k-1\s*\(form\s*1065\)|form\s+1065/i.test(text) && !/1120-?s/i.test(text)) return 'partnership';
+  if (/form\s+1120(?!\s*-?\s*s)|c-corporation/i.test(text)) return 'ccorp';
+  return 'scorp';
+}
+
+function pushField(target: LocatedMatch, field: MappedIncomeField): void {
+  if (target.fields.some((existing) => existing.id === field.id && existing.pageIndex === field.pageIndex && existing.value === field.value)) {
+    return;
+  }
+  target.fields.push(field);
+  const id = sourceId(field);
+  if (!target.name && IDENTITY_NAME_IDS.has(id) && field.value.trim()) target.name = field.value.trim();
+  if (!target.ein && IDENTITY_EIN_IDS.has(id) && field.value.trim()) target.ein = field.value.trim();
+}
+
+function pickSupportingTarget(
+  candidates: LocatedMatch[],
+  bundle: MappedIncomeField[],
+  pages?: LocatePage[],
+): LocatedMatch | undefined {
+  if (!candidates.length) return undefined;
+  const identity = identityFromFields(bundle);
+  const pageText = pageTextFor(bundle[0], pages);
+  const byEin = identity.ein ? candidates.filter((match) => einsMatch(match.ein, identity.ein)) : [];
+  if (byEin.length === 1) return byEin[0];
+  const byName = identity.name ? candidates.filter((match) => match.name && namesMatch(match.name, identity.name!)) : [];
+  if (byName.length === 1) return byName[0];
+  const byPageText = pageText
+    ? candidates.filter((match) => match.name && namesMatch(match.name, pageText))
+    : [];
+  if (byPageText.length === 1) return byPageText[0];
+  const documentId = bundle[0].documentId;
+  if (documentId) {
+    const sameDoc = candidates.filter((match) => match.documentId === documentId);
+    if (sameDoc.length === 1) return sameDoc[0];
+  }
+  if (candidates.length === 1) return candidates[0];
+  return undefined;
+}
+
+function inventMatch(bundle: MappedIncomeField[], kind: DocKind, pages?: LocatePage[]): LocatedMatch {
+  const head = bundle[0];
+  const identity = identityFromFields(bundle);
+  const fromPage = identityFromPageText(pageTextFor(head, pages));
+  const form = head.form === 'Paystub' || head.form === 'WVOE' ? head.form : formForKind(kind);
+  return {
+    entityId: head.entityId || `${form.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-p${head.pageIndex}`,
+    form,
+    kind,
+    documentId: head.documentId,
+    pageIndex: head.pageIndex,
+    name: identity.name || fromPage.name || (kind === 'w2' ? fallbackUndisclosedName('W-2') : fallbackUndisclosedName(formForKind(kind))),
+    ein: identity.ein || fromPage.ein,
+    fields: [...bundle],
+  };
+}
+
+/**
+ * Fold 8825 / 4562 / Schedule L onto the K-1 or return they belong to, and
+ * paystubs / WVOEs onto the matching W-2. Leftover 8825 (or paystub) packets
+ * still become discovered jobs/businesses so an empty 1003 does not drop them.
+ */
+function attachSupportingFields(
+  matches: LocatedMatch[],
+  supporting: MappedIncomeField[],
+  pages?: LocatePage[],
+): LocatedMatch[] {
+  if (!supporting.length) return matches;
+  const next = matches.map((match) => ({ ...match, fields: [...match.fields] }));
+  const used = new Set<MappedIncomeField>();
+  const bundles = new Map<string, MappedIncomeField[]>();
+  for (const field of supporting) {
+    const key = `${field.documentId ?? ''}::${field.pageIndex}::${compatibleKinds(field)[0] ?? field.form}`;
+    const list = bundles.get(key) ?? [];
+    list.push(field);
+    bundles.set(key, list);
+  }
+
+  const attachBundle = (bundle: MappedIncomeField[], kinds: DocKind[]): boolean => {
+    const candidates = next.filter((match) => kinds.includes(match.kind));
+    const target = pickSupportingTarget(candidates, bundle, pages);
+    if (!target) return false;
+    bundle.forEach((field) => {
+      pushField(target, field);
+      used.add(field);
+    });
+    return true;
+  };
+
+  for (const bundle of bundles.values()) {
+    attachBundle(bundle, compatibleKinds(bundle[0]));
+  }
+
+  const leftoverOf = (predicate: (field: MappedIncomeField) => boolean) =>
+    [...bundles.values()].filter((bundle) => bundle.some((field) => !used.has(field) && predicate(field)));
+
+  for (const bundle of leftoverOf((field) => field.form === 'Form 8825' || sourceId(field).startsWith('form-8825-'))) {
+    const unused = bundle.filter((field) => !used.has(field));
+    if (!unused.length) continue;
+    next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
+    unused.forEach((field) => used.add(field));
+  }
+
+  for (const bundle of leftoverOf((field) => sourceId(field).startsWith('form-4562-') || sourceId(field).startsWith('sch-l-'))) {
+    const unused = bundle.filter((field) => !used.has(field));
+    if (!unused.length) continue;
+    if (attachBundle(unused, [...CORP_KINDS])) continue;
+    if (next.some((match) => CORP_KINDS.has(match.kind))) continue;
+    next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
+    unused.forEach((field) => used.add(field));
+  }
+
+  for (const bundle of leftoverOf((field) => field.form === 'Paystub' || field.form === 'WVOE')) {
+    const unused = bundle.filter((field) => !used.has(field));
+    if (!unused.length) continue;
+    if (attachBundle(unused, ['w2'])) continue;
+    if (next.some((match) => match.kind === 'w2')) continue;
+    next.push(inventMatch(unused, 'w2', pages));
+    unused.forEach((field) => used.add(field));
+  }
+
+  return next;
 }
 
 function normalizeEin(value: string | undefined): string {
@@ -170,15 +355,19 @@ export function discoveredSelectId(match: LocatedMatch): string {
 }
 
 export function uniqueDiscoveredBusinesses(matches: LocatedMatch[]): LocatedMatch[] {
-  const seen = new Set<string>();
-  const out: LocatedMatch[] = [];
+  const byKey = new Map<string, LocatedMatch>();
   for (const match of matches) {
     const key = discoveredIdentityKey(match);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(match);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...match, fields: [...match.fields] });
+      continue;
+    }
+    existing.fields = [...existing.fields, ...match.fields];
+    if (!existing.name) existing.name = match.name;
+    if (!existing.ein) existing.ein = match.ein;
   }
-  return out;
+  return [...byKey.values()];
 }
 
 function pageTextMatches(page: LocatePage, entity: UrlAListedEntity): boolean {
@@ -220,6 +409,7 @@ export function identityFromPageText(text: string): { name?: string; ein?: strin
     /business name(?:\.?\s+if no separate[^.]{0,40})?\s+(.+?)(?=\s+b\s+employer|\s+\d{2}-?\d{7}|$)/i,
     /(?:^|\s)c\s+farm name\s+(.+?)(?=\s+b\s+employer|\s+\d{2}-?\d{7}|$)/i,
     /farm name\s+(.+?)(?=\s+employer identification|\s+\d{2}-?\d{7}|$)/i,
+    /name of partnership or s corporation\s+(.+?)(?=\s+employer identification|\s+\d{2}-?\d{7}|$)/i,
   ];
   for (const pattern of nameMatchers) {
     const match = text.match(pattern);
@@ -282,7 +472,7 @@ export function locateIncomeEntities(options: {
   pages?: LocatePage[];
   rentals?: LocateRentalExtract[];
 }): LocateResult {
-  const groups = groupFieldsByEntity(options.fields);
+  const groups = groupFieldsByEntity(options.fields, undefined, options.pages);
   const claimed = new Set<string>();
   const roster: LocatedRosterRow[] = options.roster.map((entity) => {
     const matches: LocatedMatch[] = [];

@@ -14,7 +14,8 @@ import {
   type LiveWagePatch,
 } from './liveHydrate';
 import { discoveredIdentityKey, type LocatedMatch, type LocateResult } from './locateIncomeEntities';
-import type { UrlAListedEntity } from './urlaEmploymentRoster';
+import { namesMatch, type UrlAListedEntity } from './urlaEmploymentRoster';
+import type { MappedIncomeField } from './parseTypes';
 
 export type HydratedW2Seed = {
   id: string;
@@ -59,11 +60,39 @@ function uniqueByRosterThenEntity<T extends { id: string }>(items: T[]): T[] {
   });
 }
 
+function unusedWageDocs(result: LocateResult, allFields: MappedIncomeField[]): MappedIncomeField[] {
+  const used = new Set(
+    [...result.roster.flatMap((row) => row.matches), ...result.discovered]
+      .flatMap((match) => match.fields)
+      .filter((field) => field.form === 'Paystub' || field.form === 'WVOE')
+      .map((field) => `${field.documentId ?? ''}:${field.pageIndex}:${field.sourceFieldId ?? field.id}`),
+  );
+  return allFields.filter(
+    (field) =>
+      (field.form === 'Paystub' || field.form === 'WVOE') &&
+      !used.has(`${field.documentId ?? ''}:${field.pageIndex}:${field.sourceFieldId ?? field.id}`),
+  );
+}
+
+function wageDocsForEmployer(docs: MappedIncomeField[], employerName: string): MappedIncomeField[] {
+  const pages = new Set(
+    docs
+      .filter(
+        (field) =>
+          (field.sourceFieldId === 'ps-employer-name' || field.id === 'ps-employer-name') &&
+          namesMatch(field.value, employerName),
+      )
+      .map((field) => field.pageIndex),
+  );
+  if (pages.size) return docs.filter((field) => pages.has(field.pageIndex));
+  return [];
+}
+
 export function seedW2FromLocation(
   result: LocateResult,
   allFields: Parameters<typeof liveWagePatch>[0],
 ): { current: HydratedW2Seed[]; previous: LivePrevW2Patch | null } {
-  const paystubAndWvoe = allFields.filter((field) => field.form === 'Paystub' || field.form === 'WVOE');
+  const leftoverWageDocs = unusedWageDocs(result, allFields);
   const current: HydratedW2Seed[] = [];
   let previous: LivePrevW2Patch | null = null;
 
@@ -75,7 +104,7 @@ export function seedW2FromLocation(
       previous = {
         employerName: patch?.employerName || row.entity.name,
         ein: patch?.ein || row.entity.ein || '',
-        box1Wages: patch?.w2Year1Box1,
+        box5Wages: patch?.w2Year1Box5,
       };
       continue;
     }
@@ -83,11 +112,11 @@ export function seedW2FromLocation(
     if (row.entity.kind === 'self-employed' && !w2Matches.length) continue;
 
     const first = w2Matches[0];
-    const attachPaystub = row.entity.classification === 'Primary';
+    const extras = wageDocsForEmployer(leftoverWageDocs, row.entity.name);
     const patch = first
-      ? liveWagePatch(attachPaystub ? [...first.fields, ...paystubAndWvoe] : first.fields)
-      : attachPaystub
-        ? liveWagePatch(paystubAndWvoe)
+      ? liveWagePatch([...first.fields, ...extras])
+      : extras.length
+        ? liveWagePatch(extras)
         : null;
 
     current.push({
@@ -96,7 +125,7 @@ export function seedW2FromLocation(
       employerName: patch?.employerName || row.entity.name,
       ein: patch?.ein || row.entity.ein || '',
       role: row.entity.classification === 'Secondary' ? 'SECONDARY' : 'PRIMARY',
-      located: w2Matches.length > 0,
+      located: w2Matches.length > 0 || extras.length > 0,
       patch,
     });
   }
@@ -110,7 +139,8 @@ export function seedW2FromLocation(
   }
   for (const [id, matches] of discoveredW2) {
     const fields = matches.flatMap((match) => match.fields);
-    const patch = liveWagePatch(fields);
+    const extras = wageDocsForEmployer(leftoverWageDocs, matches[0]?.name || '');
+    const patch = liveWagePatch([...fields, ...extras]);
     current.push({
       id,
       employerName: patch?.employerName || matches[0]?.name || 'Employer on return',

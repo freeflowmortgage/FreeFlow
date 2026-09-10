@@ -4,6 +4,10 @@ Status values: `OPEN`, `IN PROGRESS`, `BLOCKED`, `DONE`, `ACCEPTED RISK`.
 `DONE` requires linked automated or runbook evidence; code merged alone is not
 enough. No P0 may be accepted as risk for initial production launch.
 
+Integration launch instructions (RapidOCR, MISMO, Encompass web vs desktop,
+parser limits) live in [GO-LIVE-MAP.md](GO-LIVE-MAP.md). This file tracks
+whether the work is done; that file says how to turn each surface on.
+
 ## P0 — Launch blockers
 
 | ID | Status | Work item | Acceptance evidence | Owner |
