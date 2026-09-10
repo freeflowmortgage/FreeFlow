@@ -143,3 +143,11 @@ latency, and version. Never log bodies or borrower/document metadata. Required
 metrics include auth failures, denied cross-tenant attempts, parser limit rejects,
 parser latency/error by safe class, queue age/depth/DLQ, sync outcomes, webhook
 duplicates, DB pool saturation, 5xx rate, and audit append failures.
+# Tenant-bound document processing
+
+`POST /api/underwrite/process` requires `income:process`. In protected
+runtimes, `x-loan-id` is required and is resolved through a tenant-scoped
+database transaction before document bytes are forwarded to the parser. Missing
+loan IDs return `400 LOAN_ID_REQUIRED`; absent and cross-tenant IDs both return
+`404 LOAN_NOT_FOUND` to prevent resource enumeration. This gateway check does
+not change parser behavior or calculation logic.
