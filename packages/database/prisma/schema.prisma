@@ -82,11 +82,12 @@ model Tenant {
   isBillingActive  Boolean @default(true) // Accounts are suspended if pay methods fail
 
   // Relations
-  users            User[]
-  configurations   TenantConfiguration?
-  loanApplications LoanApplication[]
-  billingLedgers   TenantBillingLedger[]
-  auditEvents      AuditEvent[]
+  users               User[]
+  configurations      TenantConfiguration?
+  loanApplications    LoanApplication[]
+  billingLedgers      TenantBillingLedger[]
+  auditEvents         AuditEvent[]
+  apiIdempotencyKeys  ApiIdempotencyKey[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -295,6 +296,25 @@ model AuditEvent {
   @@index([tenantId, loanId, occurredAt, id])
   @@index([tenantId, requestId])
   @@map("audit_events")
+}
+
+// Mutation replay protection. Stores only hashes, status, and a safe
+// identifier reference. Never persist request bodies, documents, or PII.
+model ApiIdempotencyKey {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @db.Uuid
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  operation          String   @db.VarChar(100)
+  key                String   @db.VarChar(128)
+  requestHash        String   @db.Char(64)
+  responseCode       Int
+  responseReference  String   @db.VarChar(512)
+  expiresAt          DateTime @db.Timestamptz
+  createdAt          DateTime @default(now()) @db.Timestamptz
+
+  @@unique([tenantId, operation, key])
+  @@index([tenantId, expiresAt])
+  @@map("api_idempotency_keys")
 }
 
 // 9. LOAN CONDITIONS (Encompass Checklist Integration)

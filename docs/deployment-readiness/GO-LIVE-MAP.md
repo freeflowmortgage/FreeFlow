@@ -44,7 +44,7 @@ see production RDS, production Encompass, or real borrower files.
 |---|---|---|---|---|
 | RapidOCR income parser | LIVE (dev image stale) | `services/doc-parser` | P0-12, P0-13 | Digest-pin new image; scan SLO |
 | Portal → parser proxy | PARTIAL | `apps/underwriter-portal/.../process.ts` | P0-07 | Timeouts; no OCR-word dump |
-| Form 1084 calculation | LIVE (library) | `packages/mortgage-engine` | P0-05 | Bind to approved event |
+| Form 1084 calculation | PARTIAL | `packages/mortgage-engine` + `income-approvals` | P0-05 | Approval/override events exist; bind summary export and Encompass sync to those event IDs |
 | MISMO 3.4 cash-flow XML | PARTIAL | `services/doc-parser/src/mismo_xml_exporter.py` | P0-08 | Attach after approval only |
 | MISMO 3.4 URLA (1003) intake | PARTIAL | `apps/underwriting-console/src/intake/mismoExport.ts` | — | QA only; no prod persist |
 | MISMO D1C vendor blocks | PARTIAL | `packages/mortgage-engine/src/mismoD1cMapper.ts` | P0-08 | No vendor APIs yet |
@@ -58,7 +58,7 @@ see production RDS, production Encompass, or real borrower files.
 | Appraisal / URAR 1004 | PARTIAL | `services/appraisal-parser` | P0-11 | Native/AcroForm only; no RapidOCR |
 | Stripe billing | STUB in protected runtime | `billing/webhook.ts` | P0-09 | Authoritative reconcile |
 | Cognito + ALB OIDC | PARTIAL | TF + `albOidc.ts` | P0-01, P0-15 | Live matrix evidence |
-| RDS + RLS | PARTIAL | `packages/database` | P0-03 done; P0-04/17 open | Missing `sync_jobs` / `webhook_events` |
+| RDS + RLS | PARTIAL | `packages/database` | P0-03 done; P0-04/17 open | `audit_events` + `api_idempotency_keys` exist; missing `sync_jobs` / `webhook_events` |
 | Shared links | MISSING | — | P0-10 | — |
 | Credit / AUS (DU, LP, GUS) | MISSING | — | — | Out of scope for this launch |
 | Plaid / Truework / Argyle / Work Number APIs | MISSING | D1C **names only** | — | Do not claim D1C live |
@@ -347,7 +347,7 @@ derived coordinates (P0-11), portal `POST /api/v1/appraisals/audits`.
 |---|---|
 | Cognito + ALB | Enable `enable_cognito_edge`; verify ALB JWT signer ARN; no `ALLOW_DEV_AUTH_BYPASS` in protected runtime; two-tenant matrix (P0-01/02). |
 | Origin | Exact `TRUSTED_ORIGIN` on unsafe methods. |
-| RDS | App role + FORCE RLS; complete tenant columns (P0-04); Multi-AZ/PITR drill (P0-17). Add `sync_jobs` and `webhook_events` before Stripe/Encompass workers. |
+| RDS | App role + FORCE RLS; complete tenant columns (P0-04); Multi-AZ/PITR drill (P0-17). `api_idempotency_keys` is in place for approval mutations. Add `sync_jobs` and `webhook_events` before Stripe/Encompass workers. |
 | Stripe | Protected runtime currently **503**. Implement signature + authoritative amount/currency/tenant; ignore PI metadata prices (P0-09). |
 | WAF / TLS | Public ALB only; parsers private; no parser public IP. |
 | Images | Digest, SBOM, scan, sign, circuit-breaker rollback (P0-14/16). |
