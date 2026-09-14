@@ -49,7 +49,8 @@ BEGIN
     'public.tenant_billing_ledgers'::regclass,
     'public.appraisal_audits'::regclass,
     'public.appraisal_action_items'::regclass,
-    'public.audit_events'::regclass
+    'public.audit_events'::regclass,
+    'public.api_idempotency_keys'::regclass
   ) AND (NOT relrowsecurity OR NOT relforcerowsecurity);
   IF unprotected_tables <> 0 THEN
     RAISE EXCEPTION 'One or more tenant tables do not force row-level security';
@@ -64,6 +65,10 @@ BEGIN
   IF has_table_privilege('freeflow_app', 'audit_events', 'UPDATE')
     OR has_table_privilege('freeflow_app', 'audit_events', 'DELETE') THEN
     RAISE EXCEPTION 'freeflow_app can mutate append-only audit events';
+  END IF;
+  IF has_table_privilege('freeflow_app', 'api_idempotency_keys', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'api_idempotency_keys', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_app can mutate stored idempotency keys';
   END IF;
 END
 $role_assertions$;
@@ -192,6 +197,57 @@ INSERT INTO "audit_events" (
   repeat('0', 64), repeat('1', 64)
 );
 
+INSERT INTO "audit_events" (
+  "id", "tenantId", "loanId", "actorUserId", "action", "entityType", "entityId",
+  "expectedLoanVersion", "reasonCode", "reasonNarrative", "ruleVersion", "schemaVersion",
+  "requestId", "resultHash", "eventHash", "previousEventHash"
+) VALUES (
+  '17171717-1717-4171-8171-171717171717',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'INCOME_APPROVED', 'FORM_1084_AUDIT', '14141414-1414-4141-8141-141414141414',
+  1, 'UNDERWRITER_CONFIRMED', NULL, 'form-1084-v9', 'audit-event-v1',
+  'audit-approval-request', repeat('4', 64), repeat('5', 64), repeat('1', 64)
+);
+
+INSERT INTO "api_idempotency_keys" (
+  "id", "tenantId", "operation", "key", "requestHash", "responseCode",
+  "responseReference", "expiresAt"
+) VALUES (
+  '18181818-1818-4181-8181-181818181818',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'income-approvals',
+  'income-approval-sql-01',
+  repeat('6', 64),
+  201,
+  '{"auditEventId":"17171717-1717-4171-8171-171717171717","loanVersion":2}',
+  now() + interval '24 hours'
+);
+
+DO $override_requires_narrative$
+BEGIN
+  BEGIN
+    INSERT INTO "audit_events" (
+      "id", "tenantId", "loanId", "actorUserId", "action", "entityType", "entityId",
+      "expectedLoanVersion", "reasonCode", "ruleVersion", "schemaVersion", "requestId",
+      "resultHash", "eventHash"
+    ) VALUES (
+      '19191919-1919-4191-8191-191919191919',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'INCOME_OVERRIDE', 'FORM_1084_AUDIT', '14141414-1414-4141-8141-141414141414',
+      1, 'INCOME_ADJUSTED', 'form-1084-v9', 'audit-event-v1', 'audit-override-request',
+      repeat('7', 64), repeat('8', 64)
+    );
+    RAISE EXCEPTION 'Override without a narrative was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END
+$override_requires_narrative$;
+
 DO $append_only_grants$
 BEGIN
   BEGIN
@@ -217,10 +273,15 @@ SET LOCAL app.tenant_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 DO $audit_event_cross_tenant$
 DECLARE
   visible_events integer;
+  visible_keys integer;
 BEGIN
   SELECT count(*) INTO visible_events FROM "audit_events";
+  SELECT count(*) INTO visible_keys FROM "api_idempotency_keys";
   IF visible_events <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A audit events';
+  END IF;
+  IF visible_keys <> 0 THEN
+    RAISE EXCEPTION 'Tenant B observed Tenant A idempotency keys';
   END IF;
 END
 $audit_event_cross_tenant$;
