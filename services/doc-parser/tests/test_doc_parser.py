@@ -170,6 +170,8 @@ def test_pdf_splitter_core_rules():
     assert CORE_RULES["WVOE"].search("Written Verification of Employment") is not None
     assert CORE_RULES["Paystub"].search("Earnings Statement  Current Period  Net Pay") is not None
     assert CORE_RULES["Paystub"].search("Form W-2 Wage and Tax Statement") is None
+    assert CORE_RULES["Paystub"].search("PAY ADVICE Regular 45.00") is not None
+    assert CORE_RULES["Paystub"].search("Pay Statement Current Period") is not None
 
     sched_c = CORE_RULES["Schedule C (Page 1 - Profits)"].search("Schedule C Profit or Loss From Business")
     assert sched_c is not None

@@ -527,6 +527,95 @@ describe('entity-scoped income field mapping', () => {
     ]);
   });
 
+  test('maps W-2 Box 5 from Medicare wages when the box number is missing', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['W-2'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: [
+            at('Form W-2 Wage and Tax Statement', 0.08, 0.08, 0.4),
+            at('Medicare wages and tips', 0.52, 0.42, 0.22),
+            at('78,500.00', 0.52, 0.47, 0.16),
+          ],
+        },
+      ]),
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'w2-box5')?.numericValue).toBe(78500);
+  });
+
+  test('reads paystub employer from the header when Employer: is absent', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: [
+            at('Apex Technology Partners LLC', 0.08, 0.04, 0.5),
+            at('EARNINGS STATEMENT', 0.08, 0.08, 0.3),
+            at('Regular', 0.08, 0.28, 0.14),
+            at('45.00', 0.3, 0.28, 0.1),
+            at('86.67', 0.45, 0.28, 0.1),
+            at('3,600.00', 0.6, 0.28, 0.12),
+            at('54,000.00', 0.78, 0.28, 0.12),
+          ],
+        },
+      ]),
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'ps-employer-name')?.value).toBe(
+      'Apex Technology Partners LLC',
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
+  });
+
+  test('does not duplicate paystub rows already present in formExtracts', () => {
+    const fields = mapIncomeFields({
+      ...response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: true,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: [
+            at('Earnings Statement', 0.08, 0.08, 0.3),
+            at('Regular', 0.08, 0.28, 0.14),
+            at('45.00', 0.3, 0.28, 0.1),
+            at('3,600.00', 0.6, 0.28, 0.12),
+            at('99,999.00', 0.78, 0.28, 0.12),
+          ],
+        },
+      ]),
+      formExtracts: [
+        {
+          pageIndex: 0,
+          form: 'Paystub',
+          sourceFieldId: 'ps-base-ytd',
+          boxLabel: 'YTD',
+          fieldLabel: 'Base Wages YTD',
+          lineNum: 'YTD',
+          category: 'wages',
+          value: '$54,000.00',
+          numericValue: 54000,
+          box: { x: 0.78, y: 0.28, w: 0.12, h: 0.02 },
+          entityId: 'paystub-p0',
+        },
+      ],
+    });
+    const ytd = fields.filter((field) => field.sourceFieldId === 'ps-base-ytd');
+    expect(ytd).toHaveLength(1);
+    expect(ytd[0].numericValue).toBe(54000);
+  });
+
   test('prefers formExtracts overlay boxes for a filled W-2', () => {
     const fields = mapIncomeFields({
       ...response([

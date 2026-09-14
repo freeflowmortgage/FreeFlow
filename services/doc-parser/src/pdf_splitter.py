@@ -45,7 +45,7 @@ CORE_RULES = {
     "Schedule M-2": re.compile(r"Schedule M-2", re.IGNORECASE),
     "W-2": re.compile(r"Wage and Tax Statement|Form\s+W-2", re.IGNORECASE),
     "Paystub": re.compile(
-        r"Earnings Statement|Pay\s*Stub|Paystub|Payroll Statement|"
+        r"Earnings Statement|Pay\s*Stub|Paystub|Payroll Statement|Pay\s+Statement|Pay\s+Advice|"
         r"Year[- ]to[- ]Date\s+(?:Gross|Earnings)|Current Period|Net Pay",
         re.IGNORECASE,
     ),

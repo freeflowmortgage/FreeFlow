@@ -105,6 +105,72 @@ def test_select_ocr_only_keep_set_pages_that_need_it() -> None:
     assert select_ocr_page_indices(inspected, split) == {1}
 
 
+def test_reads_w2_stacked_box5_not_adjacent_box_number() -> None:
+    """IRS W-2 prints Box 5 above the amount and Box 2 in the cell to the right."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 50), "Form W-2 Wage and Tax Statement", fontsize=12)
+    page.insert_text((72, 90), "b Employer identification number (EIN)", fontsize=9)
+    page.insert_text((72, 106), "74-1234567", fontsize=10)
+    page.insert_text((72, 140), "c Employer's name, address, and ZIP code", fontsize=9)
+    page.insert_text((72, 156), "Apex Technology Partners LLC", fontsize=10)
+    page.insert_text((320, 200), "5 Medicare wages and tips", fontsize=9)
+    page.insert_text((320, 218), "78,500.00", fontsize=10)
+    page.insert_text((460, 200), "2 Federal income tax withheld", fontsize=9)
+    page.insert_text((460, 218), "9,420.00", fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+
+    fields = extract_irs_form_fields(data)
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert "w2-box1" not in by_id, fields
+    assert by_id["w2-box5"]["numericValue"] == 78500.0, fields
+    assert by_id["w2-box5"]["numericValue"] != 2.0
+    assert by_id["w2-box5"]["numericValue"] != 8500.0
+    assert by_id["w2-box2"]["numericValue"] == 9420.0, fields
+
+
+def test_reads_live_w2_box5_ein_and_curly_employer_name() -> None:
+    """Copy-B style cells: curly apostrophe, EIN/Box 5 under the label, Box 6 to the right."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=396)
+    page.insert_text((16, 24), "Form W-2 Wage and Tax Statement", fontsize=12)
+    page.insert_text((156, 58), "b Employer identification number (EIN)", fontsize=6.5)
+    page.insert_text((156, 74), "94-8765432", fontsize=10)
+    page.insert_text((356, 58), "d Control number", fontsize=6.5)
+    page.insert_text((356, 74), "W2-2025-0447", fontsize=10)
+    page.insert_text((16, 98), "c Employer’s name, address, and ZIP code", fontsize=6.5)
+    page.insert_text((16, 114), "Digital Solutions Corp", fontsize=8)
+    page.insert_text((356, 232), "5 Medicare wages and tips", fontsize=6.5)
+    page.insert_text((356, 248), "78,500.00", fontsize=10)
+    page.insert_text((476, 232), "6 Medicare tax withheld", fontsize=6.5)
+    page.insert_text((476, 248), "1,138.25", fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+
+    fields = extract_irs_form_fields(data)
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box5"]["numericValue"] == 78500.0, fields
+    assert by_id["w2-box5"]["numericValue"] not in (6.0, 8500.0, 1138.25)
+    assert by_id["w2-employer-ein"]["value"] == "94-8765432", fields
+    assert by_id["w2-employer-name"]["value"] == "Digital Solutions Corp", fields
+
+
+def test_reads_w2_same_line_box5() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 60), "Form W-2 Wage and Tax Statement", fontsize=12)
+    page.insert_text((72, 100), "Box 1 Wages tips other compensation 150000.00", fontsize=10)
+    page.insert_text((72, 140), "Box 5 Medicare wages and tips 78500.00", fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+
+    fields = extract_irs_form_fields(data)
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert "w2-box1" not in by_id, fields
+    assert by_id["w2-box5"]["numericValue"] == 78500.0, fields
+
+
 def test_reads_w2_acroform_box5_and_snaps_overlay() -> None:
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
@@ -159,6 +225,25 @@ def test_extracts_paystub_regular_row_not_gross_ytd() -> None:
     assert by_id["ps-bonus-ytd"]["numericValue"] == 12500.0
     assert by_id["ps-hours-week"]["numericValue"] == 40.0
     assert by_id["ps-employer-name"]["value"] == "Hidden Payroll Inc"
+
+
+def test_reads_paystub_header_employer_and_pay_advice() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((40, 40), "Apex Technology Partners LLC", fontsize=14)
+    page.insert_text((40, 70), "PAY ADVICE", fontsize=12)
+    page.insert_text((40, 100), "Regular", fontsize=10)
+    page.insert_text((200, 100), "45.00", fontsize=10)
+    page.insert_text((280, 100), "86.67", fontsize=10)
+    page.insert_text((360, 100), "3,600.00", fontsize=10)
+    page.insert_text((460, 100), "54,000.00", fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+    fields = extract_irs_form_fields(data)
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["ps-employer-name"]["value"] == "Apex Technology Partners LLC", fields
+    assert by_id["ps-base-ytd"]["numericValue"] == 54000.0, fields
+    assert by_id["ps-hourly-rate"]["numericValue"] == 45.0
 
 
 def test_extracts_paystub_ytd_from_labeled_line() -> None:

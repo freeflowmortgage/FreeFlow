@@ -76,7 +76,7 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     fieldLabel: 'Medicare Wages and Tips',
     lineNum: 'Box 5',
     category: 'wages',
-    patterns: [/box\s*5\b.{0,80}medicare/i, /\b5\b.{0,24}medicare wages/i],
+    patterns: [/box\s*5\b.{0,80}medicare/i, /\b5\b.{0,24}medicare wages/i, /medicare wages(?:\s+and\s+tips)?/i],
   },
   {
     id: 'w2-box6',
@@ -1330,6 +1330,7 @@ function assignPaystubAmounts(
 
 function fieldsFromPaystubTable(
   pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
+  claimed: Set<string> = new Set(),
 ): MappedIncomeField[] {
   const found: MappedIncomeField[] = [];
   const paystubPages = pageLines.filter(({ page }) => pagePrefers(page, 'Paystub') || page.formIds.length === 0);
@@ -1341,6 +1342,7 @@ function fieldsFromPaystubTable(
     const hasGross = /\bgross\b/i.test(pageText);
     const push = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray, value?: string) => {
       if (value == null && !Number.isFinite(numeric)) return;
+      if (claimed.has(`${page.index}:${defId}`)) return;
       if (found.some((field) => field.sourceFieldId === defId && field.pageIndex === page.index)) return;
       const def = PAYSTUB_DEFS.find((item) => item.id === defId);
       if (!def) return;
@@ -1365,6 +1367,7 @@ function fieldsFromPaystubTable(
     };
     const addMoney = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray) => {
       if (!Number.isFinite(numeric)) return;
+      if (claimed.has(`${page.index}:${defId}`)) return;
       const existing = found.find((field) => field.sourceFieldId === defId && field.pageIndex === page.index);
       if (existing) {
         existing.numericValue += numeric;
@@ -1373,6 +1376,18 @@ function fieldsFromPaystubTable(
       }
       push(defId, numeric, line, match);
     };
+    if (!/employer(?:['’]s)?(?:\s+name)?\s*[:#]/i.test(pageText)) {
+      const header = lines.find((line) => {
+        const text = line.text.trim();
+        return (
+          text.length >= 3 &&
+          text.length <= 80 &&
+          !/earnings statement|pay\s*stub|pay statement|pay advice|payroll|employee|pay period|advice/i.test(text) &&
+          !MONEY.test(text)
+        );
+      });
+      if (header) push('ps-employer-name', 0, header, undefined, header.text.trim());
+    }
     for (const line of lines) {
       const amounts = paystubRowAmounts(line);
       const matches = moneyMatches(line.text);
@@ -1581,8 +1596,15 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
   const gridFields = fieldsFromScheduleEGrid(result.scheduleEProperties ?? []);
   const extractFields = fieldsFromFormExtracts(result.formExtracts);
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
-  const found: MappedIncomeField[] = [...gridFields, ...extractFields, ...fieldsFromPaystubTable(pageLines)];
-  const claimed = new Set(found.map((field) => `${field.pageIndex}:${field.sourceFieldId}`));
+  const claimed = new Set(
+    [...gridFields, ...extractFields].map((field) => `${field.pageIndex}:${field.sourceFieldId}`),
+  );
+  const found: MappedIncomeField[] = [
+    ...gridFields,
+    ...extractFields,
+    ...fieldsFromPaystubTable(pageLines, claimed),
+  ];
+  for (const field of found) claimed.add(`${field.pageIndex}:${field.sourceFieldId}`);
 
   for (const def of INCOME_FIELD_DEFS) {
     if (gridFields.length && def.form === 'Schedule E') continue;
