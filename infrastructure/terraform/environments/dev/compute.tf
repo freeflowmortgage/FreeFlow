@@ -370,12 +370,13 @@ resource "aws_ecs_task_definition" "database_preflight" {
 resource "aws_ecs_service" "parser" {
   count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
 
-  name             = "${local.name_prefix}-income-parser"
-  cluster          = data.aws_ecs_cluster.existing.arn
-  task_definition  = aws_ecs_task_definition.parser[0].arn
-  desired_count    = 1
-  launch_type      = "FARGATE"
-  platform_version = "LATEST"
+  name            = "${local.name_prefix}-income-parser"
+  cluster         = data.aws_ecs_cluster.existing.arn
+  task_definition = aws_ecs_task_definition.parser[0].arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+  # Pin application rollouts so an image change cannot also upgrade Fargate.
+  platform_version = "1.4.0"
 
   deployment_circuit_breaker {
     enable   = true
