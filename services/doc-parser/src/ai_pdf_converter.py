@@ -82,11 +82,14 @@ class PageResult:
 
     def text(self) -> str:
         word_text = " ".join(word.text for word in self.words if word.text)
+        native = self.plain_text.strip()
         # OCR pages can retain a native value overlay. Keep that evidence, but
         # include the OCR labels so form classification sees the rendered form.
         if not self.is_native_text and word_text:
-            return " ".join(part for part in (self.plain_text.strip(), word_text) if part)
-        return self.plain_text.strip() or word_text
+            if native and native != word_text:
+                return f"{native} {word_text}"
+            return native or word_text
+        return native or word_text
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -408,6 +411,15 @@ class AIPDFConverter:
         del rgb
 
         page_flags = list(info.flags)
+        orig_h, orig_w = bgr.shape[:2]
+        rotation = self._page_content_rotation(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
+        if rotation == 90:
+            bgr = cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
+            page_flags.append("ocr_rotated_90")
+        elif rotation == 270:
+            bgr = cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            page_flags.append("ocr_rotated_270")
+
         photo = self._looks_like_photo(bgr)
         skew = 0.0
         if photo:
@@ -432,21 +444,39 @@ class AIPDFConverter:
                 page_flags.append("sauvola_retry")
 
         height, width = gray.shape[:2]
+        if not rotation and self._ocr_rows_look_sideways(words, width, height):
+            guessed = self._choose_quarter_turn(gray)
+            flag = cv2.ROTATE_90_CLOCKWISE if guessed == 90 else cv2.ROTATE_90_COUNTERCLOCKWISE
+            rotated = cv2.rotate(gray, flag)
+            retry_words, retry_conf = self._ocr_numpy(rotated)
+            if retry_words and (
+                retry_conf >= mean_conf - 8.0 or len(retry_words) >= max(8, int(len(words) * 0.5))
+            ):
+                words, mean_conf = retry_words, retry_conf
+                height, width = rotated.shape[:2]
+                rotation = guessed
+                page_flags.append("ocr_rotated_90" if guessed == 90 else "ocr_rotated_270")
         del gray
         if photo and abs(skew) >= DESKEW_DEADZONE_DEGREES:
             words = self._unrotate_ocr_rows(words, width, height, skew)
+        if rotation:
+            words = self._map_ocr_rows_from_upright(words, rotation, width, height, orig_w, orig_h)
+            width, height = orig_w, orig_h
         relative = self._merge_words(self._to_relative(words, width, height), info.fields)
+        ocr_text = " ".join(word.text for word in relative if word.text)
+        native_overlay = (info.text or "").strip()
         width_pt = float(page.get_width())
         height_pt = float(page.get_height())
 
         logger.info(
-            "page_ocr index=%s skew=%.2f words=%s conf=%.1f binarized=%s photo=%s",
+            "page_ocr index=%s skew=%.2f words=%s conf=%.1f binarized=%s photo=%s rotation=%s",
             index,
             skew,
             len(relative),
             mean_conf,
             used_binarization,
             photo,
+            rotation,
         )
 
         return PageResult(
@@ -455,7 +485,7 @@ class AIPDFConverter:
             height_px=int(height_pt),
             is_native_text=False,
             words=relative,
-            plain_text=info.text,
+            plain_text=native_overlay or ocr_text,
             mean_confidence=round(mean_conf, 2),
             skew_degrees=round(skew, 2),
             used_binarization=used_binarization,
@@ -598,6 +628,94 @@ class AIPDFConverter:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
         white_frac = float((gray > 245).mean())
         return white_frac < 0.62
+
+    @staticmethod
+    def _letter_aspect_median(gray: np.ndarray) -> float | None:
+        """Median height/width of letter-sized ink. Sideways glyphs are wider than tall."""
+        height, width = gray.shape[:2]
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(25, width // 15), 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(25, height // 15)))
+        binary = cv2.subtract(binary, cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel))
+        binary = cv2.subtract(binary, cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel))
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        aspects: list[float] = []
+        page_area = float(height * width)
+        for contour in contours:
+            _x, _y, box_w, box_h = cv2.boundingRect(contour)
+            area = box_w * box_h
+            if box_w < 5 or box_h < 5 or box_w > 90 or box_h > 90:
+                continue
+            if area < 30 or area > page_area * 0.01:
+                continue
+            aspects.append(box_h / float(box_w))
+        if len(aspects) < 12:
+            return None
+        return float(np.median(aspects))
+
+    @staticmethod
+    def _choose_quarter_turn(gray: np.ndarray) -> int:
+        def header_score(image: np.ndarray) -> float:
+            hh = image.shape[0]
+            edge = cv2.Canny(image, 50, 150)
+            return float(edge[: hh // 4].mean()) - float(edge[3 * hh // 4 :].mean())
+
+        clockwise = cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE)
+        counter = cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return 90 if header_score(clockwise) >= header_score(counter) else 270
+
+    @staticmethod
+    def _page_content_rotation(gray: np.ndarray) -> int:
+        """Detect a full-page 90/270 scan. Small skew stays in deskew_image."""
+        height, width = gray.shape[:2]
+        if height < 80 or width < 80:
+            return 0
+        aspect = AIPDFConverter._letter_aspect_median(gray)
+        if aspect is None or aspect >= 0.85:
+            return 0
+        return AIPDFConverter._choose_quarter_turn(gray)
+
+    @staticmethod
+    def _ocr_rows_look_sideways(rows: list[dict[str, Any]], width: int, height: int) -> bool:
+        ratios: list[float] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                continue
+            box_w = float(box[:, 0].max() - box[:, 0].min())
+            box_h = float(box[:, 1].max() - box[:, 1].min())
+            if min(box_w, box_h) < 4 or box_w > width * 0.35 or box_h > height * 0.35:
+                continue
+            ratios.append(box_h / max(box_w, 1.0))
+        return len(ratios) >= 8 and float(np.median(ratios)) > 1.6
+
+    @staticmethod
+    def _map_ocr_rows_from_upright(
+        rows: list[dict[str, Any]],
+        rotation: int,
+        upright_w: int,
+        upright_h: int,
+        orig_w: int,
+        orig_h: int,
+    ) -> list[dict[str, Any]]:
+        """Map OCR quads from the upright raster back onto the original page."""
+        if not rows or rotation not in {90, 270}:
+            return rows
+        mapped: list[dict[str, Any]] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                mapped.append(row)
+                continue
+            points: list[list[float]] = []
+            for x, y in box[:, :2]:
+                if rotation == 90:
+                    points.append([float(y), float(orig_h - 1 - x)])
+                else:
+                    points.append([float(orig_w - 1 - y), float(x)])
+            mapped.append({**row, "box": np.array(points, dtype=np.float32)})
+        return mapped
 
     def deskew_image(self, image: np.ndarray) -> tuple[np.ndarray, float]:
         try:

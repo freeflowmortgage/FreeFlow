@@ -11,9 +11,15 @@ import fitz
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from irs_form_extract import _paystub_row_kind, extract_irs_form_fields  # noqa: E402
+from irs_form_extract import (  # noqa: E402
+    _hit_from_words,
+    _paystub_row_kind,
+    _remap_overlay_box,
+    _words_to_upright,
+    extract_irs_form_fields,
+)
 from pdf_splitter import SplitResult, pre_split_tax_returns, select_ocr_page_indices  # noqa: E402
-from ai_pdf_converter import ConvertResult, PageResult  # noqa: E402
+from ai_pdf_converter import AIPDFConverter, ConvertResult, OcrWord, PageResult  # noqa: E402
 
 
 def _form_8825_pdf(*, mention_4562: bool = True) -> bytes:
@@ -338,3 +344,274 @@ def test_select_ocr_scans_when_majority_need_ocr_and_no_keep_set() -> None:
         unresolved_statements=[],
     )
     assert select_ocr_page_indices(inspected, split) == {0, 1}
+
+
+def _blank_pdf(width: float = 612, height: float = 792) -> bytes:
+    doc = fitz.open()
+    doc.new_page(width=width, height=height)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def _ocr_page(*words: OcrWord, flags: list[str] | None = None, text: str = "") -> PageResult:
+    return PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        words=list(words),
+        plain_text=text,
+        flags=list(flags or []),
+    )
+
+
+def test_ocr_w2_keeps_box2_withheld_out_of_box1_wages() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Form W-2 Wage and Tax Statement", 0.08, 0.05, 0.40, 0.03, 99),
+                OcrWord("1 Wages, tips, other compensation", 0.26, 0.18, 0.22, 0.025, 99),
+                OcrWord("90,064.58", 0.30, 0.22, 0.12, 0.025, 99),
+                OcrWord("2 Federal income tax withheld", 0.50, 0.18, 0.22, 0.025, 99),
+                OcrWord("2,224.58", 0.56, 0.22, 0.10, 0.025, 99),
+                OcrWord("5 Medicare wages and tips", 0.26, 0.32, 0.22, 0.025, 99),
+                OcrWord("90,064.58", 0.30, 0.36, 0.12, 0.025, 99),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box2"]["numericValue"] == 2224.58, fields
+    assert by_id["w2-box5"]["numericValue"] == 90064.58, fields
+
+
+def test_extracts_w2_from_ocr_words_without_native_text() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Form", 0.08, 0.05, 0.07, 0.02, 99),
+                OcrWord("W-2", 0.16, 0.05, 0.06, 0.02, 99),
+                OcrWord("Wage", 0.23, 0.05, 0.07, 0.02, 99),
+                OcrWord("and", 0.31, 0.05, 0.04, 0.02, 99),
+                OcrWord("Tax", 0.36, 0.05, 0.05, 0.02, 99),
+                OcrWord("Statement", 0.42, 0.05, 0.12, 0.02, 99),
+                OcrWord("Employer", 0.10, 0.14, 0.10, 0.02, 99),
+                OcrWord("identification", 0.21, 0.14, 0.14, 0.02, 99),
+                OcrWord("number", 0.36, 0.14, 0.08, 0.02, 99),
+                OcrWord("86-0824602", 0.10, 0.17, 0.16, 0.02, 99),
+                OcrWord("c", 0.10, 0.22, 0.02, 0.02, 99),
+                OcrWord("Employer's", 0.13, 0.22, 0.12, 0.02, 99),
+                OcrWord("name", 0.26, 0.22, 0.06, 0.02, 99),
+                OcrWord("Arizona Home Care LLC", 0.10, 0.25, 0.28, 0.02, 99),
+                OcrWord("Medicare", 0.52, 0.40, 0.10, 0.02, 99),
+                OcrWord("wages", 0.63, 0.40, 0.07, 0.02, 99),
+                OcrWord("and", 0.71, 0.40, 0.04, 0.02, 99),
+                OcrWord("tips", 0.76, 0.40, 0.05, 0.02, 99),
+                OcrWord("90,064.58", 0.52, 0.43, 0.14, 0.025, 99),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert "w2-box1" not in by_id, fields
+    assert by_id["w2-box5"]["numericValue"] == 90064.58, fields
+    assert by_id["w2-employer-ein"]["value"] == "86-0824602", fields
+    assert by_id["w2-employer-name"]["value"] == "Arizona Home Care LLC", fields
+
+
+def test_extracts_w2_when_ocr_glues_form_title() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("FormW-2WageandTaxStatement", 0.08, 0.05, 0.45, 0.03, 96),
+                OcrWord("Medicare wages and tips", 0.50, 0.38, 0.22, 0.03, 94),
+                OcrWord("90064.58", 0.50, 0.42, 0.12, 0.03, 94),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box5"]["numericValue"] == 90064.58, fields
+
+
+def test_splitter_classifies_glued_ocr_w2_title() -> None:
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text="FormW-2WageandTaxStatement Dept.of theTreasury-IRS",
+        words=[],
+    )
+    split = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=1))
+    assert "W-2" in split.classifications[0]
+
+
+def test_extracts_w2_from_glued_ocr_tokens() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Form W-2 Wage and Tax Statement", 0.08, 0.05, 0.40, 0.03, 96),
+                OcrWord("5Medicarewagesandtips", 0.50, 0.38, 0.22, 0.03, 94),
+                OcrWord("90064.58", 0.50, 0.42, 0.12, 0.03, 94),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box5"]["numericValue"] == 90064.58, fields
+
+
+def test_extracts_paystub_from_ocr_words_without_native_text() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Apex Technology Partners LLC", 0.08, 0.06, 0.40, 0.03, 99),
+                OcrWord("Earnings", 0.08, 0.10, 0.12, 0.02, 99),
+                OcrWord("Statement", 0.21, 0.10, 0.12, 0.02, 99),
+                OcrWord("Regular", 0.08, 0.22, 0.10, 0.02, 99),
+                OcrWord("45.00", 0.30, 0.22, 0.08, 0.02, 99),
+                OcrWord("80.00", 0.42, 0.22, 0.08, 0.02, 99),
+                OcrWord("3,600.00", 0.54, 0.22, 0.10, 0.02, 99),
+                OcrWord("54,000.00", 0.70, 0.22, 0.12, 0.02, 99),
+                OcrWord("Overtime", 0.08, 0.26, 0.10, 0.02, 99),
+                OcrWord("4,200.00", 0.70, 0.26, 0.12, 0.02, 99),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["ps-employer-name"]["value"] == "Apex Technology Partners LLC", fields
+    assert by_id["ps-hourly-rate"]["numericValue"] == 45.0, fields
+    assert by_id["ps-current-base"]["numericValue"] == 3600.0, fields
+    assert by_id["ps-base-ytd"]["numericValue"] == 54000.0, fields
+    assert by_id["ps-ot-ytd"]["numericValue"] == 4200.0, fields
+
+
+def test_extracts_schedule_c_from_ocr_words_without_native_text() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Schedule C Profit or Loss From Business", 0.08, 0.05, 0.50, 0.03, 99),
+                OcrWord("Business", 0.08, 0.16, 0.10, 0.02, 99),
+                OcrWord("name", 0.19, 0.16, 0.06, 0.02, 99),
+                OcrWord("Harbor", 0.30, 0.16, 0.10, 0.02, 99),
+                OcrWord("Consulting", 0.41, 0.16, 0.12, 0.02, 99),
+                OcrWord("Net", 0.08, 0.40, 0.05, 0.02, 99),
+                OcrWord("profit", 0.14, 0.40, 0.08, 0.02, 99),
+                OcrWord("or", 0.23, 0.40, 0.03, 0.02, 99),
+                OcrWord("(loss)", 0.27, 0.40, 0.08, 0.02, 99),
+                OcrWord("45,000.00", 0.50, 0.40, 0.14, 0.02, 99),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["ent1-name"]["value"] == "Harbor Consulting", fields
+    assert by_id["ent1-net"]["numericValue"] == 45000.0, fields
+
+
+def test_extracts_form_8825_from_ocr_words_without_native_text() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Form 8825 Rental Real Estate Income", 0.08, 0.05, 0.55, 0.03, 99),
+                OcrWord("14", 0.08, 0.30, 0.03, 0.02, 99),
+                OcrWord("Depreciation", 0.12, 0.30, 0.14, 0.02, 99),
+                OcrWord("400.00", 0.40, 0.30, 0.10, 0.02, 99),
+                OcrWord("600.00", 0.55, 0.30, 0.10, 0.02, 99),
+                OcrWord("8,200.00", 0.72, 0.30, 0.12, 0.02, 99),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["form-8825-dep"]["numericValue"] == 8200.0, fields
+    assert by_id["form-8825-dep-A"]["numericValue"] == 400.0, fields
+    assert by_id["form-8825-dep-B"]["numericValue"] == 600.0, fields
+
+
+def test_hit_from_words_finds_wrapped_and_glued_labels() -> None:
+    words = [
+        {"text": "Medicare", "x0": 100, "y0": 200, "x1": 160, "y1": 214},
+        {"text": "wages", "x0": 164, "y0": 200, "x1": 210, "y1": 214},
+        {"text": "and", "x0": 214, "y0": 200, "x1": 236, "y1": 214},
+        {"text": "tips", "x0": 240, "y0": 200, "x1": 270, "y1": 214},
+    ]
+    hit = _hit_from_words(words, ("Medicare wages and tips",))
+    assert hit is not None
+    assert hit.x0 == 100
+    assert hit.x1 == 270
+    glued = [{"text": "5Medicarewagesandtips", "x0": 50, "y0": 80, "x1": 200, "y1": 96}]
+    assert _hit_from_words(glued, ("Medicare wages",)) is not None
+
+
+def test_upright_word_roundtrip_keeps_box5_geometry() -> None:
+    page_w, page_h = 612.0, 792.0
+    upright = [
+        {"text": "Medicare wages and tips", "x0": 306.0, "y0": 237.6, "x1": 428.4, "y1": 253.4},
+        {"text": "90,064.58", "x0": 306.0, "y0": 261.4, "x1": 391.7, "y1": 281.2},
+    ]
+    mapped, upright_w, upright_h = _words_to_upright(upright, 0, page_w, page_h)
+    assert (upright_w, upright_h) == (page_w, page_h)
+    sideways, uw, uh = _words_to_upright(
+        [
+            {
+                "text": word["text"],
+                "x0": word["y0"] / page_h * page_w,
+                "y0": (1.0 - word["x1"] / page_w) * page_h,
+                "x1": word["y1"] / page_h * page_w,
+                "y1": (1.0 - word["x0"] / page_w) * page_h,
+            }
+            for word in upright
+        ],
+        90,
+        page_w,
+        page_h,
+    )
+    assert (uw, uh) == (page_h, page_w)
+    assert abs(sideways[1]["x0"] - upright[1]["x0"] / page_w * uw) < 1.5
+    box = {"x": 0.5, "y": 0.3, "w": 0.2, "h": 0.04}
+    assert _remap_overlay_box(box, 90) == {"x": 0.3, "y": 0.3, "w": 0.04, "h": 0.2}
+
+
+def test_extracts_w2_after_ocr_maps_90_degree_scan_back() -> None:
+    """Converter stores original-page boxes; extract rotates words upright, then remaps overlays."""
+    page_w, page_h = 612.0, 792.0
+
+    def to_original(x: float, y: float, w: float, h: float) -> tuple[float, float, float, float]:
+        return y, 1.0 - x - w, h, w
+
+    label = to_original(0.52, 0.40, 0.24, 0.02)
+    amount = to_original(0.52, 0.43, 0.14, 0.025)
+    title = to_original(0.08, 0.05, 0.40, 0.03)
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Form W-2 Wage and Tax Statement", *title, 99),
+                OcrWord("Medicare wages and tips", *label, 99),
+                OcrWord("90,064.58", *amount, 99),
+                flags=["ocr_rotated_90"],
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box5"]["numericValue"] == 90064.58, fields
+    box = by_id["w2-box5"]["box"]
+    assert box["w"] > 0 and box["h"] > 0
+
+
+def test_page_content_rotation_detects_sideways_scan() -> None:
+    import numpy as np
+
+    upright = np.full((240, 180), 255, dtype=np.uint8)
+    for row in range(10):
+        for col in range(8):
+            y = 20 + row * 20
+            x = 18 + col * 18
+            upright[y : y + 14, x : x + 6] = 0
+    sideways = np.rot90(upright, 1)
+    assert AIPDFConverter._page_content_rotation(upright) == 0
+    assert AIPDFConverter._page_content_rotation(sideways) in {90, 270}

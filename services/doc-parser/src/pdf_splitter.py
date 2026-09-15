@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
 
+from ocr_match import folded_text, pattern_matches
+
 if TYPE_CHECKING:
     from ai_pdf_converter import ConvertResult, PageResult
 
@@ -90,6 +92,33 @@ W2_BACK_SIGNATURE = re.compile(
     r"For\s+use\s+in\s+preparing\s+your\s+income\s+tax\s+return)\b",
     re.IGNORECASE,
 )
+W2_FRONT_FOLDED = (
+    "medicarewages",
+    "socialsecuritywages",
+    "wagestips",
+    "federalincometax",
+    "wageandtaxstatement",
+)
+W2_BACK_FOLDED = (
+    "instructionsforemployee",
+    "instructionsforemployer",
+    "noticetoemployee",
+    "foruseinpreparingyourincometaxreturn",
+)
+
+
+def _is_w2_front_page(text: str) -> bool:
+    if pattern_matches(W2_FRONT_SIGNATURE, text):
+        return True
+    folded = folded_text(text)
+    return any(needle in folded for needle in W2_FRONT_FOLDED)
+
+
+def _is_w2_back_page(text: str) -> bool:
+    if W2_BACK_SIGNATURE.search(text or ""):
+        return True
+    folded = folded_text(text)
+    return any(needle in folded for needle in W2_BACK_FOLDED)
 
 
 @dataclass
@@ -152,8 +181,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         if not text.strip():
             continue
 
-        matched = [name for name, pattern in CORE_RULES.items() if pattern.search(text)]
-        if "W-2" in matched and (W2_BACK_SIGNATURE.search(text) or not W2_FRONT_SIGNATURE.search(text)):
+        matched = [name for name, pattern in CORE_RULES.items() if pattern_matches(pattern, text)]
+        if "W-2" in matched and (_is_w2_back_page(text) or not _is_w2_front_page(text)):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)
         if "Schedule K-1" in matched:
@@ -180,7 +209,7 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     if statement_refs:
         claimed: set[int] = set()
         for page_idx, text in page_texts.items():
-            supp = [name for name, pattern in SUPPLEMENTAL_RULES.items() if pattern.search(text)]
+            supp = [name for name, pattern in SUPPLEMENTAL_RULES.items() if pattern_matches(pattern, text)]
             if not supp:
                 continue
             target_pages.add(page_idx)

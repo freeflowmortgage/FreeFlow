@@ -4,7 +4,7 @@ from httpx import AsyncClient, ASGITransport
 
 from server import app
 from pdf_splitter import pre_split_tax_returns, CORE_RULES
-from ai_pdf_converter import PageResult, ConvertResult, OcrWord
+from ai_pdf_converter import PageResult, ConvertResult, OcrWord, PageInspect
 from mismo_xml_exporter import generate_mismo_34_xml
 
 
@@ -155,6 +155,57 @@ async def test_parse_valid_pdf_stream():
         assert "W-2" in body["classifications"]["0"]
 
 
+@pytest.mark.asyncio
+async def test_parse_returns_form_extracts_from_ocr_scan(monkeypatch):
+    pdf_bytes = create_minimal_pdf_bytes([" "])
+    ocr_page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text="",
+        words=[
+            OcrWord(text="FormW-2WageandTaxStatement", x=0.08, y=0.05, w=0.45, h=0.03, confidence=96),
+            OcrWord(text="Employer's name", x=0.08, y=0.16, w=0.20, h=0.03, confidence=94),
+            OcrWord(text="Arizona Home Care LLC", x=0.08, y=0.20, w=0.30, h=0.03, confidence=94),
+            OcrWord(text="Medicare wages and tips", x=0.50, y=0.38, w=0.22, h=0.03, confidence=94),
+            OcrWord(text="90064.58", x=0.50, y=0.42, w=0.12, h=0.03, confidence=94),
+        ],
+    )
+    convert_result = ConvertResult(
+        pages=[ocr_page],
+        page_count=1,
+        ocr_page_count=1,
+        flags=["ocr_applied"],
+    )
+
+    class FakeConverter:
+        def inspect_pages(self, _data):
+            return [PageInspect(text="", rotation=0, fields=[], use_ocr=True, flags=[], index=0)]
+
+        def inspect_as_convert_result(self, _inspected):
+            return convert_result
+
+        def convert_to_ai_ready(self, _data, inspected=None, ocr_page_indices=None):
+            return convert_result
+
+    monkeypatch.setattr("server.get_converter", lambda: FakeConverter())
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/parse",
+            content=pdf_bytes,
+            headers={"Content-Type": "application/pdf", "x-document-title": "20_Locality_name.pdf"},
+        )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert "W-2" in body["classifications"]["0"]
+    by_id = {row["sourceFieldId"]: row for row in body["formExtracts"]}
+    assert by_id["w2-box5"]["numericValue"] == 90064.58
+    assert by_id["w2-employer-name"]["value"] == "Arizona Home Care LLC"
+
+
 def test_pdf_splitter_core_rules():
     assert "W-2" in CORE_RULES
     assert "Schedule C (Page 1 - Profits)" in CORE_RULES
@@ -215,6 +266,43 @@ def test_pdf_splitter_ignores_w2_back_or_instruction_page():
     result = pre_split_tax_returns(ConvertResult(pages=[front, back], page_count=2, ocr_page_count=0))
     assert result.target_pages == [0]
     assert 1 not in result.classifications
+
+
+def test_pdf_splitter_keeps_glued_ocr_w2_front_and_drops_glued_instructions():
+    front = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text="FormW-2WageandTaxStatement 5Medicarewagesandtips 90064.58",
+        words=[],
+    )
+    back = PageResult(
+        index=1,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text="FormW-2WageandTaxStatement Instructionsforemployee CopyC",
+        words=[],
+    )
+    result = pre_split_tax_returns(ConvertResult(pages=[front, back], page_count=2, ocr_page_count=2))
+    assert result.target_pages == [0]
+    assert "W-2" in result.classifications[0]
+    assert 1 not in result.classifications
+
+
+def test_pdf_splitter_classifies_glued_ocr_titles_for_other_forms():
+    cases = [
+        ("Paystub", "EarningsStatement CurrentPeriod NetPay 1840.22 YeartoDateGross 22000.00"),
+        ("Schedule C (Page 1 - Profits)", "ScheduleCProfit or Loss From Business"),
+        ("Form 1040 (Individual Return)", "U.S.IndividualIncomeTaxReturn"),
+        ("Form 1120S (S-Corporation Return)", "U.S.IncomeTaxReturnforanSCorporation"),
+        ("Form 8825 (Corporate Rentals)", "Form8825RentalRealEstateIncomeandExpenses"),
+    ]
+    for label, text in cases:
+        page = PageResult(index=0, width_px=612, height_px=792, is_native_text=False, plain_text=text, words=[])
+        split = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=1))
+        assert label in split.classifications[0], (label, split.classifications)
 
 
 def test_pdf_splitter_classifies_schedule_f():

@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from ocr_match import pattern_matches
 from schedule_e_grid import (
     _clip_text,
     _open_pdf,
@@ -20,6 +21,7 @@ from schedule_e_grid import (
     is_schedule_e_page1,
     parse_tax_amount,
     relative_box,
+    words_in_box,
 )
 
 logger = logging.getLogger("freeflow.irs_extract")
@@ -62,11 +64,29 @@ W2_FIELDS = (
         ),
         "text",
     ),
-    FieldSpec("w2-employer-ein", "W-2", "identity", "Box b", "Employer Identification Number (EIN)", "Box b", ("Employer identification number",), "ein"),
+    FieldSpec(
+        "w2-employer-ein",
+        "W-2",
+        "identity",
+        "Box b",
+        "Employer Identification Number (EIN)",
+        "Box b",
+        ("Employer identification number", "Employer's identification", "Employer ID number"),
+        "ein",
+    ),
     FieldSpec("w2-box2", "W-2", "withholding", "Box 2", "Federal Income Tax Withheld", "Box 2", ("Federal income tax withheld",), "money"),
     FieldSpec("w2-box3", "W-2", "wages", "Box 3", "Social Security Wages", "Box 3", ("Social security wages",), "money"),
     FieldSpec("w2-box4", "W-2", "withholding", "Box 4", "Social Security Tax Withheld (6.2%)", "Box 4", ("Social security tax withheld",), "money"),
-    FieldSpec("w2-box5", "W-2", "wages", "Box 5", "Medicare Wages and Tips", "Box 5", ("Medicare wages and tips",), "money"),
+    FieldSpec(
+        "w2-box5",
+        "W-2",
+        "wages",
+        "Box 5",
+        "Medicare Wages and Tips",
+        "Box 5",
+        ("Medicare wages and tips", "Medicare wages"),
+        "money",
+    ),
     FieldSpec("w2-box6", "W-2", "withholding", "Box 6", "Medicare Tax Withheld (1.45%)", "Box 6", ("Medicare tax withheld",), "money"),
 )
 
@@ -289,11 +309,28 @@ def _format_money(amount: float) -> str:
     return f"${amount:,.2f}"
 
 
+def _page_width(page: Any) -> float:
+    return float(page.rect.width)
+
+
+def _page_height(page: Any) -> float:
+    return float(page.rect.height)
+
+
 def _clip_right(page: Any, hit: Any, width: float = 220.0) -> list[float]:
     return [
         float(hit.x1) + 2.0,
         float(hit.y0) - 3.0,
-        min(float(page.rect.width) - 12.0, float(hit.x1) + width),
+        min(_page_width(page) - 12.0, float(hit.x1) + width),
+        float(hit.y1) + 3.0,
+    ]
+
+
+def _clip_left(page: Any, hit: Any, width: float = 220.0) -> list[float]:
+    return [
+        max(8.0, float(hit.x0) - width),
+        float(hit.y0) - 3.0,
+        max(8.0, float(hit.x0) - 2.0),
         float(hit.y1) + 3.0,
     ]
 
@@ -302,8 +339,17 @@ def _clip_below(page: Any, hit: Any, height: float = 16.0) -> list[float]:
     return [
         float(hit.x0),
         float(hit.y1),
-        min(float(page.rect.width) - 12.0, float(hit.x1) + 140.0),
-        min(float(page.rect.height) - 8.0, float(hit.y1) + height),
+        min(_page_width(page) - 12.0, float(hit.x1) + 140.0),
+        min(_page_height(page) - 8.0, float(hit.y1) + height),
+    ]
+
+
+def _clip_above(page: Any, hit: Any, height: float = 24.0) -> list[float]:
+    return [
+        max(8.0, float(hit.x0) - 28.0),
+        max(8.0, float(hit.y0) - height),
+        min(_page_width(page) - 12.0, float(hit.x1) + 8.0),
+        float(hit.y0) + 1.0,
     ]
 
 
@@ -312,12 +358,15 @@ def _clip_w2_column(page: Any, hit: Any) -> list[float]:
 
     Clip-right hits the neighboring box number (Box 5 → the '2' of Box 2). Clip-below
     starts at the label text, so it shears '78,500.00' into '8,500.00' and can include
-    the next box's amount. Keep the cell: a bit left of the label, not into the next box.
+    the next box's amount. Keep the cell: a bit left of a short box-number hit, not
+    into the next box. Long OCR labels already span the cell, so do not shift left.
     """
-    x0 = max(8.0, float(hit.x0) - 28.0)
-    x1 = min(float(page.rect.width) - 12.0, float(hit.x1) + 8.0, x0 + 130.0)
+    label_w = float(hit.x1) - float(hit.x0)
+    left_pad = 8.0 if label_w > 60.0 else 28.0
+    x0 = max(8.0, float(hit.x0) - left_pad)
+    x1 = min(_page_width(page) - 12.0, float(hit.x1) + 8.0, x0 + (160.0 if label_w > 60.0 else 130.0))
     y0 = float(hit.y1) - 1.0
-    y1 = min(float(page.rect.height) - 8.0, float(hit.y1) + 24.0)
+    y1 = min(_page_height(page) - 8.0, float(hit.y1) + 24.0)
     return [x0, y0, x1, y1]
 
 
@@ -338,13 +387,132 @@ def _label_variants(label: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def _first_hit(page: Any, labels: tuple[str, ...]):
+def _fold_label(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+@dataclass(frozen=True)
+class _Hit:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+def _word_items(words: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for word in words or []:
+        text = str(word.get("text") or "").strip()
+        if not text:
+            continue
+        items.append(
+            {
+                "text": text,
+                "fold": _fold_label(text),
+                "x0": float(word["x0"]),
+                "y0": float(word["y0"]),
+                "x1": float(word["x1"]),
+                "y1": float(word["y1"]),
+            }
+        )
+    return items
+
+
+def _median(values: list[float], fallback: float) -> float:
+    if not values:
+        return fallback
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def _cluster_reading_lines(items: list[dict[str, Any]], *, vertical: bool = False) -> list[list[dict[str, Any]]]:
+    if not items:
+        return []
+    if vertical:
+        ordered = sorted(items, key=lambda word: ((word["x0"] + word["x1"]) / 2.0, word["y0"]))
+        axis = lambda word: (word["x0"] + word["x1"]) / 2.0
+        minor = lambda word: word["y0"]
+        tolerance = max(4.0, _median([word["x1"] - word["x0"] for word in items], 8.0) * 0.65)
+    else:
+        ordered = sorted(items, key=lambda word: ((word["y0"] + word["y1"]) / 2.0, word["x0"]))
+        axis = lambda word: (word["y0"] + word["y1"]) / 2.0
+        minor = lambda word: word["x0"]
+        tolerance = max(4.0, _median([word["y1"] - word["y0"] for word in items], 8.0) * 0.7)
+    rows: list[list[dict[str, Any]]] = []
+    for word in ordered:
+        if rows and abs(axis(word) - axis(rows[-1][0])) <= tolerance:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    for row in rows:
+        row.sort(key=minor)
+    return rows
+
+
+def _span_hit(span: list[dict[str, Any]]) -> _Hit:
+    return _Hit(
+        min(word["x0"] for word in span),
+        min(word["y0"] for word in span),
+        max(word["x1"] for word in span),
+        max(word["y1"] for word in span),
+    )
+
+
+def _find_folded_needle(items: list[dict[str, Any]], needle: str) -> _Hit | None:
+    if not needle or not items:
+        return None
+    short = len(needle) < 5
+    for word in items:
+        folded = word["fold"]
+        if not folded:
+            continue
+        if short:
+            if folded == needle or folded.startswith(needle):
+                return _span_hit([word])
+            continue
+        if needle in folded:
+            return _span_hit([word])
+    folds = [word["fold"] for word in items]
+    for start in range(len(items)):
+        acc = ""
+        for end in range(start, len(items)):
+            acc += folds[end]
+            if not acc:
+                continue
+            if acc == needle or (not short and needle in acc):
+                return _span_hit(items[start : end + 1])
+            if len(acc) > len(needle) + 18:
+                break
+    return None
+
+
+def _hit_from_words(words: list[dict[str, Any]] | None, labels: tuple[str, ...]) -> _Hit | None:
+    items = _word_items(words)
+    if not items:
+        return None
+    needles: list[str] = []
+    for label in labels:
+        for variant in _label_variants(label):
+            folded = _fold_label(variant)
+            if folded and folded not in needles:
+                needles.append(folded)
+    needles.sort(key=len, reverse=True)
+    groups = _cluster_reading_lines(items) + _cluster_reading_lines(items, vertical=True) + [items]
+    for needle in needles:
+        for group in groups:
+            hit = _find_folded_needle(group, needle)
+            if hit is not None:
+                return hit
+    return None
+
+
+def _first_hit(page: Any, labels: tuple[str, ...], words: list[dict[str, Any]] | None = None):
     for label in labels:
         for variant in _label_variants(label):
             hits = page.search_for(variant)
             if hits:
                 return hits[0]
-    return None
+    return _hit_from_words(words, labels)
 
 
 def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None:
@@ -385,6 +553,33 @@ def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None
     if best is None:
         return None
     return [float(best.x0), float(best.y0), float(best.x1), float(best.y1)]
+
+
+def _first_visual_line(words: list[dict[str, Any]], box: list[float]) -> str:
+    hits = words_in_box(words, box)
+    if not hits:
+        return ""
+    hits.sort(key=lambda word: (float(word["y0"]), float(word["x0"])))
+    top = float(hits[0]["y0"])
+    line = [word for word in hits if abs(float(word["y0"]) - top) <= 5.0]
+    return re.sub(r"\s+", " ", " ".join(str(word["text"]) for word in line)).strip()
+
+
+def _same_column_money(words: list[dict[str, Any]], box: list[float], hit: Any) -> tuple[str, float] | None:
+    """Prefer the amount under the label, not a neighbor in a wide OCR clip."""
+    candidates: list[tuple[float, tuple[str, float]]] = []
+    for word in words_in_box(words, box):
+        parsed = _parse_capture(str(word.get("text") or ""), "money")
+        if not parsed:
+            continue
+        cx = (float(word["x0"]) + float(word["x1"])) / 2.0
+        if cx < float(hit.x0) - 12.0 or cx > float(hit.x1) + 12.0:
+            continue
+        candidates.append((abs(float(word["y0"]) - float(hit.y1)), parsed))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
 
 
 def _parse_capture(raw: str, capture: str) -> tuple[str, float] | None:
@@ -500,7 +695,7 @@ def _extract_spec(
     if spec.source_id.startswith("sch-l-") or spec.source_id.startswith("form-4562-"):
         form = _corporate_form(blob, spec.form)
         entity_id = f"{_form_slug(form)}-p{page_index}"
-    hit = _first_hit(page, spec.labels)
+    hit = _first_hit(page, spec.labels, words)
     if hit is None:
         return None
     boxes: list[list[float]] = []
@@ -514,11 +709,18 @@ def _extract_spec(
             [
                 float(hit.x1) + 2.0,
                 float(hit.y0) - 3.0,
-                float(page.rect.width) - 12.0,
+                _page_width(page) - 12.0,
                 float(hit.y1) + 3.0,
             ]
         )
-    boxes.extend([_clip_right(page, hit), _clip_below(page, hit)])
+    boxes.extend(
+        [
+            _clip_right(page, hit),
+            _clip_below(page, hit),
+            _clip_left(page, hit),
+            _clip_above(page, hit),
+        ]
+    )
     parsed = None
     used_box = boxes[0]
     for box in boxes:
@@ -529,7 +731,11 @@ def _extract_spec(
             words,
             money=spec.capture.startswith("money"),
         )
+        if spec.capture == "text" and words:
+            raw = _first_visual_line(words, box) or raw
         parsed = _parse_capture(raw, spec.capture)
+        if spec.form == "W-2" and spec.capture == "money" and words:
+            parsed = _same_column_money(words, box, hit) or parsed
         if parsed:
             used_box = box
             break
@@ -558,36 +764,72 @@ def _parse_paystub_row_money(raw: str) -> tuple[str, float] | None:
     return _format_money(amount), amount
 
 
-def _row_money_amounts(page: Any, pymupdf: Any, hit: Any) -> list[tuple[float, str, float, list[float]]]:
-    clip = [
-        float(hit.x1) + 2.0,
-        float(hit.y0) - 5.0,
-        float(page.rect.width) - 8.0,
-        float(hit.y1) + 5.0,
-    ]
-    rect = pymupdf.Rect(clip)
+def _money_tokens_in_clip(
+    page: Any,
+    pymupdf: Any,
+    clip: list[float],
+    words: list[dict[str, Any]] | None,
+) -> list[tuple[float, str, float, list[float]]]:
     found: list[tuple[float, str, float, list[float]]] = []
-    for word in page.get_text("words", clip=rect) or []:
-        x0, y0, x1, y1, text = word[0], word[1], word[2], word[3], word[4]
-        parsed = _parse_paystub_row_money(str(text))
+    native = page.get_text("words", clip=pymupdf.Rect(clip)) or []
+    source: list[tuple[float, float, float, float, str]] = []
+    if native:
+        source = [(float(word[0]), float(word[1]), float(word[2]), float(word[3]), str(word[4])) for word in native]
+    elif words:
+        source = [
+            (float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"]), str(word["text"]))
+            for word in words_in_box(words, clip)
+        ]
+    for x0, y0, x1, y1, text in source:
+        parsed = _parse_paystub_row_money(text)
         if not parsed:
             continue
         value, numeric = parsed
-        found.append((float(x0), value, numeric, [float(x0), float(y0), float(x1), float(y1)]))
+        found.append((x0, value, numeric, [x0, y0, x1, y1]))
     found.sort(key=lambda item: item[0])
     return found
 
 
-def _extract_8825_columns(page: Any, pymupdf: Any, *, page_index: int) -> list[dict[str, Any]]:
+def _row_money_amounts(
+    page: Any,
+    pymupdf: Any,
+    hit: Any,
+    words: list[dict[str, Any]] | None = None,
+) -> list[tuple[float, str, float, list[float]]]:
+    clips = [
+        [
+            float(hit.x1) + 2.0,
+            float(hit.y0) - 5.0,
+            _page_width(page) - 8.0,
+            float(hit.y1) + 5.0,
+        ],
+        _clip_below(page, hit, height=22.0),
+        _clip_left(page, hit, width=260.0),
+        _clip_above(page, hit, height=22.0),
+    ]
+    for clip in clips:
+        found = _money_tokens_in_clip(page, pymupdf, clip, words)
+        if found:
+            return found
+    return []
+
+
+def _extract_8825_columns(
+    page: Any,
+    pymupdf: Any,
+    *,
+    page_index: int,
+    words: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Property columns A/B/C… plus totals, matching Schedule E's per-column capture."""
     columns = "ABCDEFGH"
     extracted: list[dict[str, Any]] = []
     entity_id = f"form-8825-p{page_index}"
     for source_id, line_num, labels in _8825_COLUMN_LINES:
-        hit = _first_hit(page, labels)
+        hit = _first_hit(page, labels, words)
         if hit is None:
             continue
-        amounts = _row_money_amounts(page, pymupdf, hit)
+        amounts = _row_money_amounts(page, pymupdf, hit, words)
         if len(amounts) < 2:
             continue
         *properties, total = amounts
@@ -740,38 +982,58 @@ def _assign_paystub_amounts(
     return assigned
 
 
-def _paystub_visual_lines(page: Any) -> list[str]:
-    """Cluster native words by Y so PDFKit/OCR cells on one row stay one earning line."""
-    words = list(page.get_text("words") or [])
+def _cluster_visual_word_rows(words: list[tuple[float, float, float, float, str]]) -> list[str]:
     if not words:
         return []
-    rows: list[list[Any]] = []
-    for word in sorted(words, key=lambda item: (float(item[1]), float(item[0]))):
-        if rows and abs(float(word[1]) - float(rows[-1][0][1])) <= 4.0:
+    rows: list[list[tuple[float, float, float, float, str]]] = []
+    for word in sorted(words, key=lambda item: (item[1], item[0])):
+        if rows and abs(word[1] - rows[-1][0][1]) <= 4.0:
             rows[-1].append(word)
         else:
             rows.append([word])
     lines: list[str] = []
     for row in rows:
-        row.sort(key=lambda item: float(item[0]))
-        text = re.sub(r"\s+", " ", " ".join(str(item[4]) for item in row)).strip()
+        row.sort(key=lambda item: item[0])
+        text = re.sub(r"\s+", " ", " ".join(item[4] for item in row)).strip()
         if text:
             lines.append(text)
     return lines
 
 
-def _paystub_source_lines(page: Any, blob: str) -> list[str]:
-    visual = _paystub_visual_lines(page)
+def _paystub_visual_lines(page: Any, words: list[dict[str, Any]] | None = None) -> list[str]:
+    """Cluster native or OCR words by Y so cells on one row stay one earning line."""
+    native = list(page.get_text("words") or [])
+    if native:
+        return _cluster_visual_word_rows(
+            [(float(word[0]), float(word[1]), float(word[2]), float(word[3]), str(word[4])) for word in native]
+        )
+    if words:
+        return _cluster_visual_word_rows(
+            [
+                (float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"]), str(word["text"]))
+                for word in words
+                if word.get("text")
+            ]
+        )
+    return []
+
+
+def _paystub_source_lines(page: Any, blob: str, words: list[dict[str, Any]] | None = None) -> list[str]:
+    visual = _paystub_visual_lines(page, words)
     if visual:
         return visual
     return [re.sub(r"\s+", " ", line).strip() for line in blob.splitlines() if line.strip()]
 
 
-def _paystub_header_employer(page: Any, blob: str) -> tuple[str, list[float]] | None:
+def _paystub_header_employer(
+    page: Any,
+    blob: str,
+    words: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[float]] | None:
     """Company name is often the first line of an earnings statement, not 'Employer:'."""
     if re.search(r"employer(?:['’]s)?(?:\s+name)?\s*[:#]", blob, re.I):
         return None
-    for line in _paystub_source_lines(page, blob)[:6]:
+    for line in _paystub_source_lines(page, blob, words)[:6]:
         if re.search(
             r"earnings statement|pay\s*stub|pay statement|pay advice|payroll|employee|pay period|advice",
             line,
@@ -782,13 +1044,19 @@ def _paystub_header_employer(page: Any, blob: str) -> tuple[str, list[float]] | 
             continue
         cleaned = re.sub(r"\s+", " ", line).strip(" ·-|")
         if 3 <= len(cleaned) <= 80:
-            hit = _first_hit(page, (cleaned[:24], cleaned))
+            hit = _first_hit(page, (cleaned[:24], cleaned), words)
             box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)] if hit is not None else [0.0, 0.0, 12.0, 12.0]
             return cleaned, box
     return None
 
 
-def _hit_for_paystub_label(page: Any, pymupdf: Any, label: str, used: set[tuple[float, float]]):
+def _hit_for_paystub_label(
+    page: Any,
+    pymupdf: Any,
+    label: str,
+    used: set[tuple[float, float]],
+    words: list[dict[str, Any]] | None = None,
+):
     for hit in page.search_for(label) or []:
         key = (round(float(hit.x0), 1), round(float(hit.y0), 1))
         if key in used:
@@ -802,10 +1070,24 @@ def _hit_for_paystub_label(page: Any, pymupdf: Any, label: str, used: set[tuple[
             continue
         used.add(key)
         return hit
-    return None
+    word_hit = _hit_from_words(words, (label,))
+    if word_hit is None:
+        return None
+    key = (round(float(word_hit.x0), 1), round(float(word_hit.y0), 1))
+    if key in used:
+        return None
+    used.add(key)
+    return word_hit
 
 
-def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: str) -> list[dict[str, Any]]:
+def _extract_paystub_table(
+    page: Any,
+    pymupdf: Any,
+    *,
+    page_index: int,
+    blob: str,
+    words: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Earnings-table rows: base (incl. shift/PTO), bonus, OT, tips, commission, RSU."""
     extracted: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -850,24 +1132,26 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
     hours_match = re.search(r"(\d+(?:\.\d+)?)\s*hr/?\s*wk", blob, re.I)
     if hours_match:
         hours = float(hours_match.group(1))
-        hit = _first_hit(page, ("hr/wk", "Hr/Wk", hours_match.group(0)))
+        hit = _first_hit(page, ("hr/wk", "Hr/Wk", hours_match.group(0)), words)
         box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)] if hit is not None else [0.0, 0.0, 12.0, 12.0]
         emit("ps-hours-week", f"{int(hours) if hours.is_integer() else hours}", hours, box)
 
-    header = _paystub_header_employer(page, blob)
+    header = _paystub_header_employer(page, blob, words)
     if header:
         emit("ps-employer-name", header[0], 0.0, header[1])
 
-    for raw_line in _paystub_source_lines(page, blob):
+    for raw_line in _paystub_source_lines(page, blob, words):
         line = re.sub(r"\s+", " ", raw_line).strip()
         kind = _paystub_row_kind(line)
         if kind is None:
             continue
         label = _paystub_code_label(line)
-        hit = _hit_for_paystub_label(page, pymupdf, label, used_hits) or _first_hit(page, (label, line[:18]))
+        hit = _hit_for_paystub_label(page, pymupdf, label, used_hits, words) or _first_hit(
+            page, (label, line[:18]), words
+        )
         if hit is None:
             continue
-        amounts = _row_money_amounts(page, pymupdf, hit)
+        amounts = _row_money_amounts(page, pymupdf, hit, words)
         if not amounts:
             continue
         slots = _assign_paystub_amounts(amounts, line, kind)
@@ -894,9 +1178,9 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
             emit("ps-rsu-ytd", *slots["ytd"], accumulate=True)
 
     if "ps-base-ytd" not in totals and not re.search(r"\bgross\b", blob, re.I):
-        hit = _first_hit(page, ("Year to date", "Year-to-date"))
+        hit = _first_hit(page, ("Year to date", "Year-to-date"), words)
         if hit is not None:
-            amounts = _row_money_amounts(page, pymupdf, hit)
+            amounts = _row_money_amounts(page, pymupdf, hit, words)
             if amounts:
                 emit("ps-base-ytd", amounts[-1][1], amounts[-1][2], amounts[-1][3])
     flush()
@@ -923,10 +1207,12 @@ def extract_page_fields(
     seen: set[str] = set()
     catalogs = list(FORM_CATALOGS)
     for matcher, specs in catalogs:
-        if not matcher.search(blob):
+        if not pattern_matches(matcher, blob):
             continue
         if specs is PAYSTUB_FIELDS:
-            for row in _extract_paystub_table(page, pymupdf, page_index=page_index, blob=row_blob or blob):
+            for row in _extract_paystub_table(
+                page, pymupdf, page_index=page_index, blob=row_blob or blob, words=words
+            ):
                 if row["sourceFieldId"] in seen:
                     continue
                 seen.add(row["sourceFieldId"])
@@ -938,7 +1224,7 @@ def extract_page_fields(
             seen.add(row["sourceFieldId"])
             extracted.append(row)
         if specs is FORM_8825_FIELDS:
-            for row in _extract_8825_columns(page, pymupdf, page_index=page_index):
+            for row in _extract_8825_columns(page, pymupdf, page_index=page_index, words=words):
                 if row["sourceFieldId"] in seen:
                     continue
                 seen.add(row["sourceFieldId"])
@@ -946,7 +1232,7 @@ def extract_page_fields(
         break
 
     for matcher, specs in SUPPORTING_CATALOGS:
-        if not matcher.search(blob):
+        if not pattern_matches(matcher, blob):
             continue
         for spec in specs:
             row = _extract_spec(page, pymupdf, spec, page_index=page_index, words=words, blob=blob)
@@ -955,6 +1241,75 @@ def extract_page_fields(
             seen.add(row["sourceFieldId"])
             extracted.append(row)
     return extracted
+
+
+class _PageView:
+    """Same PDF page, optionally with an upright rect after a 90/270 OCR rotate."""
+
+    def __init__(self, page: Any, rect: Any):
+        self._page = page
+        self.rect = rect
+
+    def search_for(self, *args: Any, **kwargs: Any):
+        return self._page.search_for(*args, **kwargs)
+
+    def get_text(self, *args: Any, **kwargs: Any):
+        return self._page.get_text(*args, **kwargs)
+
+    def widgets(self):
+        return self._page.widgets()
+
+
+def _page_ocr_rotation(page_result: Any) -> int:
+    flags = list(getattr(page_result, "flags", None) or [])
+    if "ocr_rotated_90" in flags:
+        return 90
+    if "ocr_rotated_270" in flags:
+        return 270
+    return 0
+
+
+def _words_to_upright(
+    words: list[dict[str, Any]],
+    rotation: int,
+    page_width: float,
+    page_height: float,
+) -> tuple[list[dict[str, Any]], float, float]:
+    if not rotation:
+        return words, page_width, page_height
+    upright_w, upright_h = page_height, page_width
+    mapped: list[dict[str, Any]] = []
+    for word in words:
+        ox0 = float(word["x0"]) / page_width
+        oy0 = float(word["y0"]) / page_height
+        ox1 = float(word["x1"]) / page_width
+        oy1 = float(word["y1"]) / page_height
+        orig_w, orig_h = ox1 - ox0, oy1 - oy0
+        if rotation == 90:
+            ux0, uy0, rel_w, rel_h = 1.0 - oy1, ox0, orig_h, orig_w
+        else:
+            ux0, uy0, rel_w, rel_h = oy0, 1.0 - ox1, orig_h, orig_w
+        mapped.append(
+            {
+                "text": word["text"],
+                "x0": ux0 * upright_w,
+                "y0": uy0 * upright_h,
+                "x1": (ux0 + rel_w) * upright_w,
+                "y1": (uy0 + rel_h) * upright_h,
+            }
+        )
+    return mapped, upright_w, upright_h
+
+
+def _remap_overlay_box(rel: dict[str, float] | None, rotation: int) -> dict[str, float] | None:
+    if not rel or not rotation:
+        return rel
+    x, y, width, height = float(rel["x"]), float(rel["y"]), float(rel["w"]), float(rel["h"])
+    if rotation == 90:
+        return {"x": y, "y": 1.0 - x - width, "w": height, "h": width}
+    if rotation == 270:
+        return {"x": 1.0 - y - height, "y": x, "w": height, "h": width}
+    return rel
 
 
 def extract_irs_form_fields(
@@ -980,9 +1335,21 @@ def extract_irs_form_fields(
                 else None
             )
             text = ""
+            rotation = 0
+            extract_page = page
             if convert_page is not None:
                 text = convert_page.text()
-            fields.extend(extract_page_fields(page, page_index=index, words=page_words, text=text))
+                rotation = _page_ocr_rotation(convert_page)
+                if rotation and page_words:
+                    page_words, upright_w, upright_h = _words_to_upright(
+                        page_words, rotation, float(page.rect.width), float(page.rect.height)
+                    )
+                    extract_page = _PageView(page, pymupdf.Rect(0, 0, upright_w, upright_h))
+            page_fields = extract_page_fields(extract_page, page_index=index, words=page_words, text=text)
+            if rotation:
+                for row in page_fields:
+                    row["box"] = _remap_overlay_box(row.get("box"), rotation)
+            fields.extend(page_fields)
         logger.info("irs_form_extract fields=%s", len(fields))
         return fields
     finally:
