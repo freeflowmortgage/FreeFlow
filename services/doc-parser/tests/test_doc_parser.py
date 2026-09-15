@@ -217,6 +217,19 @@ def test_pdf_splitter_ignores_w2_back_or_instruction_page():
     assert 1 not in result.classifications
 
 
+@pytest.mark.parametrize(
+    ("text", "label"),
+    [
+        ("Schedule B\n(Form 1040)\nInterest and Ordinary Dividends", "Schedule B (Interest & Dividends)"),
+        ("Schedule C\n(Form 1040)\nProfit or Loss From Business", "Schedule C (Page 1 - Profits)"),
+    ],
+)
+def test_pdf_splitter_classifies_native_multiline_form_titles(text: str, label: str) -> None:
+    page = PageResult(index=0, width_px=612, height_px=792, is_native_text=True, plain_text=text, words=[])
+    result = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
+    assert label in result.classifications[0]
+
+
 def test_pdf_splitter_classifies_schedule_f():
     page = PageResult(
         index=0,

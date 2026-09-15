@@ -73,7 +73,10 @@ see production RDS, production Encompass, or real borrower files.
 In-process ONNX RapidOCR (`rapidocr-onnxruntime`) inside `AIPDFConverter`. No
 Textract, no disk sandwich PDF. Inspect first (AcroForm `/V` + native text),
 classify, then OCR only keep-set pages that still need it. All-scan packets
-with no labels OCR every page that `use_ocr`.
+with no labels OCR every page that `use_ocr`. Empty native AcroForms and exact
+official K-1 code/reference pages bypass OCR; the Schedule E grid pass runs only
+after Schedule E classification. Safe phase timings are emitted for capacity
+analysis without logging document content or names.
 
 ### Limits (must stay in runbooks)
 
@@ -388,6 +391,10 @@ On the current engine (sequential RapidOCR, 300 DPI, 1 vCPU):
 - Dollar cost is cents; **capacity cost is the blocker**.
 - Digital labeled packets OCR keep-set pages only (tens of pages), which is
   the path inspect-first was built for.
+- The 2026-09-14 blank official non-wage corpus completed 34 pages in 12.714
+  seconds total (0.201-2.605 seconds per PDF), with zero OCR and zero values.
+  This is not evidence for filled scans; scanned-document latency remains the
+  governing capacity constraint.
 
 Do not advertise 300-page scan ingest on the synchronous `/parse` API.
 

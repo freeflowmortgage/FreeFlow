@@ -91,8 +91,17 @@ document revision, SHA-256, and license/provenance in the local corpus manifest.
 
 ## Current gate status
 
-The ordinary parser suite passes 54 tests. Local end-to-end samples currently
-pass for a four-page W-2 packet, a sideways single-page W-2, and a three-page
-digital paystub. This does **not** satisfy the adversarial release gate. Every
-other row above remains open until a pinned corpus entry, exact expected output,
-and production-like endpoint result are recorded.
+The ordinary parser suite passes 59 tests. On 2026-09-14, 14 official blank
+non-wage IRS PDFs (34 pages across 1040, 1065, 1120, 1120-S, 4562, 8825, K-1
+1041/1065/1120-S, and Schedules B-F) were sent through the live local HTTP
+endpoint. The run completed in 12.714 seconds total, with a per-document range
+of 0.201-2.605 seconds, zero OCR pages, and zero extracted borrower values.
+Before the native empty-AcroForm gate, individual documents took as long as
+44.65 seconds and OCR produced plausible false values on blank forms.
+
+This establishes only tier-1 blank-form integrity and latency for that corpus.
+It does **not** satisfy the adversarial release gate: filled forms, rendered
+scans, degraded scans, mixed packets, WVOE, and appraisal scans still require
+pinned ground truth and production-like results. Wage-document reconciliation
+and further W-2/paystub behavior are intentionally paused pending product-owner
+confirmation.

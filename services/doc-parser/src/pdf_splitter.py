@@ -162,10 +162,17 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         if not text.strip():
             continue
 
-        matched = [name for name, pattern in CORE_RULES.items() if pattern.search(text)]
-        if "W-2" not in matched and _has_w2_front_evidence(text):
+        # Native PDF extraction commonly inserts newlines between a form name
+        # and its subtitle. Classifiers describe the visual line, so search a
+        # whitespace-normalized view while retaining raw text for evidence.
+        search_text = re.sub(r"\s+", " ", text).strip()
+
+        matched = [name for name, pattern in CORE_RULES.items() if pattern.search(search_text)]
+        if "W-2" not in matched and _has_w2_front_evidence(search_text):
             matched.append("W-2")
-        if "W-2" in matched and (W2_BACK_SIGNATURE.search(text) or not W2_FRONT_SIGNATURE.search(text)):
+        if "W-2" in matched and (
+            W2_BACK_SIGNATURE.search(search_text) or not W2_FRONT_SIGNATURE.search(search_text)
+        ):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)
         if "Schedule K-1" in matched:
@@ -177,8 +184,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
             classifications[page.index] = matched
             target_pages.add(page.index)
             if any(term in "".join(matched) for term in ("Schedule C", "Schedule E", "Schedule F", "Form 1065", "Form 1120", "Form 1120S")):
-                if SEE_STATEMENT.search(text):
-                    token_match = STMT_TOKEN.search(text)
+                if SEE_STATEMENT.search(search_text):
+                    token_match = STMT_TOKEN.search(search_text)
                     snippet = token_match.group(0) if token_match else "see statement"
                     statement_refs.append(
                         StatementRef(

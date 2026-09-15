@@ -47,6 +47,10 @@ _NATIVE_PAYSTUB = re.compile(
     r"employee taxes|year[- ]to[- ]date\s+(?:earnings|gross)",
     re.IGNORECASE,
 )
+_IRS_REFERENCE_PAGE = re.compile(
+    r"This list identifies the codes used on Schedule K-1",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -272,9 +276,10 @@ class AIPDFConverter:
                 except Exception:
                     text = ""
                 rotation = int(getattr(page, "rotation", 0) or 0) % 360
+                has_widgets = self._has_form_widgets(page)
                 fields = self._widget_words(page)
                 filled = [word for word in fields if word.text.strip()]
-                use_ocr, page_flags = self._page_strategy(text, filled)
+                use_ocr, page_flags = self._page_strategy(text, filled, has_widgets=has_widgets)
                 if filled:
                     page_flags.append("acroform_merged")
                 pages.append(
@@ -293,13 +298,29 @@ class AIPDFConverter:
                 reader.close()
 
     @staticmethod
-    def _page_strategy(text: str, filled_fields: list[OcrWord]) -> tuple[bool, list[str]]:
+    def _page_strategy(
+        text: str,
+        filled_fields: list[OcrWord],
+        *,
+        has_widgets: bool = False,
+    ) -> tuple[bool, list[str]]:
         stripped = text.strip()
         has_amounts = bool(_CONTENT_AMOUNT.search(stripped))
         amount_count = len(_CONTENT_AMOUNT.findall(stripped))
         irs_chrome = bool(_IRS_CHROME.search(stripped))
         flags: list[str] = []
         if filled_fields:
+            return False, flags
+        # Official IRS PDFs are native-text AcroForms. When their widgets are
+        # empty, OCR only rereads printed line and box numbers as if they were
+        # borrower values. Preserve the authoritative native layer and avoid a
+        # costly, lower-integrity OCR pass. Flattened/scanned forms have no
+        # widgets and continue through the normal OCR decision path.
+        if has_widgets and len(stripped) >= NATIVE_TEXT_CHARS:
+            flags.append("blank_acroform_native_text")
+            return False, flags
+        if len(stripped) >= NATIVE_TEXT_CHARS and _IRS_REFERENCE_PAGE.search(stripped):
+            flags.append("irs_reference_native_text")
             return False, flags
         if has_amounts:
             # A digitally generated paystub already contains higher-integrity
@@ -320,6 +341,30 @@ class AIPDFConverter:
         if irs_chrome and len(stripped) >= NATIVE_TEXT_CHARS:
             flags.append("irs_searchable_mask_bypass")
         return True, flags
+
+    @staticmethod
+    def _has_form_widgets(page: Any) -> bool:
+        """Return True only for AcroForm widgets, not links or annotations."""
+        annots = None
+        try:
+            annots = page.annotations
+        except Exception:
+            annots = None
+        if annots is None:
+            try:
+                annots = page.get("/Annots")
+            except Exception:
+                annots = None
+        for annot in annots or []:
+            try:
+                data = annot.get_object() if hasattr(annot, "get_object") else annot
+                if str(data.get("/Subtype") or "") in {"/Widget", "Widget"}:
+                    return True
+                if data.get("/FT") is not None:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _widget_words(self, page: Any) -> list[OcrWord]:
         words: list[OcrWord] = []

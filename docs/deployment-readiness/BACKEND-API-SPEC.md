@@ -121,6 +121,15 @@ a typed error and never invokes a less trustworthy fallback. For long OCR, prefe
 a controlled fetch from Encompass by an isolated worker; do not place uploaded
 raw PDF bytes in SQS or object storage merely to make the call asynchronous.
 
+Native AcroForms are authoritative when they expose an intact text layer and
+fillable widgets. If those widgets are empty, the parser MUST preserve native
+text and return no borrower values; it MUST NOT OCR printed line/box numbers as
+data. Official K-1 code/reference pages with an exact reference-page signature
+also remain native. Flattened or scanned forms do not satisfy this bypass and
+continue through the bounded OCR path. The parser logs only safe phase latency
+(inspect, convert/OCR, specialized extraction, field extraction, total), never
+document names, text, or values.
+
 For W-2s, a page is eligible for W-2 extraction only when its OCR contains a
 front-page wage or tax-cell signature. A title-only back or instruction page is
 excluded before extraction. Hybrid forms with native value overlays are OCR'd
