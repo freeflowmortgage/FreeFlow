@@ -66,6 +66,9 @@ services were updated in place under deployment circuit breakers.
 - CloudWatch log searches covering the rollout and smoke test found no parser or
   console error, exception, traceback, or timeout events.
 - Company and partner PR Terraform and portal-validation checks passed.
+- A post-apply targeted Terraform plan reported `No changes` for both task
+  definitions and both services. Linux provider package checksums are retained
+  in the lockfile so this containerized verification remains reproducible.
 
 The supplied real-world W-2, paystub, and tax samples were qualified locally
 only. They were not uploaded to AWS because this development environment is
