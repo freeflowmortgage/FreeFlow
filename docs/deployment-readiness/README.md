@@ -27,6 +27,7 @@ tests.
 | [STAGING-FOUNDATION-2026-09-09.md](STAGING-FOUNDATION-2026-09-09.md) | Separate-account staging access and Terraform-state foundation evidence |
 | [DEV-BASELINE-VERIFICATION-2026-09-09.md](DEV-BASELINE-VERIFICATION-2026-09-09.md) | Current synthetic-dev service, digest, and target-health baseline |
 | [DEV-PORTAL-ROLLOUT-2026-09-09.md](DEV-PORTAL-ROLLOUT-2026-09-09.md) | Current portal rollout evidence; explicitly incomplete pending ECS provisioning |
+| [DEV-PARSER-CONSOLE-ROLLOUT-2026-09-14.md](DEV-PARSER-CONSOLE-ROLLOUT-2026-09-14.md) | Immutable parser/console image rollout, Terraform scope, ECR scans, ECS health, and synthetic smoke evidence |
 | [RUNBOOKS.md](RUNBOOKS.md) | Deployment, rollback, incident, restore, rotation, and vulnerability procedures |
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
 | [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
