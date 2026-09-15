@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Iterable
 
 from schedule_e_grid import (
@@ -347,6 +348,24 @@ def _first_hit(page: Any, labels: tuple[str, ...]):
     return None
 
 
+def _first_ocr_hit(words: list[dict[str, Any]] | None, labels: tuple[str, ...]):
+    """Locate a field label in OCR when the PDF has no searchable form chrome."""
+    for label in labels:
+        for variant in _label_variants(label):
+            needle = variant.casefold()
+            for word in words or []:
+                text = str(word.get("text", ""))
+                if needle not in text.casefold():
+                    continue
+                return SimpleNamespace(
+                    x0=float(word["x0"]),
+                    y0=float(word["y0"]),
+                    x1=float(word["x1"]),
+                    y1=float(word["y1"]),
+                )
+    return None
+
+
 def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None:
     """Snap a label to the live AcroForm cell in the same column, then right / below."""
     widgets = list(page.widgets() or [])
@@ -500,7 +519,7 @@ def _extract_spec(
     if spec.source_id.startswith("sch-l-") or spec.source_id.startswith("form-4562-"):
         form = _corporate_form(blob, spec.form)
         entity_id = f"{_form_slug(form)}-p{page_index}"
-    hit = _first_hit(page, spec.labels)
+    hit = _first_hit(page, spec.labels) or _first_ocr_hit(words, spec.labels)
     if hit is None:
         return None
     boxes: list[list[float]] = []
@@ -961,8 +980,10 @@ def extract_irs_form_fields(
     pdf_input: bytes,
     *,
     ocr_pages: Iterable[Any] | None = None,
+    page_indices: Iterable[int] | None = None,
 ) -> list[dict[str, Any]]:
     pymupdf = _require_pymupdf()
+    allowed_pages = set(page_indices) if page_indices is not None else None
     supplied: dict[int, Any] = {}
     for page_result in ocr_pages or []:
         index = getattr(page_result, "index", None)
@@ -973,6 +994,8 @@ def extract_irs_form_fields(
     try:
         fields: list[dict[str, Any]] = []
         for index, page in enumerate(doc):
+            if allowed_pages is not None and index not in allowed_pages:
+                continue
             convert_page = supplied.get(index)
             page_words = (
                 convert_relative_words(convert_page.words, page.rect.width, page.rect.height)

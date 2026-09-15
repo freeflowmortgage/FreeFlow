@@ -229,6 +229,14 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     }
     if not needs:
         return set()
+    hybrid_form_pages = {
+        int(getattr(page, "index", index))
+        for index, page in enumerate(pages)
+        if "numeric_form_overlay_ocr_bypass" in getattr(page, "flags", [])
+    }
+    if hybrid_form_pages:
+        logger.info("ocr_hybrid_form_pages pages=%s", sorted(hybrid_form_pages))
+        return hybrid_form_pages
     kept = set(split_result.target_pages)
     if kept:
         selected = needs & kept

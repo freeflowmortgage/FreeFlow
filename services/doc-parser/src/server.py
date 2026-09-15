@@ -249,16 +249,20 @@ async def process_document(request: Request):
         except Exception as grid_exc:
             logger.warning("schedule_e_grid_skipped: %s", grid_exc)
 
+        split_result = pre_split_tax_returns(convert_result)
         form_extracts: list = []
         if extract_irs_form_fields is not None:
             try:
-                form_extracts = extract_irs_form_fields(pdf_bytes, ocr_pages=convert_result.pages)
+                form_extracts = extract_irs_form_fields(
+                    pdf_bytes,
+                    ocr_pages=convert_result.pages,
+                    page_indices=split_result.target_pages,
+                )
             except Exception as extract_exc:
                 logger.warning("irs_form_extract_skipped: %s", extract_exc)
 
         del pdf_bytes
 
-        split_result = pre_split_tax_returns(convert_result)
         kept = set(split_result.target_pages)
         page_payload = []
         for page in convert_result.pages:

@@ -123,8 +123,10 @@ raw PDF bytes in SQS or object storage merely to make the call asynchronous.
 
 For W-2s, a page is eligible for W-2 extraction only when its OCR contains a
 front-page wage or tax-cell signature. A title-only back or instruction page is
-excluded before extraction; this filter does not alter normalized income values
-or underwriting calculations.
+excluded before extraction. Hybrid forms with native value overlays are OCR'd
+for their rendered labels, while excluded pages are never passed to field
+extraction; these filters do not alter normalized income values or underwriting
+calculations.
 
 ## Encompass synchronization state machine
 

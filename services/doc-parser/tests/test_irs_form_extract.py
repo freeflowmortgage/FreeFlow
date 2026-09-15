@@ -11,7 +11,7 @@ import fitz
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from irs_form_extract import _paystub_row_kind, extract_irs_form_fields  # noqa: E402
+from irs_form_extract import _paystub_row_kind, extract_irs_form_fields, extract_page_fields  # noqa: E402
 from pdf_splitter import SplitResult, pre_split_tax_returns, select_ocr_page_indices  # noqa: E402
 from ai_pdf_converter import ConvertResult, PageResult  # noqa: E402
 
@@ -105,6 +105,17 @@ def test_select_ocr_only_keep_set_pages_that_need_it() -> None:
     assert select_ocr_page_indices(inspected, split) == {1}
 
 
+def test_select_ocr_hybrid_form_pages_skips_blank_companion_pages() -> None:
+    inspected = [
+        SimpleNamespace(index=0, use_ocr=True, flags=["numeric_form_overlay_ocr_bypass"]),
+        SimpleNamespace(index=1, use_ocr=True, flags=[]),
+        SimpleNamespace(index=2, use_ocr=True, flags=["numeric_form_overlay_ocr_bypass"]),
+        SimpleNamespace(index=3, use_ocr=True, flags=[]),
+    ]
+    split = SplitResult(target_pages=[], classifications={}, statement_refs=[], unresolved_statements=[])
+    assert select_ocr_page_indices(inspected, split) == {0, 2}
+
+
 def test_reads_w2_stacked_box5_not_adjacent_box_number() -> None:
     """IRS W-2 prints Box 5 above the amount and Box 2 in the cell to the right."""
     doc = fitz.open()
@@ -128,6 +139,25 @@ def test_reads_w2_stacked_box5_not_adjacent_box_number() -> None:
     assert by_id["w2-box5"]["numericValue"] != 2.0
     assert by_id["w2-box5"]["numericValue"] != 8500.0
     assert by_id["w2-box2"]["numericValue"] == 9420.0, fields
+
+
+def test_reads_w2_box5_from_ocr_labels_when_pdf_text_is_absent() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    words = [
+        {"x0": 40, "y0": 40, "x1": 260, "y1": 54, "text": "Form W-2 Wage and Tax Statement"},
+        {"x0": 320, "y0": 200, "x1": 440, "y1": 210, "text": "5 Medicare wages and tips"},
+        {"x0": 320, "y0": 218, "x1": 390, "y1": 230, "text": "78,500.00"},
+    ]
+    fields = extract_page_fields(
+        page,
+        page_index=0,
+        words=words,
+        text="Form W-2 Wage and Tax Statement 5 Medicare wages and tips 78,500.00",
+    )
+    doc.close()
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box5"]["numericValue"] == 78500.0
 
 
 def test_reads_live_w2_box5_ein_and_curly_employer_name() -> None:
