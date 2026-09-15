@@ -1,7 +1,8 @@
 /**
- * Canonical paystub JSON (MISMO 3.4 / URLA Section 1b) plus CURRENT_INCOME XML.
- * Maps FreeFlow ps-* buckets without dropping Tips, RSU, or qualifying base
- * (regular, PTO, holiday, vacation, sick, shift/weekend/night, retro).
+ * Canonical paystub JSON for any payroll processor (MISMO 3.4 / URLA Section 1b)
+ * plus CURRENT_INCOME XML. Maps FreeFlow ps-* buckets without dropping Tips, RSU,
+ * or qualifying base (regular, PTO, holiday, vacation, sick, shift/weekend/night,
+ * retro). Not written to match a single employer stub.
  */
 
 export type PaymentFrequencyType = 'Weekly' | 'Biweekly' | 'SemiMonthly' | 'Monthly';

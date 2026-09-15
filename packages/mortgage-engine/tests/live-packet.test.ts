@@ -1,6 +1,7 @@
-import type { ParsePage, ParseResponse } from '../../../apps/underwriting-console/src/parseTypes';
+import type { MappedIncomeField, ParsePage, ParseResponse } from '../../../apps/underwriting-console/src/parseTypes';
 import {
   classifyDocument,
+  fieldForInspection,
   findDuplicate,
   firstPageForKind,
   pickDocumentForTab,
@@ -54,6 +55,18 @@ const scheduleEProps = {
 };
 
 describe('live packet routing', () => {
+  test('keeps wage-field inspection scoped to the open PDF', () => {
+    const fields = [
+      { id: 'w2-a:w2-box5', sourceFieldId: 'w2-box5', documentId: 'w2-a', pageIndex: 0 },
+      { id: 'w2-b:w2-box5', sourceFieldId: 'w2-box5', documentId: 'w2-b', pageIndex: 0 },
+      { id: 'tax:ent2-rents', sourceFieldId: 'ent2-rents', documentId: 'tax', pageIndex: 8 },
+    ] as MappedIncomeField[];
+
+    expect(fieldForInspection(fields, 'w2-box5', 'w2-b')?.documentId).toBe('w2-b');
+    expect(fieldForInspection(fields, 'ps-base-ytd', 'w2-b')).toBeUndefined();
+    expect(fieldForInspection(fields, 'ent2-rents', 'w2-b')?.documentId).toBe('tax');
+  });
+
   test('classifies paystub, W-2, and Schedule E separately', () => {
     expect(classifyDocument(response([page(0, ['Paystub'])]))).toContain('paystub');
     expect(classifyDocument(response([page(0, ['W-2'])]))).toContain('w2');

@@ -13,6 +13,10 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       DOC_PARSER_URL: http://income-parser:8080
+      # Large mixed tax packets can legitimately exceed the 90-second proxy
+      # default while OCR is still synchronous. Keep the authoritative Python
+      # result instead of silently replacing it with the native-text fallback.
+      DOC_PARSER_TIMEOUT_MS: 300000
       APPRAISAL_PARSER_URL: http://appraisal-parser:8081
     depends_on:
       - income-parser

@@ -207,6 +207,7 @@ resource "aws_ecs_task_definition" "console" {
         { name = "PORT", value = "3000" },
         { name = "HOST", value = "0.0.0.0" },
         { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080" },
+        { name = "DOC_PARSER_TIMEOUT_MS", value = "300000" },
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
         { name = "VITE_CACHE_DIR", value = "/tmp/freeflow/vite" },
         { name = "TMPDIR", value = "/tmp/freeflow" },
@@ -369,12 +370,13 @@ resource "aws_ecs_task_definition" "database_preflight" {
 resource "aws_ecs_service" "parser" {
   count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
 
-  name             = "${local.name_prefix}-income-parser"
-  cluster          = data.aws_ecs_cluster.existing.arn
-  task_definition  = aws_ecs_task_definition.parser[0].arn
-  desired_count    = 1
-  launch_type      = "FARGATE"
-  platform_version = "LATEST"
+  name            = "${local.name_prefix}-income-parser"
+  cluster         = data.aws_ecs_cluster.existing.arn
+  task_definition = aws_ecs_task_definition.parser[0].arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+  # Pin application rollouts so an image change cannot also upgrade Fargate.
+  platform_version = "1.4.0"
 
   deployment_circuit_breaker {
     enable   = true

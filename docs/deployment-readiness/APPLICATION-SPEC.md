@@ -60,6 +60,10 @@ real borrower documents.
 - Source evidence is derived from the actual page, not a static template. The UI
   distinguishes extracted, calculated, overridden, approved, synced, failed, and
   stale states.
+- In a multi-document wage packet, the selected document is a single inspection
+  context: changing the document selector updates the PDF, employer/entity,
+  extracted fields, and evidence highlights together. The UI must never combine
+  one document's canvas with another document's reconciliation values.
 - An upstream source/version change invalidates downstream approval and requires
   re-review. Stale approval cannot sync.
 - Every external write and billable operation is idempotent and visible in an

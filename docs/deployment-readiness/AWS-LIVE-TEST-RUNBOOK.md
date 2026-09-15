@@ -40,6 +40,11 @@ to the portal task on port 8000. The portal and parser run without public IPs
 in the two existing application subnets. The parser accepts port 8080 only from
 the portal security group and registers as `income-parser.freeflow.local`.
 
+When private-DNS ECR/Logs interface endpoints are enabled for the underwriting
+console, their HTTPS security group must also admit the parser task security
+group. Otherwise replacement parser tasks cannot obtain ECR authorization and
+remain pending even though the previous task stays healthy.
+
 The Cognito-enabled ALB is allowed outbound HTTPS only so it can complete the
 hosted-domain authorization-code exchange. Its authentication session remains
 one hour; longer sessions require an explicit security review and compensating

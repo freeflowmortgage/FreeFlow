@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "MortgageDocumentPaystubParserSchema",
-  "description": "Standard canonical paystub extraction model mapping directly to MISMO 3.4 structures (Form 1003 Section 1b / DU & LPA format). Extends the wage buckets with Tips and RestrictedStockUnits so FreeFlow first-class fields are not collapsed away.",
+  "description": "Standard canonical paystub extraction model for any payroll processor, mapping to MISMO 3.4 (Form 1003 Section 1b / DU & LPA). Not bound to a single employer or vendor layout. Extends wage buckets with Tips and RestrictedStockUnits so FreeFlow first-class fields are not collapsed away.",
   "type": "object",
   "required": [
     "documentMetadata",

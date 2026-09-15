@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -219,6 +220,7 @@ async def _read_pdf_bytes(request: Request) -> tuple[bytes, str]:
 @app.post("/api/underwrite/process", status_code=status.HTTP_200_OK)
 async def process_document(request: Request):
     transaction_id = str(uuid.uuid4())
+    request_started = time.perf_counter()
     try:
         pdf_bytes, original_name = await _read_pdf_bytes(request)
         if not original_name.lower().endswith(".pdf"):
@@ -235,30 +237,47 @@ async def process_document(request: Request):
             from src.schedule_e_grid import extract_schedule_e_pages
 
         converter = get_converter()
+        inspect_started = time.perf_counter()
         inspected = converter.inspect_pages(pdf_bytes)
         preview = converter.inspect_as_convert_result(inspected)
         preview_split = pre_split_tax_returns(preview)
+        inspect_ms = (time.perf_counter() - inspect_started) * 1000
         ocr_indices = select_ocr_page_indices(inspected, preview_split) if select_ocr_page_indices else None
+        convert_started = time.perf_counter()
         convert_result = converter.convert_to_ai_ready(
             pdf_bytes,
             inspected=inspected,
             ocr_page_indices=ocr_indices,
         )
-        try:
-            schedule_e_properties = extract_schedule_e_pages(pdf_bytes, ocr_pages=convert_result.pages)
-        except Exception as grid_exc:
-            logger.warning("schedule_e_grid_skipped: %s", grid_exc)
+        convert_ms = (time.perf_counter() - convert_started) * 1000
+        split_result = pre_split_tax_returns(convert_result)
+        schedule_e_started = time.perf_counter()
+        has_schedule_e = any(
+            any(label.startswith("Schedule E") for label in labels)
+            for labels in split_result.classifications.values()
+        )
+        if has_schedule_e:
+            try:
+                schedule_e_properties = extract_schedule_e_pages(pdf_bytes, ocr_pages=convert_result.pages)
+            except Exception as grid_exc:
+                logger.warning("schedule_e_grid_skipped: %s", grid_exc)
+        schedule_e_ms = (time.perf_counter() - schedule_e_started) * 1000
 
+        extract_started = time.perf_counter()
         form_extracts: list = []
         if extract_irs_form_fields is not None:
             try:
-                form_extracts = extract_irs_form_fields(pdf_bytes, ocr_pages=convert_result.pages)
+                form_extracts = extract_irs_form_fields(
+                    pdf_bytes,
+                    ocr_pages=convert_result.pages,
+                    page_indices=split_result.target_pages,
+                )
             except Exception as extract_exc:
                 logger.warning("irs_form_extract_skipped: %s", extract_exc)
+        extract_ms = (time.perf_counter() - extract_started) * 1000
 
         del pdf_bytes
 
-        split_result = pre_split_tax_returns(convert_result)
         kept = set(split_result.target_pages)
         page_payload = []
         for page in convert_result.pages:
@@ -284,11 +303,17 @@ async def process_document(request: Request):
         )
 
         logger.info(
-            "parse_complete txn=%s pages=%s kept=%s ocr=%s",
+            "parse_complete txn=%s pages=%s kept=%s ocr=%s inspect_ms=%.1f convert_ms=%.1f "
+            "schedule_e_ms=%.1f extract_ms=%.1f total_ms=%.1f",
             transaction_id,
             convert_result.page_count,
             len(split_result.target_pages),
             convert_result.ocr_page_count,
+            inspect_ms,
+            convert_ms,
+            schedule_e_ms,
+            extract_ms,
+            (time.perf_counter() - request_started) * 1000,
         )
 
         return JSONResponse(

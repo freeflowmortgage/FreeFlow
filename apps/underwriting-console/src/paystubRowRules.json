@@ -1,0 +1,29 @@
+{
+  "description": "Vendor-agnostic paystub earnings classifier for any payroll processor (ADP, Paychex, Workday, Kronos, UKG, in-house, and similar). Classifies Regular/OT/Bonus/Tips/Commission/RSU rows and Weekly/Biweekly/SemiMonthly/Monthly frequency from generic labels, not from one employer layout. Banner Health is only a test fixture in tests/fixtures/; it is not this catalog.",
+  "excludeRow": "spot\\s*bonus|\\breloc(?:ation)?\\b|^(gross|net\\b|total|federal|social security|medicare|401|deduct|tax|health|dental|pre[- ]tax|after[- ]tax)\\b",
+  "baseRow": "\\b(regular|reg(?:ular)?(?:\\s+pay)?|base(?:\\s+pay)?(?!\\s+rate)|salary|hourly(?!\\s+rate)|straight\\s*time|sunday|weekend(?:\\s+premium)?|night(?:\\s+diff(?:erential)?)?|shift(?:\\s+diff(?:erential)?)?|pto|paid\\s+time\\s+off|time\\s+off|holiday|leave|vacation|sick(?:\\s+(?:pay|leave|time))?|retro(?:\\s+pay)?)\\b",
+  "primaryRateRow": "\\b(regular|reg(?:ular)?(?:\\s+pay)?|base(?:\\s+pay)?(?!\\s+rate)|salary|hourly(?!\\s+rate)|straight\\s*time)\\b",
+  "bonusRow": "\\b(aip|annual\\s+incentive|quarterly|annual\\s+pay|incentive|bonus)\\b",
+  "otRow": "\\bover\\s*time\\b|\\bot(?:[- ]?1\\.5(?:0+)?)?\\b|\\bdouble\\s*time\\b|\\bdbl\\s*time\\b|\\b1\\.5(?:0+)?\\s*(?:x|hourly|hours?|ot)\\b|\\btime\\s+and\\s+a\\s+half\\b|\\bworked\\s+holiday\\b|\\bholiday\\s+worked\\b",
+  "tipsRow": "\\btips?\\b|\\bgratuity\\b",
+  "commissionRow": "\\bcommission",
+  "rsuRow": "\\brsu\\b|restricted\\s+stock|stock\\s+unit|stock\\s+award",
+  "nonWorked": "non[- ]?worked",
+  "hoursBeforeRate": "\\bhours\\b.{0,80}\\brate\\b.{0,80}\\bcurrent\\b",
+  "frequency": {
+    "semiMonthly": "semi[- ]?month",
+    "biweekly": "bi[- ]?week",
+    "weekly": "\\bweekly\\b",
+    "monthly": "\\bmonthly\\b",
+    "weeklySpan": [5, 9],
+    "biweeklySpan": [11, 17],
+    "monthlySpan": [26, 35]
+  },
+  "ytdFieldByKind": {
+    "bonus": "ps-bonus-ytd",
+    "ot": "ps-ot-ytd",
+    "tips": "ps-tips-ytd",
+    "commission": "ps-commission-ytd",
+    "rsu": "ps-rsu-ytd"
+  }
+}

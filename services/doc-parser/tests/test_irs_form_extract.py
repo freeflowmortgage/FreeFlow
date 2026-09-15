@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,11 +14,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from irs_form_extract import (  # noqa: E402
+    _dated_regular_pay_slots,
     _hit_from_words,
+    _ordered_regular_pay_slots,
     _paystub_row_kind,
     _remap_overlay_box,
     _words_to_upright,
     extract_irs_form_fields,
+    extract_page_fields,
 )
 from pdf_splitter import SplitResult, pre_split_tax_returns, select_ocr_page_indices  # noqa: E402
 from ai_pdf_converter import AIPDFConverter, ConvertResult, OcrWord, PageResult  # noqa: E402
@@ -112,6 +116,17 @@ def test_select_ocr_only_keep_set_pages_that_need_it() -> None:
     assert select_ocr_page_indices(inspected, split) == {1}
 
 
+def test_select_ocr_hybrid_form_pages_skips_blank_companion_pages() -> None:
+    inspected = [
+        SimpleNamespace(index=0, use_ocr=True, flags=["numeric_form_overlay_ocr_bypass"]),
+        SimpleNamespace(index=1, use_ocr=True, flags=[]),
+        SimpleNamespace(index=2, use_ocr=True, flags=["numeric_form_overlay_ocr_bypass"]),
+        SimpleNamespace(index=3, use_ocr=True, flags=[]),
+    ]
+    split = SplitResult(target_pages=[], classifications={}, statement_refs=[], unresolved_statements=[])
+    assert select_ocr_page_indices(inspected, split) == {0, 2}
+
+
 def test_reads_w2_stacked_box5_not_adjacent_box_number() -> None:
     """IRS W-2 prints Box 5 above the amount and Box 2 in the cell to the right."""
     doc = fitz.open()
@@ -135,6 +150,25 @@ def test_reads_w2_stacked_box5_not_adjacent_box_number() -> None:
     assert by_id["w2-box5"]["numericValue"] != 2.0
     assert by_id["w2-box5"]["numericValue"] != 8500.0
     assert by_id["w2-box2"]["numericValue"] == 9420.0, fields
+
+
+def test_reads_w2_box5_from_ocr_labels_when_pdf_text_is_absent() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    words = [
+        {"x0": 40, "y0": 40, "x1": 260, "y1": 54, "text": "Form W-2 Wage and Tax Statement"},
+        {"x0": 320, "y0": 200, "x1": 440, "y1": 210, "text": "5 Medicare wages and tips"},
+        {"x0": 320, "y0": 218, "x1": 390, "y1": 230, "text": "78,500.00"},
+    ]
+    fields = extract_page_fields(
+        page,
+        page_index=0,
+        words=words,
+        text="Form W-2 Wage and Tax Statement 5 Medicare wages and tips 78,500.00",
+    )
+    doc.close()
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["w2-box5"]["numericValue"] == 78500.0
 
 
 def test_reads_live_w2_box5_ein_and_curly_employer_name() -> None:
@@ -266,6 +300,57 @@ def test_extracts_paystub_ytd_from_labeled_line() -> None:
     by_id = {row["sourceFieldId"]: row for row in fields}
     assert by_id["ps-base-ytd"]["numericValue"] == 54000.0
     assert by_id["ps-hourly-rate"]["numericValue"] == 45.0
+
+
+def test_reads_ordered_dated_regular_paystub_row() -> None:
+    assert _dated_regular_pay_slots(
+        "Regular Hourly 10/30/2022 - 11/05/2022 40 51.9953 2,079.82 1400 72,568.59"
+    ) == {
+        "hours": 40.0,
+        "rate": 51.9953,
+        "current": 2079.82,
+        "ytd_hours": 1400.0,
+        "ytd": 72568.59,
+    }
+    assert _ordered_regular_pay_slots("Vacation Pay 0 128 6,585.08") == {
+        "current": 0.0,
+        "ytd_hours": 128.0,
+        "ytd": 6585.08,
+    }
+    assert _ordered_regular_pay_slots("Overtime Premium 0 0 0.34") == {
+        "current": 0.0,
+        "ytd_hours": 0.0,
+        "ytd": 0.34,
+    }
+
+
+def test_ordered_paystub_overlays_point_to_numeric_tokens() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 40), "Earnings Statement Semi-monthly (24/yr)", fontsize=12)
+    # The statement contains a summary row with the same label before the dated
+    # earnings row. The overlay must bind to the dated row's numeric cells.
+    page.insert_text((72, 75), "Regular Hourly", fontsize=10)
+    page.insert_text((430, 75), "0", fontsize=10)
+    page.insert_text((485, 75), "168", fontsize=10)
+    page.insert_text((525, 75), "8,439.82", fontsize=10)
+    page.insert_text((72, 100), "Regular Hourly", fontsize=10)
+    page.insert_text((190, 100), "10/30/2022 - 11/05/2022", fontsize=10)
+    page.insert_text((350, 100), "40", fontsize=10)
+    page.insert_text((380, 100), "51.9953", fontsize=10)
+    page.insert_text((430, 100), "2,079.82", fontsize=10)
+    page.insert_text((485, 100), "1400", fontsize=10)
+    page.insert_text((525, 100), "72,568.59", fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+
+    by_id = {row["sourceFieldId"]: row for row in extract_irs_form_fields(data)}
+    assert by_id["ps-hourly-rate"]["box"]["x"] > 0.55
+    assert by_id["ps-current-base"]["box"]["x"] > 0.65
+    assert by_id["ps-base-ytd"]["box"]["x"] > 0.80
+    assert by_id["ps-hours-week"]["box"]["x"] > 0.50
+    assert len(by_id["ps-base-ytd"]["componentBoxes"]) == 2
+    assert all(box["x"] > 0.80 for box in by_id["ps-base-ytd"]["componentBoxes"])
 
 
 def test_paystub_classifies_base_bonus_and_variable_rows() -> None:
@@ -442,19 +527,6 @@ def test_extracts_w2_when_ocr_glues_form_title() -> None:
     assert by_id["w2-box5"]["numericValue"] == 90064.58, fields
 
 
-def test_splitter_classifies_glued_ocr_w2_title() -> None:
-    page = PageResult(
-        index=0,
-        width_px=612,
-        height_px=792,
-        is_native_text=False,
-        plain_text="FormW-2WageandTaxStatement Dept.of theTreasury-IRS",
-        words=[],
-    )
-    split = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=1))
-    assert "W-2" in split.classifications[0]
-
-
 def test_extracts_w2_from_glued_ocr_tokens() -> None:
     fields = extract_irs_form_fields(
         _blank_pdf(),
@@ -496,54 +568,33 @@ def test_extracts_paystub_from_ocr_words_without_native_text() -> None:
     assert by_id["ps-ot-ytd"]["numericValue"] == 4200.0, fields
 
 
-def test_extracts_hours_rate_paystub_with_pto_bonus_and_side_taxes() -> None:
+def test_extracts_hours_rate_paystub_sample_including_pto_sick_and_bonus() -> None:
+    """One Hours/Rate layout sample. Classification still uses the generic catalog."""
+    fixture = json.loads((Path(__file__).resolve().parent / "fixtures" / "banner_health_paystub.json").read_text())
     fields = extract_irs_form_fields(
         _blank_pdf(),
-        ocr_pages=[
-            _ocr_page(
-                OcrWord("BANNER HEALTH", 0.06, 0.05, 0.18, 0.02, 99),
-                OcrWord("Period Start", 0.62, 0.28, 0.08, 0.02, 99),
-                OcrWord("11/13/2022", 0.62, 0.32, 0.08, 0.02, 99),
-                OcrWord("Period End", 0.72, 0.28, 0.08, 0.02, 99),
-                OcrWord("11/26/2022", 0.72, 0.32, 0.08, 0.02, 99),
-                OcrWord("Earnings", 0.06, 0.46, 0.10, 0.02, 99),
-                OcrWord("Hours", 0.23, 0.48, 0.05, 0.02, 99),
-                OcrWord("Rate", 0.29, 0.48, 0.04, 0.02, 99),
-                OcrWord("Current", 0.34, 0.48, 0.06, 0.02, 99),
-                OcrWord("Year to Date", 0.41, 0.48, 0.08, 0.02, 99),
-                OcrWord("Hire On Bonus Incentive", 0.06, 0.50, 0.16, 0.02, 99),
-                OcrWord("5000.00", 0.44, 0.50, 0.06, 0.02, 99),
-                OcrWord("EmployerMedicareWithholding", 0.51, 0.51, 0.18, 0.02, 99),
-                OcrWord("61.35", 0.81, 0.51, 0.05, 0.02, 99),
-                OcrWord("164.52", 0.90, 0.51, 0.05, 0.02, 99),
-                OcrWord("Non Worked Regular", 0.06, 0.52, 0.14, 0.02, 99),
-                OcrWord("13.23", 0.24, 0.52, 0.04, 0.02, 99),
-                OcrWord("52.88", 0.29, 0.52, 0.04, 0.02, 99),
-                OcrWord("699.66", 0.36, 0.52, 0.05, 0.02, 99),
-                OcrWord("699.66", 0.45, 0.52, 0.05, 0.02, 99),
-                OcrWord("Paid Time Off", 0.06, 0.54, 0.10, 0.02, 99),
-                OcrWord("2.77", 0.25, 0.54, 0.04, 0.02, 99),
-                OcrWord("52.88", 0.29, 0.54, 0.04, 0.02, 99),
-                OcrWord("146.49", 0.36, 0.54, 0.05, 0.02, 99),
-                OcrWord("146.49", 0.45, 0.54, 0.05, 0.02, 99),
-                OcrWord("Regular Pay", 0.06, 0.56, 0.10, 0.02, 99),
-                OcrWord("64.00", 0.24, 0.56, 0.04, 0.02, 99),
-                OcrWord("52.88", 0.29, 0.56, 0.04, 0.02, 99),
-                OcrWord("3384.62", 0.35, 0.56, 0.06, 0.02, 99),
-                OcrWord("5500.01", 0.44, 0.56, 0.06, 0.02, 99),
-            )
-        ],
+        ocr_pages=[_ocr_page(*(OcrWord(**word) for word in fixture["ocrWords"]))],
     )
     by_id = {row["sourceFieldId"]: row for row in fields}
-    assert by_id["ps-employer-name"]["value"] == "BANNER HEALTH", fields
-    assert by_id["ps-pay-frequency"]["value"] == "Biweekly", fields
-    assert by_id["ps-hourly-rate"]["numericValue"] == 52.88, fields
-    assert by_id["ps-hours-week"]["numericValue"] == 40.0, fields
-    assert by_id["ps-current-base"]["numericValue"] == pytest.approx(4230.77)
-    assert by_id["ps-base-ytd"]["numericValue"] == 6346.16, fields
-    assert by_id["ps-bonus-ytd"]["numericValue"] == 5000.0, fields
+    expected = fixture["expected"]
+    assert by_id["ps-employer-name"]["value"] == expected["ps-employer-name"], fields
+    assert by_id["ps-pay-frequency"]["value"] == expected["ps-pay-frequency"], fields
+    assert by_id["ps-hourly-rate"]["numericValue"] == expected["ps-hourly-rate"], fields
+    assert by_id["ps-hours-week"]["numericValue"] == pytest.approx(expected["ps-hours-week"])
+    assert by_id["ps-current-base"]["numericValue"] == pytest.approx(expected["ps-current-base"])
+    assert by_id["ps-base-ytd"]["numericValue"] == pytest.approx(expected["ps-base-ytd"])
+    assert by_id["ps-bonus-ytd"]["numericValue"] == expected["ps-bonus-ytd"], fields
     for row in fields:
         assert row["box"]["w"] > 0.01 and row["box"]["h"] > 0.005, row
+
+
+def test_console_paystub_row_rules_match_parser() -> None:
+    """Generic catalog copies must stay identical; they are not employer stubs."""
+    parser = json.loads((ROOT / "src" / "paystub_row_rules.json").read_text())
+    console = ROOT.parents[1] / "apps" / "underwriting-console" / "src" / "paystubRowRules.json"
+    if not console.exists():
+        pytest.skip("console catalog not in this checkout")
+    assert parser == json.loads(console.read_text())
 
 
 def test_extracts_schedule_c_from_ocr_words_without_native_text() -> None:

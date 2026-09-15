@@ -20,6 +20,8 @@ import type { MappedIncomeField } from './parseTypes';
 export type HydratedW2Seed = {
   id: string;
   rosterId?: string;
+  /** Source PDFs that contributed fields to this employer. */
+  documentIds: string[];
   employerName: string;
   ein: string;
   role: 'PRIMARY' | 'SECONDARY';
@@ -75,6 +77,8 @@ function unusedWageDocs(result: LocateResult, allFields: MappedIncomeField[]): M
 }
 
 function wageDocsForEmployer(docs: MappedIncomeField[], employerName: string): MappedIncomeField[] {
+  // Page indexes restart at zero for every uploaded PDF. Keep the document ID in
+  // the key so page 1 of an unrelated paystub cannot be folded into this employer.
   const pages = new Set(
     docs
       .filter(
@@ -82,10 +86,14 @@ function wageDocsForEmployer(docs: MappedIncomeField[], employerName: string): M
           (field.sourceFieldId === 'ps-employer-name' || field.id === 'ps-employer-name') &&
           namesMatch(field.value, employerName),
       )
-      .map((field) => field.pageIndex),
+      .map((field) => `${field.documentId ?? ''}:${field.pageIndex}`),
   );
-  if (pages.size) return docs.filter((field) => pages.has(field.pageIndex));
+  if (pages.size) return docs.filter((field) => pages.has(`${field.documentId ?? ''}:${field.pageIndex}`));
   return [];
+}
+
+function sourceDocumentIds(fields: MappedIncomeField[]): string[] {
+  return [...new Set(fields.map((field) => field.documentId).filter((id): id is string => Boolean(id)))];
 }
 
 export function seedW2FromLocation(
@@ -122,6 +130,7 @@ export function seedW2FromLocation(
     current.push({
       id: row.entity.id,
       rosterId: row.entity.id,
+      documentIds: sourceDocumentIds([...w2Matches.flatMap((match) => match.fields), ...extras]),
       employerName: patch?.employerName || row.entity.name,
       ein: patch?.ein || row.entity.ein || '',
       role: row.entity.classification === 'Secondary' ? 'SECONDARY' : 'PRIMARY',
@@ -143,6 +152,7 @@ export function seedW2FromLocation(
     const patch = liveWagePatch([...fields, ...extras]);
     current.push({
       id,
+      documentIds: sourceDocumentIds([...fields, ...extras]),
       employerName: patch?.employerName || matches[0]?.name || 'Employer on return',
       ein: patch?.ein || matches[0]?.ein || '',
       role: current.some((item) => item.role === 'PRIMARY') ? 'SECONDARY' : 'PRIMARY',

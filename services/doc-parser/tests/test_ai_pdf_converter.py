@@ -41,11 +41,72 @@ def test_content_stream_amounts_skip_ocr() -> None:
     assert "irs_searchable_mask_bypass" not in inspected[0].flags
 
 
+def test_empty_native_acroform_skips_ocr_and_false_values() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 72), "Form 1040 Department of the Treasury Internal Revenue Service", fontsize=11)
+    page.insert_text((72, 96), "U.S. Individual Income Tax Return", fontsize=11)
+    widget = fitz.Widget()
+    widget.rect = fitz.Rect(320, 190, 460, 212)
+    widget.field_name = "line_1z"
+    widget.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+    page.add_widget(widget)
+    data = doc.tobytes()
+    doc.close()
+
+    inspected = AIPDFConverter().inspect_pages(data)
+
+    assert inspected[0].use_ocr is False
+    assert inspected[0].fields == []
+    assert "blank_acroform_native_text" in inspected[0].flags
+
+
+def test_irs_native_page_without_widgets_still_requests_ocr() -> None:
+    inspected = AIPDFConverter().inspect_pages(_chrome_pdf())
+    assert inspected[0].use_ocr is True
+    assert "blank_acroform_native_text" not in inspected[0].flags
+
+
+def test_k1_code_reference_page_skips_ocr() -> None:
+    text = (
+        "Schedule K-1 (Form 1041) 2024 Page 2 "
+        "This list identifies the codes used on Schedule K-1 for beneficiaries "
+        "and provides summarized reporting information for beneficiaries."
+    )
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is False
+    assert "irs_reference_native_text" in flags
+
+
 def test_numeric_form_overlay_requests_ocr_for_form_labels() -> None:
     text = "value " * 80 + " 12,000.00 13,000.00 14,000.00 15,000.00"
     use_ocr, flags = AIPDFConverter._page_strategy(text, [])
     assert use_ocr is True
     assert "numeric_form_overlay_ocr_bypass" in flags
+
+
+def test_label_rich_numeric_page_preserves_native_text() -> None:
+    text = (
+        "Tax return comparison income deductions adjusted gross exemptions credits payments "
+        "filing status taxpayer identification federal state charitable contribution worksheet "
+        "current prior difference calendar schedule attachment "
+        + "supporting detail " * 20
+        + " 12,000.00 13,000.00 14,000.00 15,000.00"
+    )
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is False
+    assert "label_rich_native_text" in flags
+    assert "numeric_form_overlay_ocr_bypass" not in flags
+
+
+def test_native_paystub_table_skips_lossy_ocr() -> None:
+    text = (
+        "Earnings Statement Pay Period Regular Hourly 10/30/2022 - 11/05/2022 "
+        "40 51.9953 2,079.82 1400 72,568.59 Employee Taxes " + "detail " * 50
+    )
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is False
+    assert "paystub_native_text" in flags
 
 
 def test_ocr_page_text_includes_native_overlay_and_ocr_labels() -> None:

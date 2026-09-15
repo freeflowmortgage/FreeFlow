@@ -125,6 +125,9 @@ resource "aws_lb" "portal" {
   subnets                    = var.public_subnet_ids
   drop_invalid_header_fields = true
   enable_deletion_protection = false
+  # Preserve enough connection time for bounded synchronous document parsing.
+  # Moving parser work behind an asynchronous job boundary remains the target.
+  idle_timeout = 180
 }
 
 resource "aws_security_group" "authenticated_alb" {

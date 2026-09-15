@@ -23,6 +23,10 @@ MAX_PDF_BYTES = 40 * 1024 * 1024
 MAX_PAGES = 150
 RENDER_DPI = 300
 NATIVE_TEXT_CHARS = 40
+# Pages with a real readable native layer have varied form-label vocabulary.
+# Value-only overlays (the failure mode this gate is meant to rescue) contain
+# mostly names, addresses, IDs, and repeated amounts instead.
+NATIVE_LABEL_VOCABULARY_MIN = 20
 LOW_CONFIDENCE = 55.0
 DESKEW_MAX_DEGREES = 15.0
 DESKEW_DEADZONE_DEGREES = 0.8
@@ -41,6 +45,15 @@ _CONTENT_AMOUNT = re.compile(
     r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?|"
     r"\(\s*\d{1,3}(?:,\d{3})+|"
     r"\d+\.\d{2}"
+)
+_NATIVE_PAYSTUB = re.compile(
+    r"earnings statement|pay\s+(?:statement|advice|period)|regular\s+(?:hourly|pay)|"
+    r"employee taxes|year[- ]to[- ]date\s+(?:earnings|gross)",
+    re.IGNORECASE,
+)
+_IRS_REFERENCE_PAGE = re.compile(
+    r"This list identifies the codes used on Schedule K-1",
+    re.IGNORECASE,
 )
 
 
@@ -270,9 +283,10 @@ class AIPDFConverter:
                 except Exception:
                     text = ""
                 rotation = int(getattr(page, "rotation", 0) or 0) % 360
+                has_widgets = self._has_form_widgets(page)
                 fields = self._widget_words(page)
                 filled = [word for word in fields if word.text.strip()]
-                use_ocr, page_flags = self._page_strategy(text, filled)
+                use_ocr, page_flags = self._page_strategy(text, filled, has_widgets=has_widgets)
                 if filled:
                     page_flags.append("acroform_merged")
                 pages.append(
@@ -291,7 +305,12 @@ class AIPDFConverter:
                 reader.close()
 
     @staticmethod
-    def _page_strategy(text: str, filled_fields: list[OcrWord]) -> tuple[bool, list[str]]:
+    def _page_strategy(
+        text: str,
+        filled_fields: list[OcrWord],
+        *,
+        has_widgets: bool = False,
+    ) -> tuple[bool, list[str]]:
         stripped = text.strip()
         has_amounts = bool(_CONTENT_AMOUNT.search(stripped))
         amount_count = len(_CONTENT_AMOUNT.findall(stripped))
@@ -299,12 +318,32 @@ class AIPDFConverter:
         flags: list[str] = []
         if filled_fields:
             return False, flags
+        # Official IRS PDFs are native-text AcroForms. When their widgets are
+        # empty, OCR only rereads printed line and box numbers as if they were
+        # borrower values. Preserve the authoritative native layer and avoid a
+        # costly, lower-integrity OCR pass. Flattened/scanned forms have no
+        # widgets and continue through the normal OCR decision path.
+        if has_widgets and len(stripped) >= NATIVE_TEXT_CHARS:
+            flags.append("blank_acroform_native_text")
+            return False, flags
+        if len(stripped) >= NATIVE_TEXT_CHARS and _IRS_REFERENCE_PAGE.search(stripped):
+            flags.append("irs_reference_native_text")
+            return False, flags
         if has_amounts:
+            # A digitally generated paystub already contains higher-integrity
+            # ordered text. OCR would be slower and can scramble table columns.
+            if _NATIVE_PAYSTUB.search(stripped):
+                flags.append("paystub_native_text")
+                return False, flags
             # Some scanned tax forms have only their filled values encoded as
             # native text. OCR them so the form labels and layout are available
             # to the classifier instead of treating the numeric overlay as a
             # complete searchable document.
             if not irs_chrome and len(stripped) >= 400 and amount_count >= 4:
+                label_vocabulary = set(re.findall(r"[A-Za-z]{4,}", stripped.casefold()))
+                if len(label_vocabulary) >= NATIVE_LABEL_VOCABULARY_MIN:
+                    flags.append("label_rich_native_text")
+                    return False, flags
                 flags.append("numeric_form_overlay_ocr_bypass")
                 return True, flags
             return False, flags
@@ -313,6 +352,30 @@ class AIPDFConverter:
         if irs_chrome and len(stripped) >= NATIVE_TEXT_CHARS:
             flags.append("irs_searchable_mask_bypass")
         return True, flags
+
+    @staticmethod
+    def _has_form_widgets(page: Any) -> bool:
+        """Return True only for AcroForm widgets, not links or annotations."""
+        annots = None
+        try:
+            annots = page.annotations
+        except Exception:
+            annots = None
+        if annots is None:
+            try:
+                annots = page.get("/Annots")
+            except Exception:
+                annots = None
+        for annot in annots or []:
+            try:
+                data = annot.get_object() if hasattr(annot, "get_object") else annot
+                if str(data.get("/Subtype") or "") in {"/Widget", "Widget"}:
+                    return True
+                if data.get("/FT") is not None:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _widget_words(self, page: Any) -> list[OcrWord]:
         words: list[OcrWord] = []
@@ -433,6 +496,29 @@ class AIPDFConverter:
             del bgr
 
         words, mean_conf = self._ocr_numpy(gray)
+        ocr_text = " ".join(row["text"] for row in words).casefold()
+        # A scan can be stored upright as a PDF page while the W-2 itself is
+        # rotated 90 degrees inside it. Retry only W-2-like OCR that is missing
+        # the Medicare label; a complete page avoids this extra OCR pass.
+        orientation_score = self._w2_label_score(words)
+        vertical_rows = self._vertical_ocr_row_count(words)
+        if (orientation_score < 3 and "wages" in ocr_text) or vertical_rows >= max(4, len(words) // 6):
+            best_rank = (orientation_score, -vertical_rows)
+            for turns in (1, 3):
+                rotated_rows, rotated_conf = self._ocr_numpy(np.rot90(gray, turns))
+                candidate_score = self._w2_label_score(rotated_rows)
+                candidate_rank = (candidate_score, -self._vertical_ocr_row_count(rotated_rows))
+                if candidate_rank <= best_rank:
+                    continue
+                words = self._unrotate_quarter_turn_rows(rotated_rows, width=gray.shape[1], height=gray.shape[0], turns=turns)
+                mean_conf = rotated_conf
+                orientation_score = candidate_score
+                best_rank = candidate_rank
+                page_flags.append(f"w2_orientation_retry_{turns * 90}")
+                # A readable horizontal W-2 label set is decisive.  Do not
+                # spend another full OCR pass trying the opposite rotation.
+                if candidate_score >= 3 and candidate_rank[1] == 0:
+                    break
         used_binarization = False
 
         if photo and mean_conf < LOW_CONFIDENCE:
@@ -839,6 +925,47 @@ class AIPDFConverter:
                 continue
             ones = np.ones((box.shape[0], 1), dtype=np.float32)
             mapped = (matrix @ np.hstack([box[:, :2], ones]).T).T
+            restored.append({**row, "box": mapped})
+        return restored
+
+    @staticmethod
+    def _w2_label_score(rows: list[dict[str, Any]]) -> int:
+        text = " ".join(row["text"] for row in rows).casefold()
+        return sum(token in text for token in ("wage", "social security", "medicare", "tax statement", "form w-2"))
+
+    @staticmethod
+    def _vertical_ocr_row_count(rows: list[dict[str, Any]]) -> int:
+        count = 0
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                continue
+            width = float(box[:, 0].max() - box[:, 0].min())
+            height = float(box[:, 1].max() - box[:, 1].min())
+            if height > max(1.0, width * 2.0):
+                count += 1
+        return count
+
+    @staticmethod
+    def _unrotate_quarter_turn_rows(
+        rows: list[dict[str, Any]],
+        *,
+        width: int,
+        height: int,
+        turns: int,
+    ) -> list[dict[str, Any]]:
+        """Map OCR boxes from numpy.rot90 image coordinates to the original page."""
+        restored: list[dict[str, Any]] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                restored.append(row)
+                continue
+            x, y = box[:, 0].copy(), box[:, 1].copy()
+            if turns == 1:  # counter-clockwise
+                mapped = np.column_stack((width - 1 - y, x))
+            else:  # clockwise
+                mapped = np.column_stack((y, height - 1 - x))
             restored.append({**row, "box": mapped})
         return restored
 

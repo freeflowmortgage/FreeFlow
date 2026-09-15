@@ -4,6 +4,9 @@ import type {
   ParseResponse,
   ParseWord
 } from '../../../apps/underwriting-console/src/parseTypes';
+import parserPaystubRules from '../../../services/doc-parser/src/paystub_row_rules.json';
+import consolePaystubRules from '../../../apps/underwriting-console/src/paystubRowRules.json';
+import bannerHealthPaystub from '../../../services/doc-parser/tests/fixtures/banner_health_paystub.json';
 
 // The engine package intentionally omits DOM libs; this parser-model test only
 // needs the name used by LiveParseSession, not browser File behavior.
@@ -371,7 +374,11 @@ describe('entity-scoped income field mapping', () => {
     expect(fields.some((field) => field.numericValue === 9999 || field.numericValue === 8888)).toBe(false);
   });
 
-  test('maps Hours/Rate Banner-style rows including PTO, sick-as-base, and biweekly dates', () => {
+  test('keeps parser and console generic paystub catalogs identical', () => {
+    expect(consolePaystubRules).toEqual(parserPaystubRules);
+  });
+
+  test('maps a generic Hours/Rate stub sample including PTO, sick-as-base, and biweekly dates', () => {
     const fields = mapIncomeFields(
       response([
         {
@@ -381,27 +388,18 @@ describe('entity-scoped income field mapping', () => {
           meanConfidence: 99,
           skewDegrees: 0,
           flags: [],
-          words: words([
-            'BANNER HEALTH',
-            'Period Start 11/13/2022 Period End 11/26/2022',
-            'Earnings Hours Rate Current Year to Date',
-            'Hire On Bonus Incentive 5000.00',
-            'EmployerMedicareWithholding 61.35 164.52',
-            'Non Worked Regular 13.23 52.88 699.66 699.66',
-            'Paid Time Off 2.77 52.88 146.49 146.49',
-            'Sick 4.00 52.88 211.52 211.52',
-            'Regular Pay 64.00 52.88 3384.62 5500.01',
-          ]),
+          words: words(bannerHealthPaystub.lines),
         },
       ]),
     );
-    expect(fields.find((field) => field.sourceFieldId === 'ps-employer-name')?.value).toBe('BANNER HEALTH');
-    expect(fields.find((field) => field.sourceFieldId === 'ps-pay-frequency')?.value).toBe('Biweekly');
-    expect(fields.find((field) => field.sourceFieldId === 'ps-hourly-rate')?.numericValue).toBe(52.88);
-    expect(fields.find((field) => field.sourceFieldId === 'ps-hours-week')?.numericValue).toBeCloseTo(42, 5);
-    expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBeCloseTo(4442.29, 2);
-    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBeCloseTo(6557.68, 2);
-    expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(5000);
+    const expected = bannerHealthPaystub.expected;
+    expect(fields.find((field) => field.sourceFieldId === 'ps-employer-name')?.value).toBe(expected['ps-employer-name']);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-pay-frequency')?.value).toBe(expected['ps-pay-frequency']);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hourly-rate')?.numericValue).toBe(expected['ps-hourly-rate']);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hours-week')?.numericValue).toBeCloseTo(expected['ps-hours-week'], 5);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBeCloseTo(expected['ps-current-base'], 2);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBeCloseTo(expected['ps-base-ytd'], 2);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(expected['ps-bonus-ytd']);
   });
 
   test('classifies OT, double time, 1.5 hourly, and worked holiday as overtime', () => {

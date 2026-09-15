@@ -79,11 +79,15 @@ resource "aws_security_group" "console_aws_endpoints" {
   vpc_id      = data.aws_vpc.existing.id
 
   ingress {
-    description     = "HTTPS from underwriting console and portal"
-    protocol        = "tcp"
-    from_port       = 443
-    to_port         = 443
-    security_groups = [aws_security_group.console[0].id, var.app_security_group_id]
+    description = "HTTPS from underwriting console, portal, and income parser"
+    protocol    = "tcp"
+    from_port   = 443
+    to_port     = 443
+    security_groups = [
+      aws_security_group.console[0].id,
+      var.app_security_group_id,
+      aws_security_group.parser.id,
+    ]
   }
 }
 

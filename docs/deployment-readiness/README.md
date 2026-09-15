@@ -15,6 +15,7 @@ tests.
 
 | Document | Purpose |
 |---|---|
+| [PR15-REGRESSION-AUDIT-2026-09-14.md](PR15-REGRESSION-AUDIT-2026-09-14.md) | PR 15 comparison, retained/fixed behavior, supplied-document evidence, and local acceptance checklist |
 | [SECURITY-ASSESSMENT.md](SECURITY-ASSESSMENT.md) | Adversarial findings and release gates |
 | [SECURITY-SPEC.md](SECURITY-SPEC.md) | Required production security controls and threat model |
 | [BACKEND-API-SPEC.md](BACKEND-API-SPEC.md) | Authentication, tenancy, API, job, error, and audit contracts |
@@ -26,10 +27,12 @@ tests.
 | [STAGING-FOUNDATION-2026-09-09.md](STAGING-FOUNDATION-2026-09-09.md) | Separate-account staging access and Terraform-state foundation evidence |
 | [DEV-BASELINE-VERIFICATION-2026-09-09.md](DEV-BASELINE-VERIFICATION-2026-09-09.md) | Current synthetic-dev service, digest, and target-health baseline |
 | [DEV-PORTAL-ROLLOUT-2026-09-09.md](DEV-PORTAL-ROLLOUT-2026-09-09.md) | Current portal rollout evidence; explicitly incomplete pending ECS provisioning |
+| [DEV-PARSER-CONSOLE-ROLLOUT-2026-09-14.md](DEV-PARSER-CONSOLE-ROLLOUT-2026-09-14.md) | Immutable parser/console image rollout, Terraform scope, ECR scans, ECS health, and synthetic smoke evidence |
 | [RUNBOOKS.md](RUNBOOKS.md) | Deployment, rollback, incident, restore, rotation, and vulnerability procedures |
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
 | [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
 | [GO-LIVE-MAP.md](GO-LIVE-MAP.md) | Integration go-live instructions: RapidOCR, MISMO, Encompass web/desktop, appraisal, billing, identity |
+| [ADVERSARIAL-DOCUMENT-QUALIFICATION.md](ADVERSARIAL-DOCUMENT-QUALIFICATION.md) | Exact-value OCR/parser release gate for every admitted document type and hostile scan variant |
 
 ## Non-negotiable invariants
 
