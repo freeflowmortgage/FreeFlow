@@ -81,9 +81,12 @@ class PageResult:
     flags: list[str] = field(default_factory=list)
 
     def text(self) -> str:
-        if self.plain_text.strip():
-            return self.plain_text
-        return " ".join(word.text for word in self.words if word.text)
+        word_text = " ".join(word.text for word in self.words if word.text)
+        # OCR pages can retain a native value overlay. Keep that evidence, but
+        # include the OCR labels so form classification sees the rendered form.
+        if not self.is_native_text and word_text:
+            return " ".join(part for part in (self.plain_text.strip(), word_text) if part)
+        return self.plain_text.strip() or word_text
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -288,11 +291,19 @@ class AIPDFConverter:
     def _page_strategy(text: str, filled_fields: list[OcrWord]) -> tuple[bool, list[str]]:
         stripped = text.strip()
         has_amounts = bool(_CONTENT_AMOUNT.search(stripped))
+        amount_count = len(_CONTENT_AMOUNT.findall(stripped))
         irs_chrome = bool(_IRS_CHROME.search(stripped))
         flags: list[str] = []
         if filled_fields:
             return False, flags
         if has_amounts:
+            # Some scanned tax forms have only their filled values encoded as
+            # native text. OCR them so the form labels and layout are available
+            # to the classifier instead of treating the numeric overlay as a
+            # complete searchable document.
+            if not irs_chrome and len(stripped) >= 400 and amount_count >= 4:
+                flags.append("numeric_form_overlay_ocr_bypass")
+                return True, flags
             return False, flags
         if len(stripped) >= NATIVE_TEXT_CHARS and not irs_chrome:
             return False, flags

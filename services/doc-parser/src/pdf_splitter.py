@@ -78,6 +78,19 @@ SUPPLEMENTAL_RULES = {
     ),
 }
 
+# A W-2 back/instruction page can repeat the form title but contains none of
+# the numbered wage/tax cells. Do not send it to extraction merely because its
+# header OCR says "Form W-2".
+W2_FRONT_SIGNATURE = re.compile(
+    r"\b(?:Box\s*[1-6]|Wages[,\s]+tips|Medicare\s+wages|Social\s+security\s+wages|Federal\s+income\s+tax)\b",
+    re.IGNORECASE,
+)
+W2_BACK_SIGNATURE = re.compile(
+    r"\b(?:Instructions\s+for\s+(?:Employee|Employer)|Notice\s+to\s+Employee|"
+    r"For\s+use\s+in\s+preparing\s+your\s+income\s+tax\s+return)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class StatementRef:
@@ -140,6 +153,9 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
             continue
 
         matched = [name for name, pattern in CORE_RULES.items() if pattern.search(text)]
+        if "W-2" in matched and (W2_BACK_SIGNATURE.search(text) or not W2_FRONT_SIGNATURE.search(text)):
+            matched.remove("W-2")
+            logger.info("split_skip_w2_back index=%s", page.index)
         if "Schedule K-1" in matched:
             specific = [name for name in matched if name.startswith("Schedule K-1 (")]
             if specific:
