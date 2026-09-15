@@ -121,6 +121,11 @@ a typed error and never invokes a less trustworthy fallback. For long OCR, prefe
 a controlled fetch from Encompass by an isolated worker; do not place uploaded
 raw PDF bytes in SQS or object storage merely to make the call asynchronous.
 
+For W-2s, a page is eligible for W-2 extraction only when its OCR contains a
+front-page wage or tax-cell signature. A title-only back or instruction page is
+excluded before extraction; this filter does not alter normalized income values
+or underwriting calculations.
+
 ## Encompass synchronization state machine
 
 `APPROVED -> QUEUED -> IN_PROGRESS -> SUCCEEDED | RETRYABLE_FAILURE | FAILED`
