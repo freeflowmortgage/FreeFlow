@@ -207,6 +207,7 @@ resource "aws_ecs_task_definition" "console" {
         { name = "PORT", value = "3000" },
         { name = "HOST", value = "0.0.0.0" },
         { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080" },
+        { name = "DOC_PARSER_TIMEOUT_MS", value = "300000" },
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
         { name = "VITE_CACHE_DIR", value = "/tmp/freeflow/vite" },
         { name = "TMPDIR", value = "/tmp/freeflow" },
