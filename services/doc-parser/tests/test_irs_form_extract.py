@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import fitz
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -231,6 +232,7 @@ def test_extracts_paystub_regular_row_not_gross_ytd() -> None:
     assert by_id["ps-bonus-ytd"]["numericValue"] == 12500.0
     assert by_id["ps-hours-week"]["numericValue"] == 40.0
     assert by_id["ps-employer-name"]["value"] == "Hidden Payroll Inc"
+    assert by_id["ps-pay-frequency"]["value"] == "SemiMonthly"
 
 
 def test_reads_paystub_header_employer_and_pay_advice() -> None:
@@ -275,6 +277,7 @@ def test_paystub_classifies_base_bonus_and_variable_rows() -> None:
         (100, "Shift Differential", "1,200.00"),
         (120, "PTO", "2,000.00"),
         (140, "Holiday", "500.00"),
+        (150, "Sick", "800.00"),
         (160, "AIP", "4,000.00"),
         (180, "Bonus", "3,000.00"),
         (200, "Spot Bonus", "9,999.00"),
@@ -291,7 +294,7 @@ def test_paystub_classifies_base_bonus_and_variable_rows() -> None:
     doc.close()
     fields = extract_irs_form_fields(data)
     by_id = {row["sourceFieldId"]: row for row in fields}
-    assert by_id["ps-base-ytd"]["numericValue"] == 53700.0
+    assert by_id["ps-base-ytd"]["numericValue"] == 54500.0
     assert by_id["ps-bonus-ytd"]["numericValue"] == 7000.0
     assert by_id["ps-tips-ytd"]["numericValue"] == 1800.0
     assert by_id["ps-commission-ytd"]["numericValue"] == 6000.0
@@ -306,6 +309,10 @@ def test_paystub_classifies_ot_double_time_and_worked_holiday() -> None:
     assert _paystub_row_kind("1.5 Hourly") == "ot"
     assert _paystub_row_kind("Worked Holiday") == "ot"
     assert _paystub_row_kind("Holiday") == "regular"
+    assert _paystub_row_kind("Sick") == "regular"
+    assert _paystub_row_kind("Sick Pay") == "regular"
+    assert _paystub_row_kind("Sick Leave") == "regular"
+    assert _paystub_row_kind("Paid Time Off") == "regular"
 
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
@@ -487,6 +494,56 @@ def test_extracts_paystub_from_ocr_words_without_native_text() -> None:
     assert by_id["ps-current-base"]["numericValue"] == 3600.0, fields
     assert by_id["ps-base-ytd"]["numericValue"] == 54000.0, fields
     assert by_id["ps-ot-ytd"]["numericValue"] == 4200.0, fields
+
+
+def test_extracts_hours_rate_paystub_with_pto_bonus_and_side_taxes() -> None:
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("BANNER HEALTH", 0.06, 0.05, 0.18, 0.02, 99),
+                OcrWord("Period Start", 0.62, 0.28, 0.08, 0.02, 99),
+                OcrWord("11/13/2022", 0.62, 0.32, 0.08, 0.02, 99),
+                OcrWord("Period End", 0.72, 0.28, 0.08, 0.02, 99),
+                OcrWord("11/26/2022", 0.72, 0.32, 0.08, 0.02, 99),
+                OcrWord("Earnings", 0.06, 0.46, 0.10, 0.02, 99),
+                OcrWord("Hours", 0.23, 0.48, 0.05, 0.02, 99),
+                OcrWord("Rate", 0.29, 0.48, 0.04, 0.02, 99),
+                OcrWord("Current", 0.34, 0.48, 0.06, 0.02, 99),
+                OcrWord("Year to Date", 0.41, 0.48, 0.08, 0.02, 99),
+                OcrWord("Hire On Bonus Incentive", 0.06, 0.50, 0.16, 0.02, 99),
+                OcrWord("5000.00", 0.44, 0.50, 0.06, 0.02, 99),
+                OcrWord("EmployerMedicareWithholding", 0.51, 0.51, 0.18, 0.02, 99),
+                OcrWord("61.35", 0.81, 0.51, 0.05, 0.02, 99),
+                OcrWord("164.52", 0.90, 0.51, 0.05, 0.02, 99),
+                OcrWord("Non Worked Regular", 0.06, 0.52, 0.14, 0.02, 99),
+                OcrWord("13.23", 0.24, 0.52, 0.04, 0.02, 99),
+                OcrWord("52.88", 0.29, 0.52, 0.04, 0.02, 99),
+                OcrWord("699.66", 0.36, 0.52, 0.05, 0.02, 99),
+                OcrWord("699.66", 0.45, 0.52, 0.05, 0.02, 99),
+                OcrWord("Paid Time Off", 0.06, 0.54, 0.10, 0.02, 99),
+                OcrWord("2.77", 0.25, 0.54, 0.04, 0.02, 99),
+                OcrWord("52.88", 0.29, 0.54, 0.04, 0.02, 99),
+                OcrWord("146.49", 0.36, 0.54, 0.05, 0.02, 99),
+                OcrWord("146.49", 0.45, 0.54, 0.05, 0.02, 99),
+                OcrWord("Regular Pay", 0.06, 0.56, 0.10, 0.02, 99),
+                OcrWord("64.00", 0.24, 0.56, 0.04, 0.02, 99),
+                OcrWord("52.88", 0.29, 0.56, 0.04, 0.02, 99),
+                OcrWord("3384.62", 0.35, 0.56, 0.06, 0.02, 99),
+                OcrWord("5500.01", 0.44, 0.56, 0.06, 0.02, 99),
+            )
+        ],
+    )
+    by_id = {row["sourceFieldId"]: row for row in fields}
+    assert by_id["ps-employer-name"]["value"] == "BANNER HEALTH", fields
+    assert by_id["ps-pay-frequency"]["value"] == "Biweekly", fields
+    assert by_id["ps-hourly-rate"]["numericValue"] == 52.88, fields
+    assert by_id["ps-hours-week"]["numericValue"] == 40.0, fields
+    assert by_id["ps-current-base"]["numericValue"] == pytest.approx(4230.77)
+    assert by_id["ps-base-ytd"]["numericValue"] == 6346.16, fields
+    assert by_id["ps-bonus-ytd"]["numericValue"] == 5000.0, fields
+    for row in fields:
+        assert row["box"]["w"] > 0.01 and row["box"]["h"] > 0.005, row
 
 
 def test_extracts_schedule_c_from_ocr_words_without_native_text() -> None:

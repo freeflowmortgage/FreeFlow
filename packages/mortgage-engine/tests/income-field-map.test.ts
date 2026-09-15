@@ -326,6 +326,7 @@ describe('entity-scoped income field mapping', () => {
     expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-ot-ytd')?.numericValue).toBe(4200);
     expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(12500);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-pay-frequency')?.value).toBe('SemiMonthly');
   });
 
   test('adds shift/PTO/holiday/retro to base, bonus classifiers, and variable tips/commission/RSU', () => {
@@ -345,6 +346,7 @@ describe('entity-scoped income field mapping', () => {
             'Weekend Premium 20.00 800.00',
             'PTO 0.00 2,000.00',
             'Holiday 0.00 500.00',
+            'Sick 0.00 400.00',
             'Retro Pay 0.00 300.00',
             'AIP 0.00 4,000.00',
             'Quarterly 0.00 1,500.00',
@@ -360,13 +362,46 @@ describe('entity-scoped income field mapping', () => {
         },
       ]),
     );
-    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54800);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(55200);
     expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBe(3660);
     expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(11000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-tips-ytd')?.numericValue).toBe(1800);
     expect(fields.find((field) => field.sourceFieldId === 'ps-commission-ytd')?.numericValue).toBe(6000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-rsu-ytd')?.numericValue).toBe(7500);
     expect(fields.some((field) => field.numericValue === 9999 || field.numericValue === 8888)).toBe(false);
+  });
+
+  test('maps Hours/Rate Banner-style rows including PTO, sick-as-base, and biweekly dates', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: false,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words([
+            'BANNER HEALTH',
+            'Period Start 11/13/2022 Period End 11/26/2022',
+            'Earnings Hours Rate Current Year to Date',
+            'Hire On Bonus Incentive 5000.00',
+            'EmployerMedicareWithholding 61.35 164.52',
+            'Non Worked Regular 13.23 52.88 699.66 699.66',
+            'Paid Time Off 2.77 52.88 146.49 146.49',
+            'Sick 4.00 52.88 211.52 211.52',
+            'Regular Pay 64.00 52.88 3384.62 5500.01',
+          ]),
+        },
+      ]),
+    );
+    expect(fields.find((field) => field.sourceFieldId === 'ps-employer-name')?.value).toBe('BANNER HEALTH');
+    expect(fields.find((field) => field.sourceFieldId === 'ps-pay-frequency')?.value).toBe('Biweekly');
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hourly-rate')?.numericValue).toBe(52.88);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hours-week')?.numericValue).toBeCloseTo(42, 5);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBeCloseTo(4442.29, 2);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBeCloseTo(6557.68, 2);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(5000);
   });
 
   test('classifies OT, double time, 1.5 hourly, and worked holiday as overtime', () => {

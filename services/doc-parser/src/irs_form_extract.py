@@ -105,6 +105,7 @@ SCHEDULE_C_FIELDS = (
 
 PAYSTUB_FIELDS = (
     FieldSpec("ps-employer-name", "Paystub", "identity", "Employer", "Employer Name", "Employer", ("Employer", "Company"), "text"),
+    FieldSpec("ps-pay-frequency", "Paystub", "identity", "Frequency", "Pay Frequency", "Frequency", ("Pay frequency",), "text"),
     FieldSpec("ps-hourly-rate", "Paystub", "wages", "Rate", "Hourly Rate of Pay", "Rate", ("Hourly rate", "Rate of pay", "Base rate"), "money"),
     FieldSpec("ps-hours-week", "Paystub", "wages", "Hours", "Standard Weekly Hours", "Hours", ("Hr/Wk", "Hours / Wk", "Weekly hours"), "integer"),
     FieldSpec("ps-current-base", "Paystub", "wages", "Current", "Current Period Base Pay", "Current", ("Current period base", "This period regular"), "money"),
@@ -754,10 +755,18 @@ def _extract_spec(
     )
 
 
+_PAYSTUB_MONEY_TOKEN = re.compile(
+    r"(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}|\((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\))"
+)
+
+
 def _parse_paystub_row_money(raw: str) -> tuple[str, float] | None:
-    """Keep $0.00 so a blank current column still reveals the YTD slot."""
+    """Keep $0.00 so a blank current column still reveals the YTD slot.
+
+    Require two decimal places so rate codes like '1.5 Hourly' are not amounts.
+    """
     text = re.sub(r"\s+", " ", raw or "").strip()
-    match = MONEY_TOKEN.search(text)
+    match = _PAYSTUB_MONEY_TOKEN.search(text)
     if not match:
         return None
     amount = parse_tax_amount(match.group(0))
@@ -877,13 +886,14 @@ def _extract_8825_columns(
 
 _PAYSTUB_EXCLUDE_ROW = re.compile(
     r"spot\s*bonus|\breloc(?:ation)?\b|^(gross|net\b|total|federal|social security|medicare|401|"
-    r"deduct|tax|health|dental|pre[- ]tax|after[- ]tax|sick)\b",
+    r"deduct|tax|health|dental|pre[- ]tax|after[- ]tax)\b",
     re.I,
 )
 _PAYSTUB_BASE_ROW = re.compile(
     r"\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|"
     r"straight\s*time|sunday|weekend(?:\s+premium)?|night(?:\s+diff(?:erential)?)?|"
-    r"shift(?:\s+diff(?:erential)?)?|pto|holiday|leave|vacation|retro(?:\s+pay)?)\b",
+    r"shift(?:\s+diff(?:erential)?)?|pto|paid\s+time\s+off|\btime\s+off\b|holiday|leave|vacation|"
+    r"sick(?:\s+(?:pay|leave|time))?|retro(?:\s+pay)?)\b",
     re.I,
 )
 _PAYSTUB_PRIMARY_RATE_ROW = re.compile(
@@ -903,16 +913,61 @@ _PAYSTUB_RSU_ROW = re.compile(r"\brsu\b|restricted\s+stock|stock\s+unit|stock\s+
 _PAYSTUB_SPECS = {spec.source_id: spec for spec in PAYSTUB_FIELDS}
 
 
-def _paystub_pays_per_year(blob: str) -> int | None:
-    if re.search(r"semi[- ]?month", blob, re.I):
-        return 24
-    if re.search(r"bi[- ]?week", blob, re.I):
-        return 26
-    if re.search(r"\bweekly\b", blob, re.I):
-        return 52
-    if re.search(r"\bmonthly\b", blob, re.I):
-        return 12
+def _paystub_frequency_from_dates(blob: str) -> str | None:
+    parsed: list[tuple[int, int, int]] = []
+    seen: set[tuple[int, int, int]] = set()
+    for month, day, year in re.findall(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b", blob):
+        y = int(year)
+        if y < 100:
+            y += 2000
+        key = (y, int(month), int(day))
+        if key in seen:
+            continue
+        seen.add(key)
+        parsed.append(key)
+    if len(parsed) < 2:
+        return None
+    parsed.sort()
+    start = parsed[0]
+    end = parsed[1]
+    try:
+        from datetime import date
+
+        span = (date(*end) - date(*start)).days
+    except ValueError:
+        return None
+    if 5 <= span <= 9:
+        return "Weekly"
+    if 11 <= span <= 17:
+        return "Biweekly"
+    if 26 <= span <= 35:
+        return "Monthly"
     return None
+
+
+def _paystub_frequency_type(blob: str) -> str | None:
+    if re.search(r"semi[- ]?month", blob, re.I):
+        return "SemiMonthly"
+    if re.search(r"bi[- ]?week", blob, re.I):
+        return "Biweekly"
+    if re.search(r"\bweekly\b", blob, re.I):
+        return "Weekly"
+    if re.search(r"\bmonthly\b", blob, re.I):
+        return "Monthly"
+    return _paystub_frequency_from_dates(blob)
+
+
+def _paystub_hours_before_rate(blob: str) -> bool:
+    return bool(re.search(r"\bhours\b.{0,80}\brate\b.{0,80}\bcurrent\b", blob, re.I))
+
+
+def _is_primary_rate_row(line: str) -> bool:
+    return bool(_PAYSTUB_PRIMARY_RATE_ROW.search(line) and not re.search(r"non[- ]?worked", line, re.I))
+
+
+def _paystub_pays_per_year(blob: str) -> int | None:
+    frequency = _paystub_frequency_type(blob)
+    return {"Weekly": 52, "Biweekly": 26, "SemiMonthly": 24, "Monthly": 12}.get(frequency or "", None)
 
 
 def _paystub_row_kind(label: str) -> str | None:
@@ -955,22 +1010,34 @@ def _assign_paystub_amounts(
     amounts: list[tuple[float, str, float, list[float]]],
     line: str,
     kind: str,
+    hours_before_rate: bool = False,
 ) -> dict[str, tuple[str, float, list[float]]]:
     values = [(value, numeric, box) for _x, value, numeric, box in amounts]
     assigned: dict[str, tuple[str, float, list[float]]] = {}
     if len(values) >= 4:
-        assigned["rate"] = values[0]
-        assigned["hours"] = values[1]
-        assigned["current"] = values[2]
-        assigned["ytd"] = values[3]
+        if hours_before_rate:
+            assigned["hours"] = values[0]
+            assigned["rate"] = values[1]
+            assigned["current"] = values[2]
+            assigned["ytd"] = values[3]
+        else:
+            assigned["rate"] = values[0]
+            assigned["hours"] = values[1]
+            assigned["current"] = values[2]
+            assigned["ytd"] = values[3]
     elif len(values) == 3 and values[0][1] < 200 and values[1][1] >= 200:
         assigned["rate"] = values[0]
         assigned["current"] = values[1]
         assigned["ytd"] = values[2]
     elif len(values) == 3 and values[0][1] < 200 and values[1][1] < 200:
-        assigned["rate"] = values[0]
-        assigned["hours"] = values[1]
-        assigned["current"] = values[2]
+        if hours_before_rate:
+            assigned["hours"] = values[0]
+            assigned["rate"] = values[1]
+            assigned["current"] = values[2]
+        else:
+            assigned["rate"] = values[0]
+            assigned["hours"] = values[1]
+            assigned["current"] = values[2]
     elif len(values) >= 2:
         assigned["current"] = values[0]
         assigned["ytd"] = values[-1]
@@ -982,7 +1049,9 @@ def _assign_paystub_amounts(
     return assigned
 
 
-def _cluster_visual_word_rows(words: list[tuple[float, float, float, float, str]]) -> list[str]:
+def _cluster_visual_word_rows(
+    words: list[tuple[float, float, float, float, str]],
+) -> list[list[tuple[float, float, float, float, str]]]:
     if not words:
         return []
     rows: list[list[tuple[float, float, float, float, str]]] = []
@@ -991,17 +1060,20 @@ def _cluster_visual_word_rows(words: list[tuple[float, float, float, float, str]
             rows[-1].append(word)
         else:
             rows.append([word])
-    lines: list[str] = []
+    clustered: list[list[tuple[float, float, float, float, str]]] = []
     for row in rows:
         row.sort(key=lambda item: item[0])
-        text = re.sub(r"\s+", " ", " ".join(item[4] for item in row)).strip()
-        if text:
-            lines.append(text)
-    return lines
+        clustered.append(row)
+    return clustered
 
 
-def _paystub_visual_lines(page: Any, words: list[dict[str, Any]] | None = None) -> list[str]:
-    """Cluster native or OCR words by Y so cells on one row stay one earning line."""
+def _join_visual_row(row: list[tuple[float, float, float, float, str]]) -> str:
+    return re.sub(r"\s+", " ", " ".join(item[4] for item in row)).strip()
+
+
+def _paystub_visual_rows(
+    page: Any, words: list[dict[str, Any]] | None = None
+) -> list[list[tuple[float, float, float, float, str]]]:
     native = list(page.get_text("words") or [])
     if native:
         return _cluster_visual_word_rows(
@@ -1016,6 +1088,11 @@ def _paystub_visual_lines(page: Any, words: list[dict[str, Any]] | None = None) 
             ]
         )
     return []
+
+
+def _paystub_visual_lines(page: Any, words: list[dict[str, Any]] | None = None) -> list[str]:
+    """Cluster native or OCR words by Y so cells on one row stay one earning line."""
+    return [text for text in (_join_visual_row(row) for row in _paystub_visual_rows(page, words)) if text]
 
 
 def _paystub_source_lines(page: Any, blob: str, words: list[dict[str, Any]] | None = None) -> list[str]:
@@ -1129,6 +1206,9 @@ def _extract_paystub_table(
             )
 
     used_hits: set[tuple[float, float]] = set()
+    hours_before_rate = _paystub_hours_before_rate(blob)
+    period_hours = 0.0
+    period_hours_box: list[float] | None = None
     hours_match = re.search(r"(\d+(?:\.\d+)?)\s*hr/?\s*wk", blob, re.I)
     if hours_match:
         hours = float(hours_match.group(1))
@@ -1140,32 +1220,68 @@ def _extract_paystub_table(
     if header:
         emit("ps-employer-name", header[0], 0.0, header[1])
 
-    for raw_line in _paystub_source_lines(page, blob, words):
-        line = re.sub(r"\s+", " ", raw_line).strip()
+    frequency = _paystub_frequency_type(blob)
+    if frequency:
+        freq_hit = _first_hit(
+            page,
+            (
+                "Pay frequency",
+                "Semi-monthly",
+                "SemiMonthly",
+                "Biweekly",
+                "Bi-weekly",
+                "Weekly",
+                "Monthly",
+                "Period Start",
+                "Period End",
+            ),
+            words,
+        )
+        freq_box = (
+            [float(freq_hit.x0), float(freq_hit.y0), float(freq_hit.x1), float(freq_hit.y1)]
+            if freq_hit is not None
+            else [0.0, 0.0, 12.0, 12.0]
+        )
+        emit("ps-pay-frequency", frequency, 0.0, freq_box)
+
+    visual_rows = _paystub_visual_rows(page, words)
+    source = visual_rows or [
+        [(0.0, 0.0, 12.0, 12.0, line)]
+        for line in _paystub_source_lines(page, blob, words)
+    ]
+    for row in source:
+        line = _join_visual_row(row)
         kind = _paystub_row_kind(line)
         if kind is None:
             continue
-        label = _paystub_code_label(line)
-        hit = _hit_for_paystub_label(page, pymupdf, label, used_hits, words) or _first_hit(
-            page, (label, line[:18]), words
-        )
-        if hit is None:
-            continue
-        amounts = _row_money_amounts(page, pymupdf, hit, words)
+        amounts: list[tuple[float, str, float, list[float]]] = []
+        for x0, y0, x1, y1, text in row:
+            parsed = _parse_paystub_row_money(text)
+            if not parsed:
+                continue
+            value, numeric = parsed
+            amounts.append((x0, value, numeric, [x0, y0, x1, y1]))
+        if not amounts:
+            label = _paystub_code_label(line)
+            hit = _hit_for_paystub_label(page, pymupdf, label, used_hits, words) or _first_hit(
+                page, (label, line[:18]), words
+            )
+            if hit is None:
+                continue
+            amounts = _row_money_amounts(page, pymupdf, hit, words)
         if not amounts:
             continue
-        slots = _assign_paystub_amounts(amounts, line, kind)
+        slots = _assign_paystub_amounts(amounts, line, kind, hours_before_rate)
         if kind == "regular":
-            if "rate" in slots and _PAYSTUB_PRIMARY_RATE_ROW.search(line):
+            if "rate" in slots and _is_primary_rate_row(line):
                 emit("ps-hourly-rate", *slots["rate"])
             if "current" in slots:
                 emit("ps-current-base", *slots["current"], accumulate=True)
             if "ytd" in slots:
                 emit("ps-base-ytd", *slots["ytd"], accumulate=True)
-            if "hours" in slots and "ps-hours-week" not in totals and _PAYSTUB_PRIMARY_RATE_ROW.search(line):
-                weekly = _weekly_from_period_hours(slots["hours"][1], pays_per_year)
-                if weekly:
-                    emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, slots["hours"][2])
+            if "hours" in slots:
+                period_hours += slots["hours"][1]
+                period_hours_box = slots["hours"][2]
         elif kind == "bonus" and "ytd" in slots:
             emit("ps-bonus-ytd", *slots["ytd"], accumulate=True)
         elif kind == "ot" and "ytd" in slots:
@@ -1176,6 +1292,11 @@ def _extract_paystub_table(
             emit("ps-commission-ytd", *slots["ytd"], accumulate=True)
         elif kind == "rsu" and "ytd" in slots:
             emit("ps-rsu-ytd", *slots["ytd"], accumulate=True)
+
+    if "ps-hours-week" not in totals and period_hours and period_hours_box:
+        weekly = _weekly_from_period_hours(period_hours, pays_per_year)
+        if weekly:
+            emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, period_hours_box)
 
     if "ps-base-ytd" not in totals and not re.search(r"\bgross\b", blob, re.I):
         hit = _first_hit(page, ("Year to date", "Year-to-date"), words)

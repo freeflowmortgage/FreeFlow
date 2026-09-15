@@ -37,6 +37,7 @@ describe('live worksheet hydration', () => {
       field('w2-box5', 78500, { form: 'W-2' }),
       field('ps-base-ytd', 54000, { form: 'Paystub' }),
       field('ps-hourly-rate', 45, { form: 'Paystub' }),
+      { ...field('ps-pay-frequency', 0, { form: 'Paystub', category: 'identity' }), value: 'SemiMonthly' },
       { ...field('w2-employer-name', 0, { form: 'W-2', category: 'identity' }), value: 'Apex LLC' },
     ];
     expect(liveWagePatch(fields)).toMatchObject({
@@ -44,6 +45,7 @@ describe('live worksheet hydration', () => {
       baseYtd: 54000,
       hourlyRate: 45,
       employerName: 'Apex LLC',
+      payFrequency: 'SEMIMONTHLY',
     });
     expect(liveWagePatch(fields)?.w2Year1Box5).not.toBe(70000);
     expect(livePrevW2Patch(fields)?.box5Wages).toBeUndefined();

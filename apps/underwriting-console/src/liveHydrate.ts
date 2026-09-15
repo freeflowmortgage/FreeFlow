@@ -1,4 +1,5 @@
 import type { MappedIncomeField } from './parseTypes';
+import { uiPayFrequencyFromMismo } from '../../../packages/mortgage-engine/src/paystubMismoMapper';
 
 function bySource(fields: MappedIncomeField[], sourceId: string, entityId?: string): MappedIncomeField | undefined {
   return fields.find(
@@ -32,6 +33,7 @@ export type LiveWagePatch = {
   commissionYtd?: number;
   rsuYtd?: number;
   otherYtd?: number;
+  payFrequency?: 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
   wvoeBonus?: number;
   wvoeOvertime?: number;
   w2Year1Box5?: number;
@@ -132,6 +134,7 @@ export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null
     commissionYtd: num(fields, 'ps-commission-ytd'),
     rsuYtd: num(fields, 'ps-rsu-ytd'),
     otherYtd: num(fields, 'ps-rsu-ytd'),
+    payFrequency: uiPayFrequencyFromMismo(text(fields, 'ps-pay-frequency')),
     wvoeBonus: num(fields, 'wvoe-bonus'),
     wvoeOvertime: num(fields, 'wvoe-ot'),
     w2Year1Box5: w2GrossWages(fields, entityId),
