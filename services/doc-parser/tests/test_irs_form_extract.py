@@ -11,7 +11,13 @@ import fitz
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from irs_form_extract import _paystub_row_kind, extract_irs_form_fields, extract_page_fields  # noqa: E402
+from irs_form_extract import (  # noqa: E402
+    _dated_regular_pay_slots,
+    _ordered_regular_pay_slots,
+    _paystub_row_kind,
+    extract_irs_form_fields,
+    extract_page_fields,
+)
 from pdf_splitter import SplitResult, pre_split_tax_returns, select_ocr_page_indices  # noqa: E402
 from ai_pdf_converter import ConvertResult, PageResult  # noqa: E402
 
@@ -288,6 +294,28 @@ def test_extracts_paystub_ytd_from_labeled_line() -> None:
     by_id = {row["sourceFieldId"]: row for row in fields}
     assert by_id["ps-base-ytd"]["numericValue"] == 54000.0
     assert by_id["ps-hourly-rate"]["numericValue"] == 45.0
+
+
+def test_reads_ordered_dated_regular_paystub_row() -> None:
+    assert _dated_regular_pay_slots(
+        "Regular Hourly 10/30/2022 - 11/05/2022 40 51.9953 2,079.82 1400 72,568.59"
+    ) == {
+        "hours": 40.0,
+        "rate": 51.9953,
+        "current": 2079.82,
+        "ytd_hours": 1400.0,
+        "ytd": 72568.59,
+    }
+    assert _ordered_regular_pay_slots("Vacation Pay 0 128 6,585.08") == {
+        "current": 0.0,
+        "ytd_hours": 128.0,
+        "ytd": 6585.08,
+    }
+    assert _ordered_regular_pay_slots("Overtime Premium 0 0 0.34") == {
+        "current": 0.0,
+        "ytd_hours": 0.0,
+        "ytd": 0.34,
+    }
 
 
 def test_paystub_classifies_base_bonus_and_variable_rows() -> None:

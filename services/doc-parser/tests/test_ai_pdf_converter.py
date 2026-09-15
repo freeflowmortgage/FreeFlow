@@ -48,6 +48,16 @@ def test_numeric_form_overlay_requests_ocr_for_form_labels() -> None:
     assert "numeric_form_overlay_ocr_bypass" in flags
 
 
+def test_native_paystub_table_skips_lossy_ocr() -> None:
+    text = (
+        "Earnings Statement Pay Period Regular Hourly 10/30/2022 - 11/05/2022 "
+        "40 51.9953 2,079.82 1400 72,568.59 Employee Taxes " + "detail " * 50
+    )
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is False
+    assert "paystub_native_text" in flags
+
+
 def test_ocr_page_text_includes_native_overlay_and_ocr_labels() -> None:
     page = PageResult(
         index=0,

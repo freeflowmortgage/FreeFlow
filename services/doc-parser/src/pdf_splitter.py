@@ -85,11 +85,21 @@ W2_FRONT_SIGNATURE = re.compile(
     r"\b(?:Box\s*[1-6]|Wages[,\s]+tips|Medicare\s+wages|Social\s+security\s+wages|Federal\s+income\s+tax)\b",
     re.IGNORECASE,
 )
+W2_FRONT_LABELS = (
+    re.compile(r"Wages[,\s]+tips", re.IGNORECASE),
+    re.compile(r"Medicare\s+wages", re.IGNORECASE),
+    re.compile(r"Social\s+security\s+wages", re.IGNORECASE),
+    re.compile(r"Federal\s+income\s+tax", re.IGNORECASE),
+)
 W2_BACK_SIGNATURE = re.compile(
-    r"\b(?:Instructions\s+for\s+(?:Employee|Employer)|Notice\s+to\s+Employee|"
+    r"\b(?:Instructions\s+for\s+(?:Employee|Employer)|"
     r"For\s+use\s+in\s+preparing\s+your\s+income\s+tax\s+return)\b",
     re.IGNORECASE,
 )
+
+
+def _has_w2_front_evidence(text: str) -> bool:
+    return sum(bool(pattern.search(text)) for pattern in W2_FRONT_LABELS) >= 2
 
 
 @dataclass
@@ -153,6 +163,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
             continue
 
         matched = [name for name, pattern in CORE_RULES.items() if pattern.search(text)]
+        if "W-2" not in matched and _has_w2_front_evidence(text):
+            matched.append("W-2")
         if "W-2" in matched and (W2_BACK_SIGNATURE.search(text) or not W2_FRONT_SIGNATURE.search(text)):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)

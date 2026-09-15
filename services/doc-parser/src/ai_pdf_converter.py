@@ -42,6 +42,11 @@ _CONTENT_AMOUNT = re.compile(
     r"\(\s*\d{1,3}(?:,\d{3})+|"
     r"\d+\.\d{2}"
 )
+_NATIVE_PAYSTUB = re.compile(
+    r"earnings statement|pay\s+(?:statement|advice|period)|regular\s+(?:hourly|pay)|"
+    r"employee taxes|year[- ]to[- ]date\s+(?:earnings|gross)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -297,6 +302,11 @@ class AIPDFConverter:
         if filled_fields:
             return False, flags
         if has_amounts:
+            # A digitally generated paystub already contains higher-integrity
+            # ordered text. OCR would be slower and can scramble table columns.
+            if _NATIVE_PAYSTUB.search(stripped):
+                flags.append("paystub_native_text")
+                return False, flags
             # Some scanned tax forms have only their filled values encoded as
             # native text. OCR them so the form labels and layout are available
             # to the classifier instead of treating the numeric overlay as a
@@ -421,6 +431,29 @@ class AIPDFConverter:
             del bgr
 
         words, mean_conf = self._ocr_numpy(gray)
+        ocr_text = " ".join(row["text"] for row in words).casefold()
+        # A scan can be stored upright as a PDF page while the W-2 itself is
+        # rotated 90 degrees inside it. Retry only W-2-like OCR that is missing
+        # the Medicare label; a complete page avoids this extra OCR pass.
+        orientation_score = self._w2_label_score(words)
+        vertical_rows = self._vertical_ocr_row_count(words)
+        if (orientation_score < 3 and "wages" in ocr_text) or vertical_rows >= max(4, len(words) // 6):
+            best_rank = (orientation_score, -vertical_rows)
+            for turns in (1, 3):
+                rotated_rows, rotated_conf = self._ocr_numpy(np.rot90(gray, turns))
+                candidate_score = self._w2_label_score(rotated_rows)
+                candidate_rank = (candidate_score, -self._vertical_ocr_row_count(rotated_rows))
+                if candidate_rank <= best_rank:
+                    continue
+                words = self._unrotate_quarter_turn_rows(rotated_rows, width=gray.shape[1], height=gray.shape[0], turns=turns)
+                mean_conf = rotated_conf
+                orientation_score = candidate_score
+                best_rank = candidate_rank
+                page_flags.append(f"w2_orientation_retry_{turns * 90}")
+                # A readable horizontal W-2 label set is decisive.  Do not
+                # spend another full OCR pass trying the opposite rotation.
+                if candidate_score >= 3 and candidate_rank[1] == 0:
+                    break
         used_binarization = False
 
         if photo and mean_conf < LOW_CONFIDENCE:
@@ -721,6 +754,47 @@ class AIPDFConverter:
                 continue
             ones = np.ones((box.shape[0], 1), dtype=np.float32)
             mapped = (matrix @ np.hstack([box[:, :2], ones]).T).T
+            restored.append({**row, "box": mapped})
+        return restored
+
+    @staticmethod
+    def _w2_label_score(rows: list[dict[str, Any]]) -> int:
+        text = " ".join(row["text"] for row in rows).casefold()
+        return sum(token in text for token in ("wage", "social security", "medicare", "tax statement", "form w-2"))
+
+    @staticmethod
+    def _vertical_ocr_row_count(rows: list[dict[str, Any]]) -> int:
+        count = 0
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                continue
+            width = float(box[:, 0].max() - box[:, 0].min())
+            height = float(box[:, 1].max() - box[:, 1].min())
+            if height > max(1.0, width * 2.0):
+                count += 1
+        return count
+
+    @staticmethod
+    def _unrotate_quarter_turn_rows(
+        rows: list[dict[str, Any]],
+        *,
+        width: int,
+        height: int,
+        turns: int,
+    ) -> list[dict[str, Any]]:
+        """Map OCR boxes from numpy.rot90 image coordinates to the original page."""
+        restored: list[dict[str, Any]] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                restored.append(row)
+                continue
+            x, y = box[:, 0].copy(), box[:, 1].copy()
+            if turns == 1:  # counter-clockwise
+                mapped = np.column_stack((width - 1 - y, x))
+            else:  # clockwise
+                mapped = np.column_stack((y, height - 1 - x))
             restored.append({**row, "box": mapped})
         return restored
 

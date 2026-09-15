@@ -126,7 +126,17 @@ front-page wage or tax-cell signature. A title-only back or instruction page is
 excluded before extraction. Hybrid forms with native value overlays are OCR'd
 for their rendered labels, while excluded pages are never passed to field
 extraction; these filters do not alter normalized income values or underwriting
-calculations.
+calculations. A W-2 wage record also requires a peer wage/withholding field so a
+blank copy cannot promote an EIN or box number into Box 5. W-2 images embedded
+sideways in an otherwise upright PDF page may receive a bounded orientation
+retry; the retry stops when a horizontal W-2 label set is established.
+
+Digitally generated paystubs with an ordered earnings table MUST use their
+native text layer. They MUST NOT be sent through OCR merely because the page is
+long and numeric: OCR can scramble Hours, Rate, Current Amount, YTD Hours, and
+YTD Amount. Scanned paystubs continue through the bounded OCR path. Extraction
+must preserve per-row provenance while accumulating only the explicitly
+classified base or variable-income rows.
 
 ## Encompass synchronization state machine
 

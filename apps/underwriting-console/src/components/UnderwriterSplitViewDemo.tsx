@@ -26,7 +26,7 @@ import {
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
-import { liveAssetPatch } from '../liveHydrate';
+import { liveAssetPatch, liveWagePatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
   firstPageForKind,
@@ -1013,19 +1013,32 @@ export default function UnderwriterSplitViewDemo({
   useEffect(() => {
     if (!isLive) return;
     const kinds = new Set(packet.flatMap((doc) => kindsOf(doc)));
+    const selectedWageDocument = canvasDoc && kindsOf(canvasDoc).some((kind) => kind === 'w2' || kind === 'paystub' || kind === 'unknown');
     const { current, previous } = seedW2FromLocation(locateResult, mappedFields);
-    const w2Rows = current.map((seed) =>
-      emptyW2Employer(seed.id, {
-        ...seed.patch,
-        employerName: seed.employerName,
-        ein: seed.ein,
-        role: seed.role,
-        wageDocSource: seed.patch?.wageDocSource ?? 'PAYSTUB',
-      }),
-    );
+    // The document chip is an inspection control, not merely a canvas control.
+    // Keep the reconciliation panel bound to the same selected wage document so
+    // the field values, employer selector, and highlighted PDF cannot disagree.
+    const selectedPatch = selectedWageDocument ? liveWagePatch(canvasFields) : null;
+    const w2Rows = selectedWageDocument && canvasDoc
+      ? [emptyW2Employer(`w2-${canvasDoc.id}`, {
+          ...selectedPatch,
+          employerName: selectedPatch?.employerName || canvasDoc.fileName.replace(/\.[^.]+$/, ''),
+          ein: selectedPatch?.ein || '',
+          role: 'PRIMARY',
+          wageDocSource: selectedPatch?.wageDocSource ?? 'PAYSTUB',
+        })]
+      : current.map((seed) =>
+          emptyW2Employer(seed.id, {
+            ...seed.patch,
+            employerName: seed.employerName,
+            ein: seed.ein,
+            role: seed.role,
+            wageDocSource: seed.patch?.wageDocSource ?? 'PAYSTUB',
+          }),
+        );
     setW2Employers(w2Rows.length ? w2Rows : [emptyW2Employer('w2-live')]);
     setActiveW2EmployerId(w2Rows[0]?.id ?? 'w2-live');
-    if (previous) {
+    if (previous && !selectedWageDocument) {
       setPrevEmployerW2({
         employerName: previous.employerName || 'Prior employer',
         ein: previous.ein || '',
@@ -1174,7 +1187,7 @@ export default function UnderwriterSplitViewDemo({
     setSCorpPnl(EMPTY_PNL);
     setCCorpPnl(EMPTY_PNL);
     setPartnershipPnl(EMPTY_PNL);
-  }, [isLive, mappedFields, locateResult, packet, scheduleEExtracts]);
+  }, [isLive, mappedFields, locateResult, packet, scheduleEExtracts, canvasDoc?.id]);
 
   // Borrower Core Metadata Reference
   const borrowerMetadata = {

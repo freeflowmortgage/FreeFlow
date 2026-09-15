@@ -30,6 +30,7 @@ tests.
 | [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) | Ordered engineering implementation with acceptance tests |
 | [DEPLOYMENT-BURNDOWN.md](DEPLOYMENT-BURNDOWN.md) | Trackable P0/P1/P2 release backlog |
 | [GO-LIVE-MAP.md](GO-LIVE-MAP.md) | Integration go-live instructions: RapidOCR, MISMO, Encompass web/desktop, appraisal, billing, identity |
+| [ADVERSARIAL-DOCUMENT-QUALIFICATION.md](ADVERSARIAL-DOCUMENT-QUALIFICATION.md) | Exact-value OCR/parser release gate for every admitted document type and hostile scan variant |
 
 ## Non-negotiable invariants
 
