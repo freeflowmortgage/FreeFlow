@@ -981,7 +981,7 @@ def extract_irs_form_fields(
             )
             text = ""
             if convert_page is not None:
-                text = getattr(convert_page, "plain_text", "") or convert_page.text()
+                text = convert_page.text()
             fields.extend(extract_page_fields(page, page_index=index, words=page_words, text=text))
         logger.info("irs_form_extract fields=%s", len(fields))
         return fields

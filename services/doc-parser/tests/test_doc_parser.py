@@ -207,6 +207,16 @@ def test_pdf_splitter_classification():
     assert "Schedule C (Page 1 - Profits)" in split_res.classifications[1]
 
 
+def test_pdf_splitter_ignores_w2_back_or_instruction_page():
+    front = PageResult(index=0, width_px=612, height_px=792, is_native_text=True,
+        plain_text="Form W-2 Wage and Tax Statement Box 1 Wages tips other compensation 95000.00", words=[])
+    back = PageResult(index=1, width_px=612, height_px=792, is_native_text=True,
+        plain_text="Form W-2 Wage and Tax Statement Instructions for employee and employer", words=[])
+    result = pre_split_tax_returns(ConvertResult(pages=[front, back], page_count=2, ocr_page_count=0))
+    assert result.target_pages == [0]
+    assert 1 not in result.classifications
+
+
 def test_pdf_splitter_classifies_schedule_f():
     page = PageResult(
         index=0,

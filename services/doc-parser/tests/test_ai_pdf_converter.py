@@ -10,7 +10,7 @@ import fitz
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ai_pdf_converter import AIPDFConverter, NATIVE_TEXT_CHARS  # noqa: E402
+from ai_pdf_converter import AIPDFConverter, NATIVE_TEXT_CHARS, OcrWord, PageResult  # noqa: E402
 
 
 def _chrome_pdf(*, wages: str | None = None) -> bytes:
@@ -39,6 +39,25 @@ def test_content_stream_amounts_skip_ocr() -> None:
     inspected = converter.inspect_pages(_chrome_pdf(wages="78,500.00"))
     assert inspected[0].use_ocr is False
     assert "irs_searchable_mask_bypass" not in inspected[0].flags
+
+
+def test_numeric_form_overlay_requests_ocr_for_form_labels() -> None:
+    text = "value " * 80 + " 12,000.00 13,000.00 14,000.00 15,000.00"
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is True
+    assert "numeric_form_overlay_ocr_bypass" in flags
+
+
+def test_ocr_page_text_includes_native_overlay_and_ocr_labels() -> None:
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text="78500.00",
+        words=[OcrWord(text="Form W-2", x=0, y=0, w=0, h=0, confidence=99)],
+    )
+    assert page.text() == "78500.00 Form W-2"
 
 
 def test_filled_acroform_skips_ocr_and_emits_field_word() -> None:
