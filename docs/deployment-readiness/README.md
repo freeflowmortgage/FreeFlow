@@ -15,6 +15,7 @@ tests.
 
 | Document | Purpose |
 |---|---|
+| [PR15-REGRESSION-AUDIT-2026-09-14.md](PR15-REGRESSION-AUDIT-2026-09-14.md) | PR 15 comparison, retained/fixed behavior, supplied-document evidence, and local acceptance checklist |
 | [SECURITY-ASSESSMENT.md](SECURITY-ASSESSMENT.md) | Adversarial findings and release gates |
 | [SECURITY-SPEC.md](SECURITY-SPEC.md) | Required production security controls and threat model |
 | [BACKEND-API-SPEC.md](BACKEND-API-SPEC.md) | Authentication, tenancy, API, job, error, and audit contracts |

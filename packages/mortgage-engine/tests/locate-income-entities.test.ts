@@ -385,6 +385,44 @@ describe('undisclosed businesses on returns', () => {
     expect(weekend?.patch).toMatchObject({ w2Year1Box5: 24000, baseYtd: 9600 });
   });
 
+  test('does not merge page zero from an unrelated PDF into a matched employer', () => {
+    const w2Page = page(0, ['W-2'], [
+      "c Employer's name Hidden Payroll Inc",
+      'b Employer identification number (EIN) 99-1111111',
+      'Box 5 Medicare wages and tips 51000.00',
+    ]);
+    const hiddenPaystub = page(0, ['Paystub'], [
+      'Employer: Hidden Payroll Inc',
+      'Regular 45.00 80.00 3,600.00 54,000.00',
+    ]);
+    const unrelatedPaystub = page(0, ['Paystub'], [
+      'Employer: Other Company LLC',
+      'Regular 20.00 40.00 800.00 9,600.00',
+    ]);
+    const withDocument = (doc: string, source: ParsePage) =>
+      mapIncomeFields(response([source])).map((field) => ({ ...field, documentId: doc }));
+    const fields = [
+      ...withDocument('w2-hidden', w2Page),
+      ...withDocument('stub-hidden', hiddenPaystub),
+      ...withDocument('stub-other', unrelatedPaystub),
+    ];
+    const located = locateIncomeEntities({
+      roster: employmentEntitiesFromUrlA({}),
+      fields,
+      pages: [
+        { documentId: 'w2-hidden', pageIndex: 0, formIds: w2Page.formIds, text: w2Page.words.map((word) => word.text).join(' ') },
+        { documentId: 'stub-hidden', pageIndex: 0, formIds: hiddenPaystub.formIds, text: hiddenPaystub.words.map((word) => word.text).join(' ') },
+        { documentId: 'stub-other', pageIndex: 0, formIds: unrelatedPaystub.formIds, text: unrelatedPaystub.words.map((word) => word.text).join(' ') },
+      ],
+    });
+
+    const wages = seedW2FromLocation(located, fields);
+    const hidden = wages.current.find((seed) => seed.employerName.includes('Hidden Payroll'));
+    expect(hidden?.patch).toMatchObject({ w2Year1Box5: 51000, baseYtd: 54000 });
+    expect(hidden?.documentIds).toEqual(expect.arrayContaining(['w2-hidden', 'stub-hidden']));
+    expect(hidden?.documentIds).not.toContain('stub-other');
+  });
+
   test('keeps two undisclosed Schedule C businesses on separate worksheets', () => {
     const { located } = locatePages([
       page(0, ['Schedule C'], [

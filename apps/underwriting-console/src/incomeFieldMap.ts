@@ -1587,6 +1587,7 @@ function fieldsFromFormExtracts(extracts: ParseResponse['formExtracts']): Mapped
       pageIndex: extract.pageIndex,
       wordIndex: 0,
       box: extract.box,
+      componentBoxes: extract.componentBoxes,
     });
   }
   return found;

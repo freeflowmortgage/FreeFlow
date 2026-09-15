@@ -235,6 +235,9 @@ function pickSupportingTarget(
   if (byEin.length === 1) return byEin[0];
   const byName = identity.name ? candidates.filter((match) => match.name && namesMatch(match.name, identity.name!)) : [];
   if (byName.length === 1) return byName[0];
+  // An explicit identity that conflicts with every candidate is evidence of a
+  // separate employer/business, not permission to attach to the only candidate.
+  if (identity.ein || identity.name) return undefined;
   const byPageText = pageText
     ? candidates.filter((match) => match.name && namesMatch(match.name, pageText))
     : [];

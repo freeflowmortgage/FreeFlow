@@ -318,6 +318,35 @@ def test_reads_ordered_dated_regular_paystub_row() -> None:
     }
 
 
+def test_ordered_paystub_overlays_point_to_numeric_tokens() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 40), "Earnings Statement Semi-monthly (24/yr)", fontsize=12)
+    # The statement contains a summary row with the same label before the dated
+    # earnings row. The overlay must bind to the dated row's numeric cells.
+    page.insert_text((72, 75), "Regular Hourly", fontsize=10)
+    page.insert_text((430, 75), "0", fontsize=10)
+    page.insert_text((485, 75), "168", fontsize=10)
+    page.insert_text((525, 75), "8,439.82", fontsize=10)
+    page.insert_text((72, 100), "Regular Hourly", fontsize=10)
+    page.insert_text((190, 100), "10/30/2022 - 11/05/2022", fontsize=10)
+    page.insert_text((350, 100), "40", fontsize=10)
+    page.insert_text((380, 100), "51.9953", fontsize=10)
+    page.insert_text((430, 100), "2,079.82", fontsize=10)
+    page.insert_text((485, 100), "1400", fontsize=10)
+    page.insert_text((525, 100), "72,568.59", fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+
+    by_id = {row["sourceFieldId"]: row for row in extract_irs_form_fields(data)}
+    assert by_id["ps-hourly-rate"]["box"]["x"] > 0.55
+    assert by_id["ps-current-base"]["box"]["x"] > 0.65
+    assert by_id["ps-base-ytd"]["box"]["x"] > 0.80
+    assert by_id["ps-hours-week"]["box"]["x"] > 0.50
+    assert len(by_id["ps-base-ytd"]["componentBoxes"]) == 2
+    assert all(box["x"] > 0.80 for box in by_id["ps-base-ytd"]["componentBoxes"])
+
+
 def test_paystub_classifies_base_bonus_and_variable_rows() -> None:
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)

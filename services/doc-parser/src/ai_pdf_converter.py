@@ -23,6 +23,10 @@ MAX_PDF_BYTES = 40 * 1024 * 1024
 MAX_PAGES = 150
 RENDER_DPI = 300
 NATIVE_TEXT_CHARS = 40
+# Pages with a real readable native layer have varied form-label vocabulary.
+# Value-only overlays (the failure mode this gate is meant to rescue) contain
+# mostly names, addresses, IDs, and repeated amounts instead.
+NATIVE_LABEL_VOCABULARY_MIN = 20
 LOW_CONFIDENCE = 55.0
 DESKEW_MAX_DEGREES = 15.0
 DESKEW_DEADZONE_DEGREES = 0.8
@@ -333,6 +337,10 @@ class AIPDFConverter:
             # to the classifier instead of treating the numeric overlay as a
             # complete searchable document.
             if not irs_chrome and len(stripped) >= 400 and amount_count >= 4:
+                label_vocabulary = set(re.findall(r"[A-Za-z]{4,}", stripped.casefold()))
+                if len(label_vocabulary) >= NATIVE_LABEL_VOCABULARY_MIN:
+                    flags.append("label_rich_native_text")
+                    return False, flags
                 flags.append("numeric_form_overlay_ocr_bypass")
                 return True, flags
             return False, flags

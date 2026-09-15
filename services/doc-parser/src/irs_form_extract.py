@@ -575,9 +575,12 @@ def _extract_spec(
 
 
 def _parse_paystub_row_money(raw: str) -> tuple[str, float] | None:
-    """Keep $0.00 so a blank current column still reveals the YTD slot."""
+    """Keep $0.00 and pay-rate precision beyond standard currency cents."""
     text = re.sub(r"\s+", " ", raw or "").strip()
-    match = MONEY_TOKEN.search(text)
+    match = re.search(
+        r"(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\))",
+        text,
+    )
     if not match:
         return None
     amount = parse_tax_amount(match.group(0))
@@ -602,6 +605,16 @@ def _row_money_amounts(page: Any, pymupdf: Any, hit: Any) -> list[tuple[float, s
         found.append((float(x0), value, numeric, [float(x0), float(y0), float(x1), float(y1)]))
     found.sort(key=lambda item: item[0])
     return found
+
+
+def _paystub_value_box(page: Any, pymupdf: Any, hit: Any, numeric: float) -> list[float]:
+    """Return the printed numeric token, not the earnings-row label."""
+    label_box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)]
+    amounts = _row_money_amounts(page, pymupdf, hit)
+    matching = [item for item in amounts if abs(item[2] - numeric) <= max(0.005, abs(numeric) * 0.000001)]
+    if matching:
+        return matching[-1][3]
+    return label_box
 
 
 def _extract_8825_columns(page: Any, pymupdf: Any, *, page_index: int) -> list[dict[str, Any]]:
@@ -880,7 +893,7 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
     """Earnings-table rows: base (incl. shift/PTO), bonus, OT, tips, commission, RSU."""
     extracted: list[dict[str, Any]] = []
     seen: set[str] = set()
-    totals: dict[str, tuple[str, float, list[float]]] = {}
+    totals: dict[str, tuple[str, float, list[float], list[list[float]]]] = {}
     pays_per_year = _paystub_pays_per_year(blob)
     entity_id = f"paystub-p{page_index}"
 
@@ -889,23 +902,27 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
         if spec is None:
             return
         if accumulate and source_id in totals:
-            _prev_value, prev_numeric, prev_box = totals[source_id]
-            totals[source_id] = (_format_money(prev_numeric + numeric), prev_numeric + numeric, prev_box)
+            _prev_value, prev_numeric, prev_box, component_boxes = totals[source_id]
+            totals[source_id] = (
+                _format_money(prev_numeric + numeric),
+                prev_numeric + numeric,
+                prev_box,
+                [*component_boxes, box],
+            )
             return
         if source_id in totals or source_id in seen:
             return
-        totals[source_id] = (value, numeric, box)
+        totals[source_id] = (value, numeric, box, [box])
 
     def flush() -> None:
-        for source_id, (value, numeric, box) in totals.items():
+        for source_id, (value, numeric, box, component_boxes) in totals.items():
             if source_id in seen:
                 continue
             spec = _PAYSTUB_SPECS.get(source_id)
             if spec is None:
                 continue
             seen.add(source_id)
-            extracted.append(
-                _field_record(
+            row = _field_record(
                     page=page,
                     page_index=page_index,
                     spec=spec,
@@ -915,7 +932,13 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
                     numeric=numeric,
                     used_box=box,
                 )
-            )
+            if len(component_boxes) > 1:
+                row["componentBoxes"] = [
+                    rel
+                    for component in component_boxes
+                    if (rel := relative_box(page, component)) is not None
+                ]
+            extracted.append(row)
 
     used_hits: set[tuple[float, float]] = set()
     hours_match = re.search(r"(\d+(?:\.\d+)?)\s*hr/?\s*wk", blob, re.I)
@@ -940,22 +963,22 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
             ordered_slots = _dated_regular_pay_slots(line) or _ordered_regular_pay_slots(line)
             if ordered_slots:
                 ordered_label = _ordered_paystub_label(line)
-                ordered_hit = _first_hit(page, (ordered_label,)) if ordered_label else None
+                ordered_hit = _hit_for_paystub_label(page, pymupdf, ordered_label, used_hits) if ordered_label else None
                 label_box = (
                     [float(ordered_hit.x0), float(ordered_hit.y0), float(ordered_hit.x1), float(ordered_hit.y1)]
                     if ordered_hit is not None
                     else [0.0, 0.0, 12.0, 12.0]
                 )
                 if "rate" in ordered_slots and _PAYSTUB_PRIMARY_RATE_ROW.search(line):
-                    emit("ps-hourly-rate", _format_money(ordered_slots["rate"]), ordered_slots["rate"], label_box)
+                    emit("ps-hourly-rate", _format_money(ordered_slots["rate"]), ordered_slots["rate"], _paystub_value_box(page, pymupdf, ordered_hit, ordered_slots["rate"]) if ordered_hit is not None else label_box)
                 if ordered_slots.get("current", 0) > 0:
-                    emit("ps-current-base", _format_money(ordered_slots["current"]), ordered_slots["current"], label_box, accumulate=True)
+                    emit("ps-current-base", _format_money(ordered_slots["current"]), ordered_slots["current"], _paystub_value_box(page, pymupdf, ordered_hit, ordered_slots["current"]) if ordered_hit is not None else label_box, accumulate=True)
                 if ordered_slots.get("ytd", 0) > 0:
-                    emit("ps-base-ytd", _format_money(ordered_slots["ytd"]), ordered_slots["ytd"], label_box, accumulate=True)
+                    emit("ps-base-ytd", _format_money(ordered_slots["ytd"]), ordered_slots["ytd"], _paystub_value_box(page, pymupdf, ordered_hit, ordered_slots["ytd"]) if ordered_hit is not None else label_box, accumulate=True)
                 if "hours" in ordered_slots and "ps-hours-week" not in totals:
                     weekly = _weekly_from_period_hours(ordered_slots["hours"], pays_per_year)
                     if weekly:
-                        emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, label_box)
+                        emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, _paystub_value_box(page, pymupdf, ordered_hit, ordered_slots["hours"]) if ordered_hit is not None else label_box)
                 continue
         if ordered_native_rows and kind in {"bonus", "ot", "tips", "commission", "rsu"}:
             ordered_slots = _ordered_regular_pay_slots(line)
@@ -968,13 +991,13 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
             }[kind]
             if ordered_slots.get("ytd", 0) > 0:
                 ordered_label = _ordered_paystub_label(line)
-                ordered_hit = _first_hit(page, (ordered_label,)) if ordered_label else None
+                ordered_hit = _hit_for_paystub_label(page, pymupdf, ordered_label, used_hits) if ordered_label else None
                 label_box = (
                     [float(ordered_hit.x0), float(ordered_hit.y0), float(ordered_hit.x1), float(ordered_hit.y1)]
                     if ordered_hit is not None
                     else [0.0, 0.0, 12.0, 12.0]
                 )
-                emit(source_id, _format_money(ordered_slots["ytd"]), ordered_slots["ytd"], label_box, accumulate=True)
+                emit(source_id, _format_money(ordered_slots["ytd"]), ordered_slots["ytd"], _paystub_value_box(page, pymupdf, ordered_hit, ordered_slots["ytd"]) if ordered_hit is not None else label_box, accumulate=True)
             continue
         label = _paystub_code_label(line)
         hit = _hit_for_paystub_label(page, pymupdf, label, used_hits) or _first_hit(page, (label, line[:18]))
@@ -985,14 +1008,14 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
             if ordered_slots:
                 label_box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)]
                 if _PAYSTUB_PRIMARY_RATE_ROW.search(line):
-                    emit("ps-hourly-rate", _format_money(ordered_slots["rate"]), ordered_slots["rate"], label_box)
-                emit("ps-current-base", _format_money(ordered_slots["current"]), ordered_slots["current"], label_box, accumulate=True)
+                    emit("ps-hourly-rate", _format_money(ordered_slots["rate"]), ordered_slots["rate"], _paystub_value_box(page, pymupdf, hit, ordered_slots["rate"]))
+                emit("ps-current-base", _format_money(ordered_slots["current"]), ordered_slots["current"], _paystub_value_box(page, pymupdf, hit, ordered_slots["current"]), accumulate=True)
                 if "ytd" in ordered_slots:
-                    emit("ps-base-ytd", _format_money(ordered_slots["ytd"]), ordered_slots["ytd"], label_box, accumulate=True)
+                    emit("ps-base-ytd", _format_money(ordered_slots["ytd"]), ordered_slots["ytd"], _paystub_value_box(page, pymupdf, hit, ordered_slots["ytd"]), accumulate=True)
                 if "ps-hours-week" not in totals:
                     weekly = _weekly_from_period_hours(ordered_slots["hours"], pays_per_year)
                     if weekly:
-                        emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, label_box)
+                        emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, _paystub_value_box(page, pymupdf, hit, ordered_slots["hours"]))
                 continue
         amounts = _row_money_amounts(page, pymupdf, hit)
         if not amounts:

@@ -85,6 +85,20 @@ def test_numeric_form_overlay_requests_ocr_for_form_labels() -> None:
     assert "numeric_form_overlay_ocr_bypass" in flags
 
 
+def test_label_rich_numeric_page_preserves_native_text() -> None:
+    text = (
+        "Tax return comparison income deductions adjusted gross exemptions credits payments "
+        "filing status taxpayer identification federal state charitable contribution worksheet "
+        "current prior difference calendar schedule attachment "
+        + "supporting detail " * 20
+        + " 12,000.00 13,000.00 14,000.00 15,000.00"
+    )
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is False
+    assert "label_rich_native_text" in flags
+    assert "numeric_form_overlay_ocr_bypass" not in flags
+
+
 def test_native_paystub_table_skips_lossy_ocr() -> None:
     text = (
         "Earnings Statement Pay Period Regular Hourly 10/30/2022 - 11/05/2022 "

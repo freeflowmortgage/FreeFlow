@@ -1,4 +1,4 @@
-import type { LiveDocument, ParsePage, ParseResponse, ScheduleEPropertyExtract } from './parseTypes';
+import type { LiveDocument, MappedIncomeField, ParsePage, ParseResponse, ScheduleEPropertyExtract } from './parseTypes';
 
 export type DocKind =
   | 'paystub'
@@ -159,6 +159,27 @@ function pageMatchesKind(page: ParsePage, kind: DocKind): boolean {
 
 export function firstPageForKind(result: ParseResponse, kind: DocKind): number {
   return result.pages.find((page) => pageMatchesKind(page, kind))?.index ?? 0;
+}
+
+/**
+ * Resolve a clicked result field without silently changing the wage PDF under
+ * review. Wage fields are document-scoped; other worksheets retain the legacy
+ * packet-wide fallback used by tax/entity navigation.
+ */
+export function fieldForInspection(
+  fields: MappedIncomeField[],
+  fieldId: string,
+  currentDocumentId?: string | null,
+  explicitDocumentId?: string,
+): MappedIncomeField | undefined {
+  const matches = (field: MappedIncomeField) => field.id === fieldId || field.sourceFieldId === fieldId;
+  const documentId = explicitDocumentId ?? currentDocumentId ?? undefined;
+  if (documentId) {
+    const scoped = fields.find((field) => matches(field) && field.documentId === documentId);
+    if (scoped) return scoped;
+  }
+  if (fieldId.startsWith('w2-') || fieldId.startsWith('ps-')) return undefined;
+  return fields.find(matches);
 }
 
 function wageKindOrder(wageDocKind: 'paystub' | 'w2'): DocKind[] {
