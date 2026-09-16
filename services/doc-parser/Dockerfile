@@ -22,7 +22,7 @@ COPY requirements.txt .
 RUN python3.11 -m pip install --no-cache-dir -r requirements.txt \
     && python3.11 -m pip check
 
-COPY src/server.py src/ai_pdf_converter.py src/pdf_splitter.py src/schedule_e_grid.py src/irs_form_extract.py ./
+COPY src/ ./
 COPY templates /app/templates
 
 RUN groupadd -g 8888 appgroup && \

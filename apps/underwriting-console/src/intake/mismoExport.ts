@@ -1,4 +1,8 @@
 import { buildDocumentPlan, firstName, type IntakeAnswers, type LoanProgram } from './intake-agent';
+import {
+  generatePaystubCurrentIncomeItemsXml,
+  type MortgageDocumentPaystubParser,
+} from '../../../../packages/mortgage-engine/src/paystubMismoMapper';
 
 function esc(value: unknown): string {
   return String(value ?? '')
@@ -51,6 +55,7 @@ function employerBlock(
   income: string | undefined,
   classification: 'Primary' | 'Secondary' | 'Previous',
   selfEmployed: boolean,
+  paymentFrequency?: string,
 ): string {
   if (!name) return '';
   return `
@@ -60,6 +65,16 @@ function employerBlock(
                 <EmploymentClassificationType>${classification}</EmploymentClassificationType>
                 <EmploymentBorrowerSelfEmployedIndicator>${selfEmployed}</EmploymentBorrowerSelfEmployedIndicator>
                 <EmploymentTimeInLineOfWorkYearsCount>${num(years)}</EmploymentTimeInLineOfWorkYearsCount>${
+                  classification === 'Primary'
+                    ? `
+                <EmploymentStatusType>Current</EmploymentStatusType>`
+                    : ''
+                }${
+                  paymentFrequency
+                    ? `
+                <PaymentFrequencyType>${esc(paymentFrequency)}</PaymentFrequencyType>`
+                    : ''
+                }${
                   income
                     ? `
                 <EmploymentMonthlyIncomeAmount>${num(income)}</EmploymentMonthlyIncomeAmount>`
@@ -74,13 +89,17 @@ function employerBlock(
  * (lender/broker LOS) delivery. This is the deliverable — the borrower never
  * downloads anything, and FreeFlow relays without persisting (ZDR).
  */
-export function buildMismo34Xml(answers: IntakeAnswers): string {
+export function buildMismo34Xml(
+  answers: IntakeAnswers,
+  paystub?: MortgageDocumentPaystubParser,
+): string {
   const program: LoanProgram =
     answers.program && answers.program !== 'UNSURE' ? answers.program : 'CONVENTIONAL';
   const selfEmployed = answers.employmentType === 'SELF_EMPLOYED';
   const generatedAt = new Date().toISOString();
 
   const currentEmployerYears = selfEmployed ? answers.yearsInBusiness : answers.yearsAtJob;
+  const payFrequency = paystub?.documentMetadata.paymentFrequencyType;
   const priorEmployer = employerBlock(
     answers.previousEmployer,
     answers.previousEmployerYears,
@@ -153,8 +172,13 @@ export function buildMismo34Xml(answers: IntakeAnswers): string {
                 'Prior',
               )}
               </RESIDENCES>
-              <EMPLOYERS>${employerBlock(answers.employerName, currentEmployerYears, answers.monthlyIncome, 'Primary', selfEmployed)}${secondEmployer}${priorEmployer}
-              </EMPLOYERS>
+              <EMPLOYERS>${employerBlock(answers.employerName, currentEmployerYears, answers.monthlyIncome, 'Primary', selfEmployed, payFrequency)}${secondEmployer}${priorEmployer}
+              </EMPLOYERS>${
+                paystub
+                  ? `
+              ${generatePaystubCurrentIncomeItemsXml(paystub)}`
+                  : ''
+              }
               <DECLARATION>
                 <DECLARATION_DETAIL>
                   <IntentToOccupyType>${answers.declOccupyPrimary ? 'Yes' : 'No'}</IntentToOccupyType>

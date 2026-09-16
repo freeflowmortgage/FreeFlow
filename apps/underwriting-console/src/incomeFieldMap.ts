@@ -1,4 +1,14 @@
 import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
+import {
+  PAYSTUB_YTD_FIELD_BY_KIND,
+  isPrimaryRateRow,
+  paystubFrequencyType,
+  paystubHoursBeforeRate,
+  paystubPaysPerYear,
+  paystubRowKind,
+  weeklyHoursFromPeriod,
+  type PaystubRowKind,
+} from './paystubRowRules';
 
 export type IncomeForm = 'W-2' | 'Paystub' | 'WVOE' | 'Schedule B' | 'Schedule C' | 'Schedule D' | 'Schedule E' | 'Schedule F' | 'Form 1040' | 'Form 1120-S' | 'Form 1065' | 'Form 1120' | 'Form 8825';
 
@@ -654,6 +664,16 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     patterns: [/employer(?:['’]s)?(?:\s+name)?\s*[:#–—-]?\s*/i, /company\s*[:#–—-]?\s*/i],
   },
   {
+    id: 'ps-pay-frequency',
+    form: 'Paystub',
+    boxLabel: 'Frequency',
+    fieldLabel: 'Pay Frequency',
+    lineNum: 'Frequency',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/pay\s+frequency\s*[:#–—-]?\s*/i],
+  },
+  {
     id: 'ps-hourly-rate',
     form: 'Paystub',
     boxLabel: 'Rate',
@@ -1264,61 +1284,26 @@ function paystubRowAmounts(line: LineCluster): number[] {
   return moneyMatches(line.text).map((match) => parseMoneyValue(match[1]));
 }
 
-const PAYSTUB_EXCLUDE_ROW =
-  /spot\s*bonus|\breloc(?:ation)?\b|^(gross|net\b|total|federal|social security|medicare|401|deduct|tax|health|dental|pre[- ]tax|after[- ]tax|sick)\b/i;
-const PAYSTUB_BASE_ROW =
-  /\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|straight\s*time|sunday|weekend(?:\s+premium)?|night(?:\s+diff(?:erential)?)?|shift(?:\s+diff(?:erential)?)?|pto|holiday|leave|vacation|retro(?:\s+pay)?)\b/i;
-const PAYSTUB_PRIMARY_RATE_ROW =
-  /\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|straight\s*time)\b/i;
-const PAYSTUB_BONUS_ROW = /\b(aip|annual\s+incentive|quarterly|annual\s+pay|incentive|bonus)\b/i;
-const PAYSTUB_OT_ROW =
-  /\bover\s*time\b|\bot(?:[- ]?1\.5(?:0+)?)?\b|\bdouble\s*time\b|\bdbl\s*time\b|\b1\.5(?:0+)?\s*(?:x|hourly|hours?|ot)\b|\btime\s+and\s+a\s+half\b|\bworked\s+holiday\b|\bholiday\s+worked\b/i;
-const PAYSTUB_TIPS_ROW = /\btips?\b|\bgratuity\b/i;
-const PAYSTUB_COMMISSION_ROW = /\bcommission/i;
-const PAYSTUB_RSU_ROW = /\brsu\b|restricted\s+stock|stock\s+unit|stock\s+award/i;
-
-type PaystubRowKind = 'regular' | 'bonus' | 'ot' | 'tips' | 'commission' | 'rsu';
-
-function paystubPaysPerYear(text: string): number | undefined {
-  if (/semi[- ]?month/i.test(text)) return 24;
-  if (/bi[- ]?week/i.test(text)) return 26;
-  if (/\bweekly\b/i.test(text)) return 52;
-  if (/\bmonthly\b/i.test(text)) return 12;
-  return undefined;
-}
-
-function weeklyHoursFromPeriod(periodHours: number, paysPerYear?: number): number | undefined {
-  if (periodHours >= 20 && periodHours <= 50) return periodHours;
-  if (paysPerYear) return Math.round((periodHours * paysPerYear) / 52 * 100) / 100;
-  return undefined;
-}
-
-function paystubRowKind(label: string): PaystubRowKind | null {
-  const stripped = label.replace(/[$,0-9.\-—/]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!stripped || PAYSTUB_EXCLUDE_ROW.test(stripped)) return null;
-  // Match OT on the original label so "1.5 Hourly" is not stripped down to base "hourly".
-  if (PAYSTUB_OT_ROW.test(label) || PAYSTUB_OT_ROW.test(stripped)) return 'ot';
-  if (PAYSTUB_RSU_ROW.test(stripped)) return 'rsu';
-  if (PAYSTUB_TIPS_ROW.test(stripped)) return 'tips';
-  if (PAYSTUB_COMMISSION_ROW.test(stripped)) return 'commission';
-  if (PAYSTUB_BONUS_ROW.test(stripped)) return 'bonus';
-  if (PAYSTUB_BASE_ROW.test(stripped)) return 'regular';
-  return null;
-}
-
 function assignPaystubAmounts(
   amounts: number[],
   matches: RegExpMatchArray[],
   label: string,
   kind: PaystubRowKind,
+  hoursBeforeRate = false,
 ): Partial<Record<'rate' | 'hours' | 'current' | 'ytd', { numeric: number; match: RegExpMatchArray }>> {
   const slot = (index: number) => ({ numeric: amounts[index], match: matches[index] as RegExpMatchArray });
-  if (amounts.length >= 4) return { rate: slot(0), hours: slot(1), current: slot(2), ytd: slot(3) };
+  if (amounts.length >= 4) {
+    return hoursBeforeRate
+      ? { hours: slot(0), rate: slot(1), current: slot(2), ytd: slot(3) }
+      : { rate: slot(0), hours: slot(1), current: slot(2), ytd: slot(3) };
+  }
   if (amounts.length === 3 && amounts[0] < 200 && amounts[1] >= 200) {
     return { rate: slot(0), current: slot(1), ytd: slot(2) };
   }
   if (amounts.length === 3 && amounts[0] < 200 && amounts[1] < 200) {
-    return { rate: slot(0), hours: slot(1), current: slot(2) };
+    return hoursBeforeRate
+      ? { hours: slot(0), rate: slot(1), current: slot(2) }
+      : { rate: slot(0), hours: slot(1), current: slot(2) };
   }
   if (amounts.length >= 2) return { current: slot(0), ytd: slot(amounts.length - 1) };
   if (amounts.length === 1) {
@@ -1339,6 +1324,8 @@ function fieldsFromPaystubTable(
     const entityId = formEntityId('Paystub', page.index);
     const pageText = lines.map((line) => line.text).join(' ');
     const paysPerYear = paystubPaysPerYear(pageText);
+    const frequency = paystubFrequencyType(pageText);
+    const hoursBeforeRate = paystubHoursBeforeRate(pageText);
     const hasGross = /\bgross\b/i.test(pageText);
     const push = (defId: string, numeric: number, line: LineCluster, match?: RegExpMatchArray, value?: string) => {
       if (value == null && !Number.isFinite(numeric)) return;
@@ -1388,6 +1375,18 @@ function fieldsFromPaystubTable(
       });
       if (header) push('ps-employer-name', 0, header, undefined, header.text.trim());
     }
+    if (frequency) {
+      const freqLine =
+        lines.find((line) =>
+          /pay\s+frequency|semi[- ]?month|bi[- ]?week|\bweekly\b|\bmonthly\b|period\s+start|period\s+end|\d{1,2}\/\d{1,2}\/\d{2,4}/i.test(
+            line.text,
+          ),
+        ) ?? lines[0];
+      if (freqLine) push('ps-pay-frequency', 0, freqLine, undefined, frequency);
+    }
+    let periodHours = 0;
+    let periodHoursLine: LineCluster | undefined;
+    let periodHoursMatch: RegExpMatchArray | undefined;
     for (const line of lines) {
       const amounts = paystubRowAmounts(line);
       const matches = moneyMatches(line.text);
@@ -1401,28 +1400,29 @@ function fieldsFromPaystubTable(
       }
       const kind = paystubRowKind(label);
       if (!kind || !amounts.length) continue;
-      const slots = assignPaystubAmounts(amounts, matches, label, kind);
+      const slots = assignPaystubAmounts(amounts, matches, label, kind, hoursBeforeRate);
       if (kind === 'regular') {
-        if (slots.rate && PAYSTUB_PRIMARY_RATE_ROW.test(label)) {
+        if (slots.rate && isPrimaryRateRow(label)) {
           push('ps-hourly-rate', slots.rate.numeric, line, slots.rate.match);
         }
         if (slots.current) addMoney('ps-current-base', slots.current.numeric, line, slots.current.match);
         if (slots.ytd) addMoney('ps-base-ytd', slots.ytd.numeric, line, slots.ytd.match);
-        if (slots.hours && PAYSTUB_PRIMARY_RATE_ROW.test(label)) {
-          const weekly = weeklyHoursFromPeriod(slots.hours.numeric, paysPerYear);
-          if (weekly != null) push('ps-hours-week', weekly, line, slots.hours.match);
+        if (slots.hours) {
+          periodHours += slots.hours.numeric;
+          periodHoursLine = line;
+          periodHoursMatch = slots.hours.match;
         }
-      } else if (kind === 'bonus' && slots.ytd) {
-        addMoney('ps-bonus-ytd', slots.ytd.numeric, line, slots.ytd.match);
-      } else if (kind === 'ot' && slots.ytd) {
-        addMoney('ps-ot-ytd', slots.ytd.numeric, line, slots.ytd.match);
-      } else if (kind === 'tips' && slots.ytd) {
-        addMoney('ps-tips-ytd', slots.ytd.numeric, line, slots.ytd.match);
-      } else if (kind === 'commission' && slots.ytd) {
-        addMoney('ps-commission-ytd', slots.ytd.numeric, line, slots.ytd.match);
-      } else if (kind === 'rsu' && slots.ytd) {
-        addMoney('ps-rsu-ytd', slots.ytd.numeric, line, slots.ytd.match);
+      } else if (slots.ytd) {
+        const sourceId = PAYSTUB_YTD_FIELD_BY_KIND[kind];
+        if (sourceId) addMoney(sourceId, slots.ytd.numeric, line, slots.ytd.match);
       }
+    }
+    if (
+      periodHoursLine &&
+      !found.some((field) => field.sourceFieldId === 'ps-hours-week' && field.pageIndex === page.index)
+    ) {
+      const weekly = weeklyHoursFromPeriod(periodHours, paysPerYear);
+      if (weekly != null) push('ps-hours-week', weekly, periodHoursLine, periodHoursMatch);
     }
     if (!found.some((field) => field.sourceFieldId === 'ps-base-ytd' && field.pageIndex === page.index) && !hasGross) {
       for (const line of lines) {

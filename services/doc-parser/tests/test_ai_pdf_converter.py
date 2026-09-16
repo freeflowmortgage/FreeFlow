@@ -121,6 +121,18 @@ def test_ocr_page_text_includes_native_overlay_and_ocr_labels() -> None:
     assert page.text() == "78500.00 Form W-2"
 
 
+def test_ocr_page_text_does_not_duplicate_when_plain_text_is_ocr_words() -> None:
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text="Form W-2",
+        words=[OcrWord(text="Form W-2", x=0, y=0, w=0, h=0, confidence=99)],
+    )
+    assert page.text() == "Form W-2"
+
+
 def test_filled_acroform_skips_ocr_and_emits_field_word() -> None:
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
