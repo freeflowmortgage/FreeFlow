@@ -15,6 +15,8 @@ tests.
 
 | Document | Purpose |
 |---|---|
+| [TECHNICAL-READINESS-2026-09-15.md](TECHNICAL-READINESS-2026-09-15.md) | Current weighted readiness assessment, adversarial findings, weekend sales-demo plan, and September 30 technical burndown |
+| [PARTNER-READINESS-BRIEF-2026-09-15.md](PARTNER-READINESS-BRIEF-2026-09-15.md) | Plain-language partner briefing on what works, what remains, and what can honestly be sold by the target dates |
 | [PR15-REGRESSION-AUDIT-2026-09-14.md](PR15-REGRESSION-AUDIT-2026-09-14.md) | PR 15 comparison, retained/fixed behavior, supplied-document evidence, and local acceptance checklist |
 | [SECURITY-ASSESSMENT.md](SECURITY-ASSESSMENT.md) | Adversarial findings and release gates |
 | [SECURITY-SPEC.md](SECURITY-SPEC.md) | Required production security controls and threat model |

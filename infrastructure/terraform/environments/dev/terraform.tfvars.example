@@ -21,6 +21,7 @@ plte_allowed_ipv4_cidrs = []
 # value with the ECR repository URL plus the immutable image digest.
 enable_services = false
 enable_parser   = false
+enable_encompass_document_pull_worker = false
 enable_console  = false
 enable_monitoring = false
 operations_alert_email = null

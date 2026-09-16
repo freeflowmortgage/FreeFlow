@@ -171,6 +171,17 @@ variable "enable_parser" {
   default     = false
 }
 
+variable "enable_encompass_document_pull_worker" {
+  type        = bool
+  description = "Runs the tenant-scoped Encompass eFolder pull worker. Requires the portal, parser, and an externally populated API secret."
+  default     = false
+
+  validation {
+    condition     = !var.enable_encompass_document_pull_worker || (var.enable_edge && var.enable_services && var.enable_parser)
+    error_message = "The Encompass document pull worker requires edge, services, and the income parser."
+  }
+}
+
 variable "enable_console" {
   type        = bool
   description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."

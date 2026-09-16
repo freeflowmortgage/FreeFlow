@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadSummaryData, SummaryDataError } from './summary-pdf';
+import { loadSummaryData, SummaryDataError } from '../../pages/api/underwrite/summary-pdf';
 
 const requestContext = {
   requestId: '016cbe8e-43d5-4b84-b2a9-04ef3d5b0a37',

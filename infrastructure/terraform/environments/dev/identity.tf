@@ -26,6 +26,7 @@ data "aws_iam_policy_document" "task_execution_secrets" {
     resources = [
       aws_secretsmanager_secret.database_app.arn,
       aws_secretsmanager_secret.field_encryption.arn,
+      aws_secretsmanager_secret.encompass_api_client.arn,
     ]
   }
 }
@@ -75,6 +76,12 @@ data "aws_iam_policy_document" "portal_task" {
     actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
     resources = [aws_sqs_queue.sync.arn]
   }
+
+  statement {
+    sid       = "EnqueueTenantDocumentPull"
+    actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
+    resources = [aws_sqs_queue.document_pull.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "portal_task" {
@@ -86,6 +93,30 @@ resource "aws_iam_role_policy" "portal_task" {
 resource "aws_iam_role" "parser_task" {
   name               = "${local.name_prefix}-parser-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role" "document_pull_worker_task" {
+  name               = "${local.name_prefix}-document-pull-worker-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+data "aws_iam_policy_document" "document_pull_worker_task" {
+  statement {
+    sid = "ConsumeDocumentPullsOnly"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+    ]
+    resources = [aws_sqs_queue.document_pull.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "document_pull_worker_task" {
+  name   = "document-pull-worker-runtime"
+  role   = aws_iam_role.document_pull_worker_task.id
+  policy = data.aws_iam_policy_document.document_pull_worker_task.json
 }
 
 resource "aws_iam_role" "console_task" {
@@ -144,6 +175,11 @@ resource "aws_cloudwatch_log_group" "portal" {
 
 resource "aws_cloudwatch_log_group" "parser" {
   name              = "/ecs/${local.name_prefix}/income-parser"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "document_pull_worker" {
+  name              = "/ecs/${local.name_prefix}/document-pull-worker"
   retention_in_days = 14
 }
 
