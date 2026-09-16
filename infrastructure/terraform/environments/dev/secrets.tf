@@ -53,3 +53,11 @@ resource "aws_secretsmanager_secret_version" "field_encryption" {
   secret_id     = aws_secretsmanager_secret.field_encryption.id
   secret_string = random_password.field_encryption.result
 }
+
+# Terraform creates only the secret container. Populate its value through the
+# approved secrets workflow; never place an ICE API secret in tfvars or state.
+resource "aws_secretsmanager_secret" "encompass_api_client" {
+  name                    = "${local.name_prefix}/encompass-api-client-secret"
+  description             = "ICE Encompass Developer Connect client secret for the synthetic dev worker"
+  recovery_window_in_days = 7
+}

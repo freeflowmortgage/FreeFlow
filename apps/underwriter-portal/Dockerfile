@@ -55,6 +55,8 @@ COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/underwriter-portal/package.json ./apps/underwriter-portal/
 COPY --from=builder /app/apps/underwriter-portal/next.config.js ./apps/underwriter-portal/
 COPY --from=builder /app/apps/underwriter-portal/scripts ./apps/underwriter-portal/scripts
+COPY --from=builder /app/apps/underwriter-portal/src/server ./apps/underwriter-portal/src/server
+COPY --from=builder /app/apps/underwriter-portal/tsconfig.json ./apps/underwriter-portal/
 COPY --from=builder /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
 COPY --from=builder /app/apps/underwriter-portal/.next ./apps/underwriter-portal/.next
 

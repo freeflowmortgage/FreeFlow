@@ -9,6 +9,7 @@ export const AUDIT_ACTIONS = {
   INCOME_CALCULATION_COMPLETED: 'INCOME_CALCULATION_COMPLETED',
   INCOME_APPROVED: 'INCOME_APPROVED',
   INCOME_OVERRIDE: 'INCOME_OVERRIDE',
+  ENCOMPASS_DOCUMENT_PULL_QUEUED: 'ENCOMPASS_DOCUMENT_PULL_QUEUED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -23,7 +24,7 @@ export const AUDIT_REASON_CODES = {
 
 export type AuditEventInput = Readonly<{
   loanId: string;
-  entityType: 'FORM_1084_AUDIT';
+  entityType: 'FORM_1084_AUDIT' | 'ENCOMPASS_DOCUMENT_PULL_JOB';
   entityId: string;
   expectedLoanVersion: number;
   action: AuditAction;

@@ -50,7 +50,8 @@ BEGIN
     'public.appraisal_audits'::regclass,
     'public.appraisal_action_items'::regclass,
     'public.audit_events'::regclass,
-    'public.api_idempotency_keys'::regclass
+    'public.api_idempotency_keys'::regclass,
+    'public.encompass_document_pull_jobs'::regclass
   ) AND (NOT relrowsecurity OR NOT relforcerowsecurity);
   IF unprotected_tables <> 0 THEN
     RAISE EXCEPTION 'One or more tenant tables do not force row-level security';

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { requireTenantLoanAccess, resolveParserUrl, TenantLoanAccessError } from './process';
+import {
+  requireTenantLoanAccess,
+  resolveParserUrl,
+  TenantLoanAccessError,
+} from '../../pages/api/underwrite/process';
 
 const context = {
   requestId: 'request-1', subject: 'subject-1',

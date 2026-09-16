@@ -65,6 +65,14 @@ enum TrendingAnalysisResult {
   INSUFFICIENT_DATA // Missing comparative historical files
 }
 
+enum EncompassDocumentPullStatus {
+  QUEUED
+  IN_PROGRESS
+  SUCCEEDED
+  RETRYABLE_FAILURE
+  FAILED
+}
+
 // =============================================================================
 // DATABASE MODELS (Income Point-Solution Focus Only)
 // =============================================================================
@@ -82,12 +90,13 @@ model Tenant {
   isBillingActive  Boolean @default(true) // Accounts are suspended if pay methods fail
 
   // Relations
-  users               User[]
-  configurations      TenantConfiguration?
-  loanApplications    LoanApplication[]
-  billingLedgers      TenantBillingLedger[]
-  auditEvents         AuditEvent[]
-  apiIdempotencyKeys  ApiIdempotencyKey[]
+  users                     User[]
+  configurations            TenantConfiguration?
+  loanApplications          LoanApplication[]
+  billingLedgers            TenantBillingLedger[]
+  auditEvents               AuditEvent[]
+  apiIdempotencyKeys        ApiIdempotencyKey[]
+  encompassDocumentPullJobs EncompassDocumentPullJob[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -102,10 +111,11 @@ model TenantConfiguration {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Feature Toggles (Specific to Income Point-Solution)
-  enable1084Ocr         Boolean @default(true) // Standard Form 1084 scanning active
-  enableEncompassSync   Boolean @default(true) // Active Encompass REST connection
-  enableUshdaValidation Boolean @default(true) // USDA dual-track math activated
-  enableAppraisalReview Boolean @default(true) // URAR 1004 coordinate QA workspace
+  enable1084Ocr               Boolean @default(true) // Standard Form 1084 scanning active
+  enableEncompassSync         Boolean @default(false) // Approved-result writes remain fail-closed by default
+  enableEncompassDocumentPull Boolean @default(false) // eFolder reads require explicit tenant enablement
+  enableUshdaValidation       Boolean @default(true) // USDA dual-track math activated
+  enableAppraisalReview       Boolean @default(true) // URAR 1004 coordinate QA workspace
 
   // Encrypted API Keys for Ellie Mae Developer Connect and Stripe
   encompassClientId   String? @db.VarChar(255)
@@ -133,10 +143,11 @@ model User {
   nmlsNumber   String?  @db.VarChar(50)
 
   // Audit Relations
-  verifiedAudits          Form1084Audit[]       @relation("VerifiedByUser")
-  verifiedAppraisals      AppraisalAudit[]      @relation("AppraisalVerifiedByUser")
-  clearedAppraisalActions AppraisalActionItem[] @relation("ActionItemClearedByUser")
+  verifiedAudits          Form1084Audit[]            @relation("VerifiedByUser")
+  verifiedAppraisals      AppraisalAudit[]           @relation("AppraisalVerifiedByUser")
+  clearedAppraisalActions AppraisalActionItem[]      @relation("ActionItemClearedByUser")
   auditEvents             AuditEvent[]
+  requestedDocumentPulls  EncompassDocumentPullJob[] @relation("DocumentPullRequestedBy")
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -160,13 +171,14 @@ model LoanApplication {
   version              Int               @default(1)
 
   // Relations
-  documents        LoanDocument[]
-  ocrDiffHistories OcrDiffHistory[]
-  form1084Audits   Form1084Audit[]
-  appraisalAudits  AppraisalAudit[]
-  conditions       LoanCondition[]
-  billingLedgers   TenantBillingLedger[]
-  auditEvents      AuditEvent[]
+  documents                 LoanDocument[]
+  ocrDiffHistories          OcrDiffHistory[]
+  form1084Audits            Form1084Audit[]
+  appraisalAudits           AppraisalAudit[]
+  conditions                LoanCondition[]
+  billingLedgers            TenantBillingLedger[]
+  auditEvents               AuditEvent[]
+  encompassDocumentPullJobs EncompassDocumentPullJob[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -200,6 +212,7 @@ model LoanDocument {
 
   @@unique([tenantId, id])
   @@unique([tenantId, loanId, id])
+  @@unique([tenantId, loanId, sourceAttachmentId])
   @@index([tenantId, loanId])
   @@map("loan_documents")
 }
@@ -301,20 +314,52 @@ model AuditEvent {
 // Mutation replay protection. Stores only hashes, status, and a safe
 // identifier reference. Never persist request bodies, documents, or PII.
 model ApiIdempotencyKey {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @db.Uuid
-  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  operation          String   @db.VarChar(100)
-  key                String   @db.VarChar(128)
-  requestHash        String   @db.Char(64)
-  responseCode       Int
-  responseReference  String   @db.VarChar(512)
-  expiresAt          DateTime @db.Timestamptz
-  createdAt          DateTime @default(now()) @db.Timestamptz
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @db.Uuid
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  operation         String   @db.VarChar(100)
+  key               String   @db.VarChar(128)
+  requestHash       String   @db.Char(64)
+  responseCode      Int
+  responseReference String   @db.VarChar(512)
+  expiresAt         DateTime @db.Timestamptz
+  createdAt         DateTime @default(now()) @db.Timestamptz
 
   @@unique([tenantId, operation, key])
   @@index([tenantId, expiresAt])
   @@map("api_idempotency_keys")
+}
+
+// Durable orchestration metadata for Encompass eFolder reads. The job stores
+// identifiers and safe status only. PDF bytes, attachment names, borrower data,
+// OCR text, and provider responses must never be persisted here or placed on SQS.
+model EncompassDocumentPullJob {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @db.Uuid
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  loanId            String          @db.Uuid
+  loanApplication   LoanApplication @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
+  requestedByUserId String          @db.Uuid
+  requestedByUser   User            @relation("DocumentPullRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict)
+
+  expectedLoanVersion Int
+  idempotencyKey      String                      @db.VarChar(128)
+  correlationId       String                      @db.VarChar(100)
+  status              EncompassDocumentPullStatus @default(QUEUED)
+  attemptCount        Int                         @default(0)
+  safeErrorCode       String?                     @db.VarChar(100)
+  attachmentCount     Int?
+  processedCount      Int?
+  startedAt           DateTime?                   @db.Timestamptz
+  completedAt         DateTime?                   @db.Timestamptz
+  createdAt           DateTime                    @default(now()) @db.Timestamptz
+  updatedAt           DateTime                    @updatedAt @db.Timestamptz
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, loanId, createdAt])
+  @@index([status, createdAt])
+  @@map("encompass_document_pull_jobs")
 }
 
 // 9. LOAN CONDITIONS (Encompass Checklist Integration)
