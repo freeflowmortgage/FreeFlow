@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MortgageDocumentPaystubParserSchema",
+  "description": "Standard canonical paystub extraction model for any payroll processor, mapping to MISMO 3.4 (Form 1003 Section 1b / DU & LPA). Not bound to a single employer or vendor layout. Extends wage buckets with Tips and RestrictedStockUnits so FreeFlow first-class fields are not collapsed away.",
+  "type": "object",
+  "required": [
+    "documentMetadata",
+    "grossPaySummary",
+    "earningsLineItems"
+  ],
+  "properties": {
+    "documentMetadata": {
+      "type": "object",
+      "properties": {
+        "employerName": {
+          "type": "string"
+        },
+        "employerAddress": {
+          "type": "object",
+          "properties": {
+            "street": {
+              "type": ["string", "null"]
+            },
+            "city": {
+              "type": ["string", "null"]
+            },
+            "state": {
+              "type": ["string", "null"]
+            },
+            "postalCode": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "employeeFirstName": {
+          "type": "string"
+        },
+        "employeeLastName": {
+          "type": "string"
+        },
+        "employeeIdentifier": {
+          "type": ["string", "null"]
+        },
+        "payPeriodStartDate": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "payPeriodEndDate": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "payDate": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "paymentFrequencyType": {
+          "type": "string",
+          "enum": ["Weekly", "Biweekly", "SemiMonthly", "Monthly"]
+        }
+      }
+    },
+    "grossPaySummary": {
+      "type": "object",
+      "properties": {
+        "currentGrossPayAmount": {
+          "type": ["number", "null"]
+        },
+        "ytdGrossPayAmount": {
+          "type": ["number", "null"]
+        },
+        "currentNetPayAmount": {
+          "type": ["number", "null"]
+        },
+        "ytdNetPayAmount": {
+          "type": ["number", "null"]
+        }
+      }
+    },
+    "earningsLineItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rawDescription", "mismoIncomeType", "currentAmount", "ytdAmount"],
+        "properties": {
+          "rawDescription": {
+            "type": "string"
+          },
+          "mismoIncomeType": {
+            "type": "string",
+            "enum": [
+              "BasePay",
+              "Overtime",
+              "Bonus",
+              "Commissions",
+              "Tips",
+              "RestrictedStockUnits",
+              "OtherIncome"
+            ],
+            "description": "Classification based on Fannie Mae/Freddie Mac underwriting definitions. RestrictedStockUnits and Tips are FreeFlow extensions of OtherIncome so they stay first-class."
+          },
+          "isQualifyingBase": {
+            "type": "boolean",
+            "description": "True for regular hours, vacation, sick, holidays, PTO, shift/weekend/night differentials, and retro. False for overtime, bonus, commission, tips, RSU, or non-cash imputed benefits."
+          },
+          "hours": {
+            "type": ["number", "null"]
+          },
+          "rate": {
+            "type": ["number", "null"]
+          },
+          "currentAmount": {
+            "type": "number"
+          },
+          "ytdHours": {
+            "type": ["number", "null"]
+          },
+          "ytdAmount": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "deductions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "deductionTimingType": {
+            "type": "string",
+            "enum": ["PreTax", "PostTax"]
+          },
+          "isMandatoryDebtObligation": {
+            "type": "boolean",
+            "description": "True for 401(k) loans, garnishments, child support, or alimony."
+          },
+          "currentAmount": {
+            "type": "number"
+          },
+          "ytdAmount": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "taxes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taxType": {
+            "type": "string",
+            "enum": ["Federal", "State", "OASDI", "Medicare", "Local"]
+          },
+          "currentAmount": {
+            "type": "number"
+          },
+          "ytdAmount": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "calculatedUnderwritingSummary": {
+      "type": "object",
+      "properties": {
+        "totalBasePayYTD": {
+          "type": "number"
+        },
+        "totalOvertimeYTD": {
+          "type": "number"
+        },
+        "totalBonusYTD": {
+          "type": "number"
+        },
+        "totalCommissionYTD": {
+          "type": "number"
+        },
+        "totalTipsYTD": {
+          "type": "number"
+        },
+        "totalRsuYTD": {
+          "type": "number"
+        },
+        "totalImputedNonCashYTD": {
+          "type": "number"
+        },
+        "derivedCalculatedMonthlyBase": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

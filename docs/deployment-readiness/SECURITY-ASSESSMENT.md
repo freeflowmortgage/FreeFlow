@@ -1,5 +1,10 @@
 # Adversarial Security and Backend Assessment
 
+> Current reassessment: see
+> [Technical Readiness and Go-Live Burndown — 2026-09-15](TECHNICAL-READINESS-2026-09-15.md).
+> This file preserves the original 2026-09-04 baseline so progress and remaining
+> risk can be compared without rewriting the historical evidence.
+
 Assessment date: 2026-09-04
 Scope: repository code, local Docker runtime, API behavior, database state,
 dependency manifests, parser services, and existing ECS artifacts.

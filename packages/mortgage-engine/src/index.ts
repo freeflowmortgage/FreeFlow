@@ -7,3 +7,4 @@ export * from './usda-projected-income-engine-v2';
 export * from './usda-ssi-rules-engine';
 export * from './income-calculation-dispatcher';
 export * from './mismoD1cMapper';
+export * from './paystubMismoMapper';

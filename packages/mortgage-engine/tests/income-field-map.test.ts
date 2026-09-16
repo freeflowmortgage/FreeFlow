@@ -4,6 +4,9 @@ import type {
   ParseResponse,
   ParseWord
 } from '../../../apps/underwriting-console/src/parseTypes';
+import parserPaystubRules from '../../../services/doc-parser/src/paystub_row_rules.json';
+import consolePaystubRules from '../../../apps/underwriting-console/src/paystubRowRules.json';
+import bannerHealthPaystub from '../../../services/doc-parser/tests/fixtures/banner_health_paystub.json';
 
 // The engine package intentionally omits DOM libs; this parser-model test only
 // needs the name used by LiveParseSession, not browser File behavior.
@@ -326,6 +329,7 @@ describe('entity-scoped income field mapping', () => {
     expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-ot-ytd')?.numericValue).toBe(4200);
     expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(12500);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-pay-frequency')?.value).toBe('SemiMonthly');
   });
 
   test('adds shift/PTO/holiday/retro to base, bonus classifiers, and variable tips/commission/RSU', () => {
@@ -345,6 +349,7 @@ describe('entity-scoped income field mapping', () => {
             'Weekend Premium 20.00 800.00',
             'PTO 0.00 2,000.00',
             'Holiday 0.00 500.00',
+            'Sick 0.00 400.00',
             'Retro Pay 0.00 300.00',
             'AIP 0.00 4,000.00',
             'Quarterly 0.00 1,500.00',
@@ -360,13 +365,41 @@ describe('entity-scoped income field mapping', () => {
         },
       ]),
     );
-    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54800);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(55200);
     expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBe(3660);
     expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(11000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-tips-ytd')?.numericValue).toBe(1800);
     expect(fields.find((field) => field.sourceFieldId === 'ps-commission-ytd')?.numericValue).toBe(6000);
     expect(fields.find((field) => field.sourceFieldId === 'ps-rsu-ytd')?.numericValue).toBe(7500);
     expect(fields.some((field) => field.numericValue === 9999 || field.numericValue === 8888)).toBe(false);
+  });
+
+  test('keeps parser and console generic paystub catalogs identical', () => {
+    expect(consolePaystubRules).toEqual(parserPaystubRules);
+  });
+
+  test('maps a generic Hours/Rate stub sample including PTO, sick-as-base, and biweekly dates', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: false,
+          meanConfidence: 99,
+          skewDegrees: 0,
+          flags: [],
+          words: words(bannerHealthPaystub.lines),
+        },
+      ]),
+    );
+    const expected = bannerHealthPaystub.expected;
+    expect(fields.find((field) => field.sourceFieldId === 'ps-employer-name')?.value).toBe(expected['ps-employer-name']);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-pay-frequency')?.value).toBe(expected['ps-pay-frequency']);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hourly-rate')?.numericValue).toBe(expected['ps-hourly-rate']);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-hours-week')?.numericValue).toBeCloseTo(expected['ps-hours-week'], 5);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-current-base')?.numericValue).toBeCloseTo(expected['ps-current-base'], 2);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBeCloseTo(expected['ps-base-ytd'], 2);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-bonus-ytd')?.numericValue).toBe(expected['ps-bonus-ytd']);
   });
 
   test('classifies OT, double time, 1.5 hourly, and worked holiday as overtime', () => {

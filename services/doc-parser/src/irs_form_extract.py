@@ -12,6 +12,18 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from form_signatures import PAYSTUB_TITLE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
+from ocr_match import pattern_matches
+from paystub_row_rules import (
+    EXCLUDE_ROW as _PAYSTUB_EXCLUDE_ROW,
+    YTD_FIELD_BY_KIND,
+    frequency_type as _paystub_frequency_type,
+    hours_before_rate as _paystub_hours_before_rate,
+    is_primary_rate_row as _is_primary_rate_row,
+    pays_per_year as _paystub_pays_per_year,
+    row_kind as _paystub_row_kind,
+    weekly_from_period_hours as _weekly_from_period_hours,
+)
 from schedule_e_grid import (
     _clip_text,
     _open_pdf,
@@ -20,6 +32,7 @@ from schedule_e_grid import (
     is_schedule_e_page1,
     parse_tax_amount,
     relative_box,
+    words_in_box,
 )
 
 logger = logging.getLogger("freeflow.irs_extract")
@@ -62,11 +75,29 @@ W2_FIELDS = (
         ),
         "text",
     ),
-    FieldSpec("w2-employer-ein", "W-2", "identity", "Box b", "Employer Identification Number (EIN)", "Box b", ("Employer identification number",), "ein"),
+    FieldSpec(
+        "w2-employer-ein",
+        "W-2",
+        "identity",
+        "Box b",
+        "Employer Identification Number (EIN)",
+        "Box b",
+        ("Employer identification number", "Employer's identification", "Employer ID number"),
+        "ein",
+    ),
     FieldSpec("w2-box2", "W-2", "withholding", "Box 2", "Federal Income Tax Withheld", "Box 2", ("Federal income tax withheld",), "money"),
     FieldSpec("w2-box3", "W-2", "wages", "Box 3", "Social Security Wages", "Box 3", ("Social security wages",), "money"),
     FieldSpec("w2-box4", "W-2", "withholding", "Box 4", "Social Security Tax Withheld (6.2%)", "Box 4", ("Social security tax withheld",), "money"),
-    FieldSpec("w2-box5", "W-2", "wages", "Box 5", "Medicare Wages and Tips", "Box 5", ("Medicare wages and tips",), "money"),
+    FieldSpec(
+        "w2-box5",
+        "W-2",
+        "wages",
+        "Box 5",
+        "Medicare Wages and Tips",
+        "Box 5",
+        ("Medicare wages and tips", "Medicare wages"),
+        "money",
+    ),
     FieldSpec("w2-box6", "W-2", "withholding", "Box 6", "Medicare Tax Withheld (1.45%)", "Box 6", ("Medicare tax withheld",), "money"),
 )
 
@@ -85,6 +116,7 @@ SCHEDULE_C_FIELDS = (
 
 PAYSTUB_FIELDS = (
     FieldSpec("ps-employer-name", "Paystub", "identity", "Employer", "Employer Name", "Employer", ("Employer", "Company"), "text"),
+    FieldSpec("ps-pay-frequency", "Paystub", "identity", "Frequency", "Pay Frequency", "Frequency", ("Pay frequency",), "text"),
     FieldSpec("ps-hourly-rate", "Paystub", "wages", "Rate", "Hourly Rate of Pay", "Rate", ("Hourly rate", "Rate of pay", "Base rate"), "money"),
     FieldSpec("ps-hours-week", "Paystub", "wages", "Hours", "Standard Weekly Hours", "Hours", ("Hr/Wk", "Hours / Wk", "Weekly hours"), "integer"),
     FieldSpec("ps-current-base", "Paystub", "wages", "Current", "Current Period Base Pay", "Current", ("Current period base", "This period regular"), "money"),
@@ -247,7 +279,7 @@ SCHEDULE_L_FIELDS = (
 )
 
 FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
-    (re.compile(r"Wage and Tax Statement|Form\s+W-2", re.I), W2_FIELDS),
+    (W2_TITLE, W2_FIELDS),
     (re.compile(r"Schedule C.*Profit or Loss From Business|Profit or Loss From Business", re.I), SCHEDULE_C_FIELDS),
     (re.compile(r"Profit or Loss From Farming", re.I), SCHEDULE_F_FIELDS),
     (re.compile(r"Schedule K-1\s*\(Form\s*1120-?S\)", re.I), SCORP_FIELDS),
@@ -257,15 +289,8 @@ FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
     (re.compile(r"Schedule B.*Interest and Ordinary Dividends", re.I), SCHEDULE_B_FIELDS),
     (re.compile(r"Schedule D.*Capital Gains and Losses", re.I), SCHEDULE_D_FIELDS),
     (re.compile(r"Form 8825.*Rental Real Estate Income|Form\s+8825", re.I), FORM_8825_FIELDS),
-    (
-        re.compile(
-            r"earnings statement|pay\s*stub|paystub|payroll statement|pay\s+statement|pay\s+advice|"
-            r"year[- ]to[- ]date\s+(?:gross|earnings)|current period|net pay",
-            re.I,
-        ),
-        PAYSTUB_FIELDS,
-    ),
-    (re.compile(r"written verification of employment|verification of employment|the work number|\bWVOE\b", re.I), WVOE_FIELDS),
+    (PAYSTUB_TITLE, PAYSTUB_FIELDS),
+    (WVOE_TITLE, WVOE_FIELDS),
 )
 
 SUPPORTING_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
@@ -289,11 +314,28 @@ def _format_money(amount: float) -> str:
     return f"${amount:,.2f}"
 
 
+def _page_width(page: Any) -> float:
+    return float(page.rect.width)
+
+
+def _page_height(page: Any) -> float:
+    return float(page.rect.height)
+
+
 def _clip_right(page: Any, hit: Any, width: float = 220.0) -> list[float]:
     return [
         float(hit.x1) + 2.0,
         float(hit.y0) - 3.0,
-        min(float(page.rect.width) - 12.0, float(hit.x1) + width),
+        min(_page_width(page) - 12.0, float(hit.x1) + width),
+        float(hit.y1) + 3.0,
+    ]
+
+
+def _clip_left(page: Any, hit: Any, width: float = 220.0) -> list[float]:
+    return [
+        max(8.0, float(hit.x0) - width),
+        float(hit.y0) - 3.0,
+        max(8.0, float(hit.x0) - 2.0),
         float(hit.y1) + 3.0,
     ]
 
@@ -302,8 +344,17 @@ def _clip_below(page: Any, hit: Any, height: float = 16.0) -> list[float]:
     return [
         float(hit.x0),
         float(hit.y1),
-        min(float(page.rect.width) - 12.0, float(hit.x1) + 140.0),
-        min(float(page.rect.height) - 8.0, float(hit.y1) + height),
+        min(_page_width(page) - 12.0, float(hit.x1) + 140.0),
+        min(_page_height(page) - 8.0, float(hit.y1) + height),
+    ]
+
+
+def _clip_above(page: Any, hit: Any, height: float = 24.0) -> list[float]:
+    return [
+        max(8.0, float(hit.x0) - 28.0),
+        max(8.0, float(hit.y0) - height),
+        min(_page_width(page) - 12.0, float(hit.x1) + 8.0),
+        float(hit.y0) + 1.0,
     ]
 
 
@@ -312,12 +363,15 @@ def _clip_w2_column(page: Any, hit: Any) -> list[float]:
 
     Clip-right hits the neighboring box number (Box 5 → the '2' of Box 2). Clip-below
     starts at the label text, so it shears '78,500.00' into '8,500.00' and can include
-    the next box's amount. Keep the cell: a bit left of the label, not into the next box.
+    the next box's amount. Keep the cell: a bit left of a short box-number hit, not
+    into the next box. Long OCR labels already span the cell, so do not shift left.
     """
-    x0 = max(8.0, float(hit.x0) - 28.0)
-    x1 = min(float(page.rect.width) - 12.0, float(hit.x1) + 8.0, x0 + 130.0)
+    label_w = float(hit.x1) - float(hit.x0)
+    left_pad = 8.0 if label_w > 60.0 else 28.0
+    x0 = max(8.0, float(hit.x0) - left_pad)
+    x1 = min(_page_width(page) - 12.0, float(hit.x1) + 8.0, x0 + (160.0 if label_w > 60.0 else 130.0))
     y0 = float(hit.y1) - 1.0
-    y1 = min(float(page.rect.height) - 8.0, float(hit.y1) + 24.0)
+    y1 = min(_page_height(page) - 8.0, float(hit.y1) + 24.0)
     return [x0, y0, x1, y1]
 
 
@@ -338,13 +392,132 @@ def _label_variants(label: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def _first_hit(page: Any, labels: tuple[str, ...]):
+def _fold_label(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+@dataclass(frozen=True)
+class _Hit:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+def _word_items(words: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for word in words or []:
+        text = str(word.get("text") or "").strip()
+        if not text:
+            continue
+        items.append(
+            {
+                "text": text,
+                "fold": _fold_label(text),
+                "x0": float(word["x0"]),
+                "y0": float(word["y0"]),
+                "x1": float(word["x1"]),
+                "y1": float(word["y1"]),
+            }
+        )
+    return items
+
+
+def _median(values: list[float], fallback: float) -> float:
+    if not values:
+        return fallback
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def _cluster_reading_lines(items: list[dict[str, Any]], *, vertical: bool = False) -> list[list[dict[str, Any]]]:
+    if not items:
+        return []
+    if vertical:
+        ordered = sorted(items, key=lambda word: ((word["x0"] + word["x1"]) / 2.0, word["y0"]))
+        axis = lambda word: (word["x0"] + word["x1"]) / 2.0
+        minor = lambda word: word["y0"]
+        tolerance = max(4.0, _median([word["x1"] - word["x0"] for word in items], 8.0) * 0.65)
+    else:
+        ordered = sorted(items, key=lambda word: ((word["y0"] + word["y1"]) / 2.0, word["x0"]))
+        axis = lambda word: (word["y0"] + word["y1"]) / 2.0
+        minor = lambda word: word["x0"]
+        tolerance = max(4.0, _median([word["y1"] - word["y0"] for word in items], 8.0) * 0.7)
+    rows: list[list[dict[str, Any]]] = []
+    for word in ordered:
+        if rows and abs(axis(word) - axis(rows[-1][0])) <= tolerance:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    for row in rows:
+        row.sort(key=minor)
+    return rows
+
+
+def _span_hit(span: list[dict[str, Any]]) -> _Hit:
+    return _Hit(
+        min(word["x0"] for word in span),
+        min(word["y0"] for word in span),
+        max(word["x1"] for word in span),
+        max(word["y1"] for word in span),
+    )
+
+
+def _find_folded_needle(items: list[dict[str, Any]], needle: str) -> _Hit | None:
+    if not needle or not items:
+        return None
+    short = len(needle) < 5
+    for word in items:
+        folded = word["fold"]
+        if not folded:
+            continue
+        if short:
+            if folded == needle or folded.startswith(needle):
+                return _span_hit([word])
+            continue
+        if needle in folded:
+            return _span_hit([word])
+    folds = [word["fold"] for word in items]
+    for start in range(len(items)):
+        acc = ""
+        for end in range(start, len(items)):
+            acc += folds[end]
+            if not acc:
+                continue
+            if acc == needle or (not short and needle in acc):
+                return _span_hit(items[start : end + 1])
+            if len(acc) > len(needle) + 18:
+                break
+    return None
+
+
+def _hit_from_words(words: list[dict[str, Any]] | None, labels: tuple[str, ...]) -> _Hit | None:
+    items = _word_items(words)
+    if not items:
+        return None
+    needles: list[str] = []
+    for label in labels:
+        for variant in _label_variants(label):
+            folded = _fold_label(variant)
+            if folded and folded not in needles:
+                needles.append(folded)
+    needles.sort(key=len, reverse=True)
+    groups = _cluster_reading_lines(items) + _cluster_reading_lines(items, vertical=True) + [items]
+    for needle in needles:
+        for group in groups:
+            hit = _find_folded_needle(group, needle)
+            if hit is not None:
+                return hit
+    return None
+
+
+def _first_hit(page: Any, labels: tuple[str, ...], words: list[dict[str, Any]] | None = None):
     for label in labels:
         for variant in _label_variants(label):
             hits = page.search_for(variant)
             if hits:
                 return hits[0]
-    return None
+    return _hit_from_words(words, labels)
 
 
 def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None:
@@ -385,6 +558,33 @@ def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None
     if best is None:
         return None
     return [float(best.x0), float(best.y0), float(best.x1), float(best.y1)]
+
+
+def _first_visual_line(words: list[dict[str, Any]], box: list[float]) -> str:
+    hits = words_in_box(words, box)
+    if not hits:
+        return ""
+    hits.sort(key=lambda word: (float(word["y0"]), float(word["x0"])))
+    top = float(hits[0]["y0"])
+    line = [word for word in hits if abs(float(word["y0"]) - top) <= 5.0]
+    return re.sub(r"\s+", " ", " ".join(str(word["text"]) for word in line)).strip()
+
+
+def _same_column_money(words: list[dict[str, Any]], box: list[float], hit: Any) -> tuple[str, float] | None:
+    """Prefer the amount under the label, not a neighbor in a wide OCR clip."""
+    candidates: list[tuple[float, tuple[str, float]]] = []
+    for word in words_in_box(words, box):
+        parsed = _parse_capture(str(word.get("text") or ""), "money")
+        if not parsed:
+            continue
+        cx = (float(word["x0"]) + float(word["x1"])) / 2.0
+        if cx < float(hit.x0) - 12.0 or cx > float(hit.x1) + 12.0:
+            continue
+        candidates.append((abs(float(word["y0"]) - float(hit.y1)), parsed))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
 
 
 def _parse_capture(raw: str, capture: str) -> tuple[str, float] | None:
@@ -500,7 +700,7 @@ def _extract_spec(
     if spec.source_id.startswith("sch-l-") or spec.source_id.startswith("form-4562-"):
         form = _corporate_form(blob, spec.form)
         entity_id = f"{_form_slug(form)}-p{page_index}"
-    hit = _first_hit(page, spec.labels)
+    hit = _first_hit(page, spec.labels, words)
     if hit is None:
         return None
     boxes: list[list[float]] = []
@@ -514,11 +714,18 @@ def _extract_spec(
             [
                 float(hit.x1) + 2.0,
                 float(hit.y0) - 3.0,
-                float(page.rect.width) - 12.0,
+                _page_width(page) - 12.0,
                 float(hit.y1) + 3.0,
             ]
         )
-    boxes.extend([_clip_right(page, hit), _clip_below(page, hit)])
+    boxes.extend(
+        [
+            _clip_right(page, hit),
+            _clip_below(page, hit),
+            _clip_left(page, hit),
+            _clip_above(page, hit),
+        ]
+    )
     parsed = None
     used_box = boxes[0]
     for box in boxes:
@@ -529,7 +736,11 @@ def _extract_spec(
             words,
             money=spec.capture.startswith("money"),
         )
+        if spec.capture == "text" and words:
+            raw = _first_visual_line(words, box) or raw
         parsed = _parse_capture(raw, spec.capture)
+        if spec.form == "W-2" and spec.capture == "money" and words:
+            parsed = _same_column_money(words, box, hit) or parsed
         if parsed:
             used_box = box
             break
@@ -548,46 +759,126 @@ def _extract_spec(
     )
 
 
-def _parse_paystub_row_money(raw: str) -> tuple[str, float] | None:
-    """Keep $0.00 so a blank current column still reveals the YTD slot."""
+_PAYSTUB_MONEY_TOKEN = re.compile(
+    r"(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2,}|\((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2,}\))"
+)
+_PAYSTUB_ANY_NUMBER = re.compile(
+    r"(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\))"
+)
+
+
+def _parse_paystub_token(raw: str, *, currency_only: bool = True) -> tuple[str, float] | None:
+    """Keep $0.00 so a blank current column still reveals the YTD slot.
+
+    Currency tokens require two or more decimal places so rate codes like
+    '1.5 Hourly' are not amounts, while pay-rate precision such as 51.9953
+    still maps. Overlay lookup may allow integers for hours.
+    """
     text = re.sub(r"\s+", " ", raw or "").strip()
-    match = MONEY_TOKEN.search(text)
+    match = (_PAYSTUB_MONEY_TOKEN if currency_only else _PAYSTUB_ANY_NUMBER).search(text)
     if not match:
         return None
     amount = parse_tax_amount(match.group(0))
     return _format_money(amount), amount
 
 
-def _row_money_amounts(page: Any, pymupdf: Any, hit: Any) -> list[tuple[float, str, float, list[float]]]:
-    clip = [
-        float(hit.x1) + 2.0,
-        float(hit.y0) - 5.0,
-        float(page.rect.width) - 8.0,
-        float(hit.y1) + 5.0,
+def _parse_paystub_row_money(raw: str) -> tuple[str, float] | None:
+    return _parse_paystub_token(raw, currency_only=True)
+
+
+def _paystub_row_clips(page: Any, hit: Any) -> list[list[float]]:
+    return [
+        [
+            float(hit.x1) + 2.0,
+            float(hit.y0) - 5.0,
+            _page_width(page) - 8.0,
+            float(hit.y1) + 5.0,
+        ],
+        _clip_below(page, hit, height=22.0),
+        _clip_left(page, hit, width=260.0),
+        _clip_above(page, hit, height=22.0),
     ]
-    rect = pymupdf.Rect(clip)
+
+
+def _money_tokens_in_clip(
+    page: Any,
+    pymupdf: Any,
+    clip: list[float],
+    words: list[dict[str, Any]] | None,
+    *,
+    currency_only: bool = True,
+) -> list[tuple[float, str, float, list[float]]]:
     found: list[tuple[float, str, float, list[float]]] = []
-    for word in page.get_text("words", clip=rect) or []:
-        x0, y0, x1, y1, text = word[0], word[1], word[2], word[3], word[4]
-        parsed = _parse_paystub_row_money(str(text))
+    native = page.get_text("words", clip=pymupdf.Rect(clip)) or []
+    source: list[tuple[float, float, float, float, str]] = []
+    if native:
+        source = [(float(word[0]), float(word[1]), float(word[2]), float(word[3]), str(word[4])) for word in native]
+    elif words:
+        source = [
+            (float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"]), str(word["text"]))
+            for word in words_in_box(words, clip)
+        ]
+    for x0, y0, x1, y1, text in source:
+        parsed = _parse_paystub_token(text, currency_only=currency_only)
         if not parsed:
             continue
         value, numeric = parsed
-        found.append((float(x0), value, numeric, [float(x0), float(y0), float(x1), float(y1)]))
+        found.append((x0, value, numeric, [x0, y0, x1, y1]))
     found.sort(key=lambda item: item[0])
     return found
 
 
-def _extract_8825_columns(page: Any, pymupdf: Any, *, page_index: int) -> list[dict[str, Any]]:
+def _row_money_amounts(
+    page: Any,
+    pymupdf: Any,
+    hit: Any,
+    words: list[dict[str, Any]] | None = None,
+    *,
+    currency_only: bool = True,
+) -> list[tuple[float, str, float, list[float]]]:
+    for clip in _paystub_row_clips(page, hit):
+        found = _money_tokens_in_clip(page, pymupdf, clip, words, currency_only=currency_only)
+        if found:
+            return found
+    return []
+
+
+def _paystub_value_box(
+    page: Any,
+    pymupdf: Any,
+    hit: Any,
+    numeric: float,
+    words: list[dict[str, Any]] | None = None,
+) -> list[float]:
+    """Return the printed numeric token, not the earnings-row label."""
+    label_box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)]
+    amounts = _row_money_amounts(page, pymupdf, hit, words)
+    matching = [item for item in amounts if abs(item[2] - numeric) <= max(0.005, abs(numeric) * 0.000001)]
+    if matching:
+        return matching[-1][3]
+    amounts = _row_money_amounts(page, pymupdf, hit, words, currency_only=False)
+    matching = [item for item in amounts if abs(item[2] - numeric) <= max(0.005, abs(numeric) * 0.000001)]
+    if matching:
+        return matching[-1][3]
+    return label_box
+
+
+def _extract_8825_columns(
+    page: Any,
+    pymupdf: Any,
+    *,
+    page_index: int,
+    words: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Property columns A/B/C… plus totals, matching Schedule E's per-column capture."""
     columns = "ABCDEFGH"
     extracted: list[dict[str, Any]] = []
     entity_id = f"form-8825-p{page_index}"
     for source_id, line_num, labels in _8825_COLUMN_LINES:
-        hit = _first_hit(page, labels)
+        hit = _first_hit(page, labels, words)
         if hit is None:
             continue
-        amounts = _row_money_amounts(page, pymupdf, hit)
+        amounts = _row_money_amounts(page, pymupdf, hit, words)
         if len(amounts) < 2:
             continue
         *properties, total = amounts
@@ -633,73 +924,7 @@ def _extract_8825_columns(page: Any, pymupdf: Any, *, page_index: int) -> list[d
     return extracted
 
 
-_PAYSTUB_EXCLUDE_ROW = re.compile(
-    r"spot\s*bonus|\breloc(?:ation)?\b|^(gross|net\b|total|federal|social security|medicare|401|"
-    r"deduct|tax|health|dental|pre[- ]tax|after[- ]tax|sick)\b",
-    re.I,
-)
-_PAYSTUB_BASE_ROW = re.compile(
-    r"\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|"
-    r"straight\s*time|sunday|weekend(?:\s+premium)?|night(?:\s+diff(?:erential)?)?|"
-    r"shift(?:\s+diff(?:erential)?)?|pto|holiday|leave|vacation|retro(?:\s+pay)?)\b",
-    re.I,
-)
-_PAYSTUB_PRIMARY_RATE_ROW = re.compile(
-    r"\b(regular|reg(?:ular)?(?:\s+pay)?|base(?:\s+pay)?(?!\s+rate)|salary|hourly(?!\s+rate)|straight\s*time)\b",
-    re.I,
-)
-_PAYSTUB_BONUS_ROW = re.compile(r"\b(aip|annual\s+incentive|quarterly|annual\s+pay|incentive|bonus)\b", re.I)
-_PAYSTUB_OT_ROW = re.compile(
-    r"\bover\s*time\b|\bot(?:[- ]?1\.5(?:0+)?)?\b|\bdouble\s*time\b|\bdbl\s*time\b|"
-    r"\b1\.5(?:0+)?\s*(?:x|hourly|hours?|ot)\b|"
-    r"\btime\s+and\s+a\s+half\b|\bworked\s+holiday\b|\bholiday\s+worked\b",
-    re.I,
-)
-_PAYSTUB_TIPS_ROW = re.compile(r"\btips?\b|\bgratuity\b", re.I)
-_PAYSTUB_COMMISSION_ROW = re.compile(r"\bcommission", re.I)
-_PAYSTUB_RSU_ROW = re.compile(r"\brsu\b|restricted\s+stock|stock\s+unit|stock\s+award", re.I)
 _PAYSTUB_SPECS = {spec.source_id: spec for spec in PAYSTUB_FIELDS}
-
-
-def _paystub_pays_per_year(blob: str) -> int | None:
-    if re.search(r"semi[- ]?month", blob, re.I):
-        return 24
-    if re.search(r"bi[- ]?week", blob, re.I):
-        return 26
-    if re.search(r"\bweekly\b", blob, re.I):
-        return 52
-    if re.search(r"\bmonthly\b", blob, re.I):
-        return 12
-    return None
-
-
-def _paystub_row_kind(label: str) -> str | None:
-    stripped = re.sub(r"[\$0-9,.\-—/]+", " ", label)
-    stripped = re.sub(r"\s+", " ", stripped).strip()
-    if not stripped or _PAYSTUB_EXCLUDE_ROW.search(stripped):
-        return None
-    # Match OT on the original label so "1.5 Hourly" is not stripped down to base "hourly".
-    if _PAYSTUB_OT_ROW.search(label) or _PAYSTUB_OT_ROW.search(stripped):
-        return "ot"
-    if _PAYSTUB_RSU_ROW.search(stripped):
-        return "rsu"
-    if _PAYSTUB_TIPS_ROW.search(stripped):
-        return "tips"
-    if _PAYSTUB_COMMISSION_ROW.search(stripped):
-        return "commission"
-    if _PAYSTUB_BONUS_ROW.search(stripped):
-        return "bonus"
-    if _PAYSTUB_BASE_ROW.search(stripped):
-        return "regular"
-    return None
-
-
-def _weekly_from_period_hours(period_hours: float, pays_per_year: int | None) -> float | None:
-    if 20 <= period_hours <= 50:
-        return period_hours
-    if pays_per_year:
-        return round((period_hours * pays_per_year) / 52.0, 2)
-    return None
 
 
 def _paystub_code_label(line: str) -> str:
@@ -713,22 +938,34 @@ def _assign_paystub_amounts(
     amounts: list[tuple[float, str, float, list[float]]],
     line: str,
     kind: str,
+    hours_before_rate: bool = False,
 ) -> dict[str, tuple[str, float, list[float]]]:
     values = [(value, numeric, box) for _x, value, numeric, box in amounts]
     assigned: dict[str, tuple[str, float, list[float]]] = {}
     if len(values) >= 4:
-        assigned["rate"] = values[0]
-        assigned["hours"] = values[1]
-        assigned["current"] = values[2]
-        assigned["ytd"] = values[3]
+        if hours_before_rate:
+            assigned["hours"] = values[0]
+            assigned["rate"] = values[1]
+            assigned["current"] = values[2]
+            assigned["ytd"] = values[3]
+        else:
+            assigned["rate"] = values[0]
+            assigned["hours"] = values[1]
+            assigned["current"] = values[2]
+            assigned["ytd"] = values[3]
     elif len(values) == 3 and values[0][1] < 200 and values[1][1] >= 200:
         assigned["rate"] = values[0]
         assigned["current"] = values[1]
         assigned["ytd"] = values[2]
     elif len(values) == 3 and values[0][1] < 200 and values[1][1] < 200:
-        assigned["rate"] = values[0]
-        assigned["hours"] = values[1]
-        assigned["current"] = values[2]
+        if hours_before_rate:
+            assigned["hours"] = values[0]
+            assigned["rate"] = values[1]
+            assigned["current"] = values[2]
+        else:
+            assigned["rate"] = values[0]
+            assigned["hours"] = values[1]
+            assigned["current"] = values[2]
     elif len(values) >= 2:
         assigned["current"] = values[0]
         assigned["ytd"] = values[-1]
@@ -740,38 +977,113 @@ def _assign_paystub_amounts(
     return assigned
 
 
-def _paystub_visual_lines(page: Any) -> list[str]:
-    """Cluster native words by Y so PDFKit/OCR cells on one row stay one earning line."""
-    words = list(page.get_text("words") or [])
+def _cluster_visual_word_rows(
+    words: list[tuple[float, float, float, float, str]],
+) -> list[list[tuple[float, float, float, float, str]]]:
     if not words:
         return []
-    rows: list[list[Any]] = []
-    for word in sorted(words, key=lambda item: (float(item[1]), float(item[0]))):
-        if rows and abs(float(word[1]) - float(rows[-1][0][1])) <= 4.0:
+    rows: list[list[tuple[float, float, float, float, str]]] = []
+    for word in sorted(words, key=lambda item: (item[1], item[0])):
+        if rows and abs(word[1] - rows[-1][0][1]) <= 4.0:
             rows[-1].append(word)
         else:
             rows.append([word])
-    lines: list[str] = []
+    clustered: list[list[tuple[float, float, float, float, str]]] = []
     for row in rows:
-        row.sort(key=lambda item: float(item[0]))
-        text = re.sub(r"\s+", " ", " ".join(str(item[4]) for item in row)).strip()
-        if text:
-            lines.append(text)
-    return lines
+        row.sort(key=lambda item: item[0])
+        clustered.append(row)
+    return clustered
 
 
-def _paystub_source_lines(page: Any, blob: str) -> list[str]:
-    visual = _paystub_visual_lines(page)
+def _join_visual_row(row: list[tuple[float, float, float, float, str]]) -> str:
+    return re.sub(r"\s+", " ", " ".join(item[4] for item in row)).strip()
+
+
+def _paystub_visual_rows(
+    page: Any, words: list[dict[str, Any]] | None = None
+) -> list[list[tuple[float, float, float, float, str]]]:
+    native = list(page.get_text("words") or [])
+    if native:
+        return _cluster_visual_word_rows(
+            [(float(word[0]), float(word[1]), float(word[2]), float(word[3]), str(word[4])) for word in native]
+        )
+    if words:
+        return _cluster_visual_word_rows(
+            [
+                (float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"]), str(word["text"]))
+                for word in words
+                if word.get("text")
+            ]
+        )
+    return []
+
+
+def _paystub_visual_lines(page: Any, words: list[dict[str, Any]] | None = None) -> list[str]:
+    """Cluster native or OCR words by Y so cells on one row stay one earning line."""
+    return [text for text in (_join_visual_row(row) for row in _paystub_visual_rows(page, words)) if text]
+
+
+def _paystub_source_lines(page: Any, blob: str, words: list[dict[str, Any]] | None = None) -> list[str]:
+    source = [re.sub(r"\s+", " ", line).strip() for line in blob.splitlines() if line.strip()]
+    # Pypdf preserves ordered earnings rows for some generated paystubs while
+    # PyMuPDF's visual word order separates their columns. Prefer the ordered
+    # text only when it contains a dated regular-pay row.
+    if any(re.search(r"regular\s+(?:hourly|pay).*\d{1,2}/\d{1,2}/\d{4}", line, re.I) for line in source):
+        return source
+    visual = _paystub_visual_lines(page, words)
     if visual:
         return visual
-    return [re.sub(r"\s+", " ", line).strip() for line in blob.splitlines() if line.strip()]
+    return source
 
 
-def _paystub_header_employer(page: Any, blob: str) -> tuple[str, list[float]] | None:
+def _dated_regular_pay_slots(line: str) -> dict[str, float]:
+    """Read ordered Hours/Rate/Amount/YTD columns from a dated regular-pay row."""
+    if not re.search(r"regular\s+(?:hourly|pay).*\d{1,2}/\d{1,2}/\d{4}", line, re.I):
+        return {}
+    without_dates = re.sub(r"\d{1,2}/\d{1,2}/\d{4}\s*-\s*\d{1,2}/\d{1,2}/\d{4}", " ", line)
+    values = [
+        parse_tax_amount(match.group(0))
+        for match in re.finditer(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", without_dates)
+    ]
+    if len(values) < 3:
+        return {}
+    slots = {"hours": values[-3], "rate": values[-2], "current": values[-1]}
+    if len(values) >= 5:
+        slots = {"hours": values[-5], "rate": values[-4], "current": values[-3], "ytd_hours": values[-2], "ytd": values[-1]}
+    if not (0 < slots["hours"] <= 200 and 0 < slots["rate"] < 1000 and slots["current"] > 0):
+        return {}
+    return slots
+
+
+def _ordered_regular_pay_slots(line: str) -> dict[str, float]:
+    """Read current/YTD columns from an ordered non-dated base-pay row."""
+    label = re.match(r".*?(?=\s-?(?:\d|\$))", line)
+    remainder = line[label.end() :] if label else line
+    values = [
+        parse_tax_amount(match.group(0))
+        for match in re.finditer(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", remainder)
+    ]
+    if len(values) >= 3:
+        return {"current": values[-3], "ytd_hours": values[-2], "ytd": values[-1]}
+    if len(values) == 2:
+        return {"current": values[0], "ytd": values[1]}
+    return {}
+
+
+def _ordered_paystub_label(line: str) -> str:
+    match = re.match(r".*?(?=\s-?(?:\d|\$))", line)
+    return (match.group(0) if match else line).strip(" :-")
+
+
+def _paystub_header_employer(
+    page: Any,
+    blob: str,
+    words: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[float]] | None:
     """Company name is often the first line of an earnings statement, not 'Employer:'."""
     if re.search(r"employer(?:['’]s)?(?:\s+name)?\s*[:#]", blob, re.I):
         return None
-    for line in _paystub_source_lines(page, blob)[:6]:
+    for line in _paystub_source_lines(page, blob, words)[:6]:
         if re.search(
             r"earnings statement|pay\s*stub|pay statement|pay advice|payroll|employee|pay period|advice",
             line,
@@ -782,13 +1094,19 @@ def _paystub_header_employer(page: Any, blob: str) -> tuple[str, list[float]] | 
             continue
         cleaned = re.sub(r"\s+", " ", line).strip(" ·-|")
         if 3 <= len(cleaned) <= 80:
-            hit = _first_hit(page, (cleaned[:24], cleaned))
+            hit = _first_hit(page, (cleaned[:24], cleaned), words)
             box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)] if hit is not None else [0.0, 0.0, 12.0, 12.0]
             return cleaned, box
     return None
 
 
-def _hit_for_paystub_label(page: Any, pymupdf: Any, label: str, used: set[tuple[float, float]]):
+def _hit_for_paystub_label(
+    page: Any,
+    pymupdf: Any,
+    label: str,
+    used: set[tuple[float, float]],
+    words: list[dict[str, Any]] | None = None,
+):
     for hit in page.search_for(label) or []:
         key = (round(float(hit.x0), 1), round(float(hit.y0), 1))
         if key in used:
@@ -802,14 +1120,69 @@ def _hit_for_paystub_label(page: Any, pymupdf: Any, label: str, used: set[tuple[
             continue
         used.add(key)
         return hit
-    return None
+    word_hit = _hit_from_words(words, (label,))
+    if word_hit is None:
+        return None
+    key = (round(float(word_hit.x0), 1), round(float(word_hit.y0), 1))
+    if key in used:
+        return None
+    used.add(key)
+    return word_hit
 
 
-def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: str) -> list[dict[str, Any]]:
+def _ordered_row_hit(
+    page: Any,
+    pymupdf: Any,
+    line: str,
+    used_hits: set[tuple[float, float]],
+    words: list[dict[str, Any]] | None,
+) -> tuple[Any, list[float]]:
+    ordered_label = _ordered_paystub_label(line)
+    hit = _hit_for_paystub_label(page, pymupdf, ordered_label, used_hits, words) if ordered_label else None
+    box = (
+        [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)]
+        if hit is not None
+        else [0.0, 0.0, 12.0, 12.0]
+    )
+    return hit, box
+
+
+def _emit_assigned_paystub_slots(
+    emit: Any,
+    kind: str,
+    line: str,
+    slots: dict[str, tuple[str, float, list[float]]],
+    period_hours: float,
+    period_hours_box: list[float] | None,
+) -> tuple[float, list[float] | None]:
+    if kind == "regular":
+        if "rate" in slots and _is_primary_rate_row(line):
+            emit("ps-hourly-rate", *slots["rate"])
+        if "current" in slots:
+            emit("ps-current-base", *slots["current"], accumulate=True)
+        if "ytd" in slots:
+            emit("ps-base-ytd", *slots["ytd"], accumulate=True)
+        if "hours" in slots:
+            return period_hours + slots["hours"][1], slots["hours"][2]
+        return period_hours, period_hours_box
+    source_id = YTD_FIELD_BY_KIND.get(kind)
+    if source_id and "ytd" in slots:
+        emit(source_id, *slots["ytd"], accumulate=True)
+    return period_hours, period_hours_box
+
+
+def _extract_paystub_table(
+    page: Any,
+    pymupdf: Any,
+    *,
+    page_index: int,
+    blob: str,
+    words: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Earnings-table rows: base (incl. shift/PTO), bonus, OT, tips, commission, RSU."""
     extracted: list[dict[str, Any]] = []
     seen: set[str] = set()
-    totals: dict[str, tuple[str, float, list[float]]] = {}
+    totals: dict[str, tuple[str, float, list[float], list[list[float]]]] = {}
     pays_per_year = _paystub_pays_per_year(blob)
     entity_id = f"paystub-p{page_index}"
 
@@ -818,23 +1191,27 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
         if spec is None:
             return
         if accumulate and source_id in totals:
-            _prev_value, prev_numeric, prev_box = totals[source_id]
-            totals[source_id] = (_format_money(prev_numeric + numeric), prev_numeric + numeric, prev_box)
+            _prev_value, prev_numeric, prev_box, component_boxes = totals[source_id]
+            totals[source_id] = (
+                _format_money(prev_numeric + numeric),
+                prev_numeric + numeric,
+                prev_box,
+                [*component_boxes, box],
+            )
             return
         if source_id in totals or source_id in seen:
             return
-        totals[source_id] = (value, numeric, box)
+        totals[source_id] = (value, numeric, box, [box])
 
     def flush() -> None:
-        for source_id, (value, numeric, box) in totals.items():
+        for source_id, (value, numeric, box, component_boxes) in totals.items():
             if source_id in seen:
                 continue
             spec = _PAYSTUB_SPECS.get(source_id)
             if spec is None:
                 continue
             seen.add(source_id)
-            extracted.append(
-                _field_record(
+            row = _field_record(
                     page=page,
                     page_index=page_index,
                     spec=spec,
@@ -844,63 +1221,168 @@ def _extract_paystub_table(page: Any, pymupdf: Any, *, page_index: int, blob: st
                     numeric=numeric,
                     used_box=box,
                 )
-            )
+            if len(component_boxes) > 1:
+                row["componentBoxes"] = [
+                    rel
+                    for component in component_boxes
+                    if (rel := relative_box(page, component)) is not None
+                ]
+            extracted.append(row)
 
     used_hits: set[tuple[float, float]] = set()
+    hours_before_rate = _paystub_hours_before_rate(blob)
+    period_hours = 0.0
+    period_hours_box: list[float] | None = None
     hours_match = re.search(r"(\d+(?:\.\d+)?)\s*hr/?\s*wk", blob, re.I)
     if hours_match:
         hours = float(hours_match.group(1))
-        hit = _first_hit(page, ("hr/wk", "Hr/Wk", hours_match.group(0)))
+        hit = _first_hit(page, ("hr/wk", "Hr/Wk", hours_match.group(0)), words)
         box = [float(hit.x0), float(hit.y0), float(hit.x1), float(hit.y1)] if hit is not None else [0.0, 0.0, 12.0, 12.0]
         emit("ps-hours-week", f"{int(hours) if hours.is_integer() else hours}", hours, box)
 
-    header = _paystub_header_employer(page, blob)
+    header = _paystub_header_employer(page, blob, words)
     if header:
         emit("ps-employer-name", header[0], 0.0, header[1])
 
-    for raw_line in _paystub_source_lines(page, blob):
-        line = re.sub(r"\s+", " ", raw_line).strip()
-        kind = _paystub_row_kind(line)
-        if kind is None:
-            continue
-        label = _paystub_code_label(line)
-        hit = _hit_for_paystub_label(page, pymupdf, label, used_hits) or _first_hit(page, (label, line[:18]))
-        if hit is None:
-            continue
-        amounts = _row_money_amounts(page, pymupdf, hit)
-        if not amounts:
-            continue
-        slots = _assign_paystub_amounts(amounts, line, kind)
-        if kind == "regular":
-            if "rate" in slots and _PAYSTUB_PRIMARY_RATE_ROW.search(line):
-                emit("ps-hourly-rate", *slots["rate"])
-            if "current" in slots:
-                emit("ps-current-base", *slots["current"], accumulate=True)
-            if "ytd" in slots:
-                emit("ps-base-ytd", *slots["ytd"], accumulate=True)
-            if "hours" in slots and "ps-hours-week" not in totals and _PAYSTUB_PRIMARY_RATE_ROW.search(line):
-                weekly = _weekly_from_period_hours(slots["hours"][1], pays_per_year)
-                if weekly:
-                    emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, slots["hours"][2])
-        elif kind == "bonus" and "ytd" in slots:
-            emit("ps-bonus-ytd", *slots["ytd"], accumulate=True)
-        elif kind == "ot" and "ytd" in slots:
-            emit("ps-ot-ytd", *slots["ytd"], accumulate=True)
-        elif kind == "tips" and "ytd" in slots:
-            emit("ps-tips-ytd", *slots["ytd"], accumulate=True)
-        elif kind == "commission" and "ytd" in slots:
-            emit("ps-commission-ytd", *slots["ytd"], accumulate=True)
-        elif kind == "rsu" and "ytd" in slots:
-            emit("ps-rsu-ytd", *slots["ytd"], accumulate=True)
+    frequency = _paystub_frequency_type(blob)
+    if frequency:
+        freq_hit = _first_hit(
+            page,
+            (
+                "Pay frequency",
+                "Semi-monthly",
+                "SemiMonthly",
+                "Biweekly",
+                "Bi-weekly",
+                "Weekly",
+                "Monthly",
+                "Period Start",
+                "Period End",
+            ),
+            words,
+        )
+        freq_box = (
+            [float(freq_hit.x0), float(freq_hit.y0), float(freq_hit.x1), float(freq_hit.y1)]
+            if freq_hit is not None
+            else [0.0, 0.0, 12.0, 12.0]
+        )
+        emit("ps-pay-frequency", frequency, 0.0, freq_box)
+
+    source_lines = _paystub_source_lines(page, blob, words)
+    ordered_native_rows = any(_dated_regular_pay_slots(line) for line in source_lines)
+
+    def emit_ordered(source_id: str, numeric: float, hit: Any, label_box: list[float], *, accumulate: bool = False) -> None:
+        box = _paystub_value_box(page, pymupdf, hit, numeric, words) if hit is not None else label_box
+        if source_id == "ps-hours-week":
+            emit(source_id, f"{numeric:.2f}".rstrip("0").rstrip("."), numeric, box)
+            return
+        emit(source_id, _format_money(numeric), numeric, box, accumulate=accumulate)
+
+    def emit_from_amounts(kind: str, line: str, amounts: list[tuple[float, str, float, list[float]]]) -> None:
+        nonlocal period_hours, period_hours_box
+        slots = _assign_paystub_amounts(amounts, line, kind, hours_before_rate)
+        period_hours, period_hours_box = _emit_assigned_paystub_slots(
+            emit, kind, line, slots, period_hours, period_hours_box
+        )
+
+    if ordered_native_rows:
+        for raw_line in source_lines:
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            kind = _paystub_row_kind(line)
+            if kind is None:
+                continue
+            if kind == "regular":
+                ordered_slots = _dated_regular_pay_slots(line) or _ordered_regular_pay_slots(line)
+                if ordered_slots:
+                    ordered_hit, label_box = _ordered_row_hit(page, pymupdf, line, used_hits, words)
+                    if "rate" in ordered_slots and _is_primary_rate_row(line):
+                        emit_ordered("ps-hourly-rate", ordered_slots["rate"], ordered_hit, label_box)
+                    if ordered_slots.get("current", 0) > 0:
+                        emit_ordered("ps-current-base", ordered_slots["current"], ordered_hit, label_box, accumulate=True)
+                    if ordered_slots.get("ytd", 0) > 0:
+                        emit_ordered("ps-base-ytd", ordered_slots["ytd"], ordered_hit, label_box, accumulate=True)
+                    if "hours" in ordered_slots and "ps-hours-week" not in totals:
+                        weekly = _weekly_from_period_hours(ordered_slots["hours"], pays_per_year)
+                        if weekly:
+                            emit_ordered("ps-hours-week", weekly, ordered_hit, label_box)
+                    continue
+            if kind in YTD_FIELD_BY_KIND:
+                ordered_slots = _ordered_regular_pay_slots(line)
+                if ordered_slots.get("ytd", 0) > 0:
+                    ordered_hit, label_box = _ordered_row_hit(page, pymupdf, line, used_hits, words)
+                    emit_ordered(YTD_FIELD_BY_KIND[kind], ordered_slots["ytd"], ordered_hit, label_box, accumulate=True)
+                continue
+            label = _paystub_code_label(line)
+            hit = _hit_for_paystub_label(page, pymupdf, label, used_hits, words) or _first_hit(
+                page, (label, line[:18]), words
+            )
+            if hit is None:
+                continue
+            amounts = _row_money_amounts(page, pymupdf, hit, words)
+            if amounts:
+                emit_from_amounts(kind, line, amounts)
+    else:
+        visual_rows = _paystub_visual_rows(page, words)
+        source = visual_rows or [
+            [(0.0, 0.0, 12.0, 12.0, line)]
+            for line in source_lines
+        ]
+        for row in source:
+            line = _join_visual_row(row)
+            kind = _paystub_row_kind(line)
+            if kind is None:
+                continue
+            amounts = []
+            for x0, y0, x1, y1, text in row:
+                parsed = _parse_paystub_row_money(text)
+                if not parsed:
+                    continue
+                value, numeric = parsed
+                amounts.append((x0, value, numeric, [x0, y0, x1, y1]))
+            if not amounts:
+                label = _paystub_code_label(line)
+                hit = _hit_for_paystub_label(page, pymupdf, label, used_hits, words) or _first_hit(
+                    page, (label, line[:18]), words
+                )
+                if hit is None:
+                    continue
+                amounts = _row_money_amounts(page, pymupdf, hit, words)
+            if amounts:
+                emit_from_amounts(kind, line, amounts)
+
+    if "ps-hours-week" not in totals and period_hours and period_hours_box:
+        weekly = _weekly_from_period_hours(period_hours, pays_per_year)
+        if weekly:
+            emit("ps-hours-week", f"{weekly:.2f}".rstrip("0").rstrip("."), weekly, period_hours_box)
 
     if "ps-base-ytd" not in totals and not re.search(r"\bgross\b", blob, re.I):
-        hit = _first_hit(page, ("Year to date", "Year-to-date"))
+        hit = _first_hit(page, ("Year to date", "Year-to-date"), words)
         if hit is not None:
-            amounts = _row_money_amounts(page, pymupdf, hit)
+            amounts = _row_money_amounts(page, pymupdf, hit, words)
             if amounts:
                 emit("ps-base-ytd", amounts[-1][1], amounts[-1][2], amounts[-1][3])
     flush()
     return extracted
+
+
+def _plausible_w2_fields(rows: list[dict[str, Any]]) -> bool:
+    """Reject a blank W-2 copy whose nearby EIN/box-number text impersonates wages.
+
+    A captured Medicare-wage value without either Social Security wages or its
+    withholding peer is not enough evidence to establish a wage record.  This
+    is deliberately a page-level extraction guard; it does not alter any
+    underwriting calculation.
+    """
+    ids = {str(row.get("sourceFieldId", "")) for row in rows}
+    monetary = ids & {"w2-box2", "w2-box3", "w2-box4", "w2-box5", "w2-box6"}
+    if not monetary or ids & {"w2-box3", "w2-box4"}:
+        return True
+    by_id = {str(row.get("sourceFieldId", "")): row for row in rows}
+    box5 = float(by_id.get("w2-box5", {}).get("numericValue", 0) or 0)
+    box6 = float(by_id.get("w2-box6", {}).get("numericValue", 0) or 0)
+    ein_like_box5 = box5.is_integer() and 100_000_000 <= box5 <= 999_999_999
+    box_number_like_withholding = box6.is_integer() and 1 <= box6 <= 20
+    return not (ein_like_box5 or box_number_like_withholding)
 
 
 def extract_page_fields(
@@ -915,7 +1397,7 @@ def extract_page_fields(
     supplied = text or ""
     word_blob = " ".join(word.get("text", "") for word in (words or []) if word.get("text"))
     blob = " ".join(part for part in (supplied, native, word_blob) if part)
-    row_blob = native or supplied or blob
+    row_blob = supplied or native or blob
     if is_schedule_e_page1(page, words):
         return []
 
@@ -923,10 +1405,13 @@ def extract_page_fields(
     seen: set[str] = set()
     catalogs = list(FORM_CATALOGS)
     for matcher, specs in catalogs:
-        if not matcher.search(blob):
+        w2_from_labels = specs is W2_FIELDS and sum(bool(label.search(blob)) for label in W2_FRONT_LABELS) >= 2
+        if not pattern_matches(matcher, blob) and not w2_from_labels:
             continue
         if specs is PAYSTUB_FIELDS:
-            for row in _extract_paystub_table(page, pymupdf, page_index=page_index, blob=row_blob or blob):
+            for row in _extract_paystub_table(
+                page, pymupdf, page_index=page_index, blob=row_blob or blob, words=words
+            ):
                 if row["sourceFieldId"] in seen:
                     continue
                 seen.add(row["sourceFieldId"])
@@ -938,15 +1423,17 @@ def extract_page_fields(
             seen.add(row["sourceFieldId"])
             extracted.append(row)
         if specs is FORM_8825_FIELDS:
-            for row in _extract_8825_columns(page, pymupdf, page_index=page_index):
+            for row in _extract_8825_columns(page, pymupdf, page_index=page_index, words=words):
                 if row["sourceFieldId"] in seen:
                     continue
                 seen.add(row["sourceFieldId"])
                 extracted.append(row)
+        if specs is W2_FIELDS and not _plausible_w2_fields(extracted):
+            extracted = [row for row in extracted if row["form"] != "W-2"]
         break
 
     for matcher, specs in SUPPORTING_CATALOGS:
-        if not matcher.search(blob):
+        if not pattern_matches(matcher, blob):
             continue
         for spec in specs:
             row = _extract_spec(page, pymupdf, spec, page_index=page_index, words=words, blob=blob)
@@ -957,12 +1444,83 @@ def extract_page_fields(
     return extracted
 
 
+class _PageView:
+    """Same PDF page, optionally with an upright rect after a 90/270 OCR rotate."""
+
+    def __init__(self, page: Any, rect: Any):
+        self._page = page
+        self.rect = rect
+
+    def search_for(self, *args: Any, **kwargs: Any):
+        return self._page.search_for(*args, **kwargs)
+
+    def get_text(self, *args: Any, **kwargs: Any):
+        return self._page.get_text(*args, **kwargs)
+
+    def widgets(self):
+        return self._page.widgets()
+
+
+def _page_ocr_rotation(page_result: Any) -> int:
+    flags = list(getattr(page_result, "flags", None) or [])
+    if "ocr_rotated_90" in flags:
+        return 90
+    if "ocr_rotated_270" in flags:
+        return 270
+    return 0
+
+
+def _words_to_upright(
+    words: list[dict[str, Any]],
+    rotation: int,
+    page_width: float,
+    page_height: float,
+) -> tuple[list[dict[str, Any]], float, float]:
+    if not rotation:
+        return words, page_width, page_height
+    upright_w, upright_h = page_height, page_width
+    mapped: list[dict[str, Any]] = []
+    for word in words:
+        ox0 = float(word["x0"]) / page_width
+        oy0 = float(word["y0"]) / page_height
+        ox1 = float(word["x1"]) / page_width
+        oy1 = float(word["y1"]) / page_height
+        orig_w, orig_h = ox1 - ox0, oy1 - oy0
+        if rotation == 90:
+            ux0, uy0, rel_w, rel_h = 1.0 - oy1, ox0, orig_h, orig_w
+        else:
+            ux0, uy0, rel_w, rel_h = oy0, 1.0 - ox1, orig_h, orig_w
+        mapped.append(
+            {
+                "text": word["text"],
+                "x0": ux0 * upright_w,
+                "y0": uy0 * upright_h,
+                "x1": (ux0 + rel_w) * upright_w,
+                "y1": (uy0 + rel_h) * upright_h,
+            }
+        )
+    return mapped, upright_w, upright_h
+
+
+def _remap_overlay_box(rel: dict[str, float] | None, rotation: int) -> dict[str, float] | None:
+    if not rel or not rotation:
+        return rel
+    x, y, width, height = float(rel["x"]), float(rel["y"]), float(rel["w"]), float(rel["h"])
+    if rotation == 90:
+        return {"x": y, "y": 1.0 - x - width, "w": height, "h": width}
+    if rotation == 270:
+        return {"x": 1.0 - y - height, "y": x, "w": height, "h": width}
+    return rel
+
+
 def extract_irs_form_fields(
     pdf_input: bytes,
     *,
     ocr_pages: Iterable[Any] | None = None,
+    page_indices: Iterable[int] | None = None,
 ) -> list[dict[str, Any]]:
     pymupdf = _require_pymupdf()
+    allowed_pages = set(page_indices) if page_indices is not None else None
     supplied: dict[int, Any] = {}
     for page_result in ocr_pages or []:
         index = getattr(page_result, "index", None)
@@ -973,6 +1531,8 @@ def extract_irs_form_fields(
     try:
         fields: list[dict[str, Any]] = []
         for index, page in enumerate(doc):
+            if allowed_pages is not None and index not in allowed_pages:
+                continue
             convert_page = supplied.get(index)
             page_words = (
                 convert_relative_words(convert_page.words, page.rect.width, page.rect.height)
@@ -980,9 +1540,21 @@ def extract_irs_form_fields(
                 else None
             )
             text = ""
+            rotation = 0
+            extract_page = page
             if convert_page is not None:
                 text = convert_page.text()
-            fields.extend(extract_page_fields(page, page_index=index, words=page_words, text=text))
+                rotation = _page_ocr_rotation(convert_page)
+                if rotation and page_words:
+                    page_words, upright_w, upright_h = _words_to_upright(
+                        page_words, rotation, float(page.rect.width), float(page.rect.height)
+                    )
+                    extract_page = _PageView(page, pymupdf.Rect(0, 0, upright_w, upright_h))
+            page_fields = extract_page_fields(extract_page, page_index=index, words=page_words, text=text)
+            if rotation:
+                for row in page_fields:
+                    row["box"] = _remap_overlay_box(row.get("box"), rotation)
+            fields.extend(page_fields)
         logger.info("irs_form_extract fields=%s", len(fields))
         return fields
     finally:

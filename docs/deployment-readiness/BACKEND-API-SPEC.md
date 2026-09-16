@@ -121,10 +121,31 @@ a typed error and never invokes a less trustworthy fallback. For long OCR, prefe
 a controlled fetch from Encompass by an isolated worker; do not place uploaded
 raw PDF bytes in SQS or object storage merely to make the call asynchronous.
 
+Native AcroForms are authoritative when they expose an intact text layer and
+fillable widgets. If those widgets are empty, the parser MUST preserve native
+text and return no borrower values; it MUST NOT OCR printed line/box numbers as
+data. Official K-1 code/reference pages with an exact reference-page signature
+also remain native. Flattened or scanned forms do not satisfy this bypass and
+continue through the bounded OCR path. The parser logs only safe phase latency
+(inspect, convert/OCR, specialized extraction, field extraction, total), never
+document names, text, or values.
+
 For W-2s, a page is eligible for W-2 extraction only when its OCR contains a
 front-page wage or tax-cell signature. A title-only back or instruction page is
-excluded before extraction; this filter does not alter normalized income values
-or underwriting calculations.
+excluded before extraction. Hybrid forms with native value overlays are OCR'd
+for their rendered labels, while excluded pages are never passed to field
+extraction; these filters do not alter normalized income values or underwriting
+calculations. A W-2 wage record also requires a peer wage/withholding field so a
+blank copy cannot promote an EIN or box number into Box 5. W-2 images embedded
+sideways in an otherwise upright PDF page may receive a bounded orientation
+retry; the retry stops when a horizontal W-2 label set is established.
+
+Digitally generated paystubs with an ordered earnings table MUST use their
+native text layer. They MUST NOT be sent through OCR merely because the page is
+long and numeric: OCR can scramble Hours, Rate, Current Amount, YTD Hours, and
+YTD Amount. Scanned paystubs continue through the bounded OCR path. Extraction
+must preserve per-row provenance while accumulating only the explicitly
+classified base or variable-income rows.
 
 ## Encompass synchronization state machine
 

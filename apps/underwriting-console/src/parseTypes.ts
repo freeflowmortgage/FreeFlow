@@ -25,6 +25,8 @@ export type MappedIncomeField = {
   pageIndex: number;
   wordIndex: number;
   box: { x: number; y: number; w: number; h: number };
+  /** Numeric source cells contributing to a computed aggregate. */
+  componentBoxes?: OverlayBox[];
 };
 
 export type ParsePage = {
@@ -91,6 +93,7 @@ export type FormFieldExtract = {
   value: string;
   numericValue: number;
   box: OverlayBox;
+  componentBoxes?: OverlayBox[];
   entityId?: string;
 };
 

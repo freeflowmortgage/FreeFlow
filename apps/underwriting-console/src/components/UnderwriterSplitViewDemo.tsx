@@ -29,6 +29,7 @@ import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from
 import { liveAssetPatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
+  fieldForInspection,
   firstPageForKind,
   kindsOf,
   pickDocumentForTab,
@@ -109,6 +110,7 @@ interface PrevEmployerW2 {
 
 interface W2Employer {
   id: string;
+  documentIds?: string[];
   employerName: string;
   ein: string;
   employmentStartDate: string;
@@ -141,6 +143,7 @@ interface W2Employer {
 function emptyW2Employer(id: string, patch: Partial<W2Employer> = {}): W2Employer {
   return {
     id,
+    documentIds: [],
     employerName: 'Parsed employer',
     ein: '',
     employmentStartDate: '',
@@ -1017,6 +1020,7 @@ export default function UnderwriterSplitViewDemo({
     const w2Rows = current.map((seed) =>
       emptyW2Employer(seed.id, {
         ...seed.patch,
+        documentIds: seed.documentIds,
         employerName: seed.employerName,
         ein: seed.ein,
         role: seed.role,
@@ -2041,18 +2045,15 @@ export default function UnderwriterSplitViewDemo({
     skipPageResetRef.current = true;
     setHighlightFieldId(fieldId);
     setDocMode('pdf');
-    if (fieldId.startsWith('w2-') || fieldId.startsWith('ent2-')) {
-      if (fieldId.startsWith('w2-')) setWageDocKind('w2');
-      if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
+    const isWageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
+    if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
+    const live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId);
+    // A wage value click inspects the open document only. It must never jump to
+    // another uploaded W-2/paystub merely because that PDF has the same field.
+    if (!isWageField) {
+      if (live?.documentId) setInspectDocId(live.documentId);
+      else if (documentId) setInspectDocId(documentId);
     }
-    if (fieldId.startsWith('ps-')) setWageDocKind('paystub');
-    const live = mappedFields.find(
-      (field) =>
-        (field.id === fieldId || field.sourceFieldId === fieldId) &&
-        (!documentId || field.documentId === documentId),
-    );
-    if (live?.documentId) setInspectDocId(live.documentId);
-    else if (documentId) setInspectDocId(documentId);
     if (live) setLivePageIndex(live.pageIndex);
     const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
     if (!live && fromEntity) setLivePageIndex(Number(fromEntity[1]));
@@ -2154,6 +2155,20 @@ export default function UnderwriterSplitViewDemo({
     const id = `w2-${crypto.randomUUID()}`;
     setW2Employers((entries) => [...entries, emptyW2Employer(id, { employerName: `New Employer ${entries.length + 1}`, role: 'SECONDARY' })]);
     setActiveW2EmployerId(id);
+  };
+
+  const selectW2Employer = (id: string) => {
+    setActiveW2EmployerId(id);
+    const employer = w2Employers.find((entry) => entry.id === id);
+    const documentIds = employer?.documentIds ?? [];
+    if (!isLive || !documentIds.length || (canvasDoc && documentIds.includes(canvasDoc.id))) return;
+    const candidates = packet.filter((doc) => documentIds.includes(doc.id));
+    const nextDoc = candidates.find((doc) => kindsOf(doc).includes(wageDocKind)) ?? candidates[0];
+    if (!nextDoc) return;
+    const next = tabForKinds(kindsOf(nextDoc));
+    if (next.wageDocKind) setWageDocKind(next.wageDocKind);
+    setInspectDocId(nextDoc.id);
+    setLivePageIndex(firstPageForKind(nextDoc.result, kindsOf(nextDoc)[0]));
   };
 
   const removeW2Employer = (id: string) => {
@@ -2737,6 +2752,8 @@ export default function UnderwriterSplitViewDemo({
                   setActiveTab(next.tab);
                   if (next.wageDocKind) setWageDocKind(next.wageDocKind);
                   setInspectDocId(doc.id);
+                  const employer = w2Employers.find((entry) => entry.documentIds?.includes(doc.id));
+                  if (employer) setActiveW2EmployerId(employer.id);
                   setLivePageIndex(firstPageForKind(doc.result, kindsOf(doc)[0]));
                 }}
                 className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
@@ -3085,7 +3102,7 @@ export default function UnderwriterSplitViewDemo({
                 label="Employer / W-2"
                 entities={asEntityOptions(w2Employers)}
                 activeId={activeW2Employer.id}
-                onSelect={setActiveW2EmployerId}
+                onSelect={selectW2Employer}
                 onAdd={addW2Employer}
                 onRemove={removeW2Employer}
               />

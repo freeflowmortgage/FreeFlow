@@ -116,14 +116,16 @@ export default function PdfPagePreview({
       </div>
       <div className="relative inline-block max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white">
         <canvas ref={canvasRef} className="block max-w-full" />
-        {pageFields.filter((field) => isUsableOverlayBox(field.box)).map((field) => {
-          const selected = selectedFieldId === field.id;
-          const box = padOverlayBox(field.box);
-          return (
+        {pageFields.filter((field) => isUsableOverlayBox(field.box)).flatMap((field) => {
+          const selected = selectedFieldId === field.id || selectedFieldId === field.sourceFieldId;
+          const sourceBoxes = selected && field.componentBoxes?.length ? field.componentBoxes : [field.box];
+          return sourceBoxes.map((sourceBox, componentIndex) => {
+            const box = padOverlayBox(sourceBox);
+            return (
             <button
-              key={field.id}
+              key={`${field.id}-${componentIndex}`}
               type="button"
-              data-box-id={field.id}
+              data-box-id={componentIndex === 0 ? field.id : `${field.id}--component-${componentIndex}`}
               data-overlay-visible={selected ? 'true' : 'false'}
               title={`${field.boxLabel} · ${field.fieldLabel} · ${field.value}`}
               className={`absolute box-border rounded-sm ${
@@ -139,7 +141,8 @@ export default function PdfPagePreview({
               }}
               onClick={() => onSelectField?.(field.id)}
             />
-          );
+            );
+          });
         })}
         {ready && pageFields.length === 0 && (
           <p className="pointer-events-none absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-[10px] text-slate-500">

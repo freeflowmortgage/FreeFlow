@@ -7,6 +7,18 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
 
+from ocr_match import folded_text, pattern_matches
+from form_signatures import (
+    PAYSTUB_TITLE,
+    W2_BACK_FOLDED,
+    W2_BACK_SIGNATURE,
+    W2_FRONT_FOLDED,
+    W2_FRONT_LABELS,
+    W2_FRONT_SIGNATURE,
+    W2_TITLE,
+    WVOE_TITLE,
+)
+
 if TYPE_CHECKING:
     from ai_pdf_converter import ConvertResult, PageResult
 
@@ -43,16 +55,9 @@ CORE_RULES = {
     "Schedule L": re.compile(r"Schedule L\s+Balance Sheets per Books", re.IGNORECASE),
     "Schedule M-1": re.compile(r"Schedule M-1", re.IGNORECASE),
     "Schedule M-2": re.compile(r"Schedule M-2", re.IGNORECASE),
-    "W-2": re.compile(r"Wage and Tax Statement|Form\s+W-2", re.IGNORECASE),
-    "Paystub": re.compile(
-        r"Earnings Statement|Pay\s*Stub|Paystub|Payroll Statement|Pay\s+Statement|Pay\s+Advice|"
-        r"Year[- ]to[- ]Date\s+(?:Gross|Earnings)|Current Period|Net Pay",
-        re.IGNORECASE,
-    ),
-    "WVOE": re.compile(
-        r"Written Verification of Employment|Verification of Employment|The Work Number|\bWVOE\b",
-        re.IGNORECASE,
-    ),
+    "W-2": W2_TITLE,
+    "Paystub": PAYSTUB_TITLE,
+    "WVOE": WVOE_TITLE,
 }
 
 SEE_STATEMENT = re.compile(
@@ -81,15 +86,22 @@ SUPPLEMENTAL_RULES = {
 # A W-2 back/instruction page can repeat the form title but contains none of
 # the numbered wage/tax cells. Do not send it to extraction merely because its
 # header OCR says "Form W-2".
-W2_FRONT_SIGNATURE = re.compile(
-    r"\b(?:Box\s*[1-6]|Wages[,\s]+tips|Medicare\s+wages|Social\s+security\s+wages|Federal\s+income\s+tax)\b",
-    re.IGNORECASE,
-)
-W2_BACK_SIGNATURE = re.compile(
-    r"\b(?:Instructions\s+for\s+(?:Employee|Employer)|Notice\s+to\s+Employee|"
-    r"For\s+use\s+in\s+preparing\s+your\s+income\s+tax\s+return)\b",
-    re.IGNORECASE,
-)
+def _is_w2_front_page(text: str) -> bool:
+    if pattern_matches(W2_FRONT_SIGNATURE, text):
+        return True
+    folded = folded_text(text)
+    return any(needle in folded for needle in W2_FRONT_FOLDED)
+
+
+def _is_w2_back_page(text: str) -> bool:
+    if W2_BACK_SIGNATURE.search(text or ""):
+        return True
+    folded = folded_text(text)
+    return any(needle in folded for needle in W2_BACK_FOLDED)
+
+
+def _has_w2_front_evidence(text: str) -> bool:
+    return sum(bool(pattern.search(text)) for pattern in W2_FRONT_LABELS) >= 2
 
 
 @dataclass
@@ -152,8 +164,23 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         if not text.strip():
             continue
 
-        matched = [name for name, pattern in CORE_RULES.items() if pattern.search(text)]
-        if "W-2" in matched and (W2_BACK_SIGNATURE.search(text) or not W2_FRONT_SIGNATURE.search(text)):
+        # Native PDF extraction commonly inserts newlines between a form name
+        # and its subtitle. Classifiers describe the visual line, so search a
+        # whitespace-normalized view while retaining raw text for glued OCR.
+        search_text = re.sub(r"\s+", " ", text).strip()
+
+        matched = [
+            name
+            for name, pattern in CORE_RULES.items()
+            if pattern_matches(pattern, text) or pattern_matches(pattern, search_text)
+        ]
+        if "W-2" not in matched and (_has_w2_front_evidence(search_text) or _has_w2_front_evidence(text)):
+            matched.append("W-2")
+        if "W-2" in matched and (
+            _is_w2_back_page(text)
+            or _is_w2_back_page(search_text)
+            or not (_is_w2_front_page(text) or _is_w2_front_page(search_text))
+        ):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)
         if "Schedule K-1" in matched:
@@ -165,8 +192,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
             classifications[page.index] = matched
             target_pages.add(page.index)
             if any(term in "".join(matched) for term in ("Schedule C", "Schedule E", "Schedule F", "Form 1065", "Form 1120", "Form 1120S")):
-                if SEE_STATEMENT.search(text):
-                    token_match = STMT_TOKEN.search(text)
+                if SEE_STATEMENT.search(search_text):
+                    token_match = STMT_TOKEN.search(search_text)
                     snippet = token_match.group(0) if token_match else "see statement"
                     statement_refs.append(
                         StatementRef(
@@ -180,7 +207,7 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     if statement_refs:
         claimed: set[int] = set()
         for page_idx, text in page_texts.items():
-            supp = [name for name, pattern in SUPPLEMENTAL_RULES.items() if pattern.search(text)]
+            supp = [name for name, pattern in SUPPLEMENTAL_RULES.items() if pattern_matches(pattern, text)]
             if not supp:
                 continue
             target_pages.add(page_idx)
@@ -229,6 +256,14 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     }
     if not needs:
         return set()
+    hybrid_form_pages = {
+        int(getattr(page, "index", index))
+        for index, page in enumerate(pages)
+        if "numeric_form_overlay_ocr_bypass" in getattr(page, "flags", [])
+    }
+    if hybrid_form_pages:
+        logger.info("ocr_hybrid_form_pages pages=%s", sorted(hybrid_form_pages))
+        return hybrid_form_pages
     kept = set(split_result.target_pages)
     if kept:
         selected = needs & kept

@@ -23,6 +23,10 @@ MAX_PDF_BYTES = 40 * 1024 * 1024
 MAX_PAGES = 150
 RENDER_DPI = 300
 NATIVE_TEXT_CHARS = 40
+# Pages with a real readable native layer have varied form-label vocabulary.
+# Value-only overlays (the failure mode this gate is meant to rescue) contain
+# mostly names, addresses, IDs, and repeated amounts instead.
+NATIVE_LABEL_VOCABULARY_MIN = 20
 LOW_CONFIDENCE = 55.0
 DESKEW_MAX_DEGREES = 15.0
 DESKEW_DEADZONE_DEGREES = 0.8
@@ -41,6 +45,15 @@ _CONTENT_AMOUNT = re.compile(
     r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?|"
     r"\(\s*\d{1,3}(?:,\d{3})+|"
     r"\d+\.\d{2}"
+)
+_NATIVE_PAYSTUB = re.compile(
+    r"earnings statement|pay\s+(?:statement|advice|period)|regular\s+(?:hourly|pay)|"
+    r"employee taxes|year[- ]to[- ]date\s+(?:earnings|gross)",
+    re.IGNORECASE,
+)
+_IRS_REFERENCE_PAGE = re.compile(
+    r"This list identifies the codes used on Schedule K-1",
+    re.IGNORECASE,
 )
 
 
@@ -82,11 +95,14 @@ class PageResult:
 
     def text(self) -> str:
         word_text = " ".join(word.text for word in self.words if word.text)
+        native = self.plain_text.strip()
         # OCR pages can retain a native value overlay. Keep that evidence, but
         # include the OCR labels so form classification sees the rendered form.
         if not self.is_native_text and word_text:
-            return " ".join(part for part in (self.plain_text.strip(), word_text) if part)
-        return self.plain_text.strip() or word_text
+            if native and native != word_text:
+                return f"{native} {word_text}"
+            return native or word_text
+        return native or word_text
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -267,9 +283,10 @@ class AIPDFConverter:
                 except Exception:
                     text = ""
                 rotation = int(getattr(page, "rotation", 0) or 0) % 360
+                has_widgets = self._has_form_widgets(page)
                 fields = self._widget_words(page)
                 filled = [word for word in fields if word.text.strip()]
-                use_ocr, page_flags = self._page_strategy(text, filled)
+                use_ocr, page_flags = self._page_strategy(text, filled, has_widgets=has_widgets)
                 if filled:
                     page_flags.append("acroform_merged")
                 pages.append(
@@ -288,7 +305,12 @@ class AIPDFConverter:
                 reader.close()
 
     @staticmethod
-    def _page_strategy(text: str, filled_fields: list[OcrWord]) -> tuple[bool, list[str]]:
+    def _page_strategy(
+        text: str,
+        filled_fields: list[OcrWord],
+        *,
+        has_widgets: bool = False,
+    ) -> tuple[bool, list[str]]:
         stripped = text.strip()
         has_amounts = bool(_CONTENT_AMOUNT.search(stripped))
         amount_count = len(_CONTENT_AMOUNT.findall(stripped))
@@ -296,12 +318,32 @@ class AIPDFConverter:
         flags: list[str] = []
         if filled_fields:
             return False, flags
+        # Official IRS PDFs are native-text AcroForms. When their widgets are
+        # empty, OCR only rereads printed line and box numbers as if they were
+        # borrower values. Preserve the authoritative native layer and avoid a
+        # costly, lower-integrity OCR pass. Flattened/scanned forms have no
+        # widgets and continue through the normal OCR decision path.
+        if has_widgets and len(stripped) >= NATIVE_TEXT_CHARS:
+            flags.append("blank_acroform_native_text")
+            return False, flags
+        if len(stripped) >= NATIVE_TEXT_CHARS and _IRS_REFERENCE_PAGE.search(stripped):
+            flags.append("irs_reference_native_text")
+            return False, flags
         if has_amounts:
+            # A digitally generated paystub already contains higher-integrity
+            # ordered text. OCR would be slower and can scramble table columns.
+            if _NATIVE_PAYSTUB.search(stripped):
+                flags.append("paystub_native_text")
+                return False, flags
             # Some scanned tax forms have only their filled values encoded as
             # native text. OCR them so the form labels and layout are available
             # to the classifier instead of treating the numeric overlay as a
             # complete searchable document.
             if not irs_chrome and len(stripped) >= 400 and amount_count >= 4:
+                label_vocabulary = set(re.findall(r"[A-Za-z]{4,}", stripped.casefold()))
+                if len(label_vocabulary) >= NATIVE_LABEL_VOCABULARY_MIN:
+                    flags.append("label_rich_native_text")
+                    return False, flags
                 flags.append("numeric_form_overlay_ocr_bypass")
                 return True, flags
             return False, flags
@@ -310,6 +352,30 @@ class AIPDFConverter:
         if irs_chrome and len(stripped) >= NATIVE_TEXT_CHARS:
             flags.append("irs_searchable_mask_bypass")
         return True, flags
+
+    @staticmethod
+    def _has_form_widgets(page: Any) -> bool:
+        """Return True only for AcroForm widgets, not links or annotations."""
+        annots = None
+        try:
+            annots = page.annotations
+        except Exception:
+            annots = None
+        if annots is None:
+            try:
+                annots = page.get("/Annots")
+            except Exception:
+                annots = None
+        for annot in annots or []:
+            try:
+                data = annot.get_object() if hasattr(annot, "get_object") else annot
+                if str(data.get("/Subtype") or "") in {"/Widget", "Widget"}:
+                    return True
+                if data.get("/FT") is not None:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _widget_words(self, page: Any) -> list[OcrWord]:
         words: list[OcrWord] = []
@@ -408,6 +474,15 @@ class AIPDFConverter:
         del rgb
 
         page_flags = list(info.flags)
+        orig_h, orig_w = bgr.shape[:2]
+        rotation = self._page_content_rotation(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
+        if rotation == 90:
+            bgr = cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
+            page_flags.append("ocr_rotated_90")
+        elif rotation == 270:
+            bgr = cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            page_flags.append("ocr_rotated_270")
+
         photo = self._looks_like_photo(bgr)
         skew = 0.0
         if photo:
@@ -421,6 +496,29 @@ class AIPDFConverter:
             del bgr
 
         words, mean_conf = self._ocr_numpy(gray)
+        ocr_text = " ".join(row["text"] for row in words).casefold()
+        # A scan can be stored upright as a PDF page while the W-2 itself is
+        # rotated 90 degrees inside it. Retry only W-2-like OCR that is missing
+        # the Medicare label; a complete page avoids this extra OCR pass.
+        orientation_score = self._w2_label_score(words)
+        vertical_rows = self._vertical_ocr_row_count(words)
+        if (orientation_score < 3 and "wages" in ocr_text) or vertical_rows >= max(4, len(words) // 6):
+            best_rank = (orientation_score, -vertical_rows)
+            for turns in (1, 3):
+                rotated_rows, rotated_conf = self._ocr_numpy(np.rot90(gray, turns))
+                candidate_score = self._w2_label_score(rotated_rows)
+                candidate_rank = (candidate_score, -self._vertical_ocr_row_count(rotated_rows))
+                if candidate_rank <= best_rank:
+                    continue
+                words = self._unrotate_quarter_turn_rows(rotated_rows, width=gray.shape[1], height=gray.shape[0], turns=turns)
+                mean_conf = rotated_conf
+                orientation_score = candidate_score
+                best_rank = candidate_rank
+                page_flags.append(f"w2_orientation_retry_{turns * 90}")
+                # A readable horizontal W-2 label set is decisive.  Do not
+                # spend another full OCR pass trying the opposite rotation.
+                if candidate_score >= 3 and candidate_rank[1] == 0:
+                    break
         used_binarization = False
 
         if photo and mean_conf < LOW_CONFIDENCE:
@@ -432,21 +530,39 @@ class AIPDFConverter:
                 page_flags.append("sauvola_retry")
 
         height, width = gray.shape[:2]
+        if not rotation and self._ocr_rows_look_sideways(words, width, height):
+            guessed = self._choose_quarter_turn(gray)
+            flag = cv2.ROTATE_90_CLOCKWISE if guessed == 90 else cv2.ROTATE_90_COUNTERCLOCKWISE
+            rotated = cv2.rotate(gray, flag)
+            retry_words, retry_conf = self._ocr_numpy(rotated)
+            if retry_words and (
+                retry_conf >= mean_conf - 8.0 or len(retry_words) >= max(8, int(len(words) * 0.5))
+            ):
+                words, mean_conf = retry_words, retry_conf
+                height, width = rotated.shape[:2]
+                rotation = guessed
+                page_flags.append("ocr_rotated_90" if guessed == 90 else "ocr_rotated_270")
         del gray
         if photo and abs(skew) >= DESKEW_DEADZONE_DEGREES:
             words = self._unrotate_ocr_rows(words, width, height, skew)
+        if rotation:
+            words = self._map_ocr_rows_from_upright(words, rotation, width, height, orig_w, orig_h)
+            width, height = orig_w, orig_h
         relative = self._merge_words(self._to_relative(words, width, height), info.fields)
+        ocr_text = " ".join(word.text for word in relative if word.text)
+        native_overlay = (info.text or "").strip()
         width_pt = float(page.get_width())
         height_pt = float(page.get_height())
 
         logger.info(
-            "page_ocr index=%s skew=%.2f words=%s conf=%.1f binarized=%s photo=%s",
+            "page_ocr index=%s skew=%.2f words=%s conf=%.1f binarized=%s photo=%s rotation=%s",
             index,
             skew,
             len(relative),
             mean_conf,
             used_binarization,
             photo,
+            rotation,
         )
 
         return PageResult(
@@ -455,7 +571,7 @@ class AIPDFConverter:
             height_px=int(height_pt),
             is_native_text=False,
             words=relative,
-            plain_text=info.text,
+            plain_text=native_overlay or ocr_text,
             mean_confidence=round(mean_conf, 2),
             skew_degrees=round(skew, 2),
             used_binarization=used_binarization,
@@ -599,6 +715,94 @@ class AIPDFConverter:
         white_frac = float((gray > 245).mean())
         return white_frac < 0.62
 
+    @staticmethod
+    def _letter_aspect_median(gray: np.ndarray) -> float | None:
+        """Median height/width of letter-sized ink. Sideways glyphs are wider than tall."""
+        height, width = gray.shape[:2]
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(25, width // 15), 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(25, height // 15)))
+        binary = cv2.subtract(binary, cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel))
+        binary = cv2.subtract(binary, cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel))
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        aspects: list[float] = []
+        page_area = float(height * width)
+        for contour in contours:
+            _x, _y, box_w, box_h = cv2.boundingRect(contour)
+            area = box_w * box_h
+            if box_w < 5 or box_h < 5 or box_w > 90 or box_h > 90:
+                continue
+            if area < 30 or area > page_area * 0.01:
+                continue
+            aspects.append(box_h / float(box_w))
+        if len(aspects) < 12:
+            return None
+        return float(np.median(aspects))
+
+    @staticmethod
+    def _choose_quarter_turn(gray: np.ndarray) -> int:
+        def header_score(image: np.ndarray) -> float:
+            hh = image.shape[0]
+            edge = cv2.Canny(image, 50, 150)
+            return float(edge[: hh // 4].mean()) - float(edge[3 * hh // 4 :].mean())
+
+        clockwise = cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE)
+        counter = cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return 90 if header_score(clockwise) >= header_score(counter) else 270
+
+    @staticmethod
+    def _page_content_rotation(gray: np.ndarray) -> int:
+        """Detect a full-page 90/270 scan. Small skew stays in deskew_image."""
+        height, width = gray.shape[:2]
+        if height < 80 or width < 80:
+            return 0
+        aspect = AIPDFConverter._letter_aspect_median(gray)
+        if aspect is None or aspect >= 0.85:
+            return 0
+        return AIPDFConverter._choose_quarter_turn(gray)
+
+    @staticmethod
+    def _ocr_rows_look_sideways(rows: list[dict[str, Any]], width: int, height: int) -> bool:
+        ratios: list[float] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                continue
+            box_w = float(box[:, 0].max() - box[:, 0].min())
+            box_h = float(box[:, 1].max() - box[:, 1].min())
+            if min(box_w, box_h) < 4 or box_w > width * 0.35 or box_h > height * 0.35:
+                continue
+            ratios.append(box_h / max(box_w, 1.0))
+        return len(ratios) >= 8 and float(np.median(ratios)) > 1.6
+
+    @staticmethod
+    def _map_ocr_rows_from_upright(
+        rows: list[dict[str, Any]],
+        rotation: int,
+        upright_w: int,
+        upright_h: int,
+        orig_w: int,
+        orig_h: int,
+    ) -> list[dict[str, Any]]:
+        """Map OCR quads from the upright raster back onto the original page."""
+        if not rows or rotation not in {90, 270}:
+            return rows
+        mapped: list[dict[str, Any]] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                mapped.append(row)
+                continue
+            points: list[list[float]] = []
+            for x, y in box[:, :2]:
+                if rotation == 90:
+                    points.append([float(y), float(orig_h - 1 - x)])
+                else:
+                    points.append([float(orig_w - 1 - y), float(x)])
+            mapped.append({**row, "box": np.array(points, dtype=np.float32)})
+        return mapped
+
     def deskew_image(self, image: np.ndarray) -> tuple[np.ndarray, float]:
         try:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -721,6 +925,47 @@ class AIPDFConverter:
                 continue
             ones = np.ones((box.shape[0], 1), dtype=np.float32)
             mapped = (matrix @ np.hstack([box[:, :2], ones]).T).T
+            restored.append({**row, "box": mapped})
+        return restored
+
+    @staticmethod
+    def _w2_label_score(rows: list[dict[str, Any]]) -> int:
+        text = " ".join(row["text"] for row in rows).casefold()
+        return sum(token in text for token in ("wage", "social security", "medicare", "tax statement", "form w-2"))
+
+    @staticmethod
+    def _vertical_ocr_row_count(rows: list[dict[str, Any]]) -> int:
+        count = 0
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                continue
+            width = float(box[:, 0].max() - box[:, 0].min())
+            height = float(box[:, 1].max() - box[:, 1].min())
+            if height > max(1.0, width * 2.0):
+                count += 1
+        return count
+
+    @staticmethod
+    def _unrotate_quarter_turn_rows(
+        rows: list[dict[str, Any]],
+        *,
+        width: int,
+        height: int,
+        turns: int,
+    ) -> list[dict[str, Any]]:
+        """Map OCR boxes from numpy.rot90 image coordinates to the original page."""
+        restored: list[dict[str, Any]] = []
+        for row in rows:
+            box = np.array(row["box"], dtype=np.float32)
+            if box.ndim != 2 or box.shape[1] < 2:
+                restored.append(row)
+                continue
+            x, y = box[:, 0].copy(), box[:, 1].copy()
+            if turns == 1:  # counter-clockwise
+                mapped = np.column_stack((width - 1 - y, x))
+            else:  # clockwise
+                mapped = np.column_stack((y, height - 1 - x))
             restored.append({**row, "box": mapped})
         return restored
 
