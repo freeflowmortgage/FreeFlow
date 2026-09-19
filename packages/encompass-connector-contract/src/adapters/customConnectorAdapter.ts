@@ -22,7 +22,8 @@ const DOWNLOAD_TIMEOUT_MS = 120_000;
 type Fetch = typeof fetch;
 
 /**
- * Orchestrator-side adapter for a separate ECS connector service.
+ * Orchestrator-side HTTP/S2S client for the separate connector ECS service
+ * (`services/encompass-connector`). This adapter does not host LOS I/O.
  * LOS credentials never leave that service; this client sends identity + service auth only.
  */
 export class CustomConnectorAdapter implements EncompassConnector {
