@@ -15,6 +15,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/underwriting-console/package.json ./apps/underwriting-console/
 COPY apps/underwriter-portal/package.json ./apps/underwriter-portal/
 COPY packages/mortgage-engine/package.json ./packages/mortgage-engine/
+COPY packages/encompass-connector-contract/package.json ./packages/encompass-connector-contract/
 COPY packages/database/package.json ./packages/database/
 COPY packages/ui/package.json ./packages/ui/
 

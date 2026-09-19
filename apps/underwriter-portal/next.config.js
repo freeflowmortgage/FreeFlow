@@ -3,7 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
   poweredByHeader: false,
-  transpilePackages: ['@mortgage-pos/mortgage-engine', '@mortgage-pos/ui', '@mortgage-pos/database'],
+  transpilePackages: ['@mortgage-pos/mortgage-engine', '@mortgage-pos/ui', '@mortgage-pos/database', '@mortgage-pos/encompass-connector-contract'],
   async headers() {
     return [
       {

@@ -5,6 +5,7 @@ on:
     paths:
       - 'apps/underwriter-portal/**'
       - 'packages/database/**'
+      - 'packages/encompass-connector-contract/**'
       - 'packages/mortgage-engine/**'
       - 'packages/ui/**'
       - 'package.json'
@@ -16,6 +17,7 @@ on:
     paths:
       - 'apps/underwriter-portal/**'
       - 'packages/database/**'
+      - 'packages/encompass-connector-contract/**'
       - 'packages/mortgage-engine/**'
       - 'packages/ui/**'
       - 'package.json'
@@ -51,6 +53,8 @@ jobs:
         run: |
           pnpm --filter @mortgage-pos/database prisma:generate
           pnpm --filter @mortgage-pos/mortgage-engine build
+          pnpm --filter @mortgage-pos/encompass-connector-contract build
+          pnpm --filter @mortgage-pos/encompass-connector-contract test
 
       - name: Verify portal API and security regression tests
         run: pnpm --filter web test
