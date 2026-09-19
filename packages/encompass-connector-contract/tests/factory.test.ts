@@ -21,12 +21,17 @@ function unusedClient(): DeveloperConnectClient {
   };
 }
 
-test('Developer Connect stays off by default', () => {
+// ECC-20 / ECC-21: custom is the default; Developer Connect stays selectable but OFF.
+test('ECC-20/ECC-21: Developer Connect stays off by default', () => {
   assert.equal(DEVELOPER_CONNECT_ENABLED_DEFAULT, false);
   assert.equal(FREEFLOW_DEV_CONNECTOR_BINDING.kind, 'custom');
+  assert.equal('clientId' in FREEFLOW_DEV_CONNECTOR_BINDING, false);
+  assert.equal('clientSecret' in FREEFLOW_DEV_CONNECTOR_BINDING, false);
+  assert.equal('instanceId' in FREEFLOW_DEV_CONNECTOR_BINDING, false);
 });
 
-test('factory fails closed for Developer Connect without enabling it, and never calls the wrapped client', () => {
+// ECC-20: selecting developer-connect while the flag is OFF fails closed and never touches ICE.
+test('ECC-20: factory fails closed for Developer Connect without enabling it, and never calls the wrapped client', () => {
   assert.throws(
     () => createEncompassConnector({
       binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, kind: 'developer-connect' },
@@ -36,7 +41,23 @@ test('factory fails closed for Developer Connect without enabling it, and never 
   );
 });
 
-test('factory wraps the Developer Connect client only when explicitly enabled', async () => {
+// ECC-20: OFF path does not require an ICE client, secret, or instance id.
+test('ECC-20: developer-connect OFF path does not require ICE client, secret, or instance', () => {
+  assert.throws(
+    () => createEncompassConnector({
+      binding: { kind: 'developer-connect', deploymentId: 'unused', lenderId: 'unused' },
+    }),
+    (error: unknown) => (
+      error instanceof EncompassConnectorError
+      && error.safeCode === 'DEVELOPER_CONNECT_DISABLED'
+      && !error.message.includes('client')
+      && !error.message.includes('secret')
+      && !error.message.includes('instance')
+    ),
+  );
+});
+
+test('ECC-20: factory wraps the Developer Connect client only when explicitly enabled', async () => {
   const connector = createEncompassConnector({
     binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, kind: 'developer-connect' },
     developerConnectEnabled: true,
@@ -54,7 +75,8 @@ test('factory wraps the Developer Connect client only when explicitly enabled', 
   assert.deepEqual(await connector.listActiveAttachments(context, 'guid'), [{ id: 'a1' }]);
 });
 
-test('custom factory path does not require a Developer Connect client', () => {
+// ECC-21: default/custom path does not require DC client/secret/instance.
+test('ECC-21: custom factory path does not require a Developer Connect client', () => {
   const connector = createEncompassConnector({
     binding: {
       ...FREEFLOW_DEV_CONNECTOR_BINDING,
