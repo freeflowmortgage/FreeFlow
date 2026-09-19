@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import type { InspectOverlay } from '../livePacket';
+import { fieldMatchesInspectId, type InspectOverlay } from '../livePacket';
 import type { MappedIncomeField } from '../parseTypes';
 import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
 
@@ -121,7 +121,7 @@ export default function PdfPagePreview({
       <div className="relative inline-block max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white">
         <canvas ref={canvasRef} className="block max-w-full" />
         {pageFields.filter((field) => isUsableOverlayBox(field.box)).flatMap((field) => {
-          const selected = selectedFieldId === field.id || selectedFieldId === field.sourceFieldId;
+          const selected = fieldMatchesInspectId(field, selectedFieldId);
           const sourceBoxes = selected && field.componentBoxes?.length ? field.componentBoxes : [field.box];
           return sourceBoxes.map((sourceBox, componentIndex) => {
             const box = padOverlayBox(sourceBox);

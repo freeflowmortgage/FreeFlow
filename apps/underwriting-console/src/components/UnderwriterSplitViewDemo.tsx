@@ -30,6 +30,7 @@ import { liveAssetPatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
   fieldForInspection,
+  inspectNavigation,
   inspectOverlayFromField,
   kindsOf,
   pageForKind,
@@ -38,11 +39,6 @@ import {
   type InspectOverlay,
   type WorkspaceTab,
 } from '../livePacket';
-import { DEMO_URLA_ENTITIES, employmentEntitiesFromUrlA, namesMatch } from '../urlaEmploymentRoster';
-import { discoveredSelectId, locateIncomeEntities, pagesFromParsePages, type LocateResult, type LocatedMatch } from '../locateIncomeEntities';
-import {
-  seedCCorpFromLocation,
-  seedFarmFromLocation,
   seedPartnershipFromLocation,
   seedSCorpFromLocation,
   seedScheduleCFromLocation,
@@ -1192,7 +1188,8 @@ export default function UnderwriterSplitViewDemo({
     loanProgram,
   };
 
-  // 4. Dynamic Spatial Fields Definitions (For Interactive Highlights)
+  // Demo-only facsimile boxes for the generated /fixtures/docs/paystub.pdf stub.
+  // Live inspect must use mappedFields.box + pageIndex, not these coordinates.
   const fieldCoordinatesMapping = useMemo<OCRField[]>(() => [
     { id: 'ps-emp-name', category: 'METADATA', label: 'Employer Name', value: borrowerMetadata.currentEmployer, numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-emp-name'] },
     { id: 'ps-ee-name', category: 'METADATA', label: 'Employee Name', value: borrowerMetadata.borrowerName, numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-ee-name'] },
@@ -2050,36 +2047,40 @@ export default function UnderwriterSplitViewDemo({
     setDocMode('pdf');
     const isWageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
     if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
-    const live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId);
+    const live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId, livePageIndex);
     // A wage value click inspects the open document only. It must never jump to
     // another uploaded W-2/paystub merely because that PDF has the same field.
     if (!isWageField) {
       if (live?.documentId) setInspectDocId(live.documentId);
       else if (documentId) setInspectDocId(documentId);
     }
-    const overlay = inspectOverlayFromField(live);
-    if (overlay) {
-      setLivePageIndex(overlay.pageIndex);
-      setInspectOverlay(overlay);
-      viewer.triggerHighlight({
-        pageIndex: overlay.pageIndex,
-        box: [overlay.box.x, overlay.box.y, overlay.box.w, overlay.box.h],
-      });
-    } else {
-      setInspectOverlay(null);
-      const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
-      if (fromEntity) setLivePageIndex(Number(fromEntity[1]));
-      // Facsimile boxes stay on the generated demo stub. Live PDFs never use them.
-      if (!isLive) {
-        const target = fieldCoordinatesMapping.find((f) => f.id === fieldId);
-        if (target) setActivePdfPage(target.boxCoordinates.page);
-      }
-    }
+const overlay = inspectOverlayFromField(live);
+  if (overlay) {
+    setInspectOverlay(overlay);
+    viewer.triggerHighlight({
+      pageIndex: overlay.pageIndex,
+      box: [overlay.box.x, overlay.box.y, overlay.box.w, overlay.box.h],
+    });
+  } else {
+    setInspectOverlay(null);
+  }
+
+  const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
+  const facsimile = fieldCoordinatesMapping.find((f) => f.id === fieldId);
+  const nav = inspectNavigation({
+    isLive,
+    livePageIndex: overlay ? overlay.pageIndex : live?.pageIndex,
+    entityPageIndex: fromEntity ? Number(fromEntity[1]) : undefined,
+    facsimilePage: facsimile?.boxCoordinates.page,
+  });
+  if (nav.livePageIndex != null) setLivePageIndex(nav.livePageIndex);
+  if (nav.facsimilePage != null) setActivePdfPage(nav.facsimilePage);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
     requestAnimationFrame(() => {
       document.querySelector(`[data-qa-field="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      document.querySelector(`[data-box-id="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const boxId = live?.id ?? fieldId;
+      document.querySelector(`[data-box-id="${boxId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   };
 
@@ -2530,9 +2531,10 @@ export default function UnderwriterSplitViewDemo({
   }
 
   /**
-   * URL of the real filled source document for the active tab. The dev server
-   * fills official IRS blanks (or draws a pay stub) with these live values, so
-   * the PDF always matches the reconciliation math on screen.
+   * Demo-only generated PDF for the active tab. The dev server fills official
+   * IRS blanks (or draws a pay stub) from worksheet state so the facsimile
+   * always matches the reconciliation math. Live uploads render in
+   * PdfPagePreview instead — this URL is not the source document.
    */
   const fixturePdf = useMemo<{ url: string; label: string } | null>(() => {
     const q = (pairs: Record<string, string | number>) =>

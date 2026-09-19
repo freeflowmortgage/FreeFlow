@@ -193,36 +193,75 @@ export function inspectOverlayFromField(field: MappedIncomeField | undefined): I
   return { pageIndex: field.pageIndex, box: field.box };
 }
 
-function pickLatestInspectField(matches: MappedIncomeField[], fieldId: string): MappedIncomeField | undefined {
-  if (!matches.length) return undefined;
-  const exact = matches.find((field) => field.id === fieldId);
-  if (exact && fieldId.includes('--')) return exact;
-  return matches.reduce((latest, field) => (field.pageIndex >= latest.pageIndex ? field : latest));
+export function inspectFieldIds(fieldId: string | null | undefined): string[] {
+  if (!fieldId) return [];
+  const canonical = canonicalInspectFieldId(fieldId);
+  return canonical === fieldId ? [fieldId] : [fieldId, canonical];
+}
+
+export function fieldMatchesInspectId(
+  field: Pick<MappedIncomeField, 'id' | 'sourceFieldId'>,
+  fieldId: string | null | undefined,
+): boolean {
+  const ids = inspectFieldIds(fieldId);
+  return ids.includes(field.id) || (field.sourceFieldId != null && ids.includes(field.sourceFieldId));
+}
+
+function pickInspectField(
+  candidates: MappedIncomeField[],
+  fieldId?: string,
+  preferPageIndex?: number,
+): MappedIncomeField | undefined {
+  if (!candidates.length) return undefined;
+  if (fieldId && fieldId.includes('--')) {
+    const exact = candidates.find((field) => field.id === fieldId);
+    if (exact) return exact;
+  }
+  if (preferPageIndex != null) {
+    const onPreferred = candidates.filter((field) => field.pageIndex === preferPageIndex);
+    if (onPreferred.length) return onPreferred[onPreferred.length - 1];
+  }
+  return candidates.reduce((latest, field) => (field.pageIndex >= latest.pageIndex ? field : latest));
 }
 
 /**
  * Resolve a clicked result field without silently changing the wage PDF under
  * review. Wage fields are document-scoped; other worksheets retain the legacy
  * packet-wide fallback used by tax/entity navigation.
+ *
+ * On a multi-page paystub, prefer the field on the page already in view, else
+ * the latest page (most recent stub) — never the first/oldest extract.
  */
 export function fieldForInspection(
   fields: MappedIncomeField[],
   fieldId: string,
   currentDocumentId?: string | null,
   explicitDocumentId?: string,
+  preferPageIndex?: number,
 ): MappedIncomeField | undefined {
-  const wanted = new Set([fieldId, canonicalInspectFieldId(fieldId)]);
+const wanted = new Set(inspectFieldIds(fieldId));
   const matches = (field: MappedIncomeField) =>
     wanted.has(field.id) || (field.sourceFieldId != null && wanted.has(field.sourceFieldId));
-  const wageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
   const documentId = explicitDocumentId ?? currentDocumentId ?? undefined;
-  const pool = fields.filter(matches);
+  const isWageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
   if (documentId) {
-    const scoped = pool.filter((field) => field.documentId === documentId);
-    if (scoped.length) return pickLatestInspectField(scoped, fieldId);
+    const scoped = fields.filter((field) => matches(field) && field.documentId === documentId);
+    if (scoped.length) return pickInspectField(scoped, fieldId, preferPageIndex);
   }
-  if (wageField) return undefined;
-  return pickLatestInspectField(pool, fieldId);
+  if (isWageField) return undefined;
+  return pickInspectField(fields.filter(matches), fieldId, preferPageIndex);
+}
+
+/** Live inspect uses extract pageIndex only. Facsimile stub page is demo-only. */
+export function inspectNavigation(opts: {
+  isLive: boolean;
+  livePageIndex?: number;
+  entityPageIndex?: number;
+  facsimilePage?: number;
+}): { livePageIndex?: number; facsimilePage?: number } {
+  const livePageIndex = opts.livePageIndex ?? opts.entityPageIndex;
+  if (opts.isLive) return { livePageIndex };
+  return { livePageIndex, facsimilePage: opts.facsimilePage };
 }
 
 function wageKindOrder(wageDocKind: 'paystub' | 'w2'): DocKind[] {
