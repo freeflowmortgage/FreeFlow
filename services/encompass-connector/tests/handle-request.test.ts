@@ -80,6 +80,18 @@ test('list rejects a tenant/lender claim that does not match the server binding'
   assert.deepEqual(await response.json(), { safeCode: 'CONNECTOR_BINDING_MISMATCH' });
 });
 
+test('cross-tenant request is denied without exposing the bound tenant or loan identity', async () => {
+  const response = await handleConnectorRequest(
+    listRequest({ tenantId: 'tenant-b', loanId: 'loan-for-tenant-b' }),
+    deps(),
+  );
+  assert.equal(response.status, 403);
+  const payload = await response.json() as Record<string, unknown>;
+  assert.deepEqual(payload, { safeCode: 'CONNECTOR_BINDING_MISMATCH' });
+  assert.equal(JSON.stringify(payload).includes(TENANT), false);
+  assert.equal(JSON.stringify(payload).includes('loan-for-tenant-b'), false);
+});
+
 test('authenticated + bound list/download stay unimplemented (no PDF persist)', async () => {
   const service = new CustomConnectorService();
   await assert.rejects(

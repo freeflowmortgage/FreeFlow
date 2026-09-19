@@ -76,7 +76,7 @@ export async function handleConnectorRequest(
   }
 
   try {
-    enforceTenantLenderBinding(claimed, auth.principal.tenantId, deps.bindingStore);
+    await enforceTenantLenderBinding(claimed, auth.principal.tenantId, deps.bindingStore);
   } catch (error) {
     return responseFromUnknown(error);
   }

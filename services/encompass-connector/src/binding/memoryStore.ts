@@ -1,16 +1,24 @@
 import type { BindingStore, TenantLenderBinding } from './types';
 
-/** In-memory binding table for the skeleton. Fail-closed when empty. */
+type MemoryBinding = TenantLenderBinding & Readonly<{ isEnabled?: boolean }>;
+
+/** Test-only binding table. Production uses PrismaBindingStore. */
 export class MemoryBindingStore implements BindingStore {
   private readonly byTenant = new Map<string, TenantLenderBinding>();
 
-  constructor(bindings: ReadonlyArray<TenantLenderBinding> = []) {
+  constructor(bindings: ReadonlyArray<MemoryBinding> = []) {
     for (const binding of bindings) {
-      this.byTenant.set(binding.tenantId, binding);
+      if (binding.isEnabled !== false) {
+        this.byTenant.set(binding.tenantId, {
+          tenantId: binding.tenantId,
+          lenderId: binding.lenderId,
+          deploymentId: binding.deploymentId,
+        });
+      }
     }
   }
 
-  resolveByTenantId(tenantId: string): TenantLenderBinding | undefined {
+  async resolveByTenantId(tenantId: string): Promise<TenantLenderBinding | undefined> {
     return this.byTenant.get(tenantId);
   }
 }

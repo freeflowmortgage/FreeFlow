@@ -97,11 +97,28 @@ model Tenant {
   auditEvents               AuditEvent[]
   apiIdempotencyKeys        ApiIdempotencyKey[]
   encompassDocumentPullJobs EncompassDocumentPullJob[]
+  encompassConnectorBinding EncompassConnectorBinding?
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
   @@map("tenants")
+}
+
+// Opaque, server-side tenant to connector deployment identity. This is not a
+// credential store; LOS credentials and service tokens are intentionally absent.
+model EncompassConnectorBinding {
+  id           String  @id @default(uuid()) @db.Uuid
+  tenantId     String  @unique @db.Uuid
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lenderId     String  @db.VarChar(255)
+  deploymentId String  @db.VarChar(255)
+  isEnabled    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@map("encompass_connector_bindings")
 }
 
 // 2. TENANT CONFIGURATIONS (Feature Flags & Encompass Keys)

@@ -7,13 +7,16 @@
   "scripts": {
     "build": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "test:database-bindings": "tsx --test tests/prisma-binding-store.integration.ts",
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@mortgage-pos/encompass-connector-contract": "workspace:*"
+    "@mortgage-pos/encompass-connector-contract": "workspace:*",
+    "@prisma/client": "^5.14.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.2",
+    "prisma": "^5.14.0",
     "tsx": "^4.23.13",
     "typescript": "^5.4.5"
   }
