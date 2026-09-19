@@ -15,6 +15,7 @@
   "dependencies": {
     "@aws-sdk/client-sqs": "3.888.0",
     "@mortgage-pos/database": "workspace:*",
+    "@mortgage-pos/encompass-connector-contract": "workspace:*",
     "@mortgage-pos/mortgage-engine": "workspace:*",
     "@mortgage-pos/ui": "workspace:*",
     "@prisma/client": "^5.14.0",
