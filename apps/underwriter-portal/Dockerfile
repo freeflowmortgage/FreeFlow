@@ -19,6 +19,7 @@ COPY packages/mortgage-engine/package.json ./packages/mortgage-engine/
 COPY packages/encompass-connector-contract/package.json ./packages/encompass-connector-contract/
 COPY packages/database/package.json ./packages/database/
 COPY packages/ui/package.json ./packages/ui/
+COPY services/encompass-connector/package.json ./services/encompass-connector/
 
 RUN pnpm install --frozen-lockfile
 

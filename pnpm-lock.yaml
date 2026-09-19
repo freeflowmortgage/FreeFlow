@@ -242,6 +242,22 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  services/encompass-connector:
+    dependencies:
+      '@mortgage-pos/encompass-connector-contract':
+        specifier: workspace:*
+        version: link:../../packages/encompass-connector-contract
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.2
+        version: 20.19.43
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+
 packages:
 
   '@alloc/quick-lru@5.3.0':

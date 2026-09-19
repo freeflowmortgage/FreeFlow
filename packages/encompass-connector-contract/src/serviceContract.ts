@@ -4,6 +4,7 @@
  */
 export const CONNECTOR_SERVICE_CONTRACT = {
   version: 'encompass-connector-service-v1',
+  healthPath: '/health',
   listPath: '/v1/attachments/list',
   downloadPath: '/v1/attachments/download',
 } as const;
