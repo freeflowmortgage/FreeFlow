@@ -3,7 +3,8 @@ import test from 'node:test';
 import { assertNoLosCredentials, EncompassConnectorError } from '../src/index';
 import type { ConnectorServiceListRequest, EncompassConnectorContext } from '../src/index';
 
-test('connector context and service requests have no LOS credential fields', () => {
+// ECC-19: orchestrator context and service request types never carry LOS secrets.
+test('ECC-19: connector context and service requests have no LOS credential fields', () => {
   const context: EncompassConnectorContext = {
     tenantId: 't',
     loanId: 'l',
@@ -29,13 +30,23 @@ test('connector context and service requests have no LOS credential fields', () 
   assertNoLosCredentials(request);
 });
 
-test('secret guard rejects LOS credential keys before they can leave the abstraction', () => {
+// ECC-19: helpers reject credential keys and never echo the secret into the thrown message.
+test('ECC-19: secret guard rejects LOS credential keys before they can leave the abstraction', () => {
   assert.throws(
-    () => assertNoLosCredentials({ tenantId: 't', clientSecret: 'nope' }),
-    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'LOS_CREDENTIALS_FORBIDDEN',
+    () => assertNoLosCredentials({ tenantId: 't', clientSecret: 'nope-super-secret' }),
+    (error: unknown) => (
+      error instanceof EncompassConnectorError
+      && error.safeCode === 'LOS_CREDENTIALS_FORBIDDEN'
+      && !error.message.includes('nope-super-secret')
+      && !error.message.includes('clientSecret')
+    ),
   );
   assert.throws(
     () => assertNoLosCredentials({ nested: { instance_id: 'BE123' } }),
-    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'LOS_CREDENTIALS_FORBIDDEN',
+    (error: unknown) => (
+      error instanceof EncompassConnectorError
+      && error.safeCode === 'LOS_CREDENTIALS_FORBIDDEN'
+      && !error.message.includes('BE123')
+    ),
   );
 });

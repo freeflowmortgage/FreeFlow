@@ -4,7 +4,8 @@ import { DeveloperConnectAdapter } from '../src/index';
 
 const context = { tenantId: 'tenant', loanId: 'loan', correlationId: 'corr-1' };
 
-test('DeveloperConnectAdapter delegates to the wrapped client without forwarding context secrets', async () => {
+// ECC-20: opt-in wrap only. The adapter is not constructed by the factory while DC is OFF.
+test('ECC-20: DeveloperConnectAdapter delegates to the wrapped client without forwarding context secrets', async () => {
   const seen: string[] = [];
   const adapter = new DeveloperConnectAdapter({
     listActiveAttachments: async (loanGuid) => {
