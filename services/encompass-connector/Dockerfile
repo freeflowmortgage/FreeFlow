@@ -27,6 +27,7 @@ COPY services/encompass-connector ./services/encompass-connector
 
 ENV NODE_ENV=production
 ENV PORT=8080
+# Boot refuses the NON-PROD Bearer stub when NODE_ENV=production. Do not deploy this skeleton.
 
 RUN addgroup --system --gid 1001 connector \
     && adduser --system --uid 1001 --ingroup connector connector

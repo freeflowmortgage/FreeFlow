@@ -1,0 +1,63 @@
+import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
+import { NonProdBearerServiceAuthVerifier } from './auth';
+import { MemoryBindingStore } from './binding';
+import { CustomConnectorService } from './connector/customConnectorService';
+import type { ConnectorServiceDependencies } from './http/handleRequest';
+import { startConnectorHttpServer } from './http/nodeServer';
+
+/** Skeleton S2S selection. Production must not boot with this kind. */
+export const SKELETON_SERVICE_AUTH_KIND = 'bearer-stub-non-prod' as const;
+
+export type ConnectorRuntime = Readonly<{
+  port: number;
+  deps: ConnectorServiceDependencies;
+}>;
+
+/**
+ * Fail closed before listen / before loading S2S token material.
+ * Safe message only — never interpolates env or token values.
+ */
+export function assertProductionAllowsAuth(
+  nodeEnv: string | undefined,
+  authKind: string,
+): void {
+  if (nodeEnv === 'production' && authKind === SKELETON_SERVICE_AUTH_KIND) {
+    throw new EncompassConnectorError(
+      'CONNECTOR_BEARER_STUB_FORBIDDEN_IN_PRODUCTION',
+      'The non-prod Bearer S2S stub cannot run when NODE_ENV=production.',
+      false,
+    );
+  }
+}
+
+export function createConnectorRuntime(env: NodeJS.ProcessEnv): ConnectorRuntime {
+  assertProductionAllowsAuth(env.NODE_ENV, SKELETON_SERVICE_AUTH_KIND);
+
+  const port = Number.parseInt(env.PORT ?? '8080', 10);
+  const serviceToken = env.CONNECTOR_SERVICE_TOKEN?.trim();
+  const tenantId = env.CONNECTOR_BOUND_TENANT_ID?.trim();
+  const lenderId = env.CONNECTOR_BOUND_LENDER_ID?.trim();
+  const deploymentId = env.CONNECTOR_BOUND_DEPLOYMENT_ID?.trim();
+
+  return {
+    port: Number.isFinite(port) ? port : 8080,
+    deps: {
+      authVerifier: new NonProdBearerServiceAuthVerifier(
+        serviceToken && tenantId
+          ? [{ token: serviceToken, serviceId: 'portal', tenantId }]
+          : [],
+      ),
+      bindingStore: new MemoryBindingStore(
+        tenantId && lenderId && deploymentId
+          ? [{ tenantId, lenderId, deploymentId }]
+          : [],
+      ),
+      connector: new CustomConnectorService(),
+    },
+  };
+}
+
+export function bootConnectorService(env: NodeJS.ProcessEnv = process.env) {
+  const runtime = createConnectorRuntime(env);
+  return startConnectorHttpServer(runtime);
+}

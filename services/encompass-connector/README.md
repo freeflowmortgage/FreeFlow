@@ -24,7 +24,7 @@ the worker do **not** call it yet.
 
 - **LOS I/O** — no Encompass / Developer Connect calls
 - **PDF download** — not implemented; when it is, bytes stay in memory (ZDR)
-- **Bearer S2S** — test/skeleton only; production must use mTLS and/or signed+replay
+- **Bearer S2S** — test/skeleton only; `NODE_ENV=production` refuses to boot while this stub is selected
 - **Binding store** — in-memory, fail-closed unless env bindings are set
 - **Health** — liveness only; does not probe LOS
 
