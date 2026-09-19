@@ -110,6 +110,19 @@ function firstEntity(fields: MappedIncomeField[], sourceId: string): string | un
   return fields.find((field) => field.sourceFieldId === sourceId)?.entityId;
 }
 
+function latestPaystubEntity(fields: MappedIncomeField[]): string | undefined {
+  const paystub = fields.filter(
+    (field) =>
+      field.form === 'Paystub' &&
+      (field.sourceFieldId === 'ps-current-base' ||
+        field.sourceFieldId === 'ps-base-ytd' ||
+        field.sourceFieldId === 'ps-hourly-rate' ||
+        field.sourceFieldId === 'ps-employer-name'),
+  );
+  if (!paystub.length) return undefined;
+  return paystub.reduce((latest, field) => (field.pageIndex >= latest.pageIndex ? field : latest)).entityId;
+}
+
 /** Qualifying W-2 gross is Medicare wages (Box 5), which includes 401(k) and other pre-tax deferrals Box 1 excludes. */
 function w2GrossWages(fields: MappedIncomeField[], entityId?: string): number | undefined {
   return num(fields, 'w2-box5', entityId) ?? num(fields, 'w2-box5');
@@ -117,24 +130,26 @@ function w2GrossWages(fields: MappedIncomeField[], entityId?: string): number | 
 
 export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null {
   const entityId = firstEntity(fields, 'w2-box5') ?? firstEntity(fields, 'w2-employer-name');
+  const paystubEntity = latestPaystubEntity(fields);
   const fromWvoe = fields.some((field) => field.form === 'WVOE');
   return compact({
     employerName:
       text(fields, 'w2-employer-name', entityId) ??
       text(fields, 'w2-employer-name') ??
+      text(fields, 'ps-employer-name', paystubEntity) ??
       text(fields, 'ps-employer-name'),
     ein: text(fields, 'w2-employer-ein', entityId) ?? text(fields, 'w2-employer-ein'),
-    hourlyRate: num(fields, 'ps-hourly-rate') ?? num(fields, 'wvoe-base'),
-    weeklyHours: num(fields, 'ps-hours-week'),
-    currentPeriodBasePay: num(fields, 'ps-current-base'),
-    baseYtd: num(fields, 'ps-base-ytd'),
-    bonusYtd: num(fields, 'ps-bonus-ytd'),
-    overtimeYtd: num(fields, 'ps-ot-ytd'),
-    tipsYtd: num(fields, 'ps-tips-ytd'),
-    commissionYtd: num(fields, 'ps-commission-ytd'),
-    rsuYtd: num(fields, 'ps-rsu-ytd'),
-    otherYtd: num(fields, 'ps-rsu-ytd'),
-    payFrequency: uiPayFrequencyFromMismo(text(fields, 'ps-pay-frequency')),
+    hourlyRate: num(fields, 'ps-hourly-rate', paystubEntity) ?? num(fields, 'wvoe-base'),
+    weeklyHours: num(fields, 'ps-hours-week', paystubEntity),
+    currentPeriodBasePay: num(fields, 'ps-current-base', paystubEntity),
+    baseYtd: num(fields, 'ps-base-ytd', paystubEntity),
+    bonusYtd: num(fields, 'ps-bonus-ytd', paystubEntity),
+    overtimeYtd: num(fields, 'ps-ot-ytd', paystubEntity),
+    tipsYtd: num(fields, 'ps-tips-ytd', paystubEntity),
+    commissionYtd: num(fields, 'ps-commission-ytd', paystubEntity),
+    rsuYtd: num(fields, 'ps-rsu-ytd', paystubEntity),
+    otherYtd: num(fields, 'ps-rsu-ytd', paystubEntity),
+    payFrequency: uiPayFrequencyFromMismo(text(fields, 'ps-pay-frequency', paystubEntity)),
     wvoeBonus: num(fields, 'wvoe-bonus'),
     wvoeOvertime: num(fields, 'wvoe-ot'),
     w2Year1Box5: w2GrossWages(fields, entityId),

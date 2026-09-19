@@ -1,3 +1,4 @@
+import { isUsableOverlayBox } from './overlayBox';
 import type { LiveDocument, MappedIncomeField, ParsePage, ParseResponse, ScheduleEPropertyExtract } from './parseTypes';
 
 export type DocKind =
@@ -161,6 +162,44 @@ export function firstPageForKind(result: ParseResponse, kind: DocKind): number {
   return result.pages.find((page) => pageMatchesKind(page, kind))?.index ?? 0;
 }
 
+/** Last matching page — multi-stub PDFs keep the most recent check on the final page. */
+export function latestPageForKind(result: ParseResponse, kind: DocKind): number {
+  const pages = result.pages.filter((page) => pageMatchesKind(page, kind));
+  return pages.length ? pages[pages.length - 1].index : 0;
+}
+
+export function pageForKind(result: ParseResponse, kind: DocKind): number {
+  return kind === 'paystub' ? latestPageForKind(result, kind) : firstPageForKind(result, kind);
+}
+
+/** Demo worksheet ids that do not match parser sourceFieldId values. */
+export const INSPECT_FIELD_ALIASES: Record<string, string> = {
+  'ps-emp-name': 'ps-employer-name',
+  'ps-frequency': 'ps-pay-frequency',
+};
+
+export function canonicalInspectFieldId(fieldId: string): string {
+  return INSPECT_FIELD_ALIASES[fieldId] ?? fieldId;
+}
+
+export type InspectOverlay = {
+  pageIndex: number;
+  box: { x: number; y: number; w: number; h: number };
+};
+
+/** Direct field → canvas contract: the mapped token box, not a facsimile cell. */
+export function inspectOverlayFromField(field: MappedIncomeField | undefined): InspectOverlay | null {
+  if (!field?.box || !isUsableOverlayBox(field.box)) return null;
+  return { pageIndex: field.pageIndex, box: field.box };
+}
+
+function pickLatestInspectField(matches: MappedIncomeField[], fieldId: string): MappedIncomeField | undefined {
+  if (!matches.length) return undefined;
+  const exact = matches.find((field) => field.id === fieldId);
+  if (exact && fieldId.includes('--')) return exact;
+  return matches.reduce((latest, field) => (field.pageIndex >= latest.pageIndex ? field : latest));
+}
+
 /**
  * Resolve a clicked result field without silently changing the wage PDF under
  * review. Wage fields are document-scoped; other worksheets retain the legacy
@@ -172,14 +211,18 @@ export function fieldForInspection(
   currentDocumentId?: string | null,
   explicitDocumentId?: string,
 ): MappedIncomeField | undefined {
-  const matches = (field: MappedIncomeField) => field.id === fieldId || field.sourceFieldId === fieldId;
+  const wanted = new Set([fieldId, canonicalInspectFieldId(fieldId)]);
+  const matches = (field: MappedIncomeField) =>
+    wanted.has(field.id) || (field.sourceFieldId != null && wanted.has(field.sourceFieldId));
+  const wageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
   const documentId = explicitDocumentId ?? currentDocumentId ?? undefined;
+  const pool = fields.filter(matches);
   if (documentId) {
-    const scoped = fields.find((field) => matches(field) && field.documentId === documentId);
-    if (scoped) return scoped;
+    const scoped = pool.filter((field) => field.documentId === documentId);
+    if (scoped.length) return pickLatestInspectField(scoped, fieldId);
   }
-  if (fieldId.startsWith('w2-') || fieldId.startsWith('ps-')) return undefined;
-  return fields.find(matches);
+  if (wageField) return undefined;
+  return pickLatestInspectField(pool, fieldId);
 }
 
 function wageKindOrder(wageDocKind: 'paystub' | 'w2'): DocKind[] {

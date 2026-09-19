@@ -58,6 +58,38 @@ describe('live worksheet hydration', () => {
     ).toBe(24000);
   });
 
+  test('hydrates paystub wages from the latest page, not page 0', () => {
+    expect(
+      liveWagePatch([
+        field('ps-current-base', 2079.82, { form: 'Paystub', entityId: 'paystub-p0', pageIndex: 0 }),
+        field('ps-base-ytd', 72568.59, { form: 'Paystub', entityId: 'paystub-p0', pageIndex: 0 }),
+        field('ps-hourly-rate', 51.9953, { form: 'Paystub', entityId: 'paystub-p0', pageIndex: 0 }),
+        field('ps-current-base', 4159.65, {
+          form: 'Paystub',
+          entityId: 'paystub-p2',
+          pageIndex: 2,
+          id: 'ps-current-base--paystub-p2',
+        }),
+        field('ps-base-ytd', 104741.32, {
+          form: 'Paystub',
+          entityId: 'paystub-p2',
+          pageIndex: 2,
+          id: 'ps-base-ytd--paystub-p2',
+        }),
+        field('ps-hourly-rate', 51.9953, {
+          form: 'Paystub',
+          entityId: 'paystub-p2',
+          pageIndex: 2,
+          id: 'ps-hourly-rate--paystub-p2',
+        }),
+      ]),
+    ).toMatchObject({
+      currentPeriodBasePay: 4159.65,
+      baseYtd: 104741.32,
+      hourlyRate: 51.9953,
+    });
+  });
+
   test('does not treat W-2 Box 1 taxable wages as qualifying gross', () => {
     expect(liveWagePatch([field('w2-box1', 78500, { form: 'W-2' })])?.w2Year1Box5).toBeUndefined();
   });

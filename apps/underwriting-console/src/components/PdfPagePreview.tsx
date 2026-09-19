@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import type { InspectOverlay } from '../livePacket';
 import type { MappedIncomeField } from '../parseTypes';
 import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
 
@@ -15,6 +16,7 @@ export default function PdfPagePreview({
   pageCount,
   fields = [],
   selectedFieldId = null,
+  highlight = null,
   onSelectField,
   onPageChange,
 }: {
@@ -23,6 +25,8 @@ export default function PdfPagePreview({
   pageCount: number;
   fields?: MappedIncomeField[];
   selectedFieldId?: string | null;
+  /** Live token box from the clicked worksheet field — never a facsimile cell. */
+  highlight?: InspectOverlay | null;
   onSelectField?: (id: string) => void;
   onPageChange: (index: number) => void;
 }) {
@@ -144,6 +148,23 @@ export default function PdfPagePreview({
             );
           });
         })}
+        {highlight && highlight.pageIndex === pageIndex && isUsableOverlayBox(highlight.box) && (() => {
+          const box = padOverlayBox(highlight.box);
+          return (
+          <div
+            data-box-id={selectedFieldId ?? 'inspect-overlay'}
+            data-overlay-visible="true"
+            data-inspect-overlay="true"
+            className="pointer-events-none absolute z-20 box-border rounded-sm border-2 border-emerald-600 bg-emerald-400/10"
+            style={{
+              left: `${box.x * 100}%`,
+              top: `${box.y * 100}%`,
+              width: `${Math.max(box.w * 100, 1.2)}%`,
+              height: `${Math.max(box.h * 100, 1.1)}%`,
+            }}
+          />
+          );
+        })()}
         {ready && pageFields.length === 0 && (
           <p className="pointer-events-none absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-[10px] text-slate-500">
             No mapped income fields on this page.
