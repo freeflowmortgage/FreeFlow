@@ -4,6 +4,10 @@ import {
   fieldForInspection,
   findDuplicate,
   firstPageForKind,
+  inspectNavigation,
+  inspectOverlayFromField,
+  latestPageForKind,
+  pageForKind,
   pickDocumentForTab,
   taxReturnFingerprint,
 } from '../../../apps/underwriting-console/src/livePacket';
@@ -65,6 +69,99 @@ describe('live packet routing', () => {
     expect(fieldForInspection(fields, 'w2-box5', 'w2-b')?.documentId).toBe('w2-b');
     expect(fieldForInspection(fields, 'ps-base-ytd', 'w2-b')).toBeUndefined();
     expect(fieldForInspection(fields, 'ent2-rents', 'w2-b')?.documentId).toBe('tax');
+  });
+
+  test('prefers the latest paystub page unless the current page already has the field', () => {
+    const fields = [
+      { id: 'ps-current-base', sourceFieldId: 'ps-current-base', documentId: 'stub', pageIndex: 0 },
+      { id: 'ps-current-base--p1', sourceFieldId: 'ps-current-base', documentId: 'stub', pageIndex: 1 },
+      { id: 'ps-current-base--p2', sourceFieldId: 'ps-current-base', documentId: 'stub', pageIndex: 2 },
+    ] as MappedIncomeField[];
+
+    expect(fieldForInspection(fields, 'ps-current-base', 'stub')?.pageIndex).toBe(2);
+    expect(fieldForInspection(fields, 'ps-current-base', 'stub', undefined, 1)?.pageIndex).toBe(1);
+    expect(fieldForInspection(fields, 'ps-current-base', 'stub', undefined, 9)?.pageIndex).toBe(2);
+  });
+
+  test('maps demo employer and frequency aliases to the latest live fields', () => {
+    const fields = [
+      { id: 'ps-employer-name', sourceFieldId: 'ps-employer-name', documentId: 'stub', pageIndex: 0 },
+      { id: 'ps-employer-name--p2', sourceFieldId: 'ps-employer-name', documentId: 'stub', pageIndex: 2 },
+      { id: 'ps-pay-frequency', sourceFieldId: 'ps-pay-frequency', documentId: 'stub', pageIndex: 2 },
+    ] as MappedIncomeField[];
+
+    expect(fieldForInspection(fields, 'ps-emp-name', 'stub')?.pageIndex).toBe(2);
+    expect(fieldForInspection(fields, 'ps-frequency', 'stub')?.sourceFieldId).toBe('ps-pay-frequency');
+  });
+
+  test('live inspect never falls back to the generated paystub page', () => {
+    expect(
+      inspectNavigation({
+        isLive: true,
+        livePageIndex: 2,
+        facsimilePage: 1,
+      }),
+    ).toEqual({ livePageIndex: 2 });
+    expect(
+      inspectNavigation({
+        isLive: true,
+        entityPageIndex: 3,
+        facsimilePage: 1,
+      }),
+    ).toEqual({ livePageIndex: 3 });
+    expect(
+      inspectNavigation({
+        isLive: false,
+        facsimilePage: 1,
+      }),
+    ).toEqual({ livePageIndex: undefined, facsimilePage: 1 });
+  });
+
+  test('inspects the latest paystub page box, not the facsimile or page 0', () => {
+    const fields = [
+      {
+        id: 'ps-current-base',
+        sourceFieldId: 'ps-current-base',
+        documentId: 'mypay',
+        pageIndex: 0,
+        box: { x: 0.1, y: 0.2, w: 0.08, h: 0.02 },
+      },
+      {
+        id: 'ps-current-base--paystub-p2',
+        sourceFieldId: 'ps-current-base',
+        documentId: 'mypay',
+        pageIndex: 2,
+        box: { x: 0.12, y: 0.44, w: 0.11, h: 0.014 },
+      },
+    ] as MappedIncomeField[];
+
+    const live = fieldForInspection(fields, 'ps-current-base', 'mypay');
+    expect(live?.pageIndex).toBe(2);
+    expect(inspectOverlayFromField(live)).toEqual({
+      pageIndex: 2,
+      box: { x: 0.12, y: 0.44, w: 0.11, h: 0.014 },
+    });
+    expect(fieldForInspection(fields, 'ps-emp-name', 'mypay')).toBeUndefined();
+  });
+
+  test('maps demo employer alias to the live employer field on the latest page', () => {
+    const fields = [
+      {
+        id: 'ps-employer-name',
+        sourceFieldId: 'ps-employer-name',
+        documentId: 'mypay',
+        pageIndex: 0,
+        box: { x: 0.05, y: 0.05, w: 0.3, h: 0.03 },
+      },
+      {
+        id: 'ps-employer-name--paystub-p2',
+        sourceFieldId: 'ps-employer-name',
+        documentId: 'mypay',
+        pageIndex: 2,
+        box: { x: 0.04, y: 0.06, w: 0.28, h: 0.03 },
+      },
+    ] as MappedIncomeField[];
+    expect(fieldForInspection(fields, 'ps-emp-name', 'mypay')?.pageIndex).toBe(2);
   });
 
   test('classifies paystub, W-2, and Schedule E separately', () => {
@@ -133,6 +230,13 @@ describe('live packet routing', () => {
     );
     expect(firstPageForKind(combined, 'w2')).toBe(1);
     expect(firstPageForKind(combined, 'schedule-e')).toBe(2);
+  });
+
+  test('opens a multi-page paystub on the last page and leaves W-2 on the first match', () => {
+    const stubs = response([page(0, ['Paystub']), page(1, ['Paystub']), page(2, ['Paystub'])]);
+    expect(latestPageForKind(stubs, 'paystub')).toBe(2);
+    expect(pageForKind(stubs, 'paystub')).toBe(2);
+    expect(pageForKind(response([page(0, ['W-2']), page(1, ['W-2'])]), 'w2')).toBe(0);
   });
 
   test('rejects the same tax return by hash or Schedule E year/address', () => {

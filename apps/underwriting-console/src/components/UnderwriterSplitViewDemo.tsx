@@ -30,10 +30,13 @@ import { liveAssetPatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
   fieldForInspection,
-  firstPageForKind,
+  inspectNavigation,
+  inspectOverlayFromField,
   kindsOf,
+  pageForKind,
   pickDocumentForTab,
   tabForKinds,
+  type InspectOverlay,
   type WorkspaceTab,
 } from '../livePacket';
 import { DEMO_URLA_ENTITIES, employmentEntitiesFromUrlA, namesMatch } from '../urlaEmploymentRoster';
@@ -462,6 +465,7 @@ export default function UnderwriterSplitViewDemo({
   const isLive = source === 'live' && packet.length > 0;
   const viewer = usePdfViewer(2);
   const [livePageIndex, setLivePageIndex] = useState(0);
+  const [inspectOverlay, setInspectOverlay] = useState<InspectOverlay | null>(null);
   const activePdfPage = viewer.currentPage;
   const setActivePdfPage = viewer.setPage;
   const mappedFields = useMemo(
@@ -621,7 +625,7 @@ export default function UnderwriterSplitViewDemo({
     setActiveTab(next.tab);
     if (next.wageDocKind) setWageDocKind(next.wageDocKind);
     setInspectDocId(added.id);
-    setLivePageIndex(firstPageForKind(added.result, kindsOf(added)[0]));
+    setLivePageIndex(pageForKind(added.result, kindsOf(added)[0]));
   }, [isLive, packetKey]);
   const canvasDoc = pickDocumentForTab(packet, activeTab as WorkspaceTab, wageDocKind, inspectDocId);
   const canvasFields = mappedFields.filter((field) => !canvasDoc || field.documentId === canvasDoc.id);
@@ -644,7 +648,7 @@ export default function UnderwriterSplitViewDemo({
         : activeTab === 'SCHEDULE_E'
           ? 'schedule-e'
           : kindsOf(canvasDoc)[0];
-    setLivePageIndex(firstPageForKind(canvasDoc.result, want));
+    setLivePageIndex(pageForKind(canvasDoc.result, want));
   }, [isLive, canvasDoc?.id, activeTab, wageDocKind]);
   const [twoYearSchC, setTwoYearSchC] = useState(false);
   const [twoYearScorp, setTwoYearScorp] = useState(false);
@@ -1189,7 +1193,8 @@ export default function UnderwriterSplitViewDemo({
     loanProgram,
   };
 
-  // 4. Dynamic Spatial Fields Definitions (For Interactive Highlights)
+  // Demo-only facsimile boxes for the generated /fixtures/docs/paystub.pdf stub.
+  // Live inspect must use mappedFields.box + pageIndex, not these coordinates.
   const fieldCoordinatesMapping = useMemo<OCRField[]>(() => [
     { id: 'ps-emp-name', category: 'METADATA', label: 'Employer Name', value: borrowerMetadata.currentEmployer, numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-emp-name'] },
     { id: 'ps-ee-name', category: 'METADATA', label: 'Employee Name', value: borrowerMetadata.borrowerName, numericValue: 0, isDiscrepancy: false, boxCoordinates: PAYSTUB_HIGHLIGHT_BOXES['ps-ee-name'] },
@@ -2047,23 +2052,40 @@ export default function UnderwriterSplitViewDemo({
     setDocMode('pdf');
     const isWageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
     if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
-    const live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId);
+    const live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId, livePageIndex);
     // A wage value click inspects the open document only. It must never jump to
     // another uploaded W-2/paystub merely because that PDF has the same field.
     if (!isWageField) {
       if (live?.documentId) setInspectDocId(live.documentId);
       else if (documentId) setInspectDocId(documentId);
     }
-    if (live) setLivePageIndex(live.pageIndex);
+    const overlay = inspectOverlayFromField(live);
+    if (overlay) {
+      setInspectOverlay(overlay);
+      viewer.triggerHighlight({
+        pageIndex: overlay.pageIndex,
+        box: [overlay.box.x, overlay.box.y, overlay.box.w, overlay.box.h],
+      });
+    } else {
+      setInspectOverlay(null);
+    }
+
     const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
-    if (!live && fromEntity) setLivePageIndex(Number(fromEntity[1]));
-    const target = fieldCoordinatesMapping.find((f) => f.id === fieldId);
-    if (target) setActivePdfPage(target.boxCoordinates.page);
+    const facsimile = fieldCoordinatesMapping.find((f) => f.id === fieldId);
+    const nav = inspectNavigation({
+      isLive,
+      livePageIndex: overlay ? overlay.pageIndex : live?.pageIndex,
+      entityPageIndex: fromEntity ? Number(fromEntity[1]) : undefined,
+      facsimilePage: facsimile?.boxCoordinates.page,
+    });
+    if (nav.livePageIndex != null) setLivePageIndex(nav.livePageIndex);
+    if (nav.facsimilePage != null) setActivePdfPage(nav.facsimilePage);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
     requestAnimationFrame(() => {
       document.querySelector(`[data-qa-field="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      document.querySelector(`[data-box-id="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const boxId = live?.id ?? fieldId;
+      document.querySelector(`[data-box-id="${boxId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   };
 
@@ -2168,7 +2190,7 @@ export default function UnderwriterSplitViewDemo({
     const next = tabForKinds(kindsOf(nextDoc));
     if (next.wageDocKind) setWageDocKind(next.wageDocKind);
     setInspectDocId(nextDoc.id);
-    setLivePageIndex(firstPageForKind(nextDoc.result, kindsOf(nextDoc)[0]));
+    setLivePageIndex(pageForKind(nextDoc.result, kindsOf(nextDoc)[0]));
   };
 
   const removeW2Employer = (id: string) => {
@@ -2514,9 +2536,10 @@ export default function UnderwriterSplitViewDemo({
   }
 
   /**
-   * URL of the real filled source document for the active tab. The dev server
-   * fills official IRS blanks (or draws a pay stub) with these live values, so
-   * the PDF always matches the reconciliation math on screen.
+   * Demo-only generated PDF for the active tab. The dev server fills official
+   * IRS blanks (or draws a pay stub) from worksheet state so the facsimile
+   * always matches the reconciliation math. Live uploads render in
+   * PdfPagePreview instead — this URL is not the source document.
    */
   const fixturePdf = useMemo<{ url: string; label: string } | null>(() => {
     const q = (pairs: Record<string, string | number>) =>
@@ -2754,7 +2777,7 @@ export default function UnderwriterSplitViewDemo({
                   setInspectDocId(doc.id);
                   const employer = w2Employers.find((entry) => entry.documentIds?.includes(doc.id));
                   if (employer) setActiveW2EmployerId(employer.id);
-                  setLivePageIndex(firstPageForKind(doc.result, kindsOf(doc)[0]));
+                  setLivePageIndex(pageForKind(doc.result, kindsOf(doc)[0]));
                 }}
                 className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
                   canvasDoc?.id === doc.id
@@ -2857,6 +2880,7 @@ export default function UnderwriterSplitViewDemo({
                 pageCount={canvasDoc.result.total_pages_scanned}
                 fields={canvasFields}
                 selectedFieldId={highlightFieldId}
+                highlight={inspectOverlay}
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
               />
