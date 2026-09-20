@@ -12,11 +12,11 @@ export type ClaimedBinding = Readonly<{
  * caller claim. The store is authoritative; claimed lender/deployment are
  * never used as the source of truth.
  */
-export function enforceTenantLenderBinding(
+export async function enforceTenantLenderBinding(
   claimed: ClaimedBinding,
   principalTenantId: string,
   store: BindingStore,
-): TenantLenderBinding {
+): Promise<TenantLenderBinding> {
   if (!principalTenantId || claimed.tenantId !== principalTenantId) {
     throw new EncompassConnectorError(
       'CONNECTOR_BINDING_MISMATCH',
@@ -25,7 +25,7 @@ export function enforceTenantLenderBinding(
     );
   }
 
-  const resolved = store.resolveByTenantId(principalTenantId);
+  const resolved = await store.resolveByTenantId(principalTenantId);
   if (!resolved) {
     throw new EncompassConnectorError(
       'CONNECTOR_BINDING_NOT_FOUND',

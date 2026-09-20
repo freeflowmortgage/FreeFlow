@@ -14,10 +14,13 @@ FROM base AS deps
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/database/package.json ./packages/database/
+COPY packages/database/prisma ./packages/database/prisma/
 COPY packages/encompass-connector-contract/package.json ./packages/encompass-connector-contract/
 COPY services/encompass-connector/package.json ./services/encompass-connector/
 
 RUN pnpm install --frozen-lockfile --filter @mortgage-pos/encompass-connector...
+RUN pnpm --filter @mortgage-pos/encompass-connector exec prisma generate --schema ../../packages/database/prisma/schema.prisma
 
 FROM deps AS runner
 WORKDIR /app

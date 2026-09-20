@@ -5,12 +5,14 @@ on:
     paths:
       - 'apps/underwriter-portal/**'
       - 'packages/database/**'
+      - 'services/encompass-connector/**'
       - '.github/workflows/database-validation.yml'
   push:
     branches: [main]
     paths:
       - 'apps/underwriter-portal/**'
       - 'packages/database/**'
+      - 'services/encompass-connector/**'
       - '.github/workflows/database-validation.yml'
 
 permissions:
@@ -40,6 +42,7 @@ jobs:
       ADMIN_DATABASE_URL: postgresql://postgres:postgres-validation-only@localhost:5432/freeflow_validation
       MIGRATOR_DATABASE_URL: postgresql://freeflow_migrator_ci:migrator-validation-only@localhost:5432/freeflow_validation
       APP_DATABASE_URL: postgresql://freeflow_app_ci:app-validation-only@localhost:5432/freeflow_validation
+      WORKER_DATABASE_URL: postgresql://freeflow_worker_ci:worker-validation-only@localhost:5432/freeflow_validation
 
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +72,8 @@ jobs:
           GRANT freeflow_migrator TO freeflow_migrator_ci;
           CREATE ROLE freeflow_app_ci LOGIN PASSWORD 'app-validation-only';
           GRANT freeflow_app TO freeflow_app_ci;
+          CREATE ROLE freeflow_worker_ci LOGIN PASSWORD 'worker-validation-only';
+          GRANT freeflow_worker TO freeflow_worker_ci;
           SQL
 
       - name: Apply every migration through the migrator login
@@ -82,7 +87,15 @@ jobs:
       - name: Verify SQL RLS, immutable audit, and retention controls
         run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/tests/tenant-rls-isolation.sql
 
+      - name: Verify connector binding migration and worker grants
+        run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/tests/encompass-connector-bindings.sql
+
       - name: Verify Prisma application-role isolation
         env:
           DATABASE_URL: ${{ env.APP_DATABASE_URL }}
         run: pnpm --dir apps/underwriter-portal exec tsx --test src/server/database/*.integration.test.ts
+
+      - name: Verify Prisma worker-role connector binding isolation
+        env:
+          DATABASE_URL: ${{ env.WORKER_DATABASE_URL }}
+        run: pnpm --filter @mortgage-pos/encompass-connector test:database-bindings

@@ -1,6 +1,7 @@
+import { PrismaClient } from '@prisma/client';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
 import { NonProdBearerServiceAuthVerifier } from './auth';
-import { MemoryBindingStore } from './binding';
+import { PrismaBindingStore } from './binding';
 import { CustomConnectorService } from './connector/customConnectorService';
 import type { ConnectorServiceDependencies } from './http/handleRequest';
 import { startConnectorHttpServer } from './http/nodeServer';
@@ -36,8 +37,6 @@ export function createConnectorRuntime(env: NodeJS.ProcessEnv): ConnectorRuntime
   const port = Number.parseInt(env.PORT ?? '8080', 10);
   const serviceToken = env.CONNECTOR_SERVICE_TOKEN?.trim();
   const tenantId = env.CONNECTOR_BOUND_TENANT_ID?.trim();
-  const lenderId = env.CONNECTOR_BOUND_LENDER_ID?.trim();
-  const deploymentId = env.CONNECTOR_BOUND_DEPLOYMENT_ID?.trim();
 
   return {
     port: Number.isFinite(port) ? port : 8080,
@@ -47,11 +46,7 @@ export function createConnectorRuntime(env: NodeJS.ProcessEnv): ConnectorRuntime
           ? [{ token: serviceToken, serviceId: 'portal', tenantId }]
           : [],
       ),
-      bindingStore: new MemoryBindingStore(
-        tenantId && lenderId && deploymentId
-          ? [{ tenantId, lenderId, deploymentId }]
-          : [],
-      ),
+      bindingStore: new PrismaBindingStore(new PrismaClient()),
       connector: new CustomConnectorService(),
     },
   };

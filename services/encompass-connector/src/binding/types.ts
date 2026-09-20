@@ -15,5 +15,6 @@ export type TenantLenderBinding = Readonly<{
 }>;
 
 export interface BindingStore {
-  resolveByTenantId(tenantId: string): TenantLenderBinding | undefined;
+  /** Resolves only enabled bindings. Missing and disabled bindings both fail closed. */
+  resolveByTenantId(tenantId: string): Promise<TenantLenderBinding | undefined>;
 }

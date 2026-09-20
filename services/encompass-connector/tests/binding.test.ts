@@ -22,13 +22,13 @@ function store() {
   return new MemoryBindingStore([BINDING_A, BINDING_B]);
 }
 
-test('binding enforcement accepts a claim that matches the server-resolved row', () => {
-  const resolved = enforceTenantLenderBinding(BINDING_A, BINDING_A.tenantId, store());
+test('binding enforcement accepts a claim that matches the server-resolved row', async () => {
+  const resolved = await enforceTenantLenderBinding(BINDING_A, BINDING_A.tenantId, store());
   assert.deepEqual(resolved, BINDING_A);
 });
 
-test('binding enforcement rejects a caller tenant that does not match the authenticated principal', () => {
-  assert.throws(
+test('binding enforcement rejects a caller tenant that does not match the authenticated principal', async () => {
+  await assert.rejects(
     () => enforceTenantLenderBinding(BINDING_A, BINDING_B.tenantId, store()),
     (error: unknown) => (
       error instanceof EncompassConnectorError
@@ -38,8 +38,8 @@ test('binding enforcement rejects a caller tenant that does not match the authen
   );
 });
 
-test('binding enforcement rejects a claimed lender that does not match the server store', () => {
-  assert.throws(
+test('binding enforcement rejects a claimed lender that does not match the server store', async () => {
+  await assert.rejects(
     () => enforceTenantLenderBinding(
       { ...BINDING_A, lenderId: BINDING_B.lenderId },
       BINDING_A.tenantId,
@@ -51,8 +51,8 @@ test('binding enforcement rejects a claimed lender that does not match the serve
   );
 });
 
-test('binding enforcement rejects a claimed deployment that does not match the server store', () => {
-  assert.throws(
+test('binding enforcement rejects a claimed deployment that does not match the server store', async () => {
+  await assert.rejects(
     () => enforceTenantLenderBinding(
       { ...BINDING_A, deploymentId: BINDING_B.deploymentId },
       BINDING_A.tenantId,
@@ -64,8 +64,8 @@ test('binding enforcement rejects a claimed deployment that does not match the s
   );
 });
 
-test('binding enforcement does not trust a caller-only tenant with no server row', () => {
-  assert.throws(
+test('binding enforcement does not trust a caller-only tenant with no server row', async () => {
+  await assert.rejects(
     () => enforceTenantLenderBinding(
       { tenantId: 'tenant-z', lenderId: 'lender-z', deploymentId: 'deploy-z' },
       'tenant-z',
@@ -77,11 +77,26 @@ test('binding enforcement does not trust a caller-only tenant with no server row
   );
 });
 
-test('empty binding store is fail-closed', () => {
-  assert.throws(
+test('empty binding store is fail-closed', async () => {
+  await assert.rejects(
     () => enforceTenantLenderBinding(BINDING_A, BINDING_A.tenantId, new MemoryBindingStore()),
     (error: unknown) => (
       error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_BINDING_NOT_FOUND'
+    ),
+  );
+});
+
+test('disabled binding is treated as absent and fails closed', async () => {
+  await assert.rejects(
+    () => enforceTenantLenderBinding(
+      BINDING_A,
+      BINDING_A.tenantId,
+      new MemoryBindingStore([{ ...BINDING_A, isEnabled: false }]),
+    ),
+    (error: unknown) => (
+      error instanceof EncompassConnectorError
+      && error.safeCode === 'CONNECTOR_BINDING_NOT_FOUND'
+      && error.retryable === false
     ),
   );
 });

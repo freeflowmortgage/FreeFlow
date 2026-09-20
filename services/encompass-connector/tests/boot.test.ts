@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
+import { PrismaBindingStore } from '../src/binding';
 import {
   SKELETON_SERVICE_AUTH_KIND,
   assertProductionAllowsAuth,
@@ -52,5 +53,6 @@ test('non-production still boots the NON-PROD Bearer stub', () => {
       SKELETON_SERVICE_AUTH_KIND,
     );
     assert.equal(runtime.port, 18080);
+    assert.equal(runtime.deps.bindingStore instanceof PrismaBindingStore, true);
   }
 });

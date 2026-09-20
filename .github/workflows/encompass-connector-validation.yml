@@ -43,6 +43,9 @@ jobs:
       - name: Install locked JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm --dir packages/database exec prisma generate --schema prisma/schema.prisma
+
       - name: Typecheck and test the contract plus service skeleton
         run: |
           pnpm --filter @mortgage-pos/encompass-connector-contract build
