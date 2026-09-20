@@ -4,8 +4,9 @@
 FROM node:22-alpine AS base
 
 ENV PNPM_HOME="/pnpm"
+ENV COREPACK_HOME="/pnpm/corepack"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN mkdir -p "$COREPACK_HOME" && corepack enable
 RUN apk add --no-cache openssl
 
 WORKDIR /app
@@ -19,6 +20,7 @@ COPY packages/database/prisma ./packages/database/prisma/
 COPY packages/encompass-connector-contract/package.json ./packages/encompass-connector-contract/
 COPY services/encompass-connector/package.json ./services/encompass-connector/
 
+RUN corepack install
 RUN pnpm install --frozen-lockfile \
     --filter @mortgage-pos/database... \
     --filter @mortgage-pos/encompass-connector...
