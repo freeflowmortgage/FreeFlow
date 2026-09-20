@@ -33,6 +33,7 @@ export type LiveIncomeHydration = {
     bonusYtd?: number;
     overtimeYtd?: number;
     box1?: number;
+    box5?: number;
     yearEnd?: boolean;
   };
   schC?: Array<Partial<{ line31: number; line13: number; line30: number; line44aMiles: number; line24bMeals: number }>>;
@@ -102,10 +103,11 @@ export function hydrateFromMappedFields(fields: MappedIncomeField[], fileName = 
   const baseYtd = num(fields, 'ps-base-ytd');
   const bonusYtd = num(fields, 'ps-bonus-ytd');
   const overtimeYtd = num(fields, 'ps-ot-ytd');
+  const box5 = num(fields, 'w2-box5');
   const box1 = num(fields, 'w2-box1');
   const hasWageDoc = fields.some((field) => field.form === 'W-2' || field.form === 'Paystub' || field.form === 'WVOE');
-  if (hasWageDoc && (employerName || ein || hourlyRate != null || periodPay != null || baseYtd != null || box1 != null || yearEnd)) {
-    out.wage = { employerName, ein, hourlyRate, periodPay, baseYtd, bonusYtd, overtimeYtd, box1, yearEnd };
+  if (hasWageDoc && (employerName || ein || hourlyRate != null || periodPay != null || baseYtd != null || box5 != null || box1 != null || yearEnd)) {
+    out.wage = { employerName, ein, hourlyRate, periodPay, baseYtd, bonusYtd, overtimeYtd, box1, box5, yearEnd };
   }
 
   const schCPages = pagesOf(byForm(fields, 'Schedule C'));

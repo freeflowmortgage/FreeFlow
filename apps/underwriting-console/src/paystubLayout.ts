@@ -24,6 +24,7 @@ export const PAYSTUB_EARNINGS_HEADER_Y =
 export const PAYSTUB_REGULAR_Y = PAYSTUB_EARNINGS_HEADER_Y + PAYSTUB_SECTION_H;
 export const PAYSTUB_OVERTIME_Y = PAYSTUB_REGULAR_Y + PAYSTUB_LINE_H;
 export const PAYSTUB_BONUS_Y = PAYSTUB_OVERTIME_Y + PAYSTUB_LINE_H;
+export const PAYSTUB_GROSS_Y = PAYSTUB_BONUS_Y + PAYSTUB_LINE_H;
 
 export type PaystubBox = {
   x: number;
@@ -65,4 +66,5 @@ export const PAYSTUB_HIGHLIGHT_BOXES: Record<string, PaystubBox> = {
   'ps-base-ytd': pct(PAYSTUB_COL[4] - 2, PAYSTUB_REGULAR_Y - 2, PAYSTUB_COL_W, CELL_H),
   'ps-ot-ytd': pct(PAYSTUB_COL[4] - 2, PAYSTUB_OVERTIME_Y - 2, PAYSTUB_COL_W, CELL_H),
   'ps-bonus-ytd': pct(PAYSTUB_COL[4] - 2, PAYSTUB_BONUS_Y - 2, PAYSTUB_COL_W, CELL_H),
+  'ps-gross-ytd': pct(PAYSTUB_COL[4] - 2, PAYSTUB_GROSS_Y - 2, PAYSTUB_COL_W, CELL_H),
 };
