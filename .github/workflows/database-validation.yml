@@ -67,14 +67,14 @@ jobs:
       - name: Bootstrap database capability roles
         run: |
           psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/bootstrap/roles.sql
-          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE ROLE freeflow_migrator_ci LOGIN PASSWORD 'migrator-validation-only';
-          GRANT freeflow_migrator TO freeflow_migrator_ci;
-          CREATE ROLE freeflow_app_ci LOGIN PASSWORD 'app-validation-only';
-          GRANT freeflow_app TO freeflow_app_ci;
-          CREATE ROLE freeflow_worker_ci LOGIN PASSWORD 'worker-validation-only';
-          GRANT freeflow_worker TO freeflow_worker_ci;
-          SQL
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            --set=migrator_username=freeflow_migrator_ci \
+            --set=migrator_password=migrator-validation-only \
+            --set=app_username=freeflow_app_ci \
+            --set=app_password=app-validation-only \
+            --set=connector_username=freeflow_worker_ci \
+            --set=connector_password=worker-validation-only \
+            --file=packages/database/prisma/bootstrap/logins.sql
 
       - name: Apply every migration through the migrator login
         env:

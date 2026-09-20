@@ -182,6 +182,17 @@ variable "enable_encompass_document_pull_worker" {
   }
 }
 
+variable "enable_encompass_connector" {
+  type        = bool
+  description = "Runs the internal-only custom Encompass connector foundation without LOS credentials or document retrieval."
+  default     = false
+
+  validation {
+    condition     = !var.enable_encompass_connector || (var.enable_edge && var.enable_services)
+    error_message = "The Encompass connector requires edge and services so private routing is managed."
+  }
+}
+
 variable "enable_console" {
   type        = bool
   description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."
@@ -277,5 +288,16 @@ variable "migration_image" {
   validation {
     condition     = !var.enable_services || can(regex("@sha256:[0-9a-f]{64}$", var.migration_image))
     error_message = "migration_image must be an immutable @sha256 digest reference when services are enabled."
+  }
+}
+
+variable "connector_image" {
+  type        = string
+  description = "Custom Encompass connector ECR image reference pinned with @sha256:."
+  default     = ""
+
+  validation {
+    condition     = !var.enable_encompass_connector || can(regex("@sha256:[0-9a-f]{64}$", var.connector_image))
+    error_message = "connector_image must be an immutable @sha256 digest reference when the connector is enabled."
   }
 }

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-required="PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD APP_USERNAME APP_PASSWORD MIGRATOR_USERNAME MIGRATOR_PASSWORD MIGRATOR_DATABASE_URL"
+required="PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD APP_USERNAME APP_PASSWORD MIGRATOR_USERNAME MIGRATOR_PASSWORD MIGRATOR_DATABASE_URL CONNECTOR_USERNAME CONNECTOR_PASSWORD"
 for name in $required; do
   eval "value=\${$name:-}"
   if [ -z "$value" ]; then
@@ -33,6 +33,8 @@ psql --dbname="$PGDATABASE" --set=ON_ERROR_STOP=1 \
   --set=app_password="$APP_PASSWORD" \
   --set=migrator_username="$MIGRATOR_USERNAME" \
   --set=migrator_password="$MIGRATOR_PASSWORD" \
+  --set=connector_username="$CONNECTOR_USERNAME" \
+  --set=connector_password="$CONNECTOR_PASSWORD" \
   --file=/app/packages/database/prisma/bootstrap/logins.sql
 
 unset PGPASSWORD

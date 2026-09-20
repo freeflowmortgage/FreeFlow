@@ -55,6 +55,7 @@ data "aws_iam_policy_document" "migration_secrets" {
       local.rds_master_secret_arn,
       aws_secretsmanager_secret.database_app.arn,
       aws_secretsmanager_secret.database_migrator.arn,
+      aws_secretsmanager_secret.database_connector.arn,
     ]
   }
 }
@@ -84,6 +85,30 @@ data "aws_iam_policy_document" "portal_task" {
   }
 }
 
+resource "aws_iam_role" "connector_execution" {
+  name               = "${local.name_prefix}-encompass-connector-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "connector_execution" {
+  role       = aws_iam_role.connector_execution.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+data "aws_iam_policy_document" "connector_execution_secret" {
+  statement {
+    sid       = "ReadConnectorDatabaseSecret"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.database_connector.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "connector_execution_secret" {
+  name   = "connector-database-secret"
+  role   = aws_iam_role.connector_execution.id
+  policy = data.aws_iam_policy_document.connector_execution_secret.json
+}
+
 resource "aws_iam_role_policy" "portal_task" {
   name   = "portal-runtime"
   role   = aws_iam_role.portal_task.id
@@ -97,6 +122,11 @@ resource "aws_iam_role" "parser_task" {
 
 resource "aws_iam_role" "document_pull_worker_task" {
   name               = "${local.name_prefix}-document-pull-worker-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role" "connector_task" {
+  name               = "${local.name_prefix}-encompass-connector-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -178,8 +208,26 @@ resource "aws_cloudwatch_log_group" "parser" {
   retention_in_days = 14
 }
 
+resource "aws_ecr_repository" "connector" {
+  name                 = "mortgage-encompass-connector"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
 resource "aws_cloudwatch_log_group" "document_pull_worker" {
   name              = "/ecs/${local.name_prefix}/document-pull-worker"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "connector" {
+  name              = "/ecs/${local.name_prefix}/encompass-connector"
   retention_in_days = 14
 }
 
