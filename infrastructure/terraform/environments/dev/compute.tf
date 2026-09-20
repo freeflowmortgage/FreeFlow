@@ -155,6 +155,76 @@ resource "aws_ecs_task_definition" "portal" {
   ])
 }
 
+resource "aws_ecs_task_definition" "connector" {
+  count = var.enable_encompass_connector ? 1 : 0
+
+  family                   = "${local.name_prefix}-encompass-connector"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.connector_execution.arn
+  task_role_arn            = aws_iam_role.connector_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  volume {
+    name = "connector-tmp"
+  }
+
+  container_definitions = jsonencode([{
+    name                   = "encompass-connector"
+    image                  = var.connector_image
+    essential              = true
+    readonlyRootFilesystem = true
+    user                   = "1001"
+    linuxParameters = {
+      initProcessEnabled = true
+      capabilities       = { add = [], drop = ["ALL"] }
+    }
+    environment = [
+      # This isolated dev foundation must not select the production-forbidden
+      # Bearer stub under NODE_ENV=production. No token or LOS config is set.
+      { name = "NODE_ENV", value = "development" },
+      { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
+      { name = "PORT", value = "8080" },
+      { name = "LOG_LEVEL", value = "info" },
+    ]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
+    ]
+    portMappings = [{
+      name          = "http"
+      containerPort = 8080
+      hostPort      = 8080
+      protocol      = "tcp"
+    }]
+    mountPoints = [{
+      sourceVolume  = "connector-tmp"
+      containerPath = "/tmp"
+      readOnly      = false
+    }]
+    healthCheck = {
+      command     = ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 15
+    }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.connector.name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "ecs"
+      }
+    }
+  }])
+}
+
 resource "aws_ecs_task_definition" "document_pull_worker" {
   count = var.enable_encompass_document_pull_worker ? 1 : 0
 
@@ -336,6 +406,7 @@ resource "aws_ecs_task_definition" "migration" {
         { name = "PGDATABASE", value = "mortgage_dev" },
         { name = "APP_USERNAME", value = "freeflow_app_login" },
         { name = "MIGRATOR_USERNAME", value = "freeflow_migrator_login" },
+        { name = "CONNECTOR_USERNAME", value = "freeflow_connector_login" },
       ]
       secrets = [
         { name = "PGUSER", valueFrom = "${local.rds_master_secret_arn}:username::" },
@@ -343,6 +414,7 @@ resource "aws_ecs_task_definition" "migration" {
         { name = "APP_PASSWORD", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:password::" },
         { name = "MIGRATOR_PASSWORD", valueFrom = "${aws_secretsmanager_secret.database_migrator.arn}:password::" },
         { name = "MIGRATOR_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_migrator.arn}:url::" },
+        { name = "CONNECTOR_PASSWORD", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:password::" },
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -478,6 +550,40 @@ resource "aws_ecs_service" "portal" {
   depends_on = [aws_lb_listener.http_plte, aws_lb_listener.https, aws_route.app_default]
 }
 
+resource "aws_ecs_service" "connector" {
+  count = var.enable_encompass_connector ? 1 : 0
+
+  name             = "${local.name_prefix}-encompass-connector"
+  cluster          = data.aws_ecs_cluster.existing.arn
+  task_definition  = aws_ecs_task_definition.connector[0].arn
+  desired_count    = 1
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = var.app_private_subnet_ids
+    security_groups  = [aws_security_group.connector[0].id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.connector[0].arn
+  }
+
+  depends_on = [
+    aws_route.app_default,
+    aws_vpc_endpoint.console_ecr_api,
+    aws_vpc_endpoint.console_ecr_dkr,
+    aws_vpc_endpoint.console_logs,
+    aws_vpc_endpoint.connector_secretsmanager,
+  ]
+}
+
 resource "aws_ecs_service" "document_pull_worker" {
   count = var.enable_encompass_document_pull_worker ? 1 : 0
 
@@ -592,6 +698,22 @@ resource "aws_ecr_lifecycle_policy" "console" {
     rules = [{
       rulePriority = 1
       description  = "Retain the newest ten console images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 10
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
+resource "aws_ecr_lifecycle_policy" "connector" {
+  repository = aws_ecr_repository.connector.name
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep the newest 10 connector images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"

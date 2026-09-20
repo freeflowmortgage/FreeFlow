@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
-# SKELETON ONLY — do not deploy to live ECS / freeflow-dev.
-# No Terraform task definition is provided. Future ECS wiring is a live-wiring gate.
+# Internal-only foundation image. It contains no LOS credentials or PDF persistence.
 
 FROM node:22-alpine AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 
@@ -19,8 +19,10 @@ COPY packages/database/prisma ./packages/database/prisma/
 COPY packages/encompass-connector-contract/package.json ./packages/encompass-connector-contract/
 COPY services/encompass-connector/package.json ./services/encompass-connector/
 
-RUN pnpm install --frozen-lockfile --filter @mortgage-pos/encompass-connector...
-RUN pnpm --filter @mortgage-pos/encompass-connector exec prisma generate --schema ../../packages/database/prisma/schema.prisma
+RUN pnpm install --frozen-lockfile \
+    --filter @mortgage-pos/database... \
+    --filter @mortgage-pos/encompass-connector...
+RUN pnpm --filter @mortgage-pos/database exec prisma generate --schema prisma/schema.prisma
 
 FROM deps AS runner
 WORKDIR /app
@@ -30,7 +32,9 @@ COPY services/encompass-connector ./services/encompass-connector
 
 ENV NODE_ENV=production
 ENV PORT=8080
-# Boot refuses the NON-PROD Bearer stub when NODE_ENV=production. Do not deploy this skeleton.
+# Boot refuses the NON-PROD Bearer stub when NODE_ENV=production. The isolated
+# freeflow-dev foundation explicitly runs in development mode until real S2S
+# authentication is implemented.
 
 RUN addgroup --system --gid 1001 connector \
     && adduser --system --uid 1001 --ingroup connector connector

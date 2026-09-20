@@ -8,6 +8,11 @@ resource "random_password" "database_migrator" {
   special = false
 }
 
+resource "random_password" "database_connector" {
+  length  = 40
+  special = false
+}
+
 resource "random_password" "field_encryption" {
   length  = 48
   special = false
@@ -52,6 +57,21 @@ resource "aws_secretsmanager_secret" "field_encryption" {
 resource "aws_secretsmanager_secret_version" "field_encryption" {
   secret_id     = aws_secretsmanager_secret.field_encryption.id
   secret_string = random_password.field_encryption.result
+}
+
+resource "aws_secretsmanager_secret" "database_connector" {
+  name                    = "${local.name_prefix}/database-encompass-connector"
+  description             = "Restricted synthetic dev connector database login"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "database_connector" {
+  secret_id = aws_secretsmanager_secret.database_connector.id
+  secret_string = jsonencode({
+    username = "freeflow_connector_login"
+    password = random_password.database_connector.result
+    url      = "postgresql://freeflow_connector_login:${random_password.database_connector.result}@${local.rds_endpoint}:5432/mortgage_dev?sslmode=require"
+  })
 }
 
 # Terraform creates only the secret container. Populate its value through the

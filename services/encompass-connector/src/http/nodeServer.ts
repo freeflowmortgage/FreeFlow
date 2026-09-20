@@ -3,7 +3,7 @@ import { handleConnectorRequest, type ConnectorServiceDependencies } from './han
 
 /**
  * Minimal Node HTTP adapter around the Fetch handler.
- * Skeleton only — no live ECS task definition or Terraform apply.
+ * The freeflow-dev foundation exposes this server only through private service discovery.
  */
 export function startConnectorHttpServer(options: Readonly<{
   port: number;
