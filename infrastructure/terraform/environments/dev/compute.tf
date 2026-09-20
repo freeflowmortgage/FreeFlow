@@ -113,8 +113,9 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
         { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
         { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
-        { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull.url },
-        ], var.enable_cognito_edge ? [
+        ], var.enable_encompass_document_pull_worker ? [
+        { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
+        ] : [], var.enable_cognito_edge ? [
         { name = "OIDC_ISSUER", value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.live_test[0].id}" },
         { name = "OIDC_CLIENT_ID", value = aws_cognito_user_pool_client.alb[0].id },
         { name = "OIDC_AUDIENCE", value = aws_cognito_user_pool_client.alb[0].id },
@@ -234,7 +235,7 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
   cpu                      = "512"
   memory                   = "1024"
   execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.document_pull_worker_task.arn
+  task_role_arn            = aws_iam_role.document_pull_worker_task[0].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -255,17 +256,17 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
     command          = ["./node_modules/.bin/tsx", "scripts/document-pull-worker.ts"]
     environment = [
       { name = "DOC_PARSER_SERVICE_URL", value = "http://income-parser.freeflow.local:8080/parse" },
-      { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull.url },
+      { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
       { name = "ENCOMPASS_BASE_URL", value = "https://api.elliemae.com" },
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:url::" },
-      { name = "ENCOMPASS_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.encompass_api_client.arn },
+      { name = "ENCOMPASS_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.encompass_api_client[0].arn },
     ]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        awslogs-group         = aws_cloudwatch_log_group.document_pull_worker.name
+        awslogs-group         = aws_cloudwatch_log_group.document_pull_worker[0].name
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "ecs"
       }
