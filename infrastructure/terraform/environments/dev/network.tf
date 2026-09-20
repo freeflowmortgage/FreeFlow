@@ -126,11 +126,11 @@ resource "aws_security_group_rule" "parser_from_console" {
 resource "aws_security_group" "console_aws_endpoints" {
   count       = var.enable_console || var.enable_encompass_connector ? 1 : 0
   name        = "${local.name_prefix}-console-aws-endpoints-sg"
-  description = "Private AWS API endpoints reachable from restricted FreeFlow tasks"
+  description = "Private AWS API endpoints reachable from the underwriting console"
   vpc_id      = data.aws_vpc.existing.id
 
   ingress {
-    description = "HTTPS from restricted FreeFlow tasks"
+    description = "HTTPS from underwriting console, portal, and income parser"
     protocol    = "tcp"
     from_port   = 443
     to_port     = 443

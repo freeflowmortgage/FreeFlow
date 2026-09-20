@@ -77,6 +77,8 @@ resource "aws_secretsmanager_secret_version" "database_connector" {
 # Terraform creates only the secret container. Populate its value through the
 # approved secrets workflow; never place an ICE API secret in tfvars or state.
 resource "aws_secretsmanager_secret" "encompass_api_client" {
+  count = var.enable_encompass_document_pull_worker ? 1 : 0
+
   name                    = "${local.name_prefix}/encompass-api-client-secret"
   description             = "ICE Encompass Developer Connect client secret for the synthetic dev worker"
   recovery_window_in_days = 7
