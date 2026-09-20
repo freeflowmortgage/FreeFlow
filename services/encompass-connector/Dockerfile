@@ -26,11 +26,26 @@ RUN pnpm install --frozen-lockfile \
     --filter @mortgage-pos/encompass-connector...
 RUN pnpm --filter @mortgage-pos/database exec prisma generate --schema prisma/schema.prisma
 
-FROM deps AS runner
+FROM deps AS build
 WORKDIR /app
 
 COPY packages/encompass-connector-contract ./packages/encompass-connector-contract
 COPY services/encompass-connector ./services/encompass-connector
+
+RUN pnpm --filter @mortgage-pos/encompass-connector build
+RUN pnpm --filter @mortgage-pos/encompass-connector --prod deploy /runtime \
+    && cp -R packages/database/prisma /runtime/prisma \
+    && cd /runtime \
+    && /app/packages/database/node_modules/.bin/prisma generate --schema prisma/schema.prisma \
+    && rm -rf /runtime/prisma
+
+FROM node:22-alpine AS runner
+
+RUN apk add --no-cache openssl
+
+WORKDIR /app
+
+COPY --from=build /runtime ./
 
 ENV NODE_ENV=production
 ENV PORT=8080
@@ -49,4 +64,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["node", "-e", "require('http').get('http://127.0.0.1:' + (process.env.PORT || '8080') + '/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
 WORKDIR /app
-CMD ["pnpm", "--filter", "@mortgage-pos/encompass-connector", "start"]
+CMD ["node", "dist/index.js"]

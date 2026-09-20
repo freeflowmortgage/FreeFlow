@@ -254,6 +254,9 @@ importers:
       '@types/node':
         specifier: ^20.14.2
         version: 20.19.43
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       prisma:
         specifier: ^5.14.0
         version: 5.22.0
