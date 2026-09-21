@@ -108,13 +108,17 @@ export async function handleConnectorRequest(
       attachmentId,
     );
     // In-memory response only. FORBIDDEN: persist `downloaded.bytes` to disk or S3 (ZDR).
-    return new Response(Buffer.from(downloaded.bytes), {
-      status: 200,
-      headers: {
-        'content-type': 'application/pdf',
-        'x-content-sha256': downloaded.sha256,
-      },
-    });
+    try {
+      return new Response(Buffer.from(downloaded.bytes), {
+        status: 200,
+        headers: {
+          'content-type': 'application/pdf',
+          'x-content-sha256': downloaded.sha256,
+        },
+      });
+    } finally {
+      downloaded.bytes.fill(0);
+    }
   } catch (error) {
     return responseFromUnknown(error);
   }

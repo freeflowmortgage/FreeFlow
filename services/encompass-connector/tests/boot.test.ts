@@ -3,6 +3,10 @@ import test from 'node:test';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
 import { PrismaBindingStore } from '../src/binding';
 import {
+  SYNTHETIC_FREEFLOW_DEV_MODE,
+  SyntheticFreeflowDevConnector,
+} from '../src/connector/syntheticFreeflowDevConnector';
+import {
   SKELETON_SERVICE_AUTH_KIND,
   assertProductionAllowsAuth,
   createConnectorRuntime,
@@ -28,6 +32,7 @@ test('production refuses to boot when the NON-PROD Bearer stub is selected', () 
   assert.throws(
     () => createConnectorRuntime({
       NODE_ENV: 'production',
+      CONNECTOR_MODE: SYNTHETIC_FREEFLOW_DEV_MODE,
       CONNECTOR_SERVICE_TOKEN: SECRET_TOKEN,
       CONNECTOR_BOUND_TENANT_ID: 'tenant-a',
       CONNECTOR_BOUND_LENDER_ID: 'lender-a',
@@ -54,5 +59,34 @@ test('non-production still boots the NON-PROD Bearer stub', () => {
     );
     assert.equal(runtime.port, 18080);
     assert.equal(runtime.deps.bindingStore instanceof PrismaBindingStore, true);
+  }
+});
+
+test('synthetic connector mode is selectable only in the development runtime', () => {
+  const runtime = createConnectorRuntime({
+    NODE_ENV: 'development',
+    FREEFLOW_RUNTIME_ENV: 'development',
+    CONNECTOR_MODE: SYNTHETIC_FREEFLOW_DEV_MODE,
+    CONNECTOR_SERVICE_TOKEN: SECRET_TOKEN,
+    CONNECTOR_BOUND_TENANT_ID: '00000000-0000-4000-8000-000000000100',
+  });
+  assert.equal(runtime.deps.connector instanceof SyntheticFreeflowDevConnector, true);
+
+  for (const env of [
+    { NODE_ENV: 'test', FREEFLOW_RUNTIME_ENV: 'development' },
+    { NODE_ENV: 'development', FREEFLOW_RUNTIME_ENV: 'staging' },
+    { NODE_ENV: 'development', FREEFLOW_RUNTIME_ENV: 'development', CONNECTOR_BOUND_TENANT_ID: 'wrong-tenant' },
+  ]) {
+    assert.throws(
+      () => createConnectorRuntime({
+        CONNECTOR_BOUND_TENANT_ID: '00000000-0000-4000-8000-000000000100',
+        ...env,
+        CONNECTOR_MODE: SYNTHETIC_FREEFLOW_DEV_MODE,
+      }),
+      (error: unknown) => (
+        error instanceof EncompassConnectorError
+        && error.safeCode === 'CONNECTOR_SYNTHETIC_MODE_FORBIDDEN'
+      ),
+    );
   }
 });

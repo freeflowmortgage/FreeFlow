@@ -3,6 +3,11 @@ import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contr
 import { NonProdBearerServiceAuthVerifier } from './auth';
 import { PrismaBindingStore } from './binding';
 import { CustomConnectorService } from './connector/customConnectorService';
+import {
+  SYNTHETIC_FREEFLOW_DEV_MODE,
+  SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  SyntheticFreeflowDevConnector,
+} from './connector/syntheticFreeflowDevConnector';
 import type { ConnectorServiceDependencies } from './http/handleRequest';
 import { startConnectorHttpServer } from './http/nodeServer';
 
@@ -47,9 +52,27 @@ export function createConnectorRuntime(env: NodeJS.ProcessEnv): ConnectorRuntime
           : [],
       ),
       bindingStore: new PrismaBindingStore(new PrismaClient()),
-      connector: new CustomConnectorService(),
+      connector: selectConnector(env),
     },
   };
+}
+
+function selectConnector(env: NodeJS.ProcessEnv) {
+  if (env.CONNECTOR_MODE?.trim() !== SYNTHETIC_FREEFLOW_DEV_MODE) {
+    return new CustomConnectorService();
+  }
+  if (
+    env.NODE_ENV !== 'development'
+    || env.FREEFLOW_RUNTIME_ENV !== 'development'
+    || env.CONNECTOR_BOUND_TENANT_ID?.trim() !== SYNTHETIC_FREEFLOW_DEV_TENANT_ID
+  ) {
+    throw new EncompassConnectorError(
+      'CONNECTOR_SYNTHETIC_MODE_FORBIDDEN',
+      'Synthetic connector mode is restricted to development.',
+      false,
+    );
+  }
+  return new SyntheticFreeflowDevConnector();
 }
 
 export function bootConnectorService(env: NodeJS.ProcessEnv = process.env) {
