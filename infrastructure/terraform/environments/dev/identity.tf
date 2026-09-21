@@ -103,9 +103,12 @@ resource "aws_iam_role_policy_attachment" "connector_execution" {
 
 data "aws_iam_policy_document" "connector_execution_secret" {
   statement {
-    sid       = "ReadConnectorDatabaseSecret"
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.database_connector.arn]
+    sid     = "ReadConnectorRuntimeSecrets"
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = concat(
+      [aws_secretsmanager_secret.database_connector.arn],
+      var.enable_encompass_connector ? [aws_secretsmanager_secret.connector_service_token[0].arn] : [],
+    )
   }
 }
 

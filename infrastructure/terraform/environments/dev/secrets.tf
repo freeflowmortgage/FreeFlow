@@ -13,6 +13,13 @@ resource "random_password" "database_connector" {
   special = false
 }
 
+resource "random_password" "connector_service_token" {
+  count = var.enable_encompass_connector ? 1 : 0
+
+  length  = 64
+  special = false
+}
+
 resource "random_password" "field_encryption" {
   length  = 48
   special = false
@@ -72,6 +79,21 @@ resource "aws_secretsmanager_secret_version" "database_connector" {
     password = random_password.database_connector.result
     url      = "postgresql://freeflow_connector_login:${random_password.database_connector.result}@${local.rds_endpoint}:5432/mortgage_dev?sslmode=require"
   })
+}
+
+resource "aws_secretsmanager_secret" "connector_service_token" {
+  count = var.enable_encompass_connector ? 1 : 0
+
+  name                    = "${local.name_prefix}/encompass-connector-service-token"
+  description             = "Non-production service authentication token for the private synthetic connector"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "connector_service_token" {
+  count = var.enable_encompass_connector ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.connector_service_token[0].id
+  secret_string = random_password.connector_service_token[0].result
 }
 
 # Terraform creates only the secret container. Populate its value through the

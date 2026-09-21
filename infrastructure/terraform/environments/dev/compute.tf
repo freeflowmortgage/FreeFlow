@@ -167,6 +167,8 @@ resource "aws_ecs_task_definition" "connector" {
   execution_role_arn       = aws_iam_role.connector_execution.arn
   task_role_arn            = aws_iam_role.connector_task.arn
 
+  depends_on = [aws_secretsmanager_secret_version.connector_service_token]
+
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
@@ -187,15 +189,18 @@ resource "aws_ecs_task_definition" "connector" {
       capabilities       = { add = [], drop = ["ALL"] }
     }
     environment = [
-      # This isolated dev foundation must not select the production-forbidden
-      # Bearer stub under NODE_ENV=production. No token or LOS config is set.
+      # The synthetic Bearer path is explicit development-only configuration.
+      # Its service token is distinct from database and future LOS credentials.
       { name = "NODE_ENV", value = "development" },
       { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
       { name = "PORT", value = "8080" },
       { name = "LOG_LEVEL", value = "info" },
+      { name = "CONNECTOR_MODE", value = "synthetic-freeflow-dev" },
+      { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
+      { name = "CONNECTOR_SERVICE_TOKEN", valueFrom = aws_secretsmanager_secret.connector_service_token[0].arn },
     ]
     portMappings = [{
       name          = "http"
@@ -221,6 +226,54 @@ resource "aws_ecs_task_definition" "connector" {
         awslogs-group         = aws_cloudwatch_log_group.connector.name
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "ecs"
+      }
+    }
+  }])
+}
+
+resource "aws_ecs_task_definition" "connector_binding_bootstrap" {
+  count = var.enable_encompass_connector ? 1 : 0
+
+  family                   = "${local.name_prefix}-encompass-connector-binding-bootstrap"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.migration_execution.arn
+  task_role_arn            = aws_iam_role.migration_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([{
+    name                   = "connector-binding-bootstrap"
+    image                  = var.connector_image
+    essential              = true
+    readonlyRootFilesystem = true
+    user                   = "1001"
+    command                = ["node", "dist/bootstrapSyntheticBinding.js"]
+    linuxParameters = {
+      initProcessEnabled = true
+      capabilities       = { add = [], drop = ["ALL"] }
+    }
+    environment = [
+      { name = "NODE_ENV", value = "development" },
+      { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
+      { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
+      { name = "CONNECTOR_BOUND_LENDER_ID", value = local.synthetic_connector_lender_id },
+      { name = "CONNECTOR_BOUND_DEPLOYMENT_ID", value = local.synthetic_connector_deployment_id },
+    ]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_migrator.arn}:url::" },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.connector.name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "binding-bootstrap"
       }
     }
   }])

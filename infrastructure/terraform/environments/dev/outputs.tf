@@ -30,6 +30,14 @@ output "connector_task_definition_arn" {
   value = var.enable_encompass_connector ? aws_ecs_task_definition.connector[0].arn : null
 }
 
+output "connector_binding_bootstrap_task_definition_arn" {
+  value = var.enable_encompass_connector ? aws_ecs_task_definition.connector_binding_bootstrap[0].arn : null
+}
+
+output "connector_security_group_id" {
+  value = var.enable_encompass_connector ? aws_security_group.connector[0].id : null
+}
+
 output "connector_service_name" {
   value = var.enable_encompass_connector ? aws_ecs_service.connector[0].name : null
 }

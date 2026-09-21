@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   CONNECTOR_SERVICE_CONTRACT,
@@ -9,6 +10,12 @@ import {
 import { NonProdBearerServiceAuthVerifier } from '../src/auth';
 import { MemoryBindingStore } from '../src/binding';
 import { CustomConnectorService } from '../src/connector/customConnectorService';
+import {
+  SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  SyntheticFreeflowDevConnector,
+} from '../src/connector/syntheticFreeflowDevConnector';
 import { handleConnectorRequest } from '../src/http/handleRequest';
 
 const TENANT = 'tenant-a';
@@ -23,15 +30,18 @@ const BINDING = createLenderConnectorBinding({
   serviceBaseUrl: ORIGIN,
 });
 
-function deps() {
+function deps(options: Readonly<{
+  connector?: CustomConnectorService | SyntheticFreeflowDevConnector;
+  bindings?: ConstructorParameters<typeof MemoryBindingStore>[0];
+}> = {}) {
   return {
     authVerifier: new NonProdBearerServiceAuthVerifier([
       { token: TOKEN, serviceId: 'portal', tenantId: TENANT },
     ]),
-    bindingStore: new MemoryBindingStore([
+    bindingStore: new MemoryBindingStore(options.bindings ?? [
       { tenantId: TENANT, lenderId: LENDER, deploymentId: DEPLOYMENT },
     ]),
-    connector: new CustomConnectorService(),
+    connector: options.connector ?? new CustomConnectorService(),
   };
 }
 
@@ -74,6 +84,12 @@ test('list rejects missing service auth before touching the connector stub', asy
   assert.deepEqual(await response.json(), { safeCode: 'CONNECTOR_SERVICE_AUTH_MISSING' });
 });
 
+test('list rejects an invalid service token', async () => {
+  const response = await handleConnectorRequest(listRequest({}, 'Bearer invalid-token'), deps());
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { safeCode: 'CONNECTOR_SERVICE_AUTH_INVALID' });
+});
+
 test('list rejects a tenant/lender claim that does not match the server binding', async () => {
   const response = await handleConnectorRequest(listRequest({ tenantId: 'tenant-b' }), deps());
   assert.equal(response.status, 403);
@@ -90,6 +106,68 @@ test('cross-tenant request is denied without exposing the bound tenant or loan i
   assert.deepEqual(payload, { safeCode: 'CONNECTOR_BINDING_MISMATCH' });
   assert.equal(JSON.stringify(payload).includes(TENANT), false);
   assert.equal(JSON.stringify(payload).includes('loan-for-tenant-b'), false);
+});
+
+test('binding enforcement rejects wrong lender and deployment claims', async () => {
+  for (const overrides of [{ lenderId: 'wrong' }, { deploymentId: 'wrong' }]) {
+    const response = await handleConnectorRequest(listRequest(overrides), deps());
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { safeCode: 'CONNECTOR_BINDING_MISMATCH' });
+  }
+});
+
+test('missing and disabled bindings fail closed', async () => {
+  const missing = await handleConnectorRequest(listRequest(), deps({ bindings: [] }));
+  assert.equal(missing.status, 403);
+  assert.deepEqual(await missing.json(), { safeCode: 'CONNECTOR_BINDING_NOT_FOUND' });
+
+  const disabled = await handleConnectorRequest(listRequest(), deps({
+    bindings: [{ tenantId: TENANT, lenderId: LENDER, deploymentId: DEPLOYMENT, isEnabled: false }],
+  }));
+  assert.equal(disabled.status, 403);
+  assert.deepEqual(await disabled.json(), { safeCode: 'CONNECTOR_BINDING_NOT_FOUND' });
+});
+
+test('authenticated and bound synthetic list/download returns deterministic verified PDF bytes', async () => {
+  const syntheticDeps = deps({
+    connector: new SyntheticFreeflowDevConnector(),
+    bindings: [{
+      tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+      lenderId: 'freeflow-dev',
+      deploymentId: 'freeflow-dev',
+    }],
+  });
+  syntheticDeps.authVerifier = new NonProdBearerServiceAuthVerifier([{
+    token: TOKEN,
+    serviceId: 'portal',
+    tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  }]);
+  const requestBody = {
+    tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+    lenderId: 'freeflow-dev',
+    deploymentId: 'freeflow-dev',
+    loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  };
+
+  const listed = await handleConnectorRequest(listRequest(requestBody), syntheticDeps);
+  assert.equal(listed.status, 200);
+  assert.deepEqual(await listed.json(), { attachments: [{ id: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID }] });
+
+  const downloaded = await handleConnectorRequest(new Request(`${ORIGIN}${CONNECTOR_SERVICE_CONTRACT.downloadPath}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({
+      contractVersion: CONNECTOR_SERVICE_CONTRACT.version,
+      ...requestBody,
+      loanId: 'synthetic-loan',
+      correlationId: 'synthetic-correlation',
+      attachmentId: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+    }),
+  }), syntheticDeps);
+  assert.equal(downloaded.status, 200);
+  const bytes = new Uint8Array(await downloaded.arrayBuffer());
+  assert.equal(new TextDecoder().decode(bytes.subarray(0, 5)), '%PDF-');
+  assert.equal(downloaded.headers.get('x-content-sha256'), createHash('sha256').update(bytes).digest('hex'));
 });
 
 test('authenticated + bound list/download stay unimplemented (no PDF persist)', async () => {
