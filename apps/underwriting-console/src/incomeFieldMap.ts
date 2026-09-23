@@ -43,6 +43,16 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     patterns: [/employer(?:['’]s)? name(?:,?\s*address(?:\s*,?\s*and\s+zip\s*code)?)?\s*[:#–—-]?\s*/i, /\bc\s+employer/i],
   },
   {
+    id: 'w2-employee-name',
+    form: 'W-2',
+    boxLabel: 'Box e',
+    fieldLabel: 'Employee Name',
+    lineNum: 'Box e',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employee(?:['’]s)?\s+(?:first\s+)?name/i],
+  },
+  {
     id: 'w2-employer-ein',
     form: 'W-2',
     boxLabel: 'Box b',
@@ -664,6 +674,16 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     patterns: [/employer(?:['’]s)?(?:\s+name)?\s*[:#–—-]?\s*/i, /company\s*[:#–—-]?\s*/i],
   },
   {
+    id: 'ps-employee-name',
+    form: 'Paystub',
+    boxLabel: 'Employee',
+    fieldLabel: 'Employee Name',
+    lineNum: 'Employee',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employee(?:['’]s)?\s+name\s*[:#–—-]?\s*/i, /employee\s*[:#–—-]\s*/i],
+  },
+  {
     id: 'ps-pay-frequency',
     form: 'Paystub',
     boxLabel: 'Frequency',
@@ -1005,41 +1025,76 @@ export const FORM_4562_DEFS: IncomeFieldDef[] = [
 ];
 
 export const SCHEDULE_L_DEFS: IncomeFieldDef[] = [
+  // money_last is column (d), the end-of-year balance. The first amount on the row is column (b).
   {
     id: 'sch-l-cash',
     form: 'Form 1120-S',
     boxLabel: 'Line 1',
-    fieldLabel: 'Cash',
-    lineNum: 'Line 1',
+    fieldLabel: 'Cash (End of Year)',
+    lineNum: 'Line 1d',
     category: 'asset',
-    patterns: [/schedule l.{0,40}\bcash\b/i, /\b1\b\s+cash\b.{0,40}\d/i],
+    capture: 'money_last',
+    patterns: [/schedule\s*l.{0,40}\bcash\b/i, /\b1\b\s+cash\b/i],
   },
   {
     id: 'sch-l-ar',
     form: 'Form 1120-S',
     boxLabel: 'Line 2a',
-    fieldLabel: 'Accounts Receivable',
+    fieldLabel: 'Accounts Receivable (End of Year)',
     lineNum: 'Line 2a',
     category: 'asset',
-    patterns: [/trade notes and accounts receivable/i],
+    capture: 'money_last',
+    patterns: [/trade\s+notes\s+and\s+accounts\s+receivable/i, /accounts\s+receivable/i],
   },
   {
     id: 'sch-l-securities',
     form: 'Form 1120-S',
     boxLabel: 'Line 4',
-    fieldLabel: 'Tax-Exempt Securities',
+    fieldLabel: 'Tax-Exempt Securities (End of Year)',
     lineNum: 'Line 4',
     category: 'asset',
-    patterns: [/tax-exempt securities/i],
+    capture: 'money_last',
+    patterns: [/tax-exempt\s+securities/i],
   },
   {
     id: 'sch-l-ap',
     form: 'Form 1120-S',
     boxLabel: 'Line 16',
-    fieldLabel: 'Accounts Payable',
+    fieldLabel: 'Accounts Payable (End of Year)',
     lineNum: 'Line 16',
     category: 'asset',
-    patterns: [/accounts payable/i],
+    capture: 'money_last',
+    patterns: [/accounts\s+payable/i],
+  },
+  {
+    id: 'sch-l-notes',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 17',
+    fieldLabel: 'Mortgages and notes payable in less than 1 year (End of Year)',
+    lineNum: 'Line 17',
+    category: 'asset',
+    capture: 'money_last',
+    patterns: [/payable in less than 1 year/i, /less than 1 year/i],
+  },
+  {
+    id: 'sch-l-other-current',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 18',
+    fieldLabel: 'Other Current Liabilities (End of Year)',
+    lineNum: 'Line 18',
+    category: 'asset',
+    capture: 'money_last',
+    patterns: [/other\s+current\s+liabilities/i],
+  },
+  {
+    id: 'sch-l-current-liabilities',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 18',
+    fieldLabel: 'Total Current Liabilities (End of Year)',
+    lineNum: 'Line 18d',
+    category: 'asset',
+    capture: 'money_last',
+    patterns: [/total\s+current\s+liabilities/i],
   },
 ];
 
@@ -1191,6 +1246,14 @@ function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
   return false;
 }
 
+function pagesForScheduleL(
+  pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
+): Array<{ page: ParsePage; lines: LineCluster[] }> {
+  return pageLines.filter(({ page }) =>
+    /schedule\s*l|1120-?s|\b1065\b|form\s*1120\b|c-corporation/i.test(page.formIds.join(' ')),
+  );
+}
+
 function pagesForDef(
   pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
   form: IncomeForm,
@@ -1322,7 +1385,7 @@ function fieldsFromPaystubTable(
   for (const { page, lines } of paystubPages) {
     if (!pagePrefers(page, 'Paystub') && page.formIds.length > 0) continue;
     const entityId = formEntityId('Paystub', page.index);
-    const pageText = lines.map((line) => line.text).join(' ');
+    const pageText = lines.map((line) => line.text).join('\n');
     const paysPerYear = paystubPaysPerYear(pageText);
     const frequency = paystubFrequencyType(pageText);
     const hoursBeforeRate = paystubHoursBeforeRate(pageText);
@@ -1397,6 +1460,14 @@ function fieldsFromPaystubTable(
       if (employer?.[1]) {
         const name = employer[1].replace(/\s+/g, ' ').trim();
         if (name.length >= 2) push('ps-employer-name', 0, line, undefined, name);
+      }
+      const employee =
+        line.text.match(/employee(?:['’]s)?\s+name\s*[:#–—-]?\s+(.+)/i) ??
+        line.text.match(/\bemployee\s*[:#–—-]\s+(.+)/i) ??
+        line.text.match(/\bemployee\s+(?!id\b|taxes\b)([A-Za-z][A-Za-z.'-]+(?:\s+[A-Za-z][A-Za-z.'-]+)?)(?=\s+(?:pay|ssn|department|id)\b|\s*$)/i);
+      if (employee?.[1]) {
+        const name = employee[1].replace(/\s+/g, ' ').trim();
+        if (name.length >= 2 && !/^(?:taxes|id)\b/i.test(name)) push('ps-employee-name', 0, line, undefined, name);
       }
       const kind = paystubRowKind(label);
       if (!kind || !amounts.length) continue;
@@ -1610,7 +1681,7 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
   for (const def of INCOME_FIELD_DEFS) {
     if (gridFields.length && def.form === 'Schedule E') continue;
     if (def.id === 'ps-hours-week') continue;
-    const ordered = pagesForDef(pageLines, def.form);
+    const ordered = def.id.startsWith('sch-l-') ? pagesForScheduleL(pageLines) : pagesForDef(pageLines, def.form);
     if (!ordered.length) continue;
     const allowMultipleEntities = ordered.some(({ page }) => pagePrefers(page, def.form));
 

@@ -272,10 +272,14 @@ FORM_8825_FIELDS = (
 )
 
 SCHEDULE_L_FIELDS = (
-    FieldSpec("sch-l-cash", "Form 1120-S", "asset", "Line 1", "Cash", "Line 1", ("Cash",), "money"),
-    FieldSpec("sch-l-securities", "Form 1120-S", "asset", "Line 4", "Tax-Exempt Securities", "Line 4", ("Tax-exempt securities",), "money"),
-    FieldSpec("sch-l-ar", "Form 1120-S", "asset", "Line 2a", "Accounts Receivable", "Line 2a", ("Trade notes and accounts receivable",), "money"),
-    FieldSpec("sch-l-ap", "Form 1120-S", "asset", "Line 16", "Accounts Payable", "Line 16", ("Accounts payable",), "money"),
+    # money_last keeps column (d), the end-of-year balance. "money" kept column (b).
+    FieldSpec("sch-l-cash", "Form 1120-S", "asset", "Line 1", "Cash (End of Year)", "Line 1d", ("Cash",), "money_last"),
+    FieldSpec("sch-l-ar", "Form 1120-S", "asset", "Line 2a", "Accounts Receivable (End of Year)", "Line 2a", ("Trade notes and accounts receivable",), "money_last"),
+    FieldSpec("sch-l-securities", "Form 1120-S", "asset", "Line 4", "Tax-Exempt Securities (End of Year)", "Line 4", ("Tax-exempt securities",), "money_last"),
+    FieldSpec("sch-l-ap", "Form 1120-S", "asset", "Line 16", "Accounts Payable (End of Year)", "Line 16", ("Accounts payable",), "money_last"),
+    FieldSpec("sch-l-notes", "Form 1120-S", "asset", "Line 17", "Mortgages and notes payable in less than 1 year (End of Year)", "Line 17", ("payable in less than 1 year", "less than 1 year"), "money_last"),
+    FieldSpec("sch-l-other-current", "Form 1120-S", "asset", "Line 18", "Other Current Liabilities (End of Year)", "Line 18", ("Other current liabilities",), "money_last"),
+    FieldSpec("sch-l-current-liabilities", "Form 1120-S", "asset", "Line 18", "Total Current Liabilities (End of Year)", "Line 18d", ("Total current liabilities",), "money_last"),
 )
 
 FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
@@ -704,11 +708,8 @@ def _extract_spec(
     if hit is None:
         return None
     boxes: list[list[float]] = []
-    widget_box = _nearest_widget_box(page, hit, pymupdf)
-    if widget_box:
-        boxes.append(widget_box)
-    if spec.form == "W-2":
-        boxes.append(_clip_w2_column(page, hit))
+    # End-of-year column (d) is the last amount on the row. Read that span
+    # before a fillable widget, which is often the beginning-of-year box.
     if spec.capture == "money_last":
         boxes.append(
             [
@@ -718,6 +719,11 @@ def _extract_spec(
                 float(hit.y1) + 3.0,
             ]
         )
+    widget_box = _nearest_widget_box(page, hit, pymupdf)
+    if widget_box:
+        boxes.append(widget_box)
+    if spec.form == "W-2":
+        boxes.append(_clip_w2_column(page, hit))
     boxes.extend(
         [
             _clip_right(page, hit),

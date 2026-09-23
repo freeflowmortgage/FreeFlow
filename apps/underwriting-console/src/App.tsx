@@ -203,6 +203,7 @@ export default function App() {
           {view === 'split' && (
             <div className="h-[calc(100vh-6rem)] min-h-[780px]">
               <UnderwriterSplitViewDemo
+                key={source}
                 liveSession={session}
                 liveDocuments={documents}
                 source={source}
@@ -262,6 +263,7 @@ export default function App() {
         {view === 'split' && (
           <div className="h-[calc(100vh-7rem)] min-h-[780px]">
             <UnderwriterSplitViewDemo
+              key={source}
               liveSession={session}
               liveDocuments={documents}
               source={source}

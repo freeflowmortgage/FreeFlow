@@ -26,7 +26,7 @@ import {
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
-import { liveAssetPatch } from '../liveHydrate';
+import { liveAssetPatch, liveBorrowerName, liveScheduleLPatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
   fieldForInspection,
@@ -39,11 +39,26 @@ import {
   type InspectOverlay,
   type WorkspaceTab,
 } from '../livePacket';
+import {
+  seedCCorpFromLocation,
+  seedFarmFromLocation,
   seedPartnershipFromLocation,
   seedSCorpFromLocation,
   seedScheduleCFromLocation,
   seedW2FromLocation,
 } from '../hydrateFromUrlA';
+import {
+  locateIncomeEntities,
+  pagesFromParsePages,
+  discoveredSelectId,
+  type LocateResult,
+  type LocatedMatch,
+} from '../locateIncomeEntities';
+import {
+  DEMO_URLA_ENTITIES,
+  employmentEntitiesFromUrlA,
+  namesMatch,
+} from '../urlaEmploymentRoster';
 import { loadIntakeSession } from '../intake/sessionStore';
 import UrlAEntityRoster from './UrlAEntityRoster';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
@@ -200,8 +215,31 @@ function emptyFarmYear(year: number): ScheduleFYear {
 
 const EMPTY_SCHEDULE_L: ScheduleL = {
   cash: 0, receivables: 0, allowance: 0, taxExempt: 0, otherCurrentAssets: 0,
-  accountsPayable: 0, notesLt1Yr: 0, otherCurrentLiab: 0,
+  accountsPayable: 0, notesLt1Yr: 0, otherCurrentLiab: 0, currentLiabilities: 0,
 };
+
+function scheduleLFromFields(
+  fields: Parameters<typeof liveScheduleLPatch>[0],
+  pages: Array<{ documentId: string; index: number; formIds: string[] }>,
+  pattern: RegExp,
+): ScheduleL {
+  const allowed = new Set(
+    pages.filter((page) => pattern.test(page.formIds.join(' '))).map((page) => `${page.documentId}:${page.index}`),
+  );
+  const patch = liveScheduleLPatch(
+    fields.filter((field) => (field.sourceFieldId ?? '').startsWith('sch-l-') && allowed.has(`${field.documentId ?? ''}:${field.pageIndex}`)),
+  );
+  return {
+    ...EMPTY_SCHEDULE_L,
+    cash: patch?.cash ?? 0,
+    receivables: patch?.receivables ?? 0,
+    taxExempt: patch?.taxExempt ?? 0,
+    accountsPayable: patch?.accountsPayable ?? 0,
+    notesLt1Yr: patch?.notesLt1Yr ?? 0,
+    otherCurrentLiab: patch?.otherCurrentLiab ?? 0,
+    currentLiabilities: patch?.currentLiabilities ?? 0,
+  };
+}
 
 interface BusinessEntity<TYear> {
   id: string;
@@ -655,6 +693,7 @@ export default function UnderwriterSplitViewDemo({
   const [rentalChoice, setRentalChoice] = useState<string | null>(null);
 
   const [rentalProperties, setRentalProperties] = useState<RentalProperty[]>(() => {
+    if (isLive) return [];
     const props: Array<Omit<RentalProperty, 'pitia' | 'pitiaSource'>> = [
       {
         id: 'prop-1',
@@ -710,11 +749,18 @@ export default function UnderwriterSplitViewDemo({
   const [scheduleFChoices, setScheduleFChoices] = useState<Record<string, string | null>>({});
 
   // 2. Variable Continuity & Job Transition States
-  const [mergePreviousEmployerVariable, setMergePreviousEmployerVariable] = useState<boolean>(true);
-  const [monthsAtPreviousJob, setMonthsAtPreviousJob] = useState<number>(16); // Remainder of the 24-month verification window
+  const [mergePreviousEmployerVariable, setMergePreviousEmployerVariable] = useState<boolean>(!isLive);
+  const [monthsAtPreviousJob, setMonthsAtPreviousJob] = useState<number>(isLive ? 0 : 16); // Remainder of the 24-month verification window
 
   // Previous Job Variable History
-  const [prevEmployerW2, setPrevEmployerW2] = useState<PrevEmployerW2>({
+  const [prevEmployerW2, setPrevEmployerW2] = useState<PrevEmployerW2>(isLive ? {
+    employerName: '',
+    ein: '',
+    year: 0,
+    box5Wages: 0,
+    box12Bonus: 0,
+    box14Overtime: 0,
+  } : {
     employerName: 'Digital Solutions Corp',
     ein: '94-87654321',
     year: 2025,
@@ -723,7 +769,7 @@ export default function UnderwriterSplitViewDemo({
     box14Overtime: 6000     // Previous overtime history
   });
 
-  const [w2Employers, setW2Employers] = useState<W2Employer[]>([
+  const [w2Employers, setW2Employers] = useState<W2Employer[]>(isLive ? [emptyW2Employer('w2-live', { employerName: '' })] : [
     {
       id: 'w2-apex',
       employerName: 'Apex Technology Partners LLC',
@@ -785,7 +831,7 @@ export default function UnderwriterSplitViewDemo({
       w2Year2Ot: 0,
     },
   ]);
-  const [activeW2EmployerId, setActiveW2EmployerId] = useState('w2-apex');
+  const [activeW2EmployerId, setActiveW2EmployerId] = useState(isLive ? 'w2-live' : 'w2-apex');
   const activeW2Employer = w2Employers.find((entry) => entry.id === activeW2EmployerId) ?? w2Employers[0];
   const patchW2Employer = (patch: Partial<W2Employer>) =>
     setW2Employers((entries) => entries.map((entry) => (entry.id === activeW2Employer.id ? { ...entry, ...patch } : entry)));
@@ -818,7 +864,12 @@ export default function UnderwriterSplitViewDemo({
   const setW2VarChoice = (value: string | null) =>
     setW2VarChoices((choices) => ({ ...choices, [activeW2Employer.id]: value }));
 
-  const [schCEntities, setSchCEntities] = useState<Array<BusinessEntity<SchCYear>>>([
+  const [schCEntities, setSchCEntities] = useState<Array<BusinessEntity<SchCYear>>>(isLive ? [{
+    id: 'schc-live',
+    businessName: '',
+    ein: '',
+    years: [emptySchCYear(2025), emptySchCYear(2024)],
+  }] : [
     {
       id: 'schc-vance',
       businessName: 'Vance Technology Consulting',
@@ -838,7 +889,7 @@ export default function UnderwriterSplitViewDemo({
       ],
     },
   ]);
-  const [activeSchCId, setActiveSchCId] = useState('schc-vance');
+  const [activeSchCId, setActiveSchCId] = useState(isLive ? 'schc-live' : 'schc-vance');
   const activeSchC = schCEntities.find((entry) => entry.id === activeSchCId) ?? schCEntities[0];
   const schCYears = activeSchC.years;
   const setSchCYears = (update: React.SetStateAction<[SchCYear, SchCYear]>) =>
@@ -855,9 +906,17 @@ export default function UnderwriterSplitViewDemo({
 
   const baseSCorpScheduleL: ScheduleL = {
     cash: 125000, receivables: 25000, allowance: 2500, taxExempt: 5000,
-    otherCurrentAssets: 15000, accountsPayable: 60000, notesLt1Yr: 30000, otherCurrentLiab: 10000,
+    otherCurrentAssets: 15000, accountsPayable: 60000, notesLt1Yr: 30000, otherCurrentLiab: 10000, currentLiabilities: 0,
   };
-  const [sCorpEntities, setSCorpEntities] = useState<SCorpEntity[]>([
+  const [sCorpEntities, setSCorpEntities] = useState<SCorpEntity[]>(isLive ? [{
+    id: 'scorp-live',
+    businessName: '',
+    ein: '',
+    ownershipPct: 100,
+    hasStableDistributions: true,
+    scheduleL: { ...EMPTY_SCHEDULE_L },
+    years: [emptyCorpYear(2025), emptyCorpYear(2024)],
+  }] : [
     {
       id: 'scorp-apex', businessName: 'Apex Advisory Holdings', ein: '74-9876543', ownershipPct: 35,
       hasStableDistributions: true,
@@ -868,7 +927,7 @@ export default function UnderwriterSplitViewDemo({
       ],
     },
   ]);
-  const [activeSCorpId, setActiveSCorpId] = useState('scorp-apex');
+  const [activeSCorpId, setActiveSCorpId] = useState(isLive ? 'scorp-live' : 'scorp-apex');
   const activeSCorp = sCorpEntities.find((entry) => entry.id === activeSCorpId) ?? sCorpEntities[0];
   const sCorpYears = activeSCorp.years;
   const setSCorpYears = (update: React.SetStateAction<[CorpYear, CorpYear]>) =>
@@ -880,9 +939,18 @@ export default function UnderwriterSplitViewDemo({
 
   const basePartnershipScheduleL: ScheduleL = {
     cash: 210000, receivables: 18000, allowance: 0, taxExempt: 0,
-    otherCurrentAssets: 8000, accountsPayable: 42000, notesLt1Yr: 15000, otherCurrentLiab: 6000,
+    otherCurrentAssets: 8000, accountsPayable: 42000, notesLt1Yr: 15000, otherCurrentLiab: 6000, currentLiabilities: 0,
   };
-  const [partnershipEntities, setPartnershipEntities] = useState<PartnershipEntity[]>([
+  const [partnershipEntities, setPartnershipEntities] = useState<PartnershipEntity[]>(isLive ? [{
+    id: 'partnership-live',
+    businessName: '',
+    ein: '',
+    profitPctEnd: 100,
+    capitalPctEnd: 100,
+    hasStableDistributions: true,
+    scheduleL: { ...EMPTY_SCHEDULE_L },
+    years: [emptyCorpYear(2025), emptyCorpYear(2024)],
+  }] : [
     {
       id: 'partnership-horizon', businessName: 'Horizon Property Partners', ein: '52-2468101',
       profitPctEnd: 50, capitalPctEnd: 50, hasStableDistributions: true, scheduleL: basePartnershipScheduleL,
@@ -900,7 +968,7 @@ export default function UnderwriterSplitViewDemo({
       ],
     },
   ]);
-  const [activePartnershipId, setActivePartnershipId] = useState('partnership-horizon');
+  const [activePartnershipId, setActivePartnershipId] = useState(isLive ? 'partnership-live' : 'partnership-horizon');
   const activePartnership = partnershipEntities.find((entry) => entry.id === activePartnershipId) ?? partnershipEntities[0];
   const partnershipYears = activePartnership.years;
   const setPartnershipYears = (update: React.SetStateAction<[CorpYear, CorpYear]>) =>
@@ -934,9 +1002,16 @@ export default function UnderwriterSplitViewDemo({
 
   const baseCCorpScheduleL: ScheduleL = {
     cash: 180000, receivables: 42000, allowance: 4000, taxExempt: 0,
-    otherCurrentAssets: 12000, accountsPayable: 55000, notesLt1Yr: 22000, otherCurrentLiab: 8000,
+    otherCurrentAssets: 12000, accountsPayable: 55000, notesLt1Yr: 22000, otherCurrentLiab: 8000, currentLiabilities: 0,
   };
-  const [cCorpEntities, setCCorpEntities] = useState<CCorpEntity[]>([
+  const [cCorpEntities, setCCorpEntities] = useState<CCorpEntity[]>(isLive ? [{
+    id: 'ccorp-live',
+    businessName: '',
+    ein: '',
+    ownershipPct: 100,
+    scheduleL: { ...EMPTY_SCHEDULE_L },
+    years: [emptyCCorpYear(2025), emptyCCorpYear(2024)],
+  }] : [
     {
       id: 'ccorp-summit', businessName: 'Summit Manufacturing Inc', ein: '36-5551212', ownershipPct: 40,
       scheduleL: baseCCorpScheduleL,
@@ -946,7 +1021,7 @@ export default function UnderwriterSplitViewDemo({
       ],
     },
   ]);
-  const [activeCCorpId, setActiveCCorpId] = useState('ccorp-summit');
+  const [activeCCorpId, setActiveCCorpId] = useState(isLive ? 'ccorp-live' : 'ccorp-summit');
   const activeCCorp = cCorpEntities.find((entry) => entry.id === activeCCorpId) ?? cCorpEntities[0];
   const cCorpYears = activeCCorp.years;
   const setCCorpYears = (update: React.SetStateAction<[CCorpYear, CCorpYear]>) =>
@@ -963,7 +1038,12 @@ export default function UnderwriterSplitViewDemo({
     setCCorpEntities((entities) => entities.map((entity) => entity.id === activeCCorp.id
       ? { ...entity, scheduleL: typeof value === 'function' ? value(entity.scheduleL) : value } : entity));
 
-  const [scheduleFEntities, setScheduleFEntities] = useState<Array<BusinessEntity<ScheduleFYear>>>([
+  const [scheduleFEntities, setScheduleFEntities] = useState<Array<BusinessEntity<ScheduleFYear>>>(isLive ? [{
+    id: 'farm-live',
+    businessName: '',
+    ein: '',
+    years: [emptyFarmYear(2025), emptyFarmYear(2024)],
+  }] : [
     {
       id: 'farm-vance', businessName: 'Vance Family Farm', ein: '74-1122334',
       years: [
@@ -972,7 +1052,7 @@ export default function UnderwriterSplitViewDemo({
       ],
     },
   ]);
-  const [activeScheduleFId, setActiveScheduleFId] = useState('farm-vance');
+  const [activeScheduleFId, setActiveScheduleFId] = useState(isLive ? 'farm-live' : 'farm-vance');
   const activeScheduleF = scheduleFEntities.find((entry) => entry.id === activeScheduleFId) ?? scheduleFEntities[0];
   const scheduleFChoice = scheduleFChoices[activeScheduleF.id] ?? null;
   const setScheduleFChoice = (value: string | null) =>
@@ -982,7 +1062,10 @@ export default function UnderwriterSplitViewDemo({
       ? { ...entity, years: entity.years.map((year, i) => i === index ? { ...year, ...patch } : year) as [ScheduleFYear, ScheduleFYear] }
       : entity));
 
-  const [assetIncomeYears, setAssetIncomeYears] = useState<[AssetIncomeYear, AssetIncomeYear]>([
+  const [assetIncomeYears, setAssetIncomeYears] = useState<[AssetIncomeYear, AssetIncomeYear]>(isLive ? [
+    { year: 2025, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0 },
+    { year: 2024, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0 },
+  ] : [
     { year: 2025, interestIncome: 4200, dividendIncome: 7600, capitalGainsNetLoss: 12500 },
     { year: 2024, interestIncome: 3900, dividendIncome: 7100, capitalGainsNetLoss: 9800 },
   ]);
@@ -1041,6 +1124,7 @@ export default function UnderwriterSplitViewDemo({
     } else {
       setPrevEmployerW2({ employerName: '', ein: '', year: 0, box5Wages: 0, box12Bonus: 0, box14Overtime: 0 });
       setMergePreviousEmployerVariable(false);
+      setMonthsAtPreviousJob(0);
     }
 
     const schCSeeds = seedScheduleCFromLocation(locateResult);
@@ -1060,6 +1144,25 @@ export default function UnderwriterSplitViewDemo({
     setActiveSchCId(schCSeeds[0]?.id ?? 'schc-live');
 
     const scorpSeeds = seedSCorpFromLocation(locateResult);
+    const partnershipSeeds = seedPartnershipFromLocation(locateResult);
+    const ccorpSeeds = seedCCorpFromLocation(locateResult);
+    const schedulePages = packet.flatMap((doc) =>
+      doc.result.pages.map((page) => ({ documentId: doc.id, index: page.index, formIds: page.formIds })),
+    );
+    const businessCount = [scorpSeeds, partnershipSeeds, ccorpSeeds].filter((seeds) => seeds.length > 0).length;
+    const sheetFor = (pattern: RegExp, seedCount: number): ScheduleL => {
+      if (seedCount !== 1) return { ...EMPTY_SCHEDULE_L };
+      const specific = scheduleLFromFields(mappedFields, schedulePages, pattern);
+      const generic = scheduleLFromFields(mappedFields, schedulePages, /schedule\s*l/i);
+      const used = (sheet: ScheduleL) =>
+        Boolean(sheet.cash || sheet.receivables || sheet.taxExempt || sheet.accountsPayable || sheet.notesLt1Yr || sheet.otherCurrentLiab || sheet.currentLiabilities);
+      if (used(specific)) return specific;
+      if (businessCount === 1 && used(generic)) return generic;
+      return { ...EMPTY_SCHEDULE_L };
+    };
+    const scorpSheet = sheetFor(/1120-?s/i, scorpSeeds.length);
+    const partnershipSheet = sheetFor(/\b1065\b/i, partnershipSeeds.length);
+    const ccorpSheet = sheetFor(/form\s*1120(?!-?\s*s)\b|c-corporation/i, ccorpSeeds.length);
     setSCorpEntities(
       scorpSeeds.length
         ? scorpSeeds.map((seed) => {
@@ -1073,7 +1176,7 @@ export default function UnderwriterSplitViewDemo({
               ein: seed.ein,
               ownershipPct: ownershipPct ?? 100,
               hasStableDistributions: true,
-              scheduleL: { ...EMPTY_SCHEDULE_L },
+              scheduleL: scorpSheet,
               years: [{ ...emptyCorpYear(2025), ...rest1 }, { ...emptyCorpYear(2024), ...rest2 }] as [CorpYear, CorpYear],
             };
           })
@@ -1089,7 +1192,6 @@ export default function UnderwriterSplitViewDemo({
     );
     setActiveSCorpId(scorpSeeds[0]?.id ?? 'scorp-live');
 
-    const partnershipSeeds = seedPartnershipFromLocation(locateResult);
     setPartnershipEntities(
       partnershipSeeds.length
         ? partnershipSeeds.map((seed) => {
@@ -1104,7 +1206,7 @@ export default function UnderwriterSplitViewDemo({
               profitPctEnd: profitPctEnd ?? 100,
               capitalPctEnd: capitalPctEnd ?? 100,
               hasStableDistributions: true,
-              scheduleL: { ...EMPTY_SCHEDULE_L },
+              scheduleL: partnershipSheet,
               years: [{ ...emptyCorpYear(2025), ...rest1 }, { ...emptyCorpYear(2024), ...rest2 }] as [CorpYear, CorpYear],
             };
           })
@@ -1121,7 +1223,6 @@ export default function UnderwriterSplitViewDemo({
     );
     setActivePartnershipId(partnershipSeeds[0]?.id ?? 'partnership-live');
 
-    const ccorpSeeds = seedCCorpFromLocation(locateResult);
     setCCorpEntities(
       ccorpSeeds.length
         ? ccorpSeeds.map((seed) => {
@@ -1132,7 +1233,7 @@ export default function UnderwriterSplitViewDemo({
               businessName: seed.businessName,
               ein: seed.ein,
               ownershipPct: 100,
-              scheduleL: { ...EMPTY_SCHEDULE_L },
+              scheduleL: ccorpSheet,
               years: [{ ...emptyCCorpYear(2025), ...rest1 }, { ...emptyCCorpYear(2024), ...rest2 }] as [CCorpYear, CCorpYear],
             };
           })
@@ -1179,10 +1280,11 @@ export default function UnderwriterSplitViewDemo({
     setPartnershipPnl(EMPTY_PNL);
   }, [isLive, mappedFields, locateResult, packet, scheduleEExtracts]);
 
-  // Borrower Core Metadata Reference
+  // Demo keeps the sample borrower. A live upload starts blank and takes the name from the PDF, then the 1003 draft.
+  const intakeBorrowerName = isLive ? loadIntakeSession()?.answers.borrowerName?.trim() : '';
   const borrowerMetadata = {
-    loanId: 'LN-2026-88042',
-    borrowerName: 'Sarah K. Vance',
+    loanId: isLive ? 'Live' : 'LN-2026-88042',
+    borrowerName: isLive ? (liveBorrowerName(mappedFields) || intakeBorrowerName || '—') : 'Sarah K. Vance',
     currentEmployer: activeW2Employer.employerName,
     employmentStartDate: activeW2Employer.employmentStartDate,
     loanProgram,
@@ -2673,7 +2775,7 @@ const overlay = inspectOverlayFromField(live);
           <p className="text-sm text-slate-500 mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>Loan ID: <strong className="text-slate-700">{borrowerMetadata.loanId}</strong></span>
             <span>Borrower: <strong className="text-slate-700">{borrowerMetadata.borrowerName}</strong></span>
-            <span>Current Job: <strong className="text-slate-700">{borrowerMetadata.currentEmployer} (Hired: {borrowerMetadata.employmentStartDate})</strong></span>
+            <span>Current Job: <strong className="text-slate-700">{borrowerMetadata.currentEmployer || '—'}{borrowerMetadata.employmentStartDate ? ` (Hired: ${borrowerMetadata.employmentStartDate})` : ''}</strong></span>
           </p>
         </div>
 

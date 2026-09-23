@@ -35,6 +35,8 @@ export type ScheduleL = {
   accountsPayable: number;
   notesLt1Yr: number;
   otherCurrentLiab: number;
+  /** Printed total current liabilities, end of year. When set, this is the quick-ratio denominator. */
+  currentLiabilities: number;
 };
 
 export type YtdPnl = {
@@ -228,6 +230,11 @@ export function QaAmountInput({
       placeholder={placeholder}
       value={text}
       onWheel={(event) => event.currentTarget.blur()}
+      onMouseDown={(event) => {
+        // Default focus scrolls every ancestor and jumps the QA list back to property 1.
+        event.preventDefault();
+        event.currentTarget.focus({ preventScroll: true });
+      }}
       onFocus={() => {
         setFocused(true);
         onInspect?.();
@@ -289,7 +296,8 @@ export function declining(year1: number, year2: number) {
 export function scheduleLQuickRatio(sheet: ScheduleL) {
   const assets =
     sheet.cash + (sheet.receivables - sheet.allowance) + sheet.taxExempt + sheet.otherCurrentAssets;
-  const liabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
+  const componentLiabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
+  const liabilities = sheet.currentLiabilities > 0 ? sheet.currentLiabilities : componentLiabilities;
   const quickRatio = liabilities > 0 ? assets / liabilities : 999;
   return { assets, liabilities, quickRatio, passes: quickRatio >= 1 };
 }
@@ -437,6 +445,7 @@ export function LiquidityBlock({
     { id: 'accountsPayable', line: 'L16', label: 'Accounts payable' },
     { id: 'notesLt1Yr', line: 'L17', label: 'Mortgages / notes payable in < 1 year' },
     { id: 'otherCurrentLiab', line: 'L18', label: 'Other current liabilities' },
+    { id: 'currentLiabilities', line: 'L18d', label: 'Total current liabilities (end of year)' },
   ];
 
   return (

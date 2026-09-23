@@ -75,6 +75,17 @@ export type LiveCorpPatch = {
   depletion?: number;
 };
 
+export type LiveScheduleLPatch = {
+  cash?: number;
+  receivables?: number;
+  taxExempt?: number;
+  accountsPayable?: number;
+  notesLt1Yr?: number;
+  otherCurrentLiab?: number;
+  /** Line printed as total current liabilities. Column (d) when the form has that total. */
+  currentLiabilities?: number;
+};
+
 export type LiveCCorpPatch = {
   businessName?: string;
   ein?: string;
@@ -126,6 +137,10 @@ function latestPaystubEntity(fields: MappedIncomeField[]): string | undefined {
 /** Qualifying W-2 gross is Medicare wages (Box 5), which includes 401(k) and other pre-tax deferrals Box 1 excludes. */
 function w2GrossWages(fields: MappedIncomeField[], entityId?: string): number | undefined {
   return num(fields, 'w2-box5', entityId) ?? num(fields, 'w2-box5');
+}
+
+export function liveBorrowerName(fields: MappedIncomeField[]): string | undefined {
+  return text(fields, 'ps-employee-name') ?? text(fields, 'w2-employee-name');
 }
 
 export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null {
@@ -227,6 +242,18 @@ export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch
     depreciation: num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
     section179: num(fields, 'pt-179') ?? num(fields, 'form-4562-179'),
     depletion: num(fields, 'pt-depletion'),
+  });
+}
+
+export function liveScheduleLPatch(fields: MappedIncomeField[]): LiveScheduleLPatch | null {
+  return compact({
+    cash: num(fields, 'sch-l-cash'),
+    receivables: num(fields, 'sch-l-ar'),
+    taxExempt: num(fields, 'sch-l-securities'),
+    accountsPayable: num(fields, 'sch-l-ap'),
+    notesLt1Yr: num(fields, 'sch-l-notes'),
+    otherCurrentLiab: num(fields, 'sch-l-other-current'),
+    currentLiabilities: num(fields, 'sch-l-current-liabilities'),
   });
 }
 
