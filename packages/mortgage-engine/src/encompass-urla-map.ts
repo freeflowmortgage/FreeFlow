@@ -355,7 +355,14 @@ export function buildEncompassLoanUpdate(input: {
   const statedOtherIncome = urla.hasOtherIncome ? parseMoney(urla.otherIncomeMonthly) : undefined;
   const statedSecondIncome = urla.hasSecondJob ? parseMoney(urla.secondMonthlyIncome) : undefined;
 
-  const baseIncome = income?.w2BaseMonthly ?? (urla.employmentType === 'SELF_EMPLOYED' ? undefined : statedPrimaryIncome);
+  // A self-employed borrower's income belongs on the employment record and the
+  // 1084 business totals, not in the base-income field. Reading w2BaseMonthly
+  // first put wage income into field 101 even when the borrower was flagged
+  // self-employed, double-counting it against the business total.
+  const baseIncome =
+    urla.employmentType === 'SELF_EMPLOYED'
+      ? undefined
+      : income?.w2BaseMonthly ?? statedPrimaryIncome;
   const overtimeIncome = income?.w2VariableMonthly;
   const rentalIncome = income?.rentalMonthly;
   const otherIncomePieces = [

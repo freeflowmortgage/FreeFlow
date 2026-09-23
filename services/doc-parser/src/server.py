@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
 import re
+import resource
 import threading
 import time
 import uuid
+
+# Set before any OCR import pulls in ONNX Runtime, which otherwise writes a
+# persistent device identifier and a telemetry database to disk.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +28,34 @@ logging.getLogger("freeflow.splitter").setLevel(logging.INFO)
 # OCR/OpenCV deps are only needed for POST /parse. Import them lazily so
 # GET / and /health still bind :8080 when the image or venv is incomplete.
 MAX_PDF_BYTES = 40 * 1024 * 1024
+
+DOCUMENT_ID_HMAC_KEY = os.environ.get("DOCUMENT_ID_HMAC_KEY", "").encode()
+"""Secret for the content-derived document id.
+
+Set this in production. A bare SHA-256 of a document is a stable fingerprint
+that anyone holding a copy of the same file can reproduce, so an unkeyed digest
+lets an outsider confirm that a specific document passed through this service.
+Keying the digest keeps deduplication working while making the id meaningless
+to anyone without the secret. The key must be stable across tasks and
+deployments or duplicate submissions will look new.
+"""
+
+
+def _document_id(pdf_bytes: bytes) -> str:
+    """Return a deterministic id for this document's contents.
+
+    Unlike ``transaction_id``, which is random per request, this is the same
+    for every submission of the same bytes, so the caller can recognize a
+    resubmission and avoid charging for it twice. It is derived from the
+    document but is not the document: a 32-byte one-way digest that cannot be
+    inverted, so retaining it does not retain content.
+    """
+    if DOCUMENT_ID_HMAC_KEY:
+        digest = hmac.new(DOCUMENT_ID_HMAC_KEY, pdf_bytes, hashlib.sha256).hexdigest()
+        return f"hmac-sha256:{digest}"
+    return f"sha256:{hashlib.sha256(pdf_bytes).hexdigest()}"
+
+
 AIPDFConverter = None
 pre_split_tax_returns = None
 extract_irs_form_fields = None
@@ -107,6 +143,22 @@ def get_converter():
     if _converter is None:
         _converter = AIPDFConverter()
     return _converter
+
+
+@app.on_event("startup")
+def _harden_process() -> None:
+    """Stop the kernel writing a core file containing document bytes.
+
+    A crash dump is the one path by which an in-memory parser can still spill a
+    borrower's pay stub onto disk, and it is written by the kernel rather than
+    by any code here, so it has to be refused explicitly.
+    """
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (ValueError, OSError):
+        logger.warning("core_dumps_not_disabled")
+    if not DOCUMENT_ID_HMAC_KEY:
+        logger.warning("document_id_unkeyed set DOCUMENT_ID_HMAC_KEY in production")
 
 
 @app.on_event("startup")
@@ -230,6 +282,8 @@ async def process_document(request: Request):
         if len(pdf_bytes) > MAX_PDF_BYTES:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
+        document_id = _document_id(pdf_bytes)
+
         schedule_e_properties: list = []
         w2_extracts: list = []
         try:
@@ -333,6 +387,7 @@ async def process_document(request: Request):
         return JSONResponse(
             content={
                 "transaction_id": transaction_id,
+                "document_id": document_id,
                 "original_filename": original_name,
                 "was_sandwich_applied": False,
                 "total_pages_scanned": convert_result.page_count,

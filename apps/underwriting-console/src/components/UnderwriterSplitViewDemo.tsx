@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
-import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, scheduleEGridFieldId } from '../incomeFieldMap';
+import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, reviewNotesForPage, scheduleEGridFieldId } from '../incomeFieldMap';
 import { liveAssetPatch, liveBorrowerName, liveScheduleLPatch } from '../liveHydrate';
 import {
   allScheduleEExtracts,
@@ -101,6 +101,7 @@ import {
 } from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
+import { MoneyField, ReviewNotesPanel } from './WageFieldControls';
 
 // TS Type Signatures for clean data structures
 interface OCRField {
@@ -145,6 +146,8 @@ interface W2Employer {
   wvoeBonus: number;
   wvoeOvertime: number;
   wvoeOther: number;
+  /** Wage source ids the parser located on the document, when one was parsed. */
+  extractedFieldIds?: string[];
   wvoeMonths: number;
   w2Year1Box5: number;
   w2Year1Bonus: number;
@@ -847,6 +850,19 @@ export default function UnderwriterSplitViewDemo({
   const currentRsuYtd = activeW2Employer.rsuYtd;
   const currentOtherYtd = activeW2Employer.otherYtd;
   const monthsAtCurrentJob = activeW2Employer.monthsAtJob;
+
+  // Everything the parser flagged about the wage documents. These were computed
+  // and discarded before, so an excluded earning code reached a decision unseen.
+  const wageReviewNotes = useMemo(() => reviewNotesForPage(mappedFields), [mappedFields]);
+
+  // A figure the parser never located is not a zero. Only claim a field is
+  // missing once we know which ones were extracted, so the demo packet and any
+  // hand-entered value keep rendering normally.
+  const wageFieldExtracted = (sourceId: string): boolean | undefined => {
+    const extracted = activeW2Employer.extractedFieldIds;
+    if (!extracted) return undefined;
+    return extracted.includes(sourceId);
+  };
   const setCurrentHourlyRate = (value: number) => patchW2Employer({ hourlyRate: value });
   const setCurrentWeeklyHours = (value: number) => patchW2Employer({ weeklyHours: value });
   const setCurrentPeriodBasePay = (value: number) => patchW2Employer({ currentPeriodBasePay: value });
@@ -2040,14 +2056,11 @@ export default function UnderwriterSplitViewDemo({
       });
     }
 
-    // Wage Deficit discrepancy
-    if (currentBaseYtd < 50000.00) {
-      list.push({
-        id: 'WAGE_DEFICIT_WARN',
-        type: 'ERROR',
-        message: 'Critical Wage Deficit: Extracted YTD Base Wages are lower than expected for a Semi-Monthly payroll processed in mid-August.'
-      });
-    }
+    // A fixed dollar floor cannot work here: the same YTD figure is
+    // unremarkable for a part-time borrower and alarming for a senior one, and
+    // any stub from early in the year sits below any constant. The parser
+    // measures the borrower against their own rate and hours instead, and
+    // surfaces the result through review notes.
 
     // Corporate Liquidity Deficit (only applies to self-employed 25%+ owners)
     if (!sCorpLRatio.passes && !sCorpFlow.isMinority) {
@@ -3020,6 +3033,15 @@ const overlay = inspectOverlayFromField(live);
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
               />
+            ) : parseBusy ? (
+              <div className="flex flex-col items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-10 text-center">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+                <p className="text-xs font-semibold text-slate-700">Reading the document…</p>
+                <p className="max-w-xs text-[11px] leading-relaxed text-slate-500">
+                  Scanned pages are run through OCR on the server, which usually takes
+                  10 to 20 seconds. The extracted figures appear here when it finishes.
+                </p>
+              </div>
             ) : isLive ? (
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-500">
                 No {activeTab === 'PAYSTUB_RECONCILIATION' && wageDocKind === 'w2' ? 'W-2' : activeTab === 'PAYSTUB_RECONCILIATION' ? 'paystub' : 'matching'} PDF on file for this tab. Load live PDF keeps each document — it does not replace the last one.
@@ -3258,68 +3280,61 @@ const overlay = inspectOverlayFromField(live);
 
               {/* Core interactive variable modification boxes */}
               <div className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-xs [&>div]:px-3 [&>div]:py-2">
-                <div data-qa-field="ps-hourly-rate" className={`cursor-pointer ${highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hourly-rate')}>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Hourly Rate of Pay</label>
-                  <input
-                    type="number"
-                    value={currentHourlyRate}
-                    onChange={(e) => setCurrentHourlyRate(Number(e.target.value))}
-                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div data-qa-field="ps-hours-week" className={`cursor-pointer ${highlightFieldId === 'ps-hours-week' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hours-week')}>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Standard Weekly Hours</label>
-                  <input
-                    type="number"
-                    value={currentWeeklyHours}
-                    onChange={(e) => setCurrentWeeklyHours(Number(e.target.value))}
-                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div data-qa-field="ps-current-base" className={`cursor-pointer ${highlightFieldId === 'ps-current-base' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-current-base')}>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Current Period Base Pay</label>
-                  <input
-                    type="number"
-                    value={currentPeriodBasePay}
-                    onChange={(e) => setCurrentPeriodBasePay(Number(e.target.value))}
-                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div data-qa-field="ps-base-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-base-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-base-ytd')}>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Base Wages YTD</label>
-                  <input
-                    type="number"
-                    value={currentBaseYtd}
-                    onChange={(e) => setCurrentBaseYtd(Number(e.target.value))}
-                    className={`w-full rounded border p-2 font-semibold focus:outline-none focus:border-indigo-500 ${
-                      currentBaseYtd < 50000 ? 'border-rose-300 bg-rose-50' : 'border-slate-300'
-                    }`}
-                  />
-                </div>
-
-                <div data-qa-field="w2-box5" className={`cursor-pointer ${highlightFieldId === 'w2-box5' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box5')}>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Prior Year W-2 Box 5</label>
-                  <input
-                    type="number"
-                    value={activeW2Employer.w2Year1Box5}
-                    onChange={(e) => patchW2Employer({ w2Year1Box5: Number(e.target.value) })}
-                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Other Income YTD</label>
-                  <input
-                    type="number"
-                    value={currentOtherYtd}
-                    onChange={(e) => setCurrentOtherYtd(Number(e.target.value))}
-                    className="w-full rounded border border-slate-300 p-2 font-semibold focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                <MoneyField
+                  label="Hourly rate of pay"
+                  value={currentHourlyRate}
+                  onChange={setCurrentHourlyRate}
+                  fieldId="ps-hourly-rate"
+                  onInspect={handleInspectField}
+                  highlighted={highlightFieldId === 'ps-hourly-rate'}
+                  extracted={wageFieldExtracted('ps-hourly-rate')}
+                  decimals={4}
+                />
+                <MoneyField
+                  label="Standard weekly hours"
+                  value={currentWeeklyHours}
+                  onChange={setCurrentWeeklyHours}
+                  fieldId="ps-hours-week"
+                  onInspect={handleInspectField}
+                  highlighted={highlightFieldId === 'ps-hours-week'}
+                  extracted={wageFieldExtracted('ps-hours-week')}
+                />
+                <MoneyField
+                  label="Current period base pay"
+                  value={currentPeriodBasePay}
+                  onChange={setCurrentPeriodBasePay}
+                  fieldId="ps-current-base"
+                  onInspect={handleInspectField}
+                  highlighted={highlightFieldId === 'ps-current-base'}
+                  extracted={wageFieldExtracted('ps-current-base')}
+                />
+                <MoneyField
+                  label="Base wages YTD"
+                  value={currentBaseYtd}
+                  onChange={setCurrentBaseYtd}
+                  fieldId="ps-base-ytd"
+                  onInspect={handleInspectField}
+                  highlighted={highlightFieldId === 'ps-base-ytd'}
+                  extracted={wageFieldExtracted('ps-base-ytd')}
+                />
+                <MoneyField
+                  label="Prior year W-2 Box 5"
+                  value={activeW2Employer.w2Year1Box5}
+                  onChange={(value) => patchW2Employer({ w2Year1Box5: value })}
+                  fieldId="w2-box5"
+                  onInspect={handleInspectField}
+                  highlighted={highlightFieldId === 'w2-box5'}
+                  extracted={wageFieldExtracted('w2-box5')}
+                />
+                <MoneyField
+                  label="Other income YTD"
+                  value={currentOtherYtd}
+                  onChange={setCurrentOtherYtd}
+                  extracted={wageFieldExtracted('ps-other-ytd')}
+                />
               </div>
+
+              <ReviewNotesPanel notes={wageReviewNotes} />
 
               {/* Variable income stays on the Base Income tab */}
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
@@ -3340,7 +3355,7 @@ const overlay = inspectOverlayFromField(live);
               {/* Tenure configuration inputs */}
               <div className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-xs [&>label]:px-3 [&>label]:py-2">
                 <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Months at Current Job (Hire Date: Dec 2025)</label>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Months at Current Job (Hire Date: Dec 2025)</label>
                   <input
                     type="number"
                     value={monthsAtCurrentJob}
@@ -3351,7 +3366,7 @@ const overlay = inspectOverlayFromField(live);
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Months at Previous Job (Rolling Window)</label>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Months at Previous Job (Rolling Window)</label>
                   <input
                     type="number"
                     value={monthsAtPreviousJob}
@@ -3492,15 +3507,6 @@ const overlay = inspectOverlayFromField(live);
                     <div>
                       <span className="font-bold uppercase block tracking-wider text-amber-950">Other Income Detected</span>
                       Other income of ${currentOtherYtd.toLocaleString()} found. Please validate the continuance of this other income type (e.g., probability of continued receipt for at least 3 years) per guidelines.
-                    </div>
-                  </div>
-                )}
-                {currentBaseYtd < 50000.00 && (
-                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 flex gap-3 text-xs leading-relaxed text-rose-800">
-                    <AlertCircle className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold uppercase block tracking-wider text-rose-950">Critical Wage Deficit Highlighted</span>
-                      The YTD base wage of ${currentBaseYtd.toLocaleString()} is significantly lower than expected for a semi-monthly payroll schedule processed in mid-August (expected base wage ~ $54,000.00). Check if the borrower recently changed compensation, had unpaid leave, or was hired mid-year.
                     </div>
                   </div>
                 )}

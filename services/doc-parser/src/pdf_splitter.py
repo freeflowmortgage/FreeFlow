@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
@@ -256,8 +257,23 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     )
 
 
+OCR_PAGE_BUDGET = int(os.environ.get("OCR_PAGE_BUDGET", "80"))
+"""Ceiling on pages OCR'd in one request, to bound latency on huge packets."""
+
+
 def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult) -> set[int]:
-    """OCR only keep-set pages that still need it. Scan packets with no labels OCR all."""
+    """Choose which pages to OCR.
+
+    Every page without a usable text layer is selected. The keep set cannot be
+    used to narrow this: it comes from the preview pass, which classifies pages
+    from native text only, so an image-only page is never in it. Gating on the
+    keep set therefore skipped exactly the pages that needed OCR most, and a
+    borrower's scanned return inside an otherwise native packet was dropped
+    with nothing but an INFO log to show for it.
+
+    Only the page budget removes work now, and it prefers already-recognized
+    pages and reports the shortfall to the caller.
+    """
     pages = list(inspected)
     needs = {
         int(getattr(page, "index", index))
@@ -266,6 +282,7 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     }
     if not needs:
         return set()
+
     hybrid_form_pages = {
         int(getattr(page, "index", index))
         for index, page in enumerate(pages)
@@ -274,13 +291,18 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     if hybrid_form_pages:
         logger.info("ocr_hybrid_form_pages pages=%s", sorted(hybrid_form_pages))
         return hybrid_form_pages
-    kept = set(split_result.target_pages)
-    if kept:
-        selected = needs & kept
-        logger.info("ocr_gated keep=%s ocr=%s skipped=%s", sorted(kept), sorted(selected), sorted(needs - selected))
-        return selected
-    if len(needs) * 2 >= max(len(pages), 1):
-        logger.info("ocr_ungated_scan_packet pages=%s", sorted(needs))
+
+    if len(needs) <= OCR_PAGE_BUDGET:
+        logger.info("ocr_selected pages=%s", sorted(needs))
         return needs
-    logger.info("ocr_skipped_unrecognized needs=%s", sorted(needs))
-    return set()
+
+    kept = set(split_result.target_pages)
+    prioritized = sorted(needs & kept) + sorted(needs - kept)
+    selected = set(prioritized[:OCR_PAGE_BUDGET])
+    logger.warning(
+        "ocr_budget_exceeded budget=%s needed=%s skipped=%s",
+        OCR_PAGE_BUDGET,
+        len(needs),
+        sorted(needs - selected),
+    )
+    return selected

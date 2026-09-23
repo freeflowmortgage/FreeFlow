@@ -282,12 +282,42 @@ SCHEDULE_L_FIELDS = (
     FieldSpec("sch-l-current-liabilities", "Form 1120-S", "asset", "Line 18", "Total Current Liabilities (End of Year)", "Line 18d", ("Total current liabilities",), "money_last"),
 )
 
+# The K-1 catalogs above cover the borrower's share of an entity. The return
+# face carries the entity-level figures a self-employed worksheet adds back:
+# depreciation, depletion, amortization, officer compensation. Without these
+# the page classified, entered the keep set, and produced nothing.
+SCORP_RETURN_FIELDS = (
+    FieldSpec("scorp-return-name", "Form 1120-S", "identity", "Name", "Corporation Name", "Name", ("Name of corporation", "Name"), "text"),
+    FieldSpec("scorp-return-ein", "Form 1120-S", "identity", "Box B", "Employer Identification Number", "Box B", ("Employer identification number",), "ein"),
+    FieldSpec("scorp-return-ord", "Form 1120-S", "income", "Line 21", "Ordinary Business Income (Loss)", "Line 21", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
+    FieldSpec("scorp-return-officer-comp", "Form 1120-S", "income", "Line 7", "Compensation of Officers", "Line 7", ("Compensation of officers",), "money"),
+    FieldSpec("scorp-return-wages", "Form 1120-S", "income", "Line 8", "Salaries and Wages", "Line 8", ("Salaries and wages",), "money"),
+    FieldSpec("scorp-return-dep", "Form 1120-S", "addback", "Line 14", "Depreciation", "Line 14", ("Depreciation not claimed", "Depreciation"), "money"),
+    FieldSpec("scorp-return-depletion", "Form 1120-S", "addback", "Line 15", "Depletion", "Line 15", ("Depletion",), "money"),
+    FieldSpec("scorp-return-gross", "Form 1120-S", "income", "Line 1c", "Gross Receipts or Sales", "Line 1c", ("Gross receipts or sales",), "money"),
+)
+
+PARTNERSHIP_RETURN_FIELDS = (
+    FieldSpec("pt-return-name", "Form 1065", "identity", "Name", "Partnership Name", "Name", ("Name of partnership", "Name"), "text"),
+    FieldSpec("pt-return-ein", "Form 1065", "identity", "Box D", "Employer Identification Number", "Box D", ("Employer identification number",), "ein"),
+    FieldSpec("pt-return-ord", "Form 1065", "income", "Line 22", "Ordinary Business Income (Loss)", "Line 22", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
+    FieldSpec("pt-return-gp", "Form 1065", "income", "Line 10", "Guaranteed Payments to Partners", "Line 10", ("Guaranteed payments to partners", "Guaranteed payments"), "money"),
+    FieldSpec("pt-return-wages", "Form 1065", "income", "Line 9", "Salaries and Wages", "Line 9", ("Salaries and wages",), "money"),
+    FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16c", "Depreciation", "Line 16c", ("Depreciation, if required", "Depreciation"), "money"),
+    FieldSpec("pt-return-depletion", "Form 1065", "addback", "Line 17", "Depletion", "Line 17", ("Depletion",), "money"),
+    FieldSpec("pt-return-gross", "Form 1065", "income", "Line 1c", "Gross Receipts or Sales", "Line 1c", ("Gross receipts or sales",), "money"),
+)
+
 FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
     (W2_TITLE, W2_FIELDS),
     (re.compile(r"Schedule C.*Profit or Loss From Business|Profit or Loss From Business", re.I), SCHEDULE_C_FIELDS),
     (re.compile(r"Profit or Loss From Farming", re.I), SCHEDULE_F_FIELDS),
+    # K-1 patterns stay ahead of the return faces: a K-1 page often repeats the
+    # return title in its header, and the first matching catalog wins.
     (re.compile(r"Schedule K-1\s*\(Form\s*1120-?S\)", re.I), SCORP_FIELDS),
     (re.compile(r"Schedule K-1\s*\(Form\s*1065\)", re.I), PARTNERSHIP_FIELDS),
+    (re.compile(r"U\.S\. Income Tax Return for an S Corporation", re.I), SCORP_RETURN_FIELDS),
+    (re.compile(r"U\.S\. Return of Partnership Income", re.I), PARTNERSHIP_RETURN_FIELDS),
     (re.compile(r"U\.S\. Corporation Income Tax Return", re.I), FORM_1120_FIELDS),
     (re.compile(r"U\.S\. Individual Income Tax Return", re.I), FORM_1040_FIELDS),
     (re.compile(r"Schedule B.*Interest and Ordinary Dividends", re.I), SCHEDULE_B_FIELDS),
@@ -1391,12 +1421,72 @@ def _plausible_w2_fields(rows: list[dict[str, Any]]) -> bool:
     return not (ein_like_box5 or box_number_like_withholding)
 
 
+def _paystub_fields_from_parser(
+    pdf_bytes: bytes | None, page_index: int
+) -> list[dict[str, Any]] | None:
+    """Extract a pay stub with the dedicated parser in ``src/paystub``.
+
+    Returns ``None`` when that parser cannot vouch for the page, which hands
+    the page back to the legacy table reader. The gate is the parser's own
+    reconciliation: it only claims a stub when the earnings lines sum to the
+    printed earnings total and the cash lines sum to printed gross pay. A page
+    it cannot balance is one where its column grid is wrong, and wrong values
+    with confident overlay boxes are worse than no fields at all.
+    """
+    if not pdf_bytes:
+        return None
+    try:
+        from paystub import income_fields, parse_paystub
+    except ImportError:  # pragma: no cover - packaged together in the image
+        logger.warning("paystub_parser_unavailable")
+        return None
+
+    try:
+        result = parse_paystub(pdf_bytes, page_index=page_index)
+    except Exception:  # pragma: no cover - never fail a packet on one page
+        logger.exception("paystub_parser_failed page=%s", page_index)
+        return None
+
+    if not result.lines or not result.reconciliation.balanced:
+        logger.info(
+            "paystub_parser_declined page=%s lines=%s balanced=%s warnings=%s",
+            page_index,
+            len(result.lines),
+            result.reconciliation.balanced,
+            len(result.warnings),
+        )
+        return None
+
+    fields = income_fields(result)
+    if not fields:
+        return None
+
+    # Everything the parser could not resolve, plus the notes an underwriter has
+    # to act on, rides along on the field records so the console can show them.
+    # These were previously computed and discarded, which is how an excluded
+    # earning code or a non-recurring leave code reached a decision unseen.
+    notes = [{"severity": "warning", "message": text} for text in result.warnings]
+    notes += [{"severity": "info", "message": text} for text in result.disclosures]
+    if notes:
+        for field in fields:
+            field["reviewNotes"] = notes
+
+    logger.info(
+        "paystub_parser_used page=%s fields=%s notes=%s",
+        page_index,
+        len(fields),
+        len(notes),
+    )
+    return fields
+
+
 def extract_page_fields(
     page: Any,
     *,
     page_index: int,
     words: list[dict[str, Any]] | None = None,
     text: str | None = None,
+    pdf_bytes: bytes | None = None,
 ) -> list[dict[str, Any]]:
     pymupdf = _require_pymupdf()
     native = page.get_text("text") or ""
@@ -1415,6 +1505,14 @@ def extract_page_fields(
         if not pattern_matches(matcher, blob) and not w2_from_labels:
             continue
         if specs is PAYSTUB_FIELDS:
+            delegated = _paystub_fields_from_parser(pdf_bytes, page_index)
+            if delegated is not None:
+                # The dedicated parser reconciled this page, so it owns every
+                # pay stub field on it. Letting the label-anchored specs below
+                # also fire would reintroduce the values it just replaced.
+                extracted.extend(delegated)
+                seen.update(row["sourceFieldId"] for row in delegated)
+                break
             for row in _extract_paystub_table(
                 page, pymupdf, page_index=page_index, blob=row_blob or blob, words=words
             ):
@@ -1533,6 +1631,7 @@ def extract_irs_form_fields(
         if index is None:
             continue
         supplied[int(index)] = page_result
+    source_bytes = bytes(pdf_input) if isinstance(pdf_input, (bytes, bytearray)) else None
     doc = _open_pdf(pymupdf, pdf_input)
     try:
         fields: list[dict[str, Any]] = []
@@ -1556,7 +1655,13 @@ def extract_irs_form_fields(
                         page_words, rotation, float(page.rect.width), float(page.rect.height)
                     )
                     extract_page = _PageView(page, pymupdf.Rect(0, 0, upright_w, upright_h))
-            page_fields = extract_page_fields(extract_page, page_index=index, words=page_words, text=text)
+            page_fields = extract_page_fields(
+                extract_page,
+                page_index=index,
+                words=page_words,
+                text=text,
+                pdf_bytes=source_bytes,
+            )
             if rotation:
                 for row in page_fields:
                     row["box"] = _remap_overlay_box(row.get("box"), rotation)

@@ -1,4 +1,4 @@
-import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract, W2BoxExtract } from './parseTypes';
+import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract, ReviewNote, W2BoxExtract } from './parseTypes';
 import {
   PAYSTUB_YTD_FIELD_BY_KIND,
   isPrimaryRateRow,
@@ -1677,9 +1677,33 @@ function fieldsFromFormExtracts(extracts: ParseResponse['formExtracts']): Mapped
       wordIndex: 0,
       box: extract.box,
       componentBoxes: extract.componentBoxes,
+      reviewNotes: extract.reviewNotes,
     });
   }
   return found;
+}
+
+/**
+ * Collect the parser's review notes for a page, de-duplicated by message.
+ *
+ * Notes are page-level but ride on every field extracted from that page, so
+ * the same text arrives once per field.
+ */
+export function reviewNotesForPage(
+  fields: MappedIncomeField[],
+  pageIndex?: number,
+): ReviewNote[] {
+  const seen = new Map<string, ReviewNote>();
+  for (const field of fields) {
+    if (pageIndex != null && field.pageIndex !== pageIndex) continue;
+    for (const note of field.reviewNotes ?? []) {
+      if (!seen.has(note.message)) seen.set(note.message, note);
+    }
+  }
+  // Warnings first: they mean a value was excluded or could not be trusted.
+  return [...seen.values()].sort((a, b) =>
+    a.severity === b.severity ? 0 : a.severity === 'warning' ? -1 : 1,
+  );
 }
 
 function plausibleW2Wage(value: number | undefined): boolean {

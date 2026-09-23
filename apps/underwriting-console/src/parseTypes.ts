@@ -27,6 +27,8 @@ export type MappedIncomeField = {
   box: { x: number; y: number; w: number; h: number };
   /** Numeric source cells contributing to a computed aggregate. */
   componentBoxes?: OverlayBox[];
+  /** Anything the parser flagged about the page this value came from. */
+  reviewNotes?: ReviewNote[];
 };
 
 export type ParsePage = {
@@ -42,6 +44,12 @@ export type ParsePage = {
 
 export type ParseResponse = {
   transaction_id: string;
+  /**
+   * Deterministic digest of the uploaded bytes, stable across resubmissions of
+   * the same file. Use this to recognize a duplicate submission;
+   * `transaction_id` is random per request and cannot.
+   */
+  document_id?: string;
   total_pages_scanned: number;
   pages_extracted_count: number;
   extracted_page_indices: number[];
@@ -98,6 +106,16 @@ export type W2BoxExtract = {
   boxes?: Partial<Record<'employer_ein' | 'employer_name' | 'box1' | 'box2' | 'box3' | 'box4' | 'box5' | 'box6', OverlayBox>>;
 };
 
+/**
+ * Something the parser could not resolve, or a note the underwriter must act
+ * on. `warning` means a value was excluded or could not be trusted; `info` is
+ * a disclosure such as shift differential being reported inside overtime.
+ */
+export type ReviewNote = {
+  severity: 'warning' | 'info';
+  message: string;
+};
+
 export type FormFieldExtract = {
   pageIndex: number;
   form: MappedIncomeField['form'];
@@ -111,6 +129,8 @@ export type FormFieldExtract = {
   box: OverlayBox;
   componentBoxes?: OverlayBox[];
   entityId?: string;
+  /** Page-level review notes, repeated on each field extracted from that page. */
+  reviewNotes?: ReviewNote[];
 };
 
 export type ScheduleEPropertyBoxes = {
@@ -152,5 +172,15 @@ export function pageLooksLikeW2(page: ParsePage): boolean {
 export function pageLooksSelfEmployed(page: ParsePage): boolean {
   return page.formIds.some((id) =>
     /schedule\s+[cef]|form\s+1120|form\s+1065|k-1|form\s+8825|form\s+4562/i.test(id)
+  );
+}
+
+/**
+ * Schedule E Page 1 only. Page 2 carries K-1 and trust income, which belongs on
+ * a different tab, so a bare "Schedule E" match is not enough to route a page.
+ */
+export function pageLooksLikeScheduleERentals(page: Pick<ParsePage, 'formIds'>): boolean {
+  return page.formIds.some(
+    (id) => /schedule\s+e/i.test(id) && !/page\s*2|k-1|trust/i.test(id)
   );
 }

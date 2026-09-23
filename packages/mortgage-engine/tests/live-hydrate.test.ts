@@ -107,8 +107,15 @@ describe('live worksheet hydration', () => {
       tipsYtd: 1800,
       commissionYtd: 6000,
       rsuYtd: 7500,
-      otherYtd: 7500,
     });
+  });
+
+  test('other income is its own bucket, not a copy of RSU', () => {
+    // otherYtd used to read ps-rsu-ytd, so a stock award was counted twice:
+    // once as RSU and again as other income.
+    const patch = liveWagePatch([field('ps-rsu-ytd', 7500, { form: 'Paystub' })]);
+    expect(patch?.rsuYtd).toBe(7500);
+    expect(patch?.otherYtd).toBeUndefined();
   });
 
   test('maps each self-employed and asset form onto its worksheet patch', () => {

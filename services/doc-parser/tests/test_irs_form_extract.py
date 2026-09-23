@@ -101,7 +101,12 @@ def test_splitter_classifies_form_8825() -> None:
     assert "Form 8825 (Corporate Rentals)" in split.classifications[0]
 
 
-def test_select_ocr_only_keep_set_pages_that_need_it() -> None:
+def test_select_ocr_covers_every_page_without_a_text_layer() -> None:
+    """Page 0 has no text, so the preview pass could never classify it.
+
+    Narrowing to the keep set dropped exactly those pages, which is how a
+    scanned return inside an otherwise native packet went missing.
+    """
     inspected = [
         SimpleNamespace(index=0, use_ocr=True),
         SimpleNamespace(index=1, use_ocr=True),
@@ -113,7 +118,33 @@ def test_select_ocr_only_keep_set_pages_that_need_it() -> None:
         statement_refs=[],
         unresolved_statements=[],
     )
-    assert select_ocr_page_indices(inspected, split) == {1}
+    assert select_ocr_page_indices(inspected, split) == {0, 1}
+
+
+def test_select_ocr_covers_a_lone_scan_in_a_native_packet() -> None:
+    inspected = [SimpleNamespace(index=i, use_ocr=False) for i in range(8)]
+    inspected.append(SimpleNamespace(index=8, use_ocr=True))
+    split = SplitResult(
+        target_pages=[], classifications={}, statement_refs=[], unresolved_statements=[]
+    )
+    assert select_ocr_page_indices(inspected, split) == {8}
+
+
+def test_select_ocr_budget_prefers_recognized_pages_when_over_the_cap() -> None:
+    from pdf_splitter import OCR_PAGE_BUDGET
+
+    total = OCR_PAGE_BUDGET + 5
+    inspected = [SimpleNamespace(index=i, use_ocr=True) for i in range(total)]
+    split = SplitResult(
+        target_pages=[total - 1],
+        classifications={total - 1: ["W-2"]},
+        statement_refs=[],
+        unresolved_statements=[],
+    )
+    selected = select_ocr_page_indices(inspected, split)
+
+    assert len(selected) == OCR_PAGE_BUDGET
+    assert total - 1 in selected, "a recognized page must not lose to the budget"
 
 
 def test_select_ocr_hybrid_form_pages_skips_blank_companion_pages() -> None:

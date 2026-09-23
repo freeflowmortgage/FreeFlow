@@ -8,9 +8,18 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+# Must be set before ONNX Runtime loads, which happens when RapidOCR is first
+# imported below. Left at its default the runtime writes a persistent device
+# identifier and a telemetry database under
+# ~/.cache/Microsoft/DeveloperTools/.onnxruntime plus a debug log in /tmp.
+# None of it holds document bytes, but a document-processing path that creates
+# files and a stable machine ID cannot claim zero retention.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 
 import cv2
 import numpy as np
