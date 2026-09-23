@@ -17,7 +17,7 @@ resource "aws_ecs_task_definition" "parser" {
   network_mode             = "awsvpc"
   cpu                      = "1024"
   memory                   = "4096"
-  execution_role_arn       = aws_iam_role.task_execution.arn
+  execution_role_arn       = aws_iam_role.parser_execution.arn
   task_role_arn            = aws_iam_role.parser_task.arn
 
   runtime_platform {
@@ -44,6 +44,11 @@ resource "aws_ecs_task_definition" "parser" {
         { name = "TMPDIR", value = "/tmp/freeflow" },
         { name = "PYTHONDONTWRITEBYTECODE", value = "1" },
         { name = "PYTHONUNBUFFERED", value = "1" },
+        # About 160s at 3.2s per scanned page, inside the 180s ALB idle timeout.
+        { name = "OCR_PAGE_BUDGET", value = "50" },
+      ]
+      secrets = [
+        { name = "DOCUMENT_ID_HMAC_KEY", valueFrom = aws_secretsmanager_secret.document_id_hmac[0].arn },
       ]
       portMappings = [{
         name          = "http"
