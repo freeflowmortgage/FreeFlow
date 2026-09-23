@@ -91,3 +91,32 @@ test('ECC-17: custom adapter fails closed without service auth or a TLS origin',
     (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_SERVICE_URL_INVALID',
   );
 });
+
+test('signed service authentication keeps its key out of request JSON', async () => {
+  const signingKey = 'test-signing-key';
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { kind: 'signed-hmac', serviceId: 'portal', signingKey },
+    fetch: (async (_input, init) => {
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get('x-freeflow-service-id'), 'portal');
+      assert.match(headers.get('x-freeflow-signature') ?? '', /^[a-f0-9]{64}$/);
+      assert.equal(String(init?.body).includes(signingKey), false);
+      return Response.json({ attachments: [] });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(await adapter.listActiveAttachments(context, 'loan-guid'), []);
+});
+
+test('signed service authentication permits only private Cloud Map HTTP origins', async () => {
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'http://encompass-connector.freeflow.local:8080' },
+    serviceAuth: { kind: 'signed-hmac', serviceId: 'smoke', signingKey: 'test-key' },
+    fetch: (async () => Response.json({ attachments: [] })) as typeof fetch,
+  });
+  assert.deepEqual(await adapter.listActiveAttachments(context, 'loan-guid'), []);
+  assert.throws(() => new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'http://connector.example.test' },
+    serviceAuth: { kind: 'signed-hmac', serviceId: 'smoke', signingKey: 'test-key' },
+  }), (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_SERVICE_URL_INVALID');
+});

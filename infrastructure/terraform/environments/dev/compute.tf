@@ -167,7 +167,10 @@ resource "aws_ecs_task_definition" "connector" {
   execution_role_arn       = aws_iam_role.connector_execution.arn
   task_role_arn            = aws_iam_role.connector_task.arn
 
-  depends_on = [aws_secretsmanager_secret_version.connector_service_token]
+  depends_on = [
+    aws_secretsmanager_secret_version.connector_service_token,
+    aws_secretsmanager_secret_version.connector_service_signing_key,
+  ]
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -195,13 +198,20 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
       { name = "PORT", value = "8080" },
       { name = "LOG_LEVEL", value = "info" },
-      { name = "CONNECTOR_MODE", value = "synthetic-freeflow-dev" },
+      { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
+      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : "bearer" },
+      { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
-    secrets = [
+    secrets = concat([
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
       { name = "CONNECTOR_SERVICE_TOKEN", valueFrom = aws_secretsmanager_secret.connector_service_token[0].arn },
-    ]
+      { name = "CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
+      ], local.connector_real_encompass ? [
+      { name = "ENCOMPASS_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:clientId::" },
+      { name = "ENCOMPASS_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:clientSecret::" },
+      { name = "ENCOMPASS_INSTANCE_ID", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:instanceId::" },
+    ] : [])
     portMappings = [{
       name          = "http"
       containerPort = 8080

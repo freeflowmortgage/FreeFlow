@@ -6,10 +6,10 @@ import {
   CustomConnectorAdapter,
   EncompassConnectorError,
   createLenderConnectorBinding,
+  type EncompassConnector,
 } from '@mortgage-pos/encompass-connector-contract';
 import { NonProdBearerServiceAuthVerifier } from '../src/auth';
 import { MemoryBindingStore } from '../src/binding';
-import { CustomConnectorService } from '../src/connector/customConnectorService';
 import {
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
   SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
@@ -31,7 +31,7 @@ const BINDING = createLenderConnectorBinding({
 });
 
 function deps(options: Readonly<{
-  connector?: CustomConnectorService | SyntheticFreeflowDevConnector;
+  connector?: EncompassConnector;
   bindings?: ConstructorParameters<typeof MemoryBindingStore>[0];
 }> = {}) {
   return {
@@ -41,7 +41,7 @@ function deps(options: Readonly<{
     bindingStore: new MemoryBindingStore(options.bindings ?? [
       { tenantId: TENANT, lenderId: LENDER, deploymentId: DEPLOYMENT },
     ]),
-    connector: options.connector ?? new CustomConnectorService(),
+    connector: options.connector ?? unavailableConnector(),
   };
 }
 
@@ -170,24 +170,10 @@ test('authenticated and bound synthetic list/download returns deterministic veri
   assert.equal(downloaded.headers.get('x-content-sha256'), createHash('sha256').update(bytes).digest('hex'));
 });
 
-test('authenticated + bound list/download stay unimplemented (no PDF persist)', async () => {
-  const service = new CustomConnectorService();
-  await assert.rejects(
-    () => service.downloadOriginalAttachment(
-      { tenantId: TENANT, loanId: 'loan-1', correlationId: 'corr-1' },
-      'guid-1',
-      'att-1',
-    ),
-    (error: unknown) => (
-      error instanceof EncompassConnectorError
-      && error.safeCode === 'CONNECTOR_NOT_IMPLEMENTED'
-      && error.retryable === false
-    ),
-  );
-
+test('connector failures retain a safe provider-neutral response', async () => {
   const listed = await handleConnectorRequest(listRequest(), deps());
-  assert.equal(listed.status, 501);
-  assert.deepEqual(await listed.json(), { safeCode: 'CONNECTOR_NOT_IMPLEMENTED' });
+  assert.equal(listed.status, 400);
+  assert.deepEqual(await listed.json(), { safeCode: 'ENCOMPASS_CONFIGURATION_MISSING' });
 
   const downloaded = await handleConnectorRequest(
     new Request(`${ORIGIN}${CONNECTOR_SERVICE_CONTRACT.downloadPath}`, {
@@ -209,9 +195,21 @@ test('authenticated + bound list/download stay unimplemented (no PDF persist)', 
     }),
     deps(),
   );
-  assert.equal(downloaded.status, 501);
-  assert.deepEqual(await downloaded.json(), { safeCode: 'CONNECTOR_NOT_IMPLEMENTED' });
+  assert.equal(downloaded.status, 400);
+  assert.deepEqual(await downloaded.json(), { safeCode: 'ENCOMPASS_CONFIGURATION_MISSING' });
 });
+
+function unavailableConnector(): EncompassConnector {
+  return {
+    kind: 'custom',
+    async listActiveAttachments() {
+      throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
+    },
+    async downloadOriginalAttachment() {
+      throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
+    },
+  };
+}
 
 test('CustomConnectorAdapter reaches this service boundary and surfaces binding denial', async () => {
   const adapter = new CustomConnectorAdapter({

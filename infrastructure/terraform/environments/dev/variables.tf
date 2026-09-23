@@ -193,6 +193,17 @@ variable "enable_encompass_connector" {
   }
 }
 
+variable "encompass_connector_mode" {
+  type        = string
+  description = "Connector runtime mode. Synthetic is development test-only; real-encompass resolves LOS credentials only inside the connector task."
+  default     = "synthetic-freeflow-dev"
+
+  validation {
+    condition     = contains(["synthetic-freeflow-dev", "real-encompass"], var.encompass_connector_mode)
+    error_message = "encompass_connector_mode must be synthetic-freeflow-dev or real-encompass."
+  }
+}
+
 variable "enable_console" {
   type        = bool
   description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."

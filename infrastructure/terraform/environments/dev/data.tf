@@ -46,6 +46,7 @@ locals {
   synthetic_connector_tenant_id     = "00000000-0000-4000-8000-000000000100"
   synthetic_connector_lender_id     = "freeflow-dev"
   synthetic_connector_deployment_id = "freeflow-dev"
+  connector_real_encompass          = var.enable_encompass_connector && var.encompass_connector_mode == "real-encompass"
   public_hosted_zone_id             = var.create_hosted_zone ? aws_route53_zone.public[0].zone_id : (var.dns_managed_externally ? null : ((var.enable_https_certificate || var.enable_cognito_edge) ? data.aws_route53_zone.public[0].zone_id : null))
   rds_master_secret_arn             = data.aws_db_instance.existing.master_user_secret[0].secret_arn
   rds_endpoint                      = data.aws_db_instance.existing.address

@@ -47,8 +47,18 @@ function required(name: string): string {
 }
 
 main()
-  .catch(() => {
-    console.error('Synthetic connector binding bootstrap failed.');
+  .catch((error: unknown) => {
+    if (error instanceof Error) {
+      console.error('Synthetic connector binding bootstrap failed.', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      });
+    } else {
+      console.error('Synthetic connector binding bootstrap failed.', {
+        error: String(error),
+      });
+    }
     process.exitCode = 1;
   })
   .finally(async () => prisma.$disconnect());

@@ -4,6 +4,7 @@ import {
 } from '@mortgage-pos/encompass-connector-contract';
 import type { EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
 import type { ServiceAuthVerifier } from '../auth';
+import { createHash } from 'node:crypto';
 import { enforceTenantLenderBinding, type BindingStore } from '../binding';
 import { responseFromUnknown, safeErrorResponse } from './errors';
 
@@ -42,8 +43,16 @@ export async function handleConnectorRequest(
     return safeErrorResponse(404, 'CONNECTOR_PATH_NOT_FOUND');
   }
 
+  const bodySha256 = createHash('sha256').update(Buffer.from(await request.clone().arrayBuffer())).digest('hex');
   const auth = await deps.authVerifier.verify({
     authorizationHeader: request.headers.get('authorization') ?? undefined,
+    serviceIdHeader: request.headers.get('x-freeflow-service-id') ?? undefined,
+    timestampHeader: request.headers.get('x-freeflow-timestamp') ?? undefined,
+    nonceHeader: request.headers.get('x-freeflow-nonce') ?? undefined,
+    signatureHeader: request.headers.get('x-freeflow-signature') ?? undefined,
+    requestMethod: request.method,
+    requestPath: path,
+    bodySha256,
   });
   if (!auth.ok) {
     return safeErrorResponse(401, auth.safeCode);

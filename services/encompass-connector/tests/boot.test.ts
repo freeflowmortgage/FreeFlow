@@ -51,6 +51,9 @@ test('non-production still boots the NON-PROD Bearer stub', () => {
       CONNECTOR_BOUND_TENANT_ID: 'tenant-a',
       CONNECTOR_BOUND_LENDER_ID: 'lender-a',
       CONNECTOR_BOUND_DEPLOYMENT_ID: 'deploy-a',
+      ENCOMPASS_CLIENT_ID: 'client-id',
+      ENCOMPASS_CLIENT_SECRET: 'client-secret',
+      ENCOMPASS_INSTANCE_ID: 'instance-id',
     });
     assert.equal(runtime.deps.authVerifier instanceof Object, true);
     assert.equal(
