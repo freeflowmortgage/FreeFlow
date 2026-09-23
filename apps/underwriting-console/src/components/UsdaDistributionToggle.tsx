@@ -6,6 +6,7 @@ import {
   type UsdaHouseholdMember,
   type UsdaSelfEmploymentInput,
 } from '@mortgage-pos/mortgage-engine';
+import { QaAmountInput } from './selfEmployedIncome';
 
 type HouseholdRow = Omit<UsdaHouseholdMember, 'isBorrower' | 'isSpouse' | 'selfEmployment'> & {
   id: string;
@@ -102,10 +103,9 @@ export default function UsdaDistributionToggle({
         </div>
         <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">
           County household income limit
-          <input
-            type="number"
+          <QaAmountInput
             value={countyIncomeLimit}
-            onChange={(event) => setCountyIncomeLimit(Number(event.target.value))}
+            onChange={(next) => setCountyIncomeLimit(next ?? 0)}
             className="ml-2 w-32 rounded border border-slate-300 px-2 py-1.5 text-right font-mono text-xs text-slate-900"
           />
         </label>
@@ -139,9 +139,31 @@ export default function UsdaDistributionToggle({
           {householdMembers.map((member) => (
             <div key={member.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-[1.4fr_.6fr_1fr_1fr_auto]">
               <Input label="Name" value={member.name} onChange={(value) => patchMember(member.id, { name: value })} />
-              <Input label="Age" type="number" value={member.age} onChange={(value) => patchMember(member.id, { age: Number(value) })} />
-              <Input label="Earned / mo" type="number" value={member.earnedIncomeMonthly} onChange={(value) => patchMember(member.id, { earnedIncomeMonthly: Number(value) })} />
-              <Input label="Unearned / mo" type="number" value={member.unearnedIncomeMonthly} onChange={(value) => patchMember(member.id, { unearnedIncomeMonthly: Number(value) })} />
+              <label className="text-[9px] font-black uppercase tracking-wider text-slate-500">
+                Age
+                <QaAmountInput
+                  value={member.age}
+                  cents={false}
+                  onChange={(next) => patchMember(member.id, { age: next ?? 0 })}
+                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-slate-900"
+                />
+              </label>
+              <label className="text-[9px] font-black uppercase tracking-wider text-slate-500">
+                Earned / mo
+                <QaAmountInput
+                  value={member.earnedIncomeMonthly}
+                  onChange={(next) => patchMember(member.id, { earnedIncomeMonthly: next ?? 0 })}
+                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-slate-900"
+                />
+              </label>
+              <label className="text-[9px] font-black uppercase tracking-wider text-slate-500">
+                Unearned / mo
+                <QaAmountInput
+                  value={member.unearnedIncomeMonthly}
+                  onChange={(next) => patchMember(member.id, { unearnedIncomeMonthly: next ?? 0 })}
+                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-slate-900"
+                />
+              </label>
               <div className="flex items-end gap-2">
                 <label className="flex items-center gap-1 pb-1.5 text-[9px] font-black uppercase text-slate-500">
                   <input
@@ -202,5 +224,5 @@ function Input({
 }
 
 function money(value: number) {
-  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

@@ -83,6 +83,17 @@ def pays_per_year(blob: str) -> int | None:
 
 
 def hours_before_rate(blob: str) -> bool:
+    """Column order comes from the earnings header, in either direction.
+
+    A header of "Hours Rate ..." is hours-first. "Rate Hours ..." is rate-first.
+    The older pattern required the word "current" after both, so a stub whose
+    third column was "This Period" or "Amount" was forced into rate-then-hours.
+    """
+    for line in re.split(r"[\r\n]+", blob):
+        hours = re.search(r"\bhours?\b", line, re.I)
+        rate = re.search(r"\brate\b", line, re.I)
+        if hours and rate and hours.start() != rate.start():
+            return hours.start() < rate.start()
     return bool(HOURS_BEFORE_RATE.search(blob))
 
 

@@ -8,3 +8,5 @@ export * from './usda-ssi-rules-engine';
 export * from './income-calculation-dispatcher';
 export * from './mismoD1cMapper';
 export * from './paystubMismoMapper';
+export * from './encompass-urla-map';
+export * from './encompass-custom-fields';

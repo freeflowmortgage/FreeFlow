@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Info } from 'lucide-react';
 
 export const MILEAGE_DEP_RATE = 0.3;
@@ -35,6 +35,8 @@ export type ScheduleL = {
   accountsPayable: number;
   notesLt1Yr: number;
   otherCurrentLiab: number;
+  /** Printed total current liabilities, end of year. When set, this is the quick-ratio denominator. */
+  currentLiabilities: number;
 };
 
 export type YtdPnl = {
@@ -123,28 +125,25 @@ export function ProfitLossBlock({
           </label>
           <label className="text-[10px] font-extrabold uppercase text-slate-500">
             Net profit / (loss)
-            <input
-              type="number"
+            <QaAmountInput
               value={pnl.netProfit}
-              onChange={(event) => onChange({ ...pnl, netProfit: Number(event.target.value) })}
+              onChange={(next) => onChange({ ...pnl, netProfit: next ?? 0 })}
               className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
             />
           </label>
           <label className="text-[10px] font-extrabold uppercase text-slate-500">
             Depreciation add-back
-            <input
-              type="number"
+            <QaAmountInput
               value={pnl.depreciation}
-              onChange={(event) => onChange({ ...pnl, depreciation: Number(event.target.value) })}
+              onChange={(next) => onChange({ ...pnl, depreciation: next ?? 0 })}
               className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
             />
           </label>
           <label className="text-[10px] font-extrabold uppercase text-slate-500">
             Other add-backs
-            <input
-              type="number"
+            <QaAmountInput
               value={pnl.otherAddbacks}
-              onChange={(event) => onChange({ ...pnl, otherAddbacks: Number(event.target.value) })}
+              onChange={(next) => onChange({ ...pnl, otherAddbacks: next ?? 0 })}
               className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
             />
           </label>
@@ -163,6 +162,94 @@ export type FacsimileLine = {
 
 export function usd(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+export function centsOf(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export function moneyLabel(value: number): string {
+  return centsOf(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Text amount field — no spinner, no wheel-increment, cents on blur. */
+export function QaAmountInput({
+  value,
+  onChange,
+  className,
+  disabled,
+  cents = true,
+  placeholder,
+  allowEmpty = false,
+  onInspect,
+}: {
+  value: number | null | undefined;
+  onChange: (value: number | null) => void;
+  className?: string;
+  disabled?: boolean;
+  cents?: boolean;
+  placeholder?: string;
+  allowEmpty?: boolean;
+  onInspect?: () => void;
+}) {
+  const shown =
+    value === null || value === undefined
+      ? ''
+      : cents
+        ? centsOf(value).toFixed(2)
+        : String(Math.round(value));
+  const [text, setText] = useState(shown);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(shown);
+  }, [shown, focused]);
+  const commit = (raw: string) => {
+    const trimmed = String(raw).replace(/,/g, '').trim();
+    if (trimmed === '') {
+      if (allowEmpty) {
+        onChange(null);
+        setText('');
+        return;
+      }
+      onChange(0);
+      setText(cents ? (0).toFixed(2) : '0');
+      return;
+    }
+    const parsed = Number(trimmed);
+    const next = Number.isFinite(parsed) ? (cents ? centsOf(parsed) : Math.round(parsed)) : 0;
+    onChange(next);
+    setText(cents ? next.toFixed(2) : String(next));
+  };
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      spellCheck={false}
+      disabled={disabled}
+      placeholder={placeholder}
+      value={text}
+      onWheel={(event) => event.currentTarget.blur()}
+      onMouseDown={(event) => {
+        // Default focus scrolls every ancestor and jumps the QA list back to property 1.
+        event.preventDefault();
+        event.currentTarget.focus({ preventScroll: true });
+      }}
+      onFocus={() => {
+        setFocused(true);
+        onInspect?.();
+      }}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={(event) => {
+        setFocused(false);
+        commit(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+      }}
+      className={className}
+    />
+  );
 }
 
 export function schCAnnual(row: SchCYear) {
@@ -209,7 +296,8 @@ export function declining(year1: number, year2: number) {
 export function scheduleLQuickRatio(sheet: ScheduleL) {
   const assets =
     sheet.cash + (sheet.receivables - sheet.allowance) + sheet.taxExempt + sheet.otherCurrentAssets;
-  const liabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
+  const componentLiabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
+  const liabilities = sheet.currentLiabilities > 0 ? sheet.currentLiabilities : componentLiabilities;
   const quickRatio = liabilities > 0 ? assets / liabilities : 999;
   return { assets, liabilities, quickRatio, passes: quickRatio >= 1 };
 }
@@ -248,11 +336,10 @@ export function LineRow({
         {label}
         {hint ? <span className="ml-1 font-normal text-slate-400">· {hint}</span> : null}
       </button>
-      <input
-        type="number"
+      <QaAmountInput
         value={value}
-        onClick={(event) => event.stopPropagation()}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(next) => onChange(next ?? 0)}
+        onInspect={onSelect}
         className="w-28 shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-emerald-500"
       />
     </div>
@@ -358,6 +445,7 @@ export function LiquidityBlock({
     { id: 'accountsPayable', line: 'L16', label: 'Accounts payable' },
     { id: 'notesLt1Yr', line: 'L17', label: 'Mortgages / notes payable in < 1 year' },
     { id: 'otherCurrentLiab', line: 'L18', label: 'Other current liabilities' },
+    { id: 'currentLiabilities', line: 'L18d', label: 'Total current liabilities (end of year)' },
   ];
 
   return (
@@ -559,12 +647,16 @@ export function chosenMonthly(options: AvgOption[], selectedId: string | null, r
 }
 
 export function IncomeChoicePanel({
+  heading = 'Final income used on this page',
+  compact = false,
   options,
   recommendedId,
   reason,
   selectedId,
   onSelect,
 }: {
+  heading?: string;
+  compact?: boolean;
   options: AvgOption[];
   recommendedId: string;
   reason: string;
@@ -576,12 +668,12 @@ export function IncomeChoicePanel({
   const recommended = options.find((option) => option.id === recommendedId);
 
   return (
-    <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className={`rounded-xl border border-emerald-200 bg-emerald-50/70 ${compact ? 'space-y-2 p-3' : 'space-y-3 p-4'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="max-w-2xl">
-          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-800">Final income used on this page</p>
-          <p className="text-2xl font-black text-slate-950">{usd(chosen.monthly)}/mo</p>
-          <p className="mt-1 text-xs leading-relaxed text-slate-700">
+          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-800">{heading}</p>
+          <p className={`font-black text-slate-950 ${compact ? 'text-lg' : 'text-2xl'}`}>{usd(chosen.monthly)}/mo</p>
+          <p className={`leading-relaxed text-slate-700 ${compact ? 'mt-0.5 text-[11px]' : 'mt-1 text-xs'}`}>
             <span className="font-bold text-slate-900">{overridden ? 'UW override. ' : 'Guideline pick. '}</span>
             {overridden && recommended ? `Guideline still recommends ${recommended.label} (${usd(recommended.monthly)}/mo). ` : null}
             {reason}
@@ -599,8 +691,7 @@ export function IncomeChoicePanel({
           <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-800">Guideline</span>
         )}
       </div>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Click a different average to use it on this file</p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-1.5 lg:grid-cols-4 ${compact ? '' : 'sm:grid-cols-2'}`}>
         {options.map((option) => {
           const active = option.id === chosen.id;
           const rec = option.id === recommendedId;
@@ -609,16 +700,16 @@ export function IncomeChoicePanel({
               key={option.id}
               type="button"
               onClick={() => onSelect(option.id === recommendedId ? null : option.id)}
-              className={`rounded-lg border p-3 text-left ${
-                active ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/30' : 'border-slate-200 bg-white hover:border-slate-400'
-              }`}
+              className={`rounded-lg border text-left ${
+                compact ? 'px-2.5 py-2' : 'p-3'
+              } ${active ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/30' : 'border-slate-200 bg-white hover:border-slate-400'}`}
             >
               <span className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">{option.label}</span>
                 {rec ? <span className="text-[9px] font-black uppercase text-emerald-700">Rec</span> : null}
               </span>
-              <span className="mt-1 block font-mono text-lg font-black text-slate-950">{usd(option.monthly)}</span>
-              <span className="text-[10px] text-slate-500">{option.formula}</span>
+              <span className={`mt-0.5 block font-mono font-black text-slate-950 ${compact ? 'text-sm' : 'text-lg'}`}>{usd(option.monthly)}</span>
+              <span className="text-[10px] leading-tight text-slate-500">{option.formula}</span>
             </button>
           );
         })}

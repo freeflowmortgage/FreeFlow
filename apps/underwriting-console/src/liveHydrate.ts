@@ -38,6 +38,8 @@ export type LiveWagePatch = {
   wvoeOvertime?: number;
   w2Year1Box5?: number;
   wageDocSource?: 'PAYSTUB' | 'WVOE';
+  /** Which wage fields the parser actually located on the document. */
+  extractedFieldIds?: string[];
 };
 
 export type LivePrevW2Patch = {
@@ -73,6 +75,17 @@ export type LiveCorpPatch = {
   depreciation?: number;
   section179?: number;
   depletion?: number;
+};
+
+export type LiveScheduleLPatch = {
+  cash?: number;
+  receivables?: number;
+  taxExempt?: number;
+  accountsPayable?: number;
+  notesLt1Yr?: number;
+  otherCurrentLiab?: number;
+  /** Line printed as total current liabilities. Column (d) when the form has that total. */
+  currentLiabilities?: number;
 };
 
 export type LiveCCorpPatch = {
@@ -128,11 +141,42 @@ function w2GrossWages(fields: MappedIncomeField[], entityId?: string): number | 
   return num(fields, 'w2-box5', entityId) ?? num(fields, 'w2-box5');
 }
 
+export function liveBorrowerName(fields: MappedIncomeField[]): string | undefined {
+  return text(fields, 'ps-employee-name') ?? text(fields, 'w2-employee-name');
+}
+
+/**
+ * Source ids the wage panel reads, so the UI can tell a figure the parser
+ * never found from one it read as zero. Without this every unextracted field
+ * renders as a confident 0, which is indistinguishable from a verified zero.
+ */
+const WAGE_SOURCE_IDS = [
+  'ps-employer-name',
+  'ps-pay-frequency',
+  'ps-hourly-rate',
+  'ps-hours-week',
+  'ps-current-base',
+  'ps-base-ytd',
+  'ps-bonus-ytd',
+  'ps-ot-ytd',
+  'ps-tips-ytd',
+  'ps-commission-ytd',
+  'ps-rsu-ytd',
+  'ps-other-ytd',
+  'w2-employer-name',
+  'w2-employer-ein',
+  'w2-box5',
+] as const;
+
 export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null {
   const entityId = firstEntity(fields, 'w2-box5') ?? firstEntity(fields, 'w2-employer-name');
   const paystubEntity = latestPaystubEntity(fields);
   const fromWvoe = fields.some((field) => field.form === 'WVOE');
+  const extractedFieldIds = WAGE_SOURCE_IDS.filter((sourceId) =>
+    fields.some((field) => field.sourceFieldId === sourceId),
+  );
   return compact({
+    extractedFieldIds: extractedFieldIds.length > 0 ? extractedFieldIds : undefined,
     employerName:
       text(fields, 'w2-employer-name', entityId) ??
       text(fields, 'w2-employer-name') ??
@@ -148,7 +192,7 @@ export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null
     tipsYtd: num(fields, 'ps-tips-ytd', paystubEntity),
     commissionYtd: num(fields, 'ps-commission-ytd', paystubEntity),
     rsuYtd: num(fields, 'ps-rsu-ytd', paystubEntity),
-    otherYtd: num(fields, 'ps-rsu-ytd', paystubEntity),
+    otherYtd: num(fields, 'ps-other-ytd', paystubEntity),
     payFrequency: uiPayFrequencyFromMismo(text(fields, 'ps-pay-frequency', paystubEntity)),
     wvoeBonus: num(fields, 'wvoe-bonus'),
     wvoeOvertime: num(fields, 'wvoe-ot'),
@@ -227,6 +271,18 @@ export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch
     depreciation: num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
     section179: num(fields, 'pt-179') ?? num(fields, 'form-4562-179'),
     depletion: num(fields, 'pt-depletion'),
+  });
+}
+
+export function liveScheduleLPatch(fields: MappedIncomeField[]): LiveScheduleLPatch | null {
+  return compact({
+    cash: num(fields, 'sch-l-cash'),
+    receivables: num(fields, 'sch-l-ar'),
+    taxExempt: num(fields, 'sch-l-securities'),
+    accountsPayable: num(fields, 'sch-l-ap'),
+    notesLt1Yr: num(fields, 'sch-l-notes'),
+    otherCurrentLiab: num(fields, 'sch-l-other-current'),
+    currentLiabilities: num(fields, 'sch-l-current-liabilities'),
   });
 }
 

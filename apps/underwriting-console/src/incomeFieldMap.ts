@@ -1,4 +1,4 @@
-import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract } from './parseTypes';
+import type { MappedIncomeField, OverlayBox, ParsePage, ParseResponse, ParseWord, ScheduleEPropertyExtract, ReviewNote, W2BoxExtract } from './parseTypes';
 import {
   PAYSTUB_YTD_FIELD_BY_KIND,
   isPrimaryRateRow,
@@ -41,6 +41,16 @@ export const W2_FIELD_DEFS: IncomeFieldDef[] = [
     category: 'identity',
     capture: 'text',
     patterns: [/employer(?:['’]s)? name(?:,?\s*address(?:\s*,?\s*and\s+zip\s*code)?)?\s*[:#–—-]?\s*/i, /\bc\s+employer/i],
+  },
+  {
+    id: 'w2-employee-name',
+    form: 'W-2',
+    boxLabel: 'Box e',
+    fieldLabel: 'Employee Name',
+    lineNum: 'Box e',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employee(?:['’]s)?\s+(?:first\s+)?name/i],
   },
   {
     id: 'w2-employer-ein',
@@ -664,6 +674,16 @@ export const PAYSTUB_DEFS: IncomeFieldDef[] = [
     patterns: [/employer(?:['’]s)?(?:\s+name)?\s*[:#–—-]?\s*/i, /company\s*[:#–—-]?\s*/i],
   },
   {
+    id: 'ps-employee-name',
+    form: 'Paystub',
+    boxLabel: 'Employee',
+    fieldLabel: 'Employee Name',
+    lineNum: 'Employee',
+    category: 'identity',
+    capture: 'text',
+    patterns: [/employee(?:['’]s)?\s+name\s*[:#–—-]?\s*/i, /employee\s*[:#–—-]\s*/i],
+  },
+  {
     id: 'ps-pay-frequency',
     form: 'Paystub',
     boxLabel: 'Frequency',
@@ -1005,41 +1025,76 @@ export const FORM_4562_DEFS: IncomeFieldDef[] = [
 ];
 
 export const SCHEDULE_L_DEFS: IncomeFieldDef[] = [
+  // money_last is column (d), the end-of-year balance. The first amount on the row is column (b).
   {
     id: 'sch-l-cash',
     form: 'Form 1120-S',
     boxLabel: 'Line 1',
-    fieldLabel: 'Cash',
-    lineNum: 'Line 1',
+    fieldLabel: 'Cash (End of Year)',
+    lineNum: 'Line 1d',
     category: 'asset',
-    patterns: [/schedule l.{0,40}\bcash\b/i, /\b1\b\s+cash\b.{0,40}\d/i],
+    capture: 'money_last',
+    patterns: [/schedule\s*l.{0,40}\bcash\b/i, /\b1\b\s+cash\b/i],
   },
   {
     id: 'sch-l-ar',
     form: 'Form 1120-S',
     boxLabel: 'Line 2a',
-    fieldLabel: 'Accounts Receivable',
+    fieldLabel: 'Accounts Receivable (End of Year)',
     lineNum: 'Line 2a',
     category: 'asset',
-    patterns: [/trade notes and accounts receivable/i],
+    capture: 'money_last',
+    patterns: [/trade\s+notes\s+and\s+accounts\s+receivable/i, /accounts\s+receivable/i],
   },
   {
     id: 'sch-l-securities',
     form: 'Form 1120-S',
     boxLabel: 'Line 4',
-    fieldLabel: 'Tax-Exempt Securities',
+    fieldLabel: 'Tax-Exempt Securities (End of Year)',
     lineNum: 'Line 4',
     category: 'asset',
-    patterns: [/tax-exempt securities/i],
+    capture: 'money_last',
+    patterns: [/tax-exempt\s+securities/i],
   },
   {
     id: 'sch-l-ap',
     form: 'Form 1120-S',
     boxLabel: 'Line 16',
-    fieldLabel: 'Accounts Payable',
+    fieldLabel: 'Accounts Payable (End of Year)',
     lineNum: 'Line 16',
     category: 'asset',
-    patterns: [/accounts payable/i],
+    capture: 'money_last',
+    patterns: [/accounts\s+payable/i],
+  },
+  {
+    id: 'sch-l-notes',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 17',
+    fieldLabel: 'Mortgages and notes payable in less than 1 year (End of Year)',
+    lineNum: 'Line 17',
+    category: 'asset',
+    capture: 'money_last',
+    patterns: [/payable in less than 1 year/i, /less than 1 year/i],
+  },
+  {
+    id: 'sch-l-other-current',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 18',
+    fieldLabel: 'Other Current Liabilities (End of Year)',
+    lineNum: 'Line 18',
+    category: 'asset',
+    capture: 'money_last',
+    patterns: [/other\s+current\s+liabilities/i],
+  },
+  {
+    id: 'sch-l-current-liabilities',
+    form: 'Form 1120-S',
+    boxLabel: 'Line 18',
+    fieldLabel: 'Total Current Liabilities (End of Year)',
+    lineNum: 'Line 18d',
+    category: 'asset',
+    capture: 'money_last',
+    patterns: [/total\s+current\s+liabilities/i],
   },
 ];
 
@@ -1173,10 +1228,28 @@ function amountBox(line: LineCluster, moneyMatch: RegExpMatchArray): { box: Mapp
   };
 }
 
+function pageTextBlob(page: ParsePage): string {
+  return `${page.formIds.join(' ')} ${(page.words ?? []).map((word) => word.text).join(' ')}`;
+}
+
 function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
+  const words = pageTextBlob(page).toLowerCase();
   const blob = page.formIds.join(' ').toLowerCase();
-  if (form === 'W-2') return /w-?2/.test(blob);
-  if (form === 'Paystub') return /paystub|pay stub|earnings statement|payroll/.test(blob);
+  if (form === 'W-2') {
+    const folded = words.replace(/[^a-z0-9]+/g, '');
+    const wageLabels = ['medicarewages', 'socialsecuritywages', 'wagestips', 'federalincometax'].filter((needle) =>
+      folded.includes(needle),
+    ).length;
+    if (
+      wageLabels < 2 &&
+      /notice to employee|instructions for employee|this w-2 is acceptable for filing/i.test(words)
+    ) {
+      const amounts = words.match(/\d{1,3}(?:,\d{3})+\.\d{2}|\d{4,}\.\d{2}/g) ?? [];
+      if (amounts.length < 2) return false;
+    }
+    return wageLabels >= 2 || /\bw-?2\b|wage and tax statement|medicare wages/.test(words) || folded.includes('medicarewages');
+  }
+  if (form === 'Paystub') return /paystub|pay stub|earnings statement|payroll/.test(words) && !/\bw-?2\b|wage and tax statement/.test(words);
   if (form === 'WVOE') return /wvoe|verification of employment/.test(blob);
   if (form === 'Schedule B') return /schedule\s*b/.test(blob);
   if (form === 'Schedule C') return /schedule\s*c/.test(blob);
@@ -1189,6 +1262,14 @@ function pagePrefers(page: ParsePage, form: IncomeForm): boolean {
   if (form === 'Form 1040') return /1040/.test(blob);
   if (form === 'Form 8825') return /8825/.test(blob);
   return false;
+}
+
+function pagesForScheduleL(
+  pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
+): Array<{ page: ParsePage; lines: LineCluster[] }> {
+  return pageLines.filter(({ page }) =>
+    /schedule\s*l|1120-?s|\b1065\b|form\s*1120\b|c-corporation/i.test(page.formIds.join(' ')),
+  );
 }
 
 function pagesForDef(
@@ -1322,7 +1403,7 @@ function fieldsFromPaystubTable(
   for (const { page, lines } of paystubPages) {
     if (!pagePrefers(page, 'Paystub') && page.formIds.length > 0) continue;
     const entityId = formEntityId('Paystub', page.index);
-    const pageText = lines.map((line) => line.text).join(' ');
+    const pageText = lines.map((line) => line.text).join('\n');
     const paysPerYear = paystubPaysPerYear(pageText);
     const frequency = paystubFrequencyType(pageText);
     const hoursBeforeRate = paystubHoursBeforeRate(pageText);
@@ -1397,6 +1478,14 @@ function fieldsFromPaystubTable(
       if (employer?.[1]) {
         const name = employer[1].replace(/\s+/g, ' ').trim();
         if (name.length >= 2) push('ps-employer-name', 0, line, undefined, name);
+      }
+      const employee =
+        line.text.match(/employee(?:['’]s)?\s+name\s*[:#–—-]?\s+(.+)/i) ??
+        line.text.match(/\bemployee\s*[:#–—-]\s+(.+)/i) ??
+        line.text.match(/\bemployee\s+(?!id\b|taxes\b)([A-Za-z][A-Za-z.'-]+(?:\s+[A-Za-z][A-Za-z.'-]+)?)(?=\s+(?:pay|ssn|department|id)\b|\s*$)/i);
+      if (employee?.[1]) {
+        const name = employee[1].replace(/\s+/g, ' ').trim();
+        if (name.length >= 2 && !/^(?:taxes|id)\b/i.test(name)) push('ps-employee-name', 0, line, undefined, name);
       }
       const kind = paystubRowKind(label);
       if (!kind || !amounts.length) continue;
@@ -1588,20 +1677,133 @@ function fieldsFromFormExtracts(extracts: ParseResponse['formExtracts']): Mapped
       wordIndex: 0,
       box: extract.box,
       componentBoxes: extract.componentBoxes,
+      reviewNotes: extract.reviewNotes,
     });
   }
   return found;
 }
 
+/**
+ * Collect the parser's review notes for a page, de-duplicated by message.
+ *
+ * Notes are page-level but ride on every field extracted from that page, so
+ * the same text arrives once per field.
+ */
+export function reviewNotesForPage(
+  fields: MappedIncomeField[],
+  pageIndex?: number,
+): ReviewNote[] {
+  const seen = new Map<string, ReviewNote>();
+  for (const field of fields) {
+    if (pageIndex != null && field.pageIndex !== pageIndex) continue;
+    for (const note of field.reviewNotes ?? []) {
+      if (!seen.has(note.message)) seen.set(note.message, note);
+    }
+  }
+  // Warnings first: they mean a value was excluded or could not be trusted.
+  return [...seen.values()].sort((a, b) =>
+    a.severity === b.severity ? 0 : a.severity === 'warning' ? -1 : 1,
+  );
+}
+
+function plausibleW2Wage(value: number | undefined): boolean {
+  if (value == null || !Number.isFinite(value) || value < 100 || value > 10_000_000) return false;
+  return true;
+}
+
+function isW2LabelName(value: string): boolean {
+  const folded = value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return (
+    folded.includes('employersname') ||
+    folded.includes('employersaddress') ||
+    folded.includes('addressandzip') ||
+    folded.includes('wageandtaxstatement')
+  );
+}
+
+function keepGridWage(value: number | undefined, fourUp: boolean): boolean {
+  if (!plausibleW2Wage(value)) return false;
+  // Four-up sheets used to clip a year or a box number into the wage column.
+  // A whole-dollar Medicare wage such as 26484.00 is still a real Box 5.
+  if (fourUp && Number.isInteger(value)) {
+    const amount = value ?? 0;
+    if (amount < 1_000 || (amount >= 1_990 && amount <= 2_035)) return false;
+  }
+  return true;
+}
+
+function isFourUpW2(blob: string): boolean {
+  return /copy\s*b/i.test(blob) && /copy\s*c/i.test(blob);
+}
+
+function w2Overlay(extract: W2BoxExtract, key: keyof NonNullable<W2BoxExtract['boxes']>): MappedIncomeField['box'] {
+  const box = extract.boxes?.[key];
+  if (!box) return { x: 0.58, y: 0.42, w: 0.1, h: 0.025 };
+  if (box.w > 0.18 || box.h > 0.05) {
+    return {
+      x: key === 'employer_name' ? box.x : box.x + Math.max(0, box.w - 0.08),
+      y: box.y,
+      w: Math.min(box.w, key === 'employer_name' ? 0.12 : 0.08),
+      h: Math.min(box.h, key === 'employer_name' ? 0.028 : 0.018),
+    };
+  }
+  return box;
+}
+
+function fieldsFromW2Grid(extracts: W2BoxExtract[], fourUp = false): MappedIncomeField[] {
+  const found: MappedIncomeField[] = [];
+  extracts.forEach((extract, index) => {
+    const entityId = formEntityId('W-2', extract.pageIndex) + (index ? `-g${index}` : '');
+    const push = (boxKey: keyof NonNullable<W2BoxExtract['boxes']>, defId: string, value: string, numeric: number) => {
+      const def = W2_FIELD_DEFS.find((item) => item.id === defId);
+      if (!def) return;
+      const isFirst = !found.some((field) => field.sourceFieldId === defId);
+      found.push({
+        id: isFirst ? defId : `${defId}--${entityId}`,
+        entityId,
+        sourceFieldId: defId,
+        form: def.form,
+        boxLabel: def.boxLabel,
+        fieldLabel: def.fieldLabel,
+        lineNum: def.lineNum,
+        category: def.category,
+        value,
+        numericValue: numeric,
+        pageIndex: extract.pageIndex,
+        wordIndex: 0,
+        box: w2Overlay(extract, boxKey),
+      });
+    };
+    if (extract.employerName && /[A-Za-z]{3,}/.test(extract.employerName) && !isW2LabelName(extract.employerName)) {
+      push('employer_name', 'w2-employer-name', extract.employerName, 0);
+    }
+    if (extract.ein) push('employer_ein', 'w2-employer-ein', extract.ein, 0);
+    if (extract.box2) push('box2', 'w2-box2', formatMoney(extract.box2), extract.box2);
+    if (extract.box3) push('box3', 'w2-box3', formatMoney(extract.box3), extract.box3);
+    if (extract.box4) push('box4', 'w2-box4', formatMoney(extract.box4), extract.box4);
+    if (keepGridWage(extract.box5, fourUp)) push('box5', 'w2-box5', formatMoney(extract.box5), extract.box5);
+    if (extract.box6) push('box6', 'w2-box6', formatMoney(extract.box6), extract.box6);
+  });
+  return found;
+}
+
 export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
   const gridFields = fieldsFromScheduleEGrid(result.scheduleEProperties ?? []);
-  const extractFields = fieldsFromFormExtracts(result.formExtracts);
+  const fourUp = (result.pages ?? []).some((page) => isFourUpW2(pageTextBlob(page)));
+  const w2GridFields = fieldsFromW2Grid(result.w2Extracts ?? [], fourUp);
+  const gridHasBox5 = w2GridFields.some(
+    (field) => field.sourceFieldId === 'w2-box5' && keepGridWage(field.numericValue, fourUp),
+  );
+  const extractFields = fieldsFromFormExtracts(result.formExtracts).filter(
+    (field) => !(gridHasBox5 && field.form === 'W-2'),
+  );
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
   const claimed = new Set(
-    [...gridFields, ...extractFields].map((field) => `${field.pageIndex}:${field.sourceFieldId}`),
+    [...gridFields, ...w2GridFields, ...extractFields].map((field) => `${field.pageIndex}:${field.sourceFieldId}`),
   );
   const found: MappedIncomeField[] = [
     ...gridFields,
+    ...w2GridFields,
     ...extractFields,
     ...fieldsFromPaystubTable(pageLines, claimed),
   ];
@@ -1609,8 +1811,9 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
 
   for (const def of INCOME_FIELD_DEFS) {
     if (gridFields.length && def.form === 'Schedule E') continue;
+    if (gridHasBox5 && def.form === 'W-2') continue;
     if (def.id === 'ps-hours-week') continue;
-    const ordered = pagesForDef(pageLines, def.form);
+    const ordered = def.id.startsWith('sch-l-') ? pagesForScheduleL(pageLines) : pagesForDef(pageLines, def.form);
     if (!ordered.length) continue;
     const allowMultipleEntities = ordered.some(({ page }) => pagePrefers(page, def.form));
 
