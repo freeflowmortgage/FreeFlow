@@ -9,6 +9,8 @@ export type {
   ServiceTokenRecord,
   ServiceTokenStore,
   SignedReplayAuthVerifier,
+  ReplayStore,
   VerifiedServicePrincipal,
 } from './types';
 export { NonProdBearerServiceAuthVerifier } from './bearerStub';
+export { HmacSignedReplayServiceAuthVerifier, MemoryReplayStore, signCanonicalRequest, type SignedServiceRecord } from './signedReplay';

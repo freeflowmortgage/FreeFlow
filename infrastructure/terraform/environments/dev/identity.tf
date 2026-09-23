@@ -108,6 +108,8 @@ data "aws_iam_policy_document" "connector_execution_secret" {
     resources = concat(
       [aws_secretsmanager_secret.database_connector.arn],
       var.enable_encompass_connector ? [aws_secretsmanager_secret.connector_service_token[0].arn] : [],
+      var.enable_encompass_connector ? [aws_secretsmanager_secret.connector_service_signing_key[0].arn] : [],
+      local.connector_real_encompass ? [aws_secretsmanager_secret.connector_encompass_credentials[0].arn] : [],
     )
   }
 }

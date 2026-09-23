@@ -12,6 +12,13 @@
 /** Opaque S2S material presented by the portal. Never a LOS credential. */
 export type ServiceAuthMaterial = Readonly<{
   authorizationHeader?: string;
+  serviceIdHeader?: string;
+  timestampHeader?: string;
+  nonceHeader?: string;
+  signatureHeader?: string;
+  requestMethod?: string;
+  requestPath?: string;
+  bodySha256?: string;
 }>;
 
 /** Authenticated portal/worker identity. Tenant is taken from the verifier, not the body. */
@@ -50,6 +57,10 @@ export interface MutualTlsAuthVerifier extends ServiceAuthVerifier {
 export interface SignedReplayAuthVerifier extends ServiceAuthVerifier {
   readonly kind: 'signed-replay';
 }
+
+export type ReplayStore = Readonly<{
+  claim(serviceId: string, nonce: string, expiresAt: number): Promise<boolean>;
+}>;
 
 /**
  * S2S token record for the NON-PROD Bearer stub only.

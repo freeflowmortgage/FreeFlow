@@ -30,9 +30,19 @@ export type DownloadedEncompassAttachment = Readonly<{
 }>;
 
 /** Service-to-service auth for the connector ECS process. Never LOS credentials. */
-export type ConnectorServiceAuth = Readonly<{
+export type BearerConnectorServiceAuth = Readonly<{
   authorizationHeader: string;
 }>;
+
+/** Production private-service authentication. This secret is distinct from
+ * Encompass credentials and is never added to request JSON. */
+export type SignedConnectorServiceAuth = Readonly<{
+  kind: 'signed-hmac';
+  serviceId: string;
+  signingKey: string;
+}>;
+
+export type ConnectorServiceAuth = BearerConnectorServiceAuth | SignedConnectorServiceAuth;
 
 /**
  * Port implemented by the existing portal `EncompassApiClient`.

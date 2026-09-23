@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { EncompassConnector } from '../connector';
 import { EncompassConnectorError } from '../errors';
 import { assertNoLosCredentials } from '../secrets';
@@ -35,14 +35,14 @@ export class CustomConnectorAdapter implements EncompassConnector {
     serviceAuth?: ConnectorServiceAuth;
     fetch?: Fetch;
   }>) {
-    if (!options.serviceAuth?.authorizationHeader.trim()) {
+    if (!hasServiceAuth(options.serviceAuth)) {
       throw new EncompassConnectorError(
         'CONNECTOR_SERVICE_AUTH_MISSING',
         'The custom connector service requires service-to-service authentication.',
         false,
       );
     }
-    this.origin = normalizeServiceOrigin(options.binding.serviceBaseUrl);
+    this.origin = normalizeServiceOrigin(options.binding.serviceBaseUrl, 'kind' in options.serviceAuth);
   }
 
   async listActiveAttachments(
@@ -109,6 +109,7 @@ export class CustomConnectorAdapter implements EncompassConnector {
   private async serviceFetch(path: string, body: unknown, timeoutMs: number): Promise<Response> {
     assertNoLosCredentials(body);
     const fetchImpl = this.options.fetch ?? fetch;
+    const bodyText = JSON.stringify(body);
     const response = await fetchImpl(`${this.origin}${path}`, {
       method: 'POST',
       redirect: 'error',
@@ -116,9 +117,9 @@ export class CustomConnectorAdapter implements EncompassConnector {
       headers: {
         accept: 'application/json, application/pdf',
         'content-type': 'application/json',
-        authorization: this.options.serviceAuth!.authorizationHeader,
+        ...serviceAuthHeaders(this.options.serviceAuth!, 'POST', path, bodyText),
       },
-      body: JSON.stringify(body),
+      body: bodyText,
     });
     if (!response.ok) {
       throw new EncompassConnectorError(
@@ -131,7 +132,28 @@ export class CustomConnectorAdapter implements EncompassConnector {
   }
 }
 
-function normalizeServiceOrigin(baseUrl?: string): string {
+function hasServiceAuth(auth: ConnectorServiceAuth | undefined): auth is ConnectorServiceAuth {
+  if (!auth) return false;
+  return 'authorizationHeader' in auth
+    ? Boolean(auth.authorizationHeader.trim())
+    : Boolean(auth.serviceId.trim() && auth.signingKey.trim());
+}
+
+function serviceAuthHeaders(auth: ConnectorServiceAuth, method: string, path: string, body: string): Record<string, string> {
+  if ('authorizationHeader' in auth) return { authorization: auth.authorizationHeader };
+  const timestamp = String(Date.now());
+  const nonce = randomBytes(24).toString('base64url');
+  const bodySha256 = createHash('sha256').update(body, 'utf8').digest('hex');
+  const canonical = `${method}\n${path}\n${timestamp}\n${nonce}\n${bodySha256}`;
+  return {
+    'x-freeflow-service-id': auth.serviceId,
+    'x-freeflow-timestamp': timestamp,
+    'x-freeflow-nonce': nonce,
+    'x-freeflow-signature': createHmac('sha256', auth.signingKey).update(canonical, 'utf8').digest('hex'),
+  };
+}
+
+function normalizeServiceOrigin(baseUrl: string | undefined, allowPrivateHttp: boolean): string {
   if (!baseUrl?.trim()) {
     throw new EncompassConnectorError('CONNECTOR_SERVICE_URL_MISSING', 'The custom connector service origin is not configured.', false);
   }
@@ -141,7 +163,10 @@ function normalizeServiceOrigin(baseUrl?: string): string {
   } catch {
     throw new EncompassConnectorError('CONNECTOR_SERVICE_URL_INVALID', 'The custom connector service origin is invalid.', false);
   }
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+  const privateCloudMapHttp = allowPrivateHttp
+    && url.protocol === 'http:'
+    && url.hostname.endsWith('.freeflow.local');
+  if ((!privateCloudMapHttp && url.protocol !== 'https:') || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
     throw new EncompassConnectorError('CONNECTOR_SERVICE_URL_INVALID', 'The custom connector service origin is invalid.', false);
   }
   return url.origin;

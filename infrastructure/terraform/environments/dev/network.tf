@@ -49,29 +49,6 @@ resource "aws_security_group" "connector" {
     security_groups = [var.app_security_group_id]
   }
 
-  egress {
-    description     = "Connector worker login to PostgreSQL"
-    protocol        = "tcp"
-    from_port       = 5432
-    to_port         = 5432
-    security_groups = data.aws_db_instance.existing.vpc_security_groups
-  }
-
-  egress {
-    description = "DNS over UDP to the VPC resolver"
-    protocol    = "udp"
-    from_port   = 53
-    to_port     = 53
-    cidr_blocks = ["${cidrhost(data.aws_vpc.existing.cidr_block, 2)}/32"]
-  }
-
-  egress {
-    description = "DNS over TCP to the VPC resolver"
-    protocol    = "tcp"
-    from_port   = 53
-    to_port     = 53
-    cidr_blocks = ["${cidrhost(data.aws_vpc.existing.cidr_block, 2)}/32"]
-  }
 }
 
 resource "aws_security_group_rule" "database_from_connector" {
@@ -84,6 +61,72 @@ resource "aws_security_group_rule" "database_from_connector" {
   to_port                  = 5432
   security_group_id        = each.value
   source_security_group_id = aws_security_group.connector[0].id
+}
+
+resource "aws_security_group_rule" "connector_to_database" {
+  for_each                 = var.enable_encompass_connector ? toset(data.aws_db_instance.existing.vpc_security_groups) : toset([])
+  type                     = "egress"
+  description              = "Connector worker login to PostgreSQL"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  security_group_id        = aws_security_group.connector[0].id
+  source_security_group_id = each.value
+}
+
+resource "aws_security_group_rule" "connector_dns_udp" {
+  count             = var.enable_encompass_connector ? 1 : 0
+  type              = "egress"
+  description       = "DNS over UDP to the VPC resolver"
+  protocol          = "udp"
+  from_port         = 53
+  to_port           = 53
+  security_group_id = aws_security_group.connector[0].id
+  cidr_blocks       = ["${cidrhost(data.aws_vpc.existing.cidr_block, 2)}/32"]
+}
+
+resource "aws_security_group_rule" "connector_dns_tcp" {
+  count             = var.enable_encompass_connector ? 1 : 0
+  type              = "egress"
+  description       = "DNS over TCP to the VPC resolver"
+  protocol          = "tcp"
+  from_port         = 53
+  to_port           = 53
+  security_group_id = aws_security_group.connector[0].id
+  cidr_blocks       = ["${cidrhost(data.aws_vpc.existing.cidr_block, 2)}/32"]
+}
+
+resource "aws_security_group_rule" "connector_to_aws_endpoints" {
+  count                    = var.enable_encompass_connector ? 1 : 0
+  type                     = "egress"
+  description              = "HTTPS from connector to private AWS endpoints"
+  protocol                 = "tcp"
+  from_port                = 443
+  to_port                  = 443
+  security_group_id        = aws_security_group.connector[0].id
+  source_security_group_id = aws_security_group.console_aws_endpoints[0].id
+}
+
+resource "aws_security_group_rule" "connector_to_s3_image_layers" {
+  count             = var.enable_encompass_connector ? 1 : 0
+  type              = "egress"
+  description       = "HTTPS from connector to private S3 image layers"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.connector[0].id
+  prefix_list_ids   = [data.aws_prefix_list.s3.id]
+}
+
+resource "aws_security_group_rule" "connector_to_encompass_dev" {
+  count             = local.connector_real_encompass ? 1 : 0
+  type              = "egress"
+  description       = "Development-only HTTPS from connector to Encompass through NAT"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.connector[0].id
+  cidr_blocks       = ["0.0.0.0/0"]
 }
 
 resource "aws_security_group" "console" {
@@ -140,28 +183,6 @@ resource "aws_security_group" "console_aws_endpoints" {
       var.enable_encompass_connector ? [aws_security_group.connector[0].id] : [],
     )
   }
-}
-
-resource "aws_security_group_rule" "connector_to_aws_endpoints" {
-  count                    = var.enable_encompass_connector ? 1 : 0
-  type                     = "egress"
-  description              = "HTTPS from connector to private AWS endpoints"
-  protocol                 = "tcp"
-  from_port                = 443
-  to_port                  = 443
-  security_group_id        = aws_security_group.connector[0].id
-  source_security_group_id = aws_security_group.console_aws_endpoints[0].id
-}
-
-resource "aws_security_group_rule" "connector_to_s3_image_layers" {
-  count             = var.enable_encompass_connector ? 1 : 0
-  type              = "egress"
-  description       = "HTTPS from connector to private S3 image layers"
-  protocol          = "tcp"
-  from_port         = 443
-  to_port           = 443
-  security_group_id = aws_security_group.connector[0].id
-  prefix_list_ids   = [data.aws_prefix_list.s3.id]
 }
 
 resource "aws_security_group_rule" "console_to_aws_endpoints" {
