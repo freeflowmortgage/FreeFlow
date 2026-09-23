@@ -41,7 +41,7 @@ RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
 
 # 3. Production runtime stage (runs Vite custom middleware server for PDF/OCR and Appraisal proxy)
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:279612ae66723f3f83ffdfe0045c428827d167c1954b0883e018985b8bb1d3e3 AS runner
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
