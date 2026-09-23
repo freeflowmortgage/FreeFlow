@@ -6,7 +6,6 @@ import {
   Square,
   ClipboardList,
   Layers,
-  UserCheck,
   FileSpreadsheet,
   Activity,
   AlertCircle,
@@ -19,6 +18,8 @@ import {
   Trash2,
   Monitor,
   MonitorX,
+  Maximize2,
+  Minimize2,
   Tractor,
   Coins,
   Printer,
@@ -593,15 +594,15 @@ export default function UnderwriterSplitViewDemo({
 
   const availableTabs = useMemo(() => {
     const allTabs = [
-      ['PAYSTUB_RECONCILIATION', 'Base Income', ClipboardList],
-      ['SCHEDULE_C', 'Schedule C', FileSpreadsheet],
-      ['SCORP', 'S-Corp 1120-S', FileSpreadsheet],
-      ['CCORP', 'C-Corp 1120', FileSpreadsheet],
-      ['PARTNERSHIP', 'Partnership 1065', FileSpreadsheet],
-      ['SCHEDULE_F', 'Schedule F', Tractor],
-      ['ASSET_INCOME', 'Interest / gains', Coins],
-      ['SCHEDULE_E', 'Rental Income', Home],
-      ['ENCOMPASS_SYNC', 'Encompass', Lock],
+      ['PAYSTUB_RECONCILIATION', 'Wages', ClipboardList],
+      ['SCHEDULE_C', 'Sch C', FileSpreadsheet],
+      ['SCORP', '1120-S', FileSpreadsheet],
+      ['CCORP', '1120', FileSpreadsheet],
+      ['PARTNERSHIP', '1065', FileSpreadsheet],
+      ['SCHEDULE_F', 'Sch F', Tractor],
+      ['ASSET_INCOME', 'Assets', Coins],
+      ['SCHEDULE_E', 'Rental', Home],
+      ['ENCOMPASS_SYNC', 'Reconcile', Lock],
     ] as const;
 
     if (!isLive) return allTabs; // Demo mode shows all tabs for walkthrough
@@ -2366,6 +2367,8 @@ const overlay = inspectOverlayFromField(live);
   // BroadcastChannel, so highlights, year switches, and paging remain in sync.
 
   const [docPopout, setDocPopout] = useState(false);
+  const [workspaceFull, setWorkspaceFull] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const docChannelRef = useRef<BroadcastChannel | null>(null);
   const docWinRef = useRef<Window | null>(null);
 
@@ -2512,6 +2515,35 @@ const overlay = inspectOverlayFromField(live);
     }, 1500);
     return () => clearInterval(timer);
   }, [docPopout]);
+
+  const toggleWorkspaceFull = () => {
+    const node = workspaceRef.current;
+    if (!node) return;
+    if (document.fullscreenElement || workspaceFull) {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      setWorkspaceFull(false);
+      return;
+    }
+    setWorkspaceFull(true);
+    if (node.requestFullscreen) void node.requestFullscreen().catch(() => undefined);
+  };
+
+  useEffect(() => {
+    const onChange = () => {
+      if (document.fullscreenElement === workspaceRef.current) setWorkspaceFull(true);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceFull) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setWorkspaceFull(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [workspaceFull]);
 
   const openDocWindow = () => {
     docWinRef.current = window.open(
@@ -2758,38 +2790,38 @@ const overlay = inspectOverlayFromField(live);
   ]);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50 font-sans text-slate-800">
-      
-      {/* ==================== 1. COMPREHENSIVE WORKSPACE HEADER ==================== */}
-      <div className="flex shrink-0 flex-col justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:flex-row lg:items-center">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-              <ShieldCheck className="h-7 w-7 text-indigo-600" />
-              B2B Professional Income Verification Workspace
-            </h1>
-            <span className="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold uppercase">
-              ZDR · {typeof __APP_REVISION__ === 'string' ? __APP_REVISION__ : 'dev'} · {parserEngine}
-            </span>
+    <div
+      ref={workspaceRef}
+      className={`flex min-h-0 w-full flex-col overflow-hidden bg-white font-sans text-slate-800 ${
+        workspaceFull ? 'fixed inset-0 z-50 h-screen rounded-none' : 'h-full rounded-xl border border-slate-200'
+      }`}
+    >
+      <div className="flex shrink-0 flex-col justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4 lg:flex-row lg:items-center">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2 text-emerald-700">
+            <ShieldCheck className="h-5 w-5" />
           </div>
-          <p className="text-sm text-slate-500 mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>Loan ID: <strong className="text-slate-700">{borrowerMetadata.loanId}</strong></span>
-            <span>Borrower: <strong className="text-slate-700">{borrowerMetadata.borrowerName}</strong></span>
-            <span>Current Job: <strong className="text-slate-700">{borrowerMetadata.currentEmployer || '—'}{borrowerMetadata.employmentStartDate ? ` (Hired: ${borrowerMetadata.employmentStartDate})` : ''}</strong></span>
-          </p>
+          <div>
+            <h1 className="flex items-center gap-2 text-lg font-bold tracking-tight text-slate-950">
+              Income
+              <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                ZDR
+              </span>
+            </h1>
+            <p className="text-xs text-slate-500">
+              {borrowerMetadata.borrowerName} · {borrowerMetadata.loanId}
+              {borrowerMetadata.currentEmployer ? ` · ${borrowerMetadata.currentEmployer}` : ''}
+            </p>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-500">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-[10px] font-bold uppercase text-slate-500">
             Program
             <select
               value={loanProgram}
               onChange={(event) => setLoanProgram(event.target.value as typeof loanProgram)}
-              className={`rounded border px-2 py-1 text-xs font-black outline-none ${
-                loanProgram === 'USDA'
-                  ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
-                  : 'border-slate-200 bg-slate-50 text-slate-800'
-              }`}
+              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-800 outline-none"
               aria-label="Loan program"
             >
               <option value="CONVENTIONAL">Conventional</option>
@@ -2801,17 +2833,26 @@ const overlay = inspectOverlayFromField(live);
           <button
             type="button"
             onClick={() => void printIncomeSummary()}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-800 hover:bg-slate-200"
           >
             <Printer className="h-4 w-4" />
             Print summary
+          </button>
+          <button
+            type="button"
+            onClick={toggleWorkspaceFull}
+            title={workspaceFull ? 'Leave full screen and return to the page' : 'Fill this window with the document and income QA, still side by side'}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-800 hover:bg-slate-200"
+          >
+            {workspaceFull ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {workspaceFull ? 'Exit full screen' : 'Full screen'}
           </button>
           {!docPopout ? (
             <button
               type="button"
               onClick={openDocWindow}
               title="Open the document canvas in a separate window for a second monitor"
-              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-800 hover:bg-slate-200"
             >
               <Monitor className="h-4 w-4" />
               Dual monitor
@@ -2820,13 +2861,13 @@ const overlay = inspectOverlayFromField(live);
             <button
               type="button"
               onClick={bringBackDoc}
-              className="flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-500 px-3.5 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-600"
             >
               <MonitorX className="h-4 w-4" />
               Bring documents back
             </button>
           )}
-          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-800">
             {parseBusy ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : <Upload className="h-4 w-4 text-emerald-600" />}
             {parseBusy ? 'Parsing…' : 'Load live PDF'}
             <input
@@ -2853,12 +2894,6 @@ const overlay = inspectOverlayFromField(live);
               {isLive ? 'Use demo' : 'Use live PDF'}
             </button>
           ) : null}
-          <button
-            onClick={handleExportSync}
-            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg transition hover:bg-indigo-700"
-          >
-            Lock & Sync Encompass eFolder <ArrowRight className="h-4 w-4" />
-          </button>
         </div>
         {parseError ? <p className="w-full text-xs text-rose-600">{parseError}</p> : null}
         {isLive && packet.length > 0 ? (
@@ -2891,6 +2926,29 @@ const overlay = inspectOverlayFromField(live);
 
       <UrlAEntityRoster result={locateResult} onSelect={selectUrlAEntity} />
 
+      <div className="flex shrink-0 overflow-x-auto border-b border-slate-200 px-2">
+        {availableTabs.map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              setActiveTab(id);
+              setInspectDocId(null);
+              setHighlightFieldId(null);
+              setCanvasYearIndex(0);
+            }}
+            className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-bold transition ${
+              activeTab === id
+                ? 'border-emerald-600 text-emerald-700'
+                : 'border-transparent text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
       <div className="flex min-h-0 flex-1">
         
@@ -2898,13 +2956,13 @@ const overlay = inspectOverlayFromField(live);
         {/* Unmounted (not just hidden) while the canvas lives in its own window, so the
             main window does no duplicate PDF/canvas rendering work in dual-monitor mode */}
         {!docPopout && (
-        <div className="flex min-h-0 min-w-0 w-[42%] max-w-[560px] flex-col space-y-4 overflow-y-auto border-r border-slate-200 bg-slate-50 p-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <Layers className="h-5 w-5 text-indigo-600" />
-                <h2 className="font-extrabold text-slate-900 text-sm">PDF Coordinate Canvas View</h2>
-              </div>
+        <div className="flex min-h-0 w-1/2 min-w-0 flex-col overflow-hidden border-r border-slate-200 bg-white">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2">
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400">
+                <Layers className="h-3.5 w-3.5 text-emerald-500" />
+                Source PDF
+              </span>
               <div className="flex items-center gap-2">
                 {!isLive && fixturePdf && (
                   <div className="flex rounded-md border border-slate-200 p-0.5">
@@ -2948,25 +3006,6 @@ const overlay = inspectOverlayFromField(live);
                     </button>
                   </div>
                 )}
-                <span className="rounded bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-500">
-                  {activeTab === 'SCHEDULE_C'
-                    ? 'Schedule C'
-                    : activeTab === 'SCORP'
-                      ? 'Form 1120-S'
-                      : activeTab === 'PARTNERSHIP'
-                        ? 'Form 1065'
-                        : activeTab === 'SCHEDULE_E'
-                          ? 'Schedule E'
-                          : activeTab === 'SCHEDULE_F'
-                            ? 'Schedule F'
-                            : activeTab === 'ASSET_INCOME'
-                              ? 'Schedules B / D'
-                            : activeTab === 'CCORP'
-                              ? 'Form 1120'
-                          : wageDocKind === 'w2'
-                            ? 'Form W-2'
-                          : 'Paystub'}
-                </span>
               </div>
             </div>
 
@@ -3111,33 +3150,11 @@ const overlay = inspectOverlayFromField(live);
 
             <InspectNote />
           </div>
-
-          {/* Core Licensing Profile Card */}
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-1.5 text-sm">
-              <UserCheck className="h-4.5 w-4.5 text-emerald-500" />
-              Employer Verification Profile
-            </h3>
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-500">Target Employer Name</span>
-                <span className="font-bold text-slate-800">{borrowerMetadata.currentEmployer}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-500">Employment Start Date</span>
-                <span className="font-bold text-slate-800">{borrowerMetadata.employmentStartDate} ({monthsAtCurrentJob} mos elapsed)</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-500">USDA Eligibility Zone</span>
-                <span className="font-bold text-slate-800">Zone-A Conventional Standard</span>
-              </div>
-            </div>
-          </div>
         </div>
         )}
 
         {/* ==================== RIGHT PANEL: TAB-DRIVEN CALCULATION ENGINES ==================== */}
-        <div className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto p-4">
+        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto bg-white p-6">
           {docPopout && (
             <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs">
               <span className="flex items-center gap-2 font-bold text-indigo-800">
@@ -3160,74 +3177,20 @@ const overlay = inspectOverlayFromField(live);
             />
           )}
           
-          {/* Main Workspace Navigation Tab Array */}
-          <div className="flex flex-wrap gap-1 rounded-lg border-b border-slate-200 bg-white p-1.5 shadow-sm">
-            {availableTabs.map(([id, label, Icon]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setActiveTab(id);
-                  setInspectDocId(null);
-                  setHighlightFieldId(null);
-                  setCanvasYearIndex(0);
-                }}
-                className={`flex min-w-[120px] flex-1 items-center justify-center gap-1.5 rounded-md py-2.5 text-[11px] font-bold uppercase transition-all ${
-                  activeTab === id ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-indigo-100 bg-white p-3 md:grid-cols-5">
-            {([
-              ['W-2 base', form1084CashFlow.w2BaseMonthly],
-              ['W-2 variable', form1084CashFlow.w2VariableMonthly],
-              ['Schedule C', form1084CashFlow.qualifyingMonthlySelfEmployed],
-              ['S-Corp', form1084CashFlow.sCorpShareholderDraw],
-              ['C-Corp', form1084CashFlow.cCorpMonthly],
-              ['Partnership', form1084CashFlow.partnershipMonthly],
-              ['Schedule F', form1084CashFlow.scheduleFMonthly],
-              ['Assets', form1084CashFlow.assetIncomeMonthly],
-              ['Rental', form1084CashFlow.rentalMonthly],
-            ] as Array<[string, number]>)
-              .filter(([, monthly]) => !isLive || monthly > 0)
-              .map(([label, monthly]) => (
-                <div key={label} className="rounded-md bg-slate-50 px-2 py-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{label}</p>
-                  <p className="font-mono text-sm font-black text-slate-800">{usd(monthly)}/mo</p>
-                </div>
-              ))}
-            <div className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5">
-              <p className="text-[9px] font-black uppercase tracking-wider text-indigo-500">Total qualifying</p>
-              <p className="font-mono text-sm font-black text-indigo-900">{usd(form1084CashFlow.finalTotalQualifyingMonthly)}/mo</p>
-            </div>
-          </div>
-
           {/* ==================== TAB 1: 4-WAY BASE WAGE RECONCILIATION ==================== */}
           {activeTab === 'PAYSTUB_RECONCILIATION' && (
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-6">
-              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">4-Way Base Wage Reconciliation</h3>
-                </div>
-                <span className="text-xs font-bold uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
-                  Verified Base: {usd(currentPeriodBasePay)} / {activeW2Employer.payFrequency === 'WEEKLY' ? 'Weekly' : activeW2Employer.payFrequency === 'BIWEEKLY' ? 'Biweekly' : activeW2Employer.payFrequency === 'MONTHLY' ? 'Monthly' : 'Semi-Monthly'}
-                </span>
-              </div>
+              <h3 className="border-b border-slate-100 pb-3 text-sm font-bold text-slate-900">Wage inputs</h3>
 
               <IncomeEntitySelector
                 label="Employer / W-2"
-                entities={asEntityOptions(w2Employers)}
+                entities={asEntityOptions(w2Employers).map(({ id, name }) => ({ id, name }))}
                 activeId={activeW2Employer.id}
                 onSelect={selectW2Employer}
                 onAdd={addW2Employer}
                 onRemove={removeW2Employer}
               />
-              <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 text-xs md:grid-cols-5">
+              <div className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-xs [&>label]:px-3 [&>label]:py-2">
                 <label className="font-bold text-slate-500">
                   Employer name
                   <input
@@ -3294,7 +3257,7 @@ const overlay = inspectOverlayFromField(live);
               </div>
 
               {/* Core interactive variable modification boxes */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
+              <div className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-xs [&>div]:px-3 [&>div]:py-2">
                 <div data-qa-field="ps-hourly-rate" className={`cursor-pointer ${highlightFieldId === 'ps-hourly-rate' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-hourly-rate')}>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Hourly Rate of Pay</label>
                   <input
@@ -3358,41 +3321,10 @@ const overlay = inspectOverlayFromField(live);
                 </div>
               </div>
 
-              <IncomeChoicePanel
-                options={w2BasePicks.options}
-                recommendedId={w2BasePicks.recommendedId}
-                reason={w2BasePicks.reason}
-                selectedId={w2BaseChoice}
-                onSelect={setW2BaseChoice}
-              />
-
-              {/* Other Income Warning Panel */}
-              {currentOtherYtd > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-xs leading-relaxed text-amber-800">
-                  <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold uppercase block tracking-wider text-amber-950">Other Income Detected</span>
-                    Other income of ${currentOtherYtd.toLocaleString()} found. Please validate the continuance of this other income type (e.g., probability of continued receipt for at least 3 years) per guidelines.
-                  </div>
-                </div>
-              )}
-
-              {/* Critical Wage Deficit Alert Panel */}
-              {currentBaseYtd < 50000.00 && (
-                <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 flex gap-3 text-xs leading-relaxed text-rose-800">
-                  <AlertCircle className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold uppercase block tracking-wider text-rose-950">Critical Wage Deficit Highlighted</span>
-                    The YTD base wage of ${currentBaseYtd.toLocaleString()} is significantly lower than expected for a semi-monthly payroll schedule processed in mid-August (expected base wage ~ $54,000.00). Check if the borrower recently changed compensation, had unpaid leave, or was hired mid-year.
-                  </div>
-                </div>
-              )}
-
               {/* Variable income stays on the Base Income tab */}
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <div>
-                  <h3 className="text-base font-extrabold text-slate-900">Variable Income Continuity & Rolling Average</h3>
-                  <p className="text-xs text-slate-400 mt-1">Aggregates short-term variable earnings across job transitions when similar compensation history exists</p>
+                  <h3 className="text-sm font-bold text-slate-900">Variable income</h3>
                 </div>
                 <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
                   <button 
@@ -3406,7 +3338,7 @@ const overlay = inspectOverlayFromField(live);
               </div>
 
               {/* Tenure configuration inputs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs">
+              <div className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-xs [&>label]:px-3 [&>label]:py-2">
                 <div>
                   <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">Months at Current Job (Hire Date: Dec 2025)</label>
                   <input
@@ -3432,7 +3364,7 @@ const overlay = inspectOverlayFromField(live);
               </div>
 
               {/* Side-by-Side Job Variable Details */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="flex flex-col gap-6">
                 
                 {/* Current Job variable inputs */}
                 <div className="space-y-4">
@@ -3441,7 +3373,7 @@ const overlay = inspectOverlayFromField(live);
                     {activeW2Employer.wageDocSource === 'WVOE' ? 'WVOE variable history' : 'Current Job YTD Variable Extractions'}
                   </h4>
                   {activeW2Employer.wageDocSource === 'WVOE' ? (
-                  <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div className="flex flex-col divide-y divide-slate-100 text-xs">
                     <div>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">WVOE months</label>
                       <input
@@ -3471,7 +3403,7 @@ const overlay = inspectOverlayFromField(live);
                     </div>
                   </div>
                   ) : (
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="flex flex-col divide-y divide-slate-100 text-xs">
                     <div data-qa-field="ps-bonus-ytd" className={`cursor-pointer ${highlightFieldId === 'ps-bonus-ytd' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('ps-bonus-ytd')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Bonus Income YTD</label>
                       <input
@@ -3519,10 +3451,6 @@ const overlay = inspectOverlayFromField(live);
                     </div>
                   </div>
                   )}
-                  <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">
-                    <span className="font-semibold text-slate-500">Current Monthly Variable Avg:</span>
-                    <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo</span>
-                  </div>
                 </div>
 
                 {/* Prior Job Variable inputs */}
@@ -3531,7 +3459,7 @@ const overlay = inspectOverlayFromField(live);
                     <Link className="h-4 w-4 text-indigo-500" />
                     Prior Job 2025 W-2 Variable Extractions
                   </h4>
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="flex flex-col divide-y divide-slate-100 text-xs">
                     <div data-qa-field="w2-box12-bonus" className={`cursor-pointer ${highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box12-bonus')}>
                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Box 12 Bonus History</label>
                       <input
@@ -3553,22 +3481,54 @@ const overlay = inspectOverlayFromField(live);
                       />
                     </div>
                   </div>
-                  <div className="bg-slate-50 rounded p-3 text-xs flex justify-between items-center">
-                    <span className="font-semibold text-slate-500">Prior Monthly Variable Avg:</span>
-                    <span className={`font-black text-slate-800 ${!mergePreviousEmployerVariable ? 'opacity-40' : ''}`}>
-                      ${variableContinuityCalculations.previousMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo
-                    </span>
-                  </div>
                 </div>
               </div>
 
-              <IncomeChoicePanel
-                options={w2VarPicks.options}
-                recommendedId={w2VarPicks.recommendedId}
-                reason={w2VarPicks.reason}
-                selectedId={w2VarChoice}
-                onSelect={setW2VarChoice}
-              />
+              <div className="space-y-4 border-t border-slate-200 pt-4">
+                <h3 className="text-sm font-bold text-slate-900">Income calculation</h3>
+                {currentOtherYtd > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-xs leading-relaxed text-amber-800">
+                    <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold uppercase block tracking-wider text-amber-950">Other Income Detected</span>
+                      Other income of ${currentOtherYtd.toLocaleString()} found. Please validate the continuance of this other income type (e.g., probability of continued receipt for at least 3 years) per guidelines.
+                    </div>
+                  </div>
+                )}
+                {currentBaseYtd < 50000.00 && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 flex gap-3 text-xs leading-relaxed text-rose-800">
+                    <AlertCircle className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold uppercase block tracking-wider text-rose-950">Critical Wage Deficit Highlighted</span>
+                      The YTD base wage of ${currentBaseYtd.toLocaleString()} is significantly lower than expected for a semi-monthly payroll schedule processed in mid-August (expected base wage ~ $54,000.00). Check if the borrower recently changed compensation, had unpaid leave, or was hired mid-year.
+                    </div>
+                  </div>
+                )}
+                <IncomeChoicePanel
+                  options={w2BasePicks.options}
+                  recommendedId={w2BasePicks.recommendedId}
+                  reason={w2BasePicks.reason}
+                  selectedId={w2BaseChoice}
+                  onSelect={setW2BaseChoice}
+                />
+                <div className="flex justify-between rounded bg-slate-50 p-3 text-xs">
+                  <span className="font-semibold text-slate-500">Current monthly variable average</span>
+                  <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo</span>
+                </div>
+                <div className="flex justify-between rounded bg-slate-50 p-3 text-xs">
+                  <span className="font-semibold text-slate-500">Prior monthly variable average</span>
+                  <span className={`font-black text-slate-800 ${!mergePreviousEmployerVariable ? 'opacity-40' : ''}`}>
+                    ${variableContinuityCalculations.previousMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo
+                  </span>
+                </div>
+                <IncomeChoicePanel
+                  options={w2VarPicks.options}
+                  recommendedId={w2VarPicks.recommendedId}
+                  reason={w2VarPicks.reason}
+                  selectedId={w2VarChoice}
+                  onSelect={setW2VarChoice}
+                />
+              </div>
             </div>
           )}
 
@@ -4496,12 +4456,12 @@ const overlay = inspectOverlayFromField(live);
           {/* ==================== TAB 4: ENCOMPASS SYNC INTERFACE ==================== */}
           {activeTab === 'ENCOMPASS_SYNC' && (
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
-              <div className="border-b pb-3">
+              <div className="border-b border-slate-100 pb-3">
                 <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-1.5">
                   <Lock className="h-5 w-5 text-indigo-600" />
-                  Authorize & Commit Encompass REST Sync
+                  Final reconciliation
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">Locks and writes-back processed values to standard Ellie Mae/ICE field registries</p>
+                <p className="text-xs text-slate-500 mt-1">Every income selection on this file. Review them here, then sync.</p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 text-xs md:grid-cols-2 xl:grid-cols-3">
@@ -4557,16 +4517,17 @@ const overlay = inspectOverlayFromField(live);
                 </div>
               </div>
 
-              <div className="flex flex-col md:flex-row items-center justify-between bg-slate-900 text-white p-5 rounded-xl border border-slate-800 gap-4">
+              <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center">
                 <div>
-                  <h4 className="font-bold text-sm">Lock, Release & Sync Final NOV</h4>
-                  <p className="text-xs text-slate-400 mt-1">Commits {activeIncomeWarnings.length} outstanding variables directly as prior-to-approval milestones.</p>
+                  <h4 className="text-sm font-bold text-slate-900">Sync these selections</h4>
+                  <p className="mt-1 text-xs text-slate-500">Writes the amounts above to the eFolder. Nothing syncs until you click here.</p>
                 </div>
                 <button
+                  type="button"
                   onClick={handleExportSync}
-                  className="flex items-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 text-xs font-bold uppercase tracking-wider transition shadow-lg self-end"
+                  className="flex items-center gap-2 self-end rounded-lg bg-emerald-500 px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-950 shadow-sm transition hover:bg-emerald-600"
                 >
-                  Sign & Sync Encompass eFolder <ArrowRight className="h-4 w-4" />
+                  Sync <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
             </div>

@@ -100,8 +100,17 @@ def _is_w2_back_page(text: str) -> bool:
     return any(needle in folded for needle in W2_BACK_FOLDED)
 
 
+# The form title "wage and tax statement" is on instruction pages too.
+# These four are the numbered wage cells.
+_W2_WAGE_BOX_FOLDED = tuple(needle for needle in W2_FRONT_FOLDED if needle != "wageandtaxstatement")
+
+
 def _has_w2_front_evidence(text: str) -> bool:
-    return sum(bool(pattern.search(text)) for pattern in W2_FRONT_LABELS) >= 2
+    """True when two wage-box labels are present, with or without spaces between words."""
+    if sum(bool(pattern.search(text or "")) for pattern in W2_FRONT_LABELS) >= 2:
+        return True
+    folded = folded_text(text)
+    return sum(needle in folded for needle in _W2_WAGE_BOX_FOLDED) >= 2
 
 
 @dataclass
@@ -176,11 +185,12 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         ]
         if "W-2" not in matched and (_has_w2_front_evidence(search_text) or _has_w2_front_evidence(text)):
             matched.append("W-2")
-        if "W-2" in matched and (
-            _is_w2_back_page(text)
-            or _is_w2_back_page(search_text)
-            or not (_is_w2_front_page(text) or _is_w2_front_page(search_text))
-        ):
+        is_front = _is_w2_front_page(text) or _is_w2_front_page(search_text)
+        is_back = _is_w2_back_page(text) or _is_w2_back_page(search_text)
+        # Copy C's "Notice to Employee" is often printed on the same sheet as Copy 2.
+        # Wage-box labels keep the page. Drop only a real instruction sheet.
+        has_wage_boxes = _has_w2_front_evidence(text) or _has_w2_front_evidence(search_text)
+        if "W-2" in matched and not has_wage_boxes and (is_back or not is_front):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)
         if "Schedule K-1" in matched:

@@ -32,12 +32,12 @@ export function isUsableOverlayBox(box: OverlayInput): boolean {
   return rect.w > min && rect.h > min;
 }
 
-/** Grow a mapped box so the stroke sits off the printed figure. */
+/** Grow a mapped box just enough for the stroke to clear the printed figure. */
 export function padOverlayBox(box: OverlayInput): OverlayRect {
   const unit = overlayUnit(box);
   const rect = asOverlayRect(box);
-  const padX = Math.max(unit === 1 ? 0.012 : 1.2, rect.w * 0.2);
-  const padY = Math.max(unit === 1 ? 0.008 : 0.8, rect.h * 0.4);
+  const padX = Math.max(unit === 1 ? 0.004 : 0.4, rect.w * 0.08);
+  const padY = Math.max(unit === 1 ? 0.002 : 0.2, rect.h * 0.12);
   const x = Math.max(0, rect.x - padX);
   const y = Math.max(0, rect.y - padY);
   return {

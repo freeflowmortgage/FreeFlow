@@ -58,6 +58,8 @@ export type ParseResponse = {
   scheduleEProperties?: ScheduleEPropertyExtract[];
   /** Label-anchored IRS fields with overlay boxes (W-2, C, F, K-1, 1120, 1040, …). */
   formExtracts?: FormFieldExtract[];
+  /** IRS Copy B boxes clipped from the fw2.pdf wage-column matrix. */
+  w2Extracts?: W2BoxExtract[];
 };
 
 export type ScheduleEExpenseDetermination = {
@@ -81,6 +83,20 @@ export type ScheduleEExpenseDetermination = {
 };
 
 export type OverlayBox = { x: number; y: number; w: number; h: number };
+
+export type W2BoxExtract = {
+  pageIndex: number;
+  year: number | null;
+  employerName: string;
+  ein: string;
+  box1: number;
+  box2: number;
+  box3: number;
+  box4: number;
+  box5: number;
+  box6: number;
+  boxes?: Partial<Record<'employer_ein' | 'employer_name' | 'box1' | 'box2' | 'box3' | 'box4' | 'box5' | 'box6', OverlayBox>>;
+};
 
 export type FormFieldExtract = {
   pageIndex: number;

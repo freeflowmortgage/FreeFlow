@@ -231,10 +231,15 @@ async def process_document(request: Request):
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
         schedule_e_properties: list = []
+        w2_extracts: list = []
         try:
             from schedule_e_grid import extract_schedule_e_pages
         except ImportError:
             from src.schedule_e_grid import extract_schedule_e_pages
+        try:
+            from w2_grid import extract_w2_pages
+        except ImportError:
+            from src.w2_grid import extract_w2_pages
 
         converter = get_converter()
         inspect_started = time.perf_counter()
@@ -262,6 +267,15 @@ async def process_document(request: Request):
             except Exception as grid_exc:
                 logger.warning("schedule_e_grid_skipped: %s", grid_exc)
         schedule_e_ms = (time.perf_counter() - schedule_e_started) * 1000
+        try:
+            w2_extracts = extract_w2_pages(pdf_bytes, ocr_pages=convert_result.pages)
+            logger.info(
+                "w2_grid_complete count=%s box5=%s",
+                len(w2_extracts),
+                [row.get("box5") for row in w2_extracts],
+            )
+        except Exception as grid_exc:
+            logger.warning("w2_grid_skipped: %s", grid_exc)
 
         extract_started = time.perf_counter()
         form_extracts: list = []
@@ -331,6 +345,7 @@ async def process_document(request: Request):
                 "unresolved_statements": split_result.to_dict()["unresolved_statements"],
                 "pages": page_payload,
                 "scheduleEProperties": schedule_e_properties,
+                "w2Extracts": w2_extracts,
                 "formExtracts": form_extracts,
             }
         )

@@ -140,8 +140,8 @@ export default function PdfPagePreview({
               style={{
                 left: `${box.x * 100}%`,
                 top: `${box.y * 100}%`,
-                width: `${Math.max(box.w * 100, 1.2)}%`,
-                height: `${Math.max(box.h * 100, 1.1)}%`,
+                width: `${Math.max(box.w * 100, 0.8)}%`,
+                height: `${Math.max(box.h * 100, 0.7)}%`,
               }}
               onClick={() => onSelectField?.(field.id)}
             />
@@ -159,8 +159,8 @@ export default function PdfPagePreview({
             style={{
               left: `${box.x * 100}%`,
               top: `${box.y * 100}%`,
-              width: `${Math.max(box.w * 100, 1.2)}%`,
-              height: `${Math.max(box.h * 100, 1.1)}%`,
+              width: `${Math.max(box.w * 100, 0.8)}%`,
+              height: `${Math.max(box.h * 100, 0.7)}%`,
             }}
           />
           );
