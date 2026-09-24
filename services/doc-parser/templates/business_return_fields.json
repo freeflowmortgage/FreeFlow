@@ -1,0 +1,544 @@
+{
+  "units": "pdf-points",
+  "page_size": [
+    612,
+    792
+  ],
+  "forms": {
+    "1065": {
+      "blank": "f1065.pdf",
+      "fields": {
+        "ordinary_income": {
+          "line": "Line 23",
+          "page": 0,
+          "box": [
+            504.0,
+            510.0,
+            576.0,
+            522.0
+          ],
+          "caption": "Ordinary business income",
+          "use": "base"
+        },
+        "gain_4797": {
+          "line": "Line 6",
+          "page": 0,
+          "box": [
+            504.0,
+            294.0,
+            576.0,
+            306.0
+          ],
+          "caption": "Form 4797",
+          "use": "subtract"
+        },
+        "other_income": {
+          "line": "Line 7",
+          "page": 0,
+          "box": [
+            504.0,
+            306.0,
+            576.0,
+            318.0
+          ],
+          "caption": "Other income",
+          "use": "subtract_with_review"
+        },
+        "depreciation": {
+          "line": "Line 16c",
+          "page": 0,
+          "box": [
+            504.0,
+            426.0,
+            576.0,
+            438.0
+          ],
+          "caption": "depreciation reported on Form 1125-A",
+          "use": "add_back"
+        },
+        "meals": {
+          "line": "Schedule M-1 line 4b",
+          "page": 5,
+          "box": [
+            165.6,
+            648.0,
+            223.2,
+            660.0
+          ],
+          "caption": "Travel and entertainment",
+          "use": "deduct"
+        }
+      }
+    },
+    "1120s": {
+      "blank": "f1120s.pdf",
+      "fields": {
+        "ordinary_income": {
+          "line": "Line 22",
+          "page": 0,
+          "box": [
+            496.8,
+            480.0,
+            576.0,
+            492.0
+          ],
+          "caption": "Ordinary business income",
+          "use": "base"
+        },
+        "gain_4797": {
+          "line": "Line 4",
+          "page": 0,
+          "box": [
+            496.8,
+            264.0,
+            576.0,
+            276.0
+          ],
+          "caption": "Form 4797",
+          "use": "subtract"
+        },
+        "other_income": {
+          "line": "Line 5",
+          "page": 0,
+          "box": [
+            496.8,
+            276.0,
+            576.0,
+            288.0
+          ],
+          "caption": "Other income",
+          "use": "subtract_with_review"
+        },
+        "depreciation": {
+          "line": "Line 14",
+          "page": 0,
+          "box": [
+            496.8,
+            384.0,
+            576.0,
+            396.0
+          ],
+          "caption": "Depreciation from Form 4562",
+          "use": "add_back"
+        },
+        "meals": {
+          "line": "Schedule M-1 line 3b",
+          "page": 4,
+          "box": [
+            168.8,
+            192.0,
+            223.2,
+            204.0
+          ],
+          "caption": "Travel and entertainment",
+          "use": "deduct"
+        }
+      }
+    },
+    "1065-k1": {
+      "blank": "f1065sk1.pdf",
+      "fields": {
+        "ordinary_income": {
+          "line": "Box 1",
+          "page": 0,
+          "box": [
+            331.2,
+            82.0,
+            445.65,
+            96.0
+          ],
+          "caption": "Ordinary business income",
+          "checks": [
+            [
+              "above",
+              "Ordinary business income"
+            ]
+          ],
+          "use": "base"
+        },
+        "net_rental_real_estate": {
+          "line": "Box 2",
+          "page": 0,
+          "box": [
+            331.2,
+            106.0,
+            445.65,
+            120.0
+          ],
+          "caption": "Net rental real estate income",
+          "checks": [
+            [
+              "above",
+              "Net rental real estate income"
+            ]
+          ],
+          "use": "base"
+        },
+        "other_net_rental": {
+          "line": "Box 3",
+          "page": 0,
+          "box": [
+            331.2,
+            129.92,
+            445.65,
+            144.0
+          ],
+          "caption": "Other net rental income",
+          "checks": [
+            [
+              "above",
+              "Other net rental income"
+            ]
+          ],
+          "use": "base"
+        },
+        "guaranteed_payments_services": {
+          "line": "Box 4a",
+          "page": 0,
+          "box": [
+            331.2,
+            154.0,
+            445.65,
+            168.0
+          ],
+          "caption": "Guaranteed payments for services",
+          "checks": [
+            [
+              "above",
+              "Guaranteed payments for services"
+            ]
+          ],
+          "use": "base"
+        },
+        "guaranteed_payments_capital": {
+          "line": "Box 4b",
+          "page": 0,
+          "box": [
+            331.2,
+            178.0,
+            445.65,
+            192.0
+          ],
+          "caption": "Guaranteed payments for capital",
+          "checks": [
+            [
+              "above",
+              "Guaranteed payments for capital"
+            ]
+          ],
+          "use": "base"
+        },
+        "profit_pct_end": {
+          "line": "Item J",
+          "page": 0,
+          "box": [
+            194.4,
+            444.0,
+            288.0,
+            456.0
+          ],
+          "caption": "Profit",
+          "checks": [
+            [
+              "left",
+              "Profit"
+            ],
+            [
+              "column",
+              "Ending"
+            ]
+          ],
+          "use": "ownership_freddie"
+        },
+        "capital_pct_end": {
+          "line": "Item J",
+          "page": 0,
+          "box": [
+            194.4,
+            468.0,
+            288.0,
+            480.0
+          ],
+          "caption": "Capital",
+          "checks": [
+            [
+              "left",
+              "Capital"
+            ],
+            [
+              "column",
+              "Ending"
+            ]
+          ],
+          "use": "ownership_fnma"
+        },
+        "profit_pct_begin": {
+          "line": "Item J",
+          "page": 0,
+          "box": [
+            79.2,
+            444.0,
+            180.0,
+            456.0
+          ],
+          "caption": "Profit",
+          "checks": [
+            [
+              "left",
+              "Profit"
+            ],
+            [
+              "column",
+              "Beginning"
+            ]
+          ],
+          "use": "reference"
+        },
+        "capital_pct_begin": {
+          "line": "Item J",
+          "page": 0,
+          "box": [
+            79.2,
+            468.0,
+            180.0,
+            480.0
+          ],
+          "caption": "Capital",
+          "checks": [
+            [
+              "left",
+              "Capital"
+            ],
+            [
+              "column",
+              "Beginning"
+            ]
+          ],
+          "use": "reference"
+        }
+      },
+      "coded_boxes": {
+        "distributions": {
+          "line": "Box 19",
+          "caption": "Distributions",
+          "codes": [
+            "A"
+          ],
+          "other_codes": {
+            "B": "Distribution subject to section 737",
+            "C": "Other property"
+          },
+          "rows": [
+            {
+              "code": [
+                446.4,
+                358.0,
+                468.0,
+                372.0
+              ],
+              "amount": [
+                468.0,
+                358.0,
+                574.0,
+                372.0
+              ]
+            },
+            {
+              "code": [
+                446.4,
+                372.0,
+                468.0,
+                396.0
+              ],
+              "amount": [
+                468.0,
+                372.0,
+                574.0,
+                396.0
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "1120s-k1": {
+      "blank": "f1120ssk.pdf",
+      "fields": {
+        "ordinary_income": {
+          "line": "Box 1",
+          "page": 0,
+          "box": [
+            331.2,
+            82.0,
+            445.4,
+            96.0
+          ],
+          "caption": "Ordinary business income",
+          "checks": [
+            [
+              "above",
+              "Ordinary business income"
+            ]
+          ],
+          "use": "base"
+        },
+        "net_rental_real_estate": {
+          "line": "Box 2",
+          "page": 0,
+          "box": [
+            331.2,
+            106.0,
+            445.4,
+            120.0
+          ],
+          "caption": "Net rental real estate income",
+          "checks": [
+            [
+              "above",
+              "Net rental real estate income"
+            ]
+          ],
+          "use": "base"
+        },
+        "other_net_rental": {
+          "line": "Box 3",
+          "page": 0,
+          "box": [
+            331.2,
+            130.0,
+            445.4,
+            144.0
+          ],
+          "caption": "Other net rental income",
+          "checks": [
+            [
+              "above",
+              "Other net rental income"
+            ]
+          ],
+          "use": "base"
+        },
+        "allocation_pct": {
+          "line": "Item G",
+          "page": 0,
+          "box": [
+            208.8,
+            528.0,
+            289.6,
+            540.0
+          ],
+          "caption": "Current year allocation percentage",
+          "checks": [
+            [
+              "left",
+              "Current year allocation percentage"
+            ]
+          ],
+          "use": "ownership"
+        }
+      },
+      "coded_boxes": {
+        "distributions": {
+          "line": "Box 16",
+          "caption": "Items affecting shareholder basis",
+          "codes": [
+            "D"
+          ],
+          "other_codes": {
+            "A": "Tax-exempt interest income",
+            "B": "Other tax-exempt income",
+            "C": "Nondeductible expenses",
+            "E": "Repayment of loans from shareholders",
+            "F": "Other"
+          },
+          "rows": [
+            {
+              "code": [
+                446.4,
+                346.0,
+                468.0,
+                360.0
+              ],
+              "amount": [
+                468.0,
+                346.0,
+                575.0,
+                360.0
+              ]
+            },
+            {
+              "code": [
+                446.4,
+                370.0,
+                468.0,
+                384.0
+              ],
+              "amount": [
+                468.0,
+                370.0,
+                575.0,
+                384.0
+              ]
+            },
+            {
+              "code": [
+                446.4,
+                394.0,
+                468.0,
+                408.0
+              ],
+              "amount": [
+                468.0,
+                394.0,
+                575.0,
+                408.0
+              ]
+            },
+            {
+              "code": [
+                446.4,
+                418.0,
+                468.0,
+                432.0
+              ],
+              "amount": [
+                468.0,
+                418.0,
+                575.0,
+                432.0
+              ]
+            },
+            {
+              "code": [
+                446.4,
+                442.0,
+                468.0,
+                456.0
+              ],
+              "amount": [
+                468.0,
+                442.0,
+                575.0,
+                456.0
+              ]
+            },
+            {
+              "code": [
+                446.4,
+                466.0,
+                468.0,
+                480.0
+              ],
+              "amount": [
+                468.0,
+                466.0,
+                575.0,
+                480.0
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

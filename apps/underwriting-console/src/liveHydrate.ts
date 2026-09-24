@@ -73,6 +73,10 @@ export type LiveCorpPatch = {
   profitPctEnd?: number;
   capitalPctEnd?: number;
   depreciation?: number;
+  depreciation8825?: number;
+  gain4797?: number;
+  otherIncome?: number;
+  mealsM1?: number;
   section179?: number;
   depletion?: number;
 };
@@ -242,25 +246,33 @@ export function liveSchCPatch(fields: MappedIncomeField[]): LiveSchCPatch | null
   });
 }
 
+// Depreciation is summed from the return line, Form 1125-A and Form 8825, so
+// each is kept apart when the return line was read. Without it, Form 8825 and
+// then Form 4562 stand in for it alone: line 22 of a 4562 can already include
+// the rental depreciation, and adding 8825 on top would count it twice.
 export function liveSCorpPatch(fields: MappedIncomeField[]): LiveCorpPatch | null {
   return compact({
-    businessName: text(fields, 'scorp-name') ?? text(fields, 'form-8825-name'),
-    ein: text(fields, 'scorp-ein') ?? text(fields, 'form-8825-ein'),
+    businessName: text(fields, 'scorp-name') ?? text(fields, 'scorp-return-name') ?? text(fields, 'form-8825-name'),
+    ein: text(fields, 'scorp-ein') ?? text(fields, 'scorp-return-ein') ?? text(fields, 'form-8825-ein'),
     ordinaryIncome: num(fields, 'scorp-ord'),
     netRentalRealEstate: num(fields, 'scorp-rre'),
     otherNetRental: num(fields, 'scorp-onr'),
     distributions: num(fields, 'scorp-dist'),
     ownershipPct: num(fields, 'scorp-own-pct'),
-    depreciation: num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
+    gain4797: num(fields, 'scorp-return-4797'),
+    otherIncome: num(fields, 'scorp-return-other'),
+    depreciation: num(fields, 'scorp-return-dep') ?? num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
+    depreciation8825: num(fields, 'scorp-return-dep') != null ? num(fields, 'form-8825-dep') : undefined,
+    mealsM1: num(fields, 'scorp-return-meals'),
     section179: num(fields, 'scorp-179') ?? num(fields, 'form-4562-179'),
-    depletion: num(fields, 'scorp-depletion'),
+    depletion: num(fields, 'scorp-return-depletion') ?? num(fields, 'scorp-depletion'),
   });
 }
 
 export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch | null {
   return compact({
-    businessName: text(fields, 'pt-name') ?? text(fields, 'form-8825-name'),
-    ein: text(fields, 'pt-ein') ?? text(fields, 'form-8825-ein'),
+    businessName: text(fields, 'pt-name') ?? text(fields, 'pt-return-name') ?? text(fields, 'form-8825-name'),
+    ein: text(fields, 'pt-ein') ?? text(fields, 'pt-return-ein') ?? text(fields, 'form-8825-ein'),
     ordinaryIncome: num(fields, 'pt-ord'),
     netRentalRealEstate: num(fields, 'pt-rre'),
     otherNetRental: num(fields, 'pt-onr'),
@@ -268,9 +280,13 @@ export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch
     distributions: num(fields, 'pt-dist'),
     profitPctEnd: num(fields, 'pt-profit-pct'),
     capitalPctEnd: num(fields, 'pt-capital-pct'),
-    depreciation: num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
+    gain4797: num(fields, 'pt-return-4797'),
+    otherIncome: num(fields, 'pt-return-other'),
+    depreciation: num(fields, 'pt-return-dep') ?? num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
+    depreciation8825: num(fields, 'pt-return-dep') != null ? num(fields, 'form-8825-dep') : undefined,
+    mealsM1: num(fields, 'pt-return-meals'),
     section179: num(fields, 'pt-179') ?? num(fields, 'form-4562-179'),
-    depletion: num(fields, 'pt-depletion'),
+    depletion: num(fields, 'pt-return-depletion') ?? num(fields, 'pt-depletion'),
   });
 }
 
@@ -332,11 +348,11 @@ export function liveSchCPatches(fields: MappedIncomeField[]): Array<LiveSchCPatc
 }
 
 export function liveSCorpPatches(fields: MappedIncomeField[]): Array<LiveCorpPatch & { entityId: string }> {
-  return attachEntityDepreciation(patchesFor(fields, 'Form 1120-S', liveSCorpPatch), fields);
+  return attachEntityDepreciation(patchesFor(fields, 'Form 1120-S', liveSCorpPatch), fields, 'scorp-return-dep');
 }
 
 export function livePartnershipPatches(fields: MappedIncomeField[]): Array<LiveCorpPatch & { entityId: string }> {
-  return attachEntityDepreciation(patchesFor(fields, 'Form 1065', livePartnershipPatch), fields);
+  return attachEntityDepreciation(patchesFor(fields, 'Form 1065', livePartnershipPatch), fields, 'pt-return-dep');
 }
 
 export function liveCCorpPatches(fields: MappedIncomeField[]): Array<LiveCCorpPatch & { entityId: string }> {
@@ -361,14 +377,22 @@ function isIdentityCorpPatch(patch: LiveCorpPatch): boolean {
 function attachEntityDepreciation(
   patches: Array<LiveCorpPatch & { entityId: string }>,
   fields: MappedIncomeField[],
+  returnDepId: string,
 ): Array<LiveCorpPatch & { entityId: string }> {
   // Form 4562 / 8825 are tagged onto 1120-S or 1065 but live on other pages, so
   // drop depreciation-only groups and fold Line 14 (preferred) or 4562 onto the
   // single remaining K-1 / return entity.
   const entities = patches.filter(isIdentityCorpPatch);
-  const depreciation = num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep');
-  if (depreciation == null || entities.length !== 1) return entities;
-  return entities.map((patch) => ({ ...patch, depreciation: patch.depreciation ?? depreciation }));
+  if (entities.length !== 1) return entities;
+  const depreciation8825 = num(fields, 'form-8825-dep');
+  const depreciation4562 = num(fields, 'form-4562-dep');
+  const returnDep = num(fields, returnDepId);
+  const returnLineRead = returnDep != null;
+  return entities.map((patch) => ({
+    ...patch,
+    depreciation: patch.depreciation ?? returnDep ?? depreciation8825 ?? depreciation4562,
+    depreciation8825: patch.depreciation8825 ?? (returnLineRead ? depreciation8825 : undefined),
+  }));
 }
 
 export function liveAssetPatch(fields: MappedIncomeField[]): LiveAssetPatch | null {

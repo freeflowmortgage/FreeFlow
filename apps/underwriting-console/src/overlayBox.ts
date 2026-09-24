@@ -36,8 +36,14 @@ export function isUsableOverlayBox(box: OverlayInput): boolean {
 export function padOverlayBox(box: OverlayInput): OverlayRect {
   const unit = overlayUnit(box);
   const rect = asOverlayRect(box);
-  const padX = Math.max(unit === 1 ? 0.004 : 0.4, rect.w * 0.08);
-  const padY = Math.max(unit === 1 ? 0.002 : 0.2, rect.h * 0.12);
+  // Padding is proportional so a small cell gets a visible stroke, but it has
+  // to be capped. A Schedule E address is a full-width row, and 8% of that is
+  // ~7% of the page on each side, which stretched the highlight across the
+  // A/B/C columns and made one property look like all three.
+  const clamp = (value: number, low: number, high: number) =>
+    Math.min(Math.max(value, low), high);
+  const padX = clamp(rect.w * 0.08, unit === 1 ? 0.004 : 0.4, unit === 1 ? 0.02 : 2);
+  const padY = clamp(rect.h * 0.12, unit === 1 ? 0.002 : 0.2, unit === 1 ? 0.01 : 1);
   const x = Math.max(0, rect.x - padX);
   const y = Math.max(0, rect.y - padY);
   return {

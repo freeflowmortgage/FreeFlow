@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from business_return_grid import extract_business_return_page, form_key_for_page
 from form_signatures import PAYSTUB_TITLE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
 from ocr_match import pattern_matches
 from paystub_row_rules import (
@@ -289,7 +290,7 @@ SCHEDULE_L_FIELDS = (
 SCORP_RETURN_FIELDS = (
     FieldSpec("scorp-return-name", "Form 1120-S", "identity", "Name", "Corporation Name", "Name", ("Name of corporation", "Name"), "text"),
     FieldSpec("scorp-return-ein", "Form 1120-S", "identity", "Box B", "Employer Identification Number", "Box B", ("Employer identification number",), "ein"),
-    FieldSpec("scorp-return-ord", "Form 1120-S", "income", "Line 21", "Ordinary Business Income (Loss)", "Line 21", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
+    FieldSpec("scorp-return-ord", "Form 1120-S", "income", "Line 22", "Ordinary Business Income (Loss)", "Line 22", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
     FieldSpec("scorp-return-officer-comp", "Form 1120-S", "income", "Line 7", "Compensation of Officers", "Line 7", ("Compensation of officers",), "money"),
     FieldSpec("scorp-return-wages", "Form 1120-S", "income", "Line 8", "Salaries and Wages", "Line 8", ("Salaries and wages",), "money"),
     FieldSpec("scorp-return-dep", "Form 1120-S", "addback", "Line 14", "Depreciation", "Line 14", ("Depreciation not claimed", "Depreciation"), "money"),
@@ -300,7 +301,7 @@ SCORP_RETURN_FIELDS = (
 PARTNERSHIP_RETURN_FIELDS = (
     FieldSpec("pt-return-name", "Form 1065", "identity", "Name", "Partnership Name", "Name", ("Name of partnership", "Name"), "text"),
     FieldSpec("pt-return-ein", "Form 1065", "identity", "Box D", "Employer Identification Number", "Box D", ("Employer identification number",), "ein"),
-    FieldSpec("pt-return-ord", "Form 1065", "income", "Line 22", "Ordinary Business Income (Loss)", "Line 22", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
+    FieldSpec("pt-return-ord", "Form 1065", "income", "Line 23", "Ordinary Business Income (Loss)", "Line 23", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
     FieldSpec("pt-return-gp", "Form 1065", "income", "Line 10", "Guaranteed Payments to Partners", "Line 10", ("Guaranteed payments to partners", "Guaranteed payments"), "money"),
     FieldSpec("pt-return-wages", "Form 1065", "income", "Line 9", "Salaries and Wages", "Line 9", ("Salaries and wages",), "money"),
     FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16c", "Depreciation", "Line 16c", ("Depreciation, if required", "Depreciation"), "money"),
@@ -415,6 +416,52 @@ def _is_form_box_number(token: str, amount: float) -> bool:
     if not re.fullmatch(r"\d{1,2}", stripped):
         return False
     return amount == int(amount) and 0 <= amount <= 20
+
+
+_BUSINESS_FORMS = frozenset({"Form 1065", "Form 1120", "Form 1120-S"})
+# Captions a name clip reads when the name box is empty. Compared folded,
+# because OCR runs them together ("Partnership'semployeridentificationnumber").
+_BUSINESS_CAPTION_NEEDLES = (
+    "identificationnumber", "effectivedate", "businessactivity", "dateincorporated",
+    "totalassets", "nameaddress", "numberstreet", "numberandstreet", "cityortown",
+    "checkif", "seeinstructions", "calendaryear", "taxyearbeginning",
+)
+
+
+def _is_business_caption(value: str) -> bool:
+    folded = re.sub(r"[^a-z0-9]", "", (value or "").lower())
+    if not re.search(r"[a-z]", folded):
+        return True
+    return any(needle in folded for needle in _BUSINESS_CAPTION_NEEDLES)
+
+
+def _is_printed_reference(raw: str, amount: float, labels: Iterable[str] = ()) -> bool:
+    """A number the blank form prints, read as if it were an entry.
+
+    On an empty line the clip beside a caption holds only the form's own text:
+    the line number ("22"), a form it cites ("Form 4562", "Form 1125-A"), or
+    the tax year in the header. Entries carry commas or cents, or at least do
+    not sit right after the word "Form".
+    """
+    value = abs(amount)
+    text = raw or ""
+    spellings = {f"{value:,.2f}", f"{value:.2f}", f"{value:,.1f}", f"{value:.1f}"}
+    if value == int(value):
+        spellings |= {f"{int(value):,}", str(int(value))}
+    if not any(re.search(rf"(?<![\d,.]){re.escape(s)}(?![\d,])", text) for s in spellings):
+        # The amount was pieced together from separate numbers on the page
+        # ("8 ... 9" read as 8.90, "18 19" as 1,819), so it is not an entry.
+        return True
+    if value != int(value):
+        return False
+    number = int(value)
+    if any(re.search(rf"(?<!\d){number}(?!\d)", label) for label in labels):
+        return True
+    if re.search(rf"(?:Forms?|Schedule|section|lines?)\s*\(?{number}\b", text, re.I):
+        return True
+    if number <= 99:
+        return True
+    return 1990 <= number <= 2099
 
 
 def _label_variants(label: str) -> tuple[str, ...]:
@@ -632,7 +679,12 @@ def _parse_capture(raw: str, capture: str) -> tuple[str, float] | None:
             if not _is_form_box_number(match.group(0), parse_tax_amount(match.group(0)))
         ]
         if not matches:
-            amount = parse_tax_amount(text)
+            # Dot leaders reach here as "........" or with line numbers mixed
+            # in ("3....4.."), which is not a number.
+            try:
+                amount = parse_tax_amount(text)
+            except ValueError:
+                return None
             if abs(amount) <= 0.005 or _is_form_box_number(text, amount):
                 return None
             return _format_money(amount), amount
@@ -777,6 +829,14 @@ def _extract_spec(
         parsed = _parse_capture(raw, spec.capture)
         if spec.form == "W-2" and spec.capture == "money" and words:
             parsed = _same_column_money(words, box, hit) or parsed
+        if parsed and spec.form in _BUSINESS_FORMS and spec.capture.startswith("money"):
+            if _is_printed_reference(raw, parsed[1], spec.labels):
+                parsed = None
+                continue
+        if parsed and spec.form in _BUSINESS_FORMS and spec.capture == "text":
+            if _is_business_caption(parsed[0]):
+                parsed = None
+                continue
         if parsed:
             used_box = box
             break
@@ -1499,6 +1559,18 @@ def extract_page_fields(
 
     extracted: list[dict[str, Any]] = []
     seen: set[str] = set()
+    # Cells whose caption sits where the IRS blank puts it are read from the
+    # template first; the label catalogs below fill whatever that leaves.
+    form_key = form_key_for_page(blob)
+    if form_key is not None:
+        located: set[str] = set()
+        extracted.extend(
+            extract_business_return_page(
+                page, pymupdf, form_key=form_key, page_index=page_index, ocr_words=words, located=located
+            )
+        )
+        seen.update(row["sourceFieldId"] for row in extracted)
+        seen.update(located)
     catalogs = list(FORM_CATALOGS)
     for matcher, specs in catalogs:
         w2_from_labels = specs is W2_FIELDS and sum(bool(label.search(blob)) for label in W2_FRONT_LABELS) >= 2
@@ -1655,13 +1727,19 @@ def extract_irs_form_fields(
                         page_words, rotation, float(page.rect.width), float(page.rect.height)
                     )
                     extract_page = _PageView(page, pymupdf.Rect(0, 0, upright_w, upright_h))
-            page_fields = extract_page_fields(
-                extract_page,
-                page_index=index,
-                words=page_words,
-                text=text,
-                pdf_bytes=source_bytes,
-            )
+            # One unreadable page must not cost the packet every other page's
+            # fields; the caller drops the whole result on an exception.
+            try:
+                page_fields = extract_page_fields(
+                    extract_page,
+                    page_index=index,
+                    words=page_words,
+                    text=text,
+                    pdf_bytes=source_bytes,
+                )
+            except Exception:
+                logger.exception("irs_form_extract_page_failed page=%s", index)
+                continue
             if rotation:
                 for row in page_fields:
                     row["box"] = _remap_overlay_box(row.get("box"), rotation)

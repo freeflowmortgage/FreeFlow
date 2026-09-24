@@ -31,12 +31,14 @@ import { liveAssetPatch, liveBorrowerName, liveScheduleLPatch } from '../liveHyd
 import {
   allScheduleEExtracts,
   fieldForInspection,
+  fieldForInspectionWithin,
   inspectNavigation,
   inspectOverlayFromField,
   kindsOf,
   pageForKind,
   pickDocumentForTab,
   tabForKinds,
+  type DocKind,
   type InspectOverlay,
   type WorkspaceTab,
 } from '../livePacket';
@@ -81,6 +83,7 @@ import {
   chosenMonthly,
   cCorpBusinessAnnual,
   corpBusinessAnnual,
+  corpDistributionCapped,
   corpMinorityAnnual,
   monthlyFromYears,
   schCAnnual,
@@ -101,6 +104,7 @@ import {
 } from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
+import { scrollIntoViewWithin } from '../scrollWithin';
 import { MoneyField, ReviewNotesPanel } from './WageFieldControls';
 
 // TS Type Signatures for clean data structures
@@ -199,7 +203,7 @@ function emptySchCYear(year: number): SchCYear {
 function emptyCorpYear(year: number): CorpYear {
   return {
     year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
-    depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+    gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
   };
 }
 
@@ -627,6 +631,33 @@ export default function UnderwriterSplitViewDemo({
     });
   }, [isLive, packet]);
 
+  // Each document is offered in the pane for the tab it belongs to. Wages
+  // splits pay stubs from W-2s; a document of no known kind stays reachable
+  // there, since that is where it has always routed.
+  const tabDocGroups = useMemo(() => {
+    type Group = { label: string; kind?: DocKind; wageDocKind?: 'paystub' | 'w2'; docs: typeof packet };
+    const having = (kind: DocKind) => packet.filter((doc) => kindsOf(doc).includes(kind));
+    const groups: Group[] = (() => {
+      switch (activeTab) {
+        case 'PAYSTUB_RECONCILIATION':
+          return [
+            { label: 'Pay stub', kind: 'paystub', wageDocKind: 'paystub', docs: having('paystub') },
+            { label: 'W-2', kind: 'w2', wageDocKind: 'w2', docs: having('w2') },
+            { label: 'Other', docs: packet.filter((doc) => kindsOf(doc).length === 0) },
+          ];
+        case 'SCHEDULE_C': return [{ label: 'Sch C', kind: 'schedule-c', docs: having('schedule-c') }];
+        case 'SCORP': return [{ label: '1120-S', kind: 'scorp', docs: having('scorp') }];
+        case 'CCORP': return [{ label: '1120', kind: 'ccorp', docs: having('ccorp') }];
+        case 'PARTNERSHIP': return [{ label: '1065', kind: 'partnership', docs: having('partnership') }];
+        case 'SCHEDULE_F': return [{ label: 'Sch F', kind: 'schedule-f', docs: having('schedule-f') }];
+        case 'ASSET_INCOME': return [{ label: 'Assets', kind: 'asset', docs: having('asset') }];
+        case 'SCHEDULE_E': return [{ label: 'Sch E', kind: 'schedule-e', docs: having('schedule-e') }];
+        default: return [{ label: 'All', docs: packet }];
+      }
+    })();
+    return groups.filter((group) => group.docs.length > 0);
+  }, [activeTab, packet]);
+
   // Ensure active tab is valid
   React.useEffect(() => {
     if (availableTabs.length > 0 && !availableTabs.find(([id]) => id === activeTab)) {
@@ -939,8 +970,8 @@ export default function UnderwriterSplitViewDemo({
       hasStableDistributions: true,
       scheduleL: baseSCorpScheduleL,
       years: [
-        { year: 2025, ordinaryIncome: 142000, netRentalRealEstate: 12000, otherNetRental: 0, depreciation: 18500, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000, distributions: 62000 },
-        { year: 2024, ordinaryIncome: 128000, netRentalRealEstate: 9500, otherNetRental: 0, depreciation: 16200, depletion: 0, mealsM1: 1900, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 45000, distributions: 55000 },
+        { year: 2025, ordinaryIncome: 142000, netRentalRealEstate: 12000, otherNetRental: 0, depreciation: 18500, gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 2200, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 48000, distributions: 62000 },
+        { year: 2024, ordinaryIncome: 128000, netRentalRealEstate: 9500, otherNetRental: 0, depreciation: 16200, gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 1900, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 45000, distributions: 55000 },
       ],
     },
   ]);
@@ -972,16 +1003,16 @@ export default function UnderwriterSplitViewDemo({
       id: 'partnership-horizon', businessName: 'Horizon Property Partners', ein: '52-2468101',
       profitPctEnd: 50, capitalPctEnd: 50, hasStableDistributions: true, scheduleL: basePartnershipScheduleL,
       years: [
-        { year: 2025, ordinaryIncome: 96000, netRentalRealEstate: 18000, otherNetRental: 2400, depreciation: 12000, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0, distributions: 48000 },
-        { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
+        { year: 2025, ordinaryIncome: 96000, netRentalRealEstate: 18000, otherNetRental: 2400, depreciation: 12000, gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 800, guaranteedPayments: 24000, otherNoncash: 1500, w2Wages: 0, distributions: 48000 },
+        { year: 2024, ordinaryIncome: 88000, netRentalRealEstate: 16500, otherNetRental: 2200, depreciation: 11000, gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 700, guaranteedPayments: 24000, otherNoncash: 1200, w2Wages: 0, distributions: 45000 },
       ],
     },
     {
       id: 'partnership-undisclosed-side', businessName: 'Undisclosed Side LLC', ein: '11-2233445',
       profitPctEnd: 25, capitalPctEnd: 25, hasStableDistributions: true, scheduleL: basePartnershipScheduleL,
       years: [
-        { year: 2025, ordinaryIncome: 41000, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 4000, depletion: 0, mealsM1: 200, guaranteedPayments: 8000, otherNoncash: 0, w2Wages: 0, distributions: 12000 },
-        { year: 2024, ordinaryIncome: 38000, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 3800, depletion: 0, mealsM1: 180, guaranteedPayments: 8000, otherNoncash: 0, w2Wages: 0, distributions: 11000 },
+        { year: 2025, ordinaryIncome: 41000, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 4000, gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 200, guaranteedPayments: 8000, otherNoncash: 0, w2Wages: 0, distributions: 12000 },
+        { year: 2024, ordinaryIncome: 38000, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 3800, gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 180, guaranteedPayments: 8000, otherNoncash: 0, w2Wages: 0, distributions: 11000 },
       ],
     },
   ]);
@@ -1007,7 +1038,16 @@ export default function UnderwriterSplitViewDemo({
     setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id ? { ...entity, profitPctEnd: value } : entity));
   const setPartnershipCapitalPctEnd = (value: number) =>
     setPartnershipEntities((entities) => entities.map((entity) => entity.id === activePartnership.id ? { ...entity, capitalPctEnd: value } : entity));
-  const partnershipPct = gseInvestor === 'FREDDIE' ? partnershipProfitPctEnd : partnershipCapitalPctEnd;
+  // FNMA qualifies on ending capital, Freddie Mac on ending profit. When they
+  // differ the lower is used for either agency, matching resolve1065Ownership.
+  const partnershipAgencyPct = gseInvestor === 'FREDDIE' ? partnershipProfitPctEnd : partnershipCapitalPctEnd;
+  const partnershipPct = Math.min(partnershipProfitPctEnd, partnershipCapitalPctEnd);
+  const partnershipPctNote =
+    partnershipProfitPctEnd !== partnershipCapitalPctEnd
+      ? `Ending profit ${partnershipProfitPctEnd}% and capital ${partnershipCapitalPctEnd}% differ. The lower ${partnershipPct}% is applied${
+          partnershipPct < partnershipAgencyPct ? ` instead of ${gseInvestor === 'FREDDIE' ? 'Freddie Mac' : 'FNMA'}'s ${partnershipAgencyPct}%` : ''
+        }. Confirm the partnership agreement before using the higher figure.`
+      : null;
   const sCorpL = activeSCorp.scheduleL;
   const setSCorpL = (value: React.SetStateAction<ScheduleL>) =>
     setSCorpEntities((entities) => entities.map((entity) => entity.id === activeSCorp.id
@@ -2157,18 +2197,38 @@ export default function UnderwriterSplitViewDemo({
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
-  const handleInspectField = (fieldId: string, documentId?: string) => {
+  const handleInspectField = (fieldId: string, documentId?: string, clicked?: HTMLElement | null) => {
     skipPageResetRef.current = true;
     setHighlightFieldId(fieldId);
     setDocMode('pdf');
     const isWageField = fieldId.startsWith('w2-') || fieldId.startsWith('ps-');
     if (fieldId.startsWith('ent2-')) setActiveTab('SCHEDULE_E');
-    const live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId, livePageIndex);
-    // A wage value click inspects the open document only. It must never jump to
-    // another uploaded W-2/paystub merely because that PDF has the same field.
-    if (!isWageField) {
-      if (live?.documentId) setInspectDocId(live.documentId);
-      else if (documentId) setInspectDocId(documentId);
+    let live = fieldForInspection(mappedFields, fieldId, canvasDoc?.id, documentId, livePageIndex);
+
+    // A wage click still must never jump to another employer's W-2 merely
+    // because that PDF carries the same field id. But refusing to look past the
+    // open document meant clicking a W-2 value while the pay stub was open
+    // resolved to nothing: no highlight, no page change, and the underwriter
+    // had to switch documents by hand before the click did anything. Retrying
+    // within this employer's own uploads keeps the protection and still lands
+    // on the document the figure came from.
+    if (!live && isWageField) {
+      live = fieldForInspectionWithin(
+        mappedFields,
+        fieldId,
+        activeW2Employer.documentIds,
+        livePageIndex,
+      );
+    }
+
+    if (live?.documentId) setInspectDocId(live.documentId);
+    else if (documentId && !isWageField) setInspectDocId(documentId);
+
+    // pickDocumentForTab only ranks documents whose kind matches the tab, so on
+    // a wage tab the preferred id is ignored unless the wage kind matches the
+    // field being inspected.
+    if (isWageField && live?.documentId) {
+      setWageDocKind(fieldId.startsWith('w2-') ? 'w2' : 'paystub');
     }
     const overlay = inspectOverlayFromField(live);
     if (overlay) {
@@ -2194,9 +2254,17 @@ export default function UnderwriterSplitViewDemo({
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
     requestAnimationFrame(() => {
-      document.querySelector(`[data-qa-field="${fieldId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      const boxId = live?.id ?? fieldId;
-      document.querySelector(`[data-box-id="${boxId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      // Only the worksheet field is scrolled here, and only within its own
+      // pane. scrollIntoView walks every scrollable ancestor, so scrolling the
+      // PDF overlay box from here dragged the whole page and sent the QA panel
+      // back to the top on every click. PdfPagePreview scrolls its own pane.
+      // Prefer the element that was actually clicked. Field ids can repeat
+      // across documents (two Schedule Es each have a page 1 column A), so a
+      // selector returns the first match, which sat at the top of the panel
+      // and dragged it there on every click below property 3.
+      scrollIntoViewWithin(
+        clicked ?? document.querySelector<HTMLElement>(`[data-qa-field="${fieldId}"]`),
+      );
     });
   };
 
@@ -2326,7 +2394,7 @@ export default function UnderwriterSplitViewDemo({
     const id = `scorp-${crypto.randomUUID()}`;
     const emptyYear = (year: number): CorpYear => ({
       year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
-      depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+      gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
     });
     setSCorpEntities((entities) => [...entities, {
       id, businessName: `New S-Corporation ${entities.length + 1}`, ein: '', ownershipPct: 100,
@@ -2339,7 +2407,7 @@ export default function UnderwriterSplitViewDemo({
     const id = `partnership-${crypto.randomUUID()}`;
     const emptyYear = (year: number): CorpYear => ({
       year, ordinaryIncome: 0, netRentalRealEstate: 0, otherNetRental: 0, depreciation: 0,
-      depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
+      gain4797: 0, otherIncome: 0, depreciation1125A: 0, depreciation8825: 0, depletion: 0, mealsM1: 0, guaranteedPayments: 0, otherNoncash: 0, w2Wages: 0, distributions: 0,
     });
     setPartnershipEntities((entities) => [...entities, {
       id, businessName: `New Partnership ${entities.length + 1}`, ein: '', profitPctEnd: 100, capitalPctEnd: 100,
@@ -2429,6 +2497,7 @@ export default function UnderwriterSplitViewDemo({
               pageIndex: livePageIndex,
               pageCount: canvasDoc.result.total_pages_scanned,
               fields: canvasFields,
+              highlight: inspectOverlay,
             }
           : null,
     }),
@@ -2452,6 +2521,7 @@ export default function UnderwriterSplitViewDemo({
       livePageIndex,
       mappedFields,
       canvasFields,
+      inspectOverlay,
     ],
   );
 
@@ -2802,6 +2872,37 @@ export default function UnderwriterSplitViewDemo({
     partnershipCapitalPctEnd,
   ]);
 
+  const docChips = (
+    <div className="space-y-1.5 border-b border-slate-200 bg-slate-50 px-4 py-2">
+      {tabDocGroups.map((group) => (
+        <div key={group.label} className="flex flex-wrap items-center gap-1.5">
+          <span className="w-16 shrink-0 text-[10px] font-black uppercase tracking-wider text-slate-400">{group.label}</span>
+          {group.docs.map((doc) => (
+            <button
+              key={doc.id}
+              type="button"
+              title={doc.fileName}
+              onClick={() => {
+                if (group.wageDocKind) setWageDocKind(group.wageDocKind);
+                setInspectDocId(doc.id);
+                const employer = w2Employers.find((entry) => entry.documentIds?.includes(doc.id));
+                if (employer) setActiveW2EmployerId(employer.id);
+                setLivePageIndex(pageForKind(doc.result, group.kind ?? kindsOf(doc)[0]));
+              }}
+              className={`max-w-[14rem] truncate rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                canvasDoc?.id === doc.id
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+              }`}
+            >
+              {doc.fileName}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div
       ref={workspaceRef}
@@ -2909,58 +3010,10 @@ export default function UnderwriterSplitViewDemo({
           ) : null}
         </div>
         {parseError ? <p className="w-full text-xs text-rose-600">{parseError}</p> : null}
-        {isLive && packet.length > 0 ? (
-          <div className="flex w-full flex-wrap gap-1.5">
-            {packet.map((doc) => (
-              <button
-                key={doc.id}
-                type="button"
-                onClick={() => {
-                  const next = tabForKinds(kindsOf(doc));
-                  setActiveTab(next.tab);
-                  if (next.wageDocKind) setWageDocKind(next.wageDocKind);
-                  setInspectDocId(doc.id);
-                  const employer = w2Employers.find((entry) => entry.documentIds?.includes(doc.id));
-                  if (employer) setActiveW2EmployerId(employer.id);
-                  setLivePageIndex(pageForKind(doc.result, kindsOf(doc)[0]));
-                }}
-                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                  canvasDoc?.id === doc.id
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
-                }`}
-              >
-                {doc.fileName}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       <UrlAEntityRoster result={locateResult} onSelect={selectUrlAEntity} />
 
-      <div className="flex shrink-0 overflow-x-auto border-b border-slate-200 px-2">
-        {availableTabs.map(([id, label, Icon]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => {
-              setActiveTab(id);
-              setInspectDocId(null);
-              setHighlightFieldId(null);
-              setCanvasYearIndex(0);
-            }}
-            className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-bold transition ${
-              activeTab === id
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
 
       {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
       <div className="flex min-h-0 flex-1">
@@ -2995,7 +3048,7 @@ export default function UnderwriterSplitViewDemo({
                     </button>
                   </div>
                 )}
-                {(activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && (
+                {(activeTab === 'PAYSTUB_RECONCILIATION' || activeTab === 'ENCOMPASS_SYNC') && !(isLive && tabDocGroups.length) && (
                   <div className="flex rounded-md border border-slate-200 p-0.5">
                     <button
                       type="button"
@@ -3022,6 +3075,8 @@ export default function UnderwriterSplitViewDemo({
               </div>
             </div>
 
+            {isLive && tabDocGroups.length ? docChips : null}
+
             {isLive && canvasDoc ? (
               <PdfPagePreview
                 file={canvasDoc.file}
@@ -3032,6 +3087,7 @@ export default function UnderwriterSplitViewDemo({
                 highlight={inspectOverlay}
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
+                fillHeight
               />
             ) : parseBusy ? (
               <div className="flex flex-col items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-10 text-center">
@@ -3176,7 +3232,33 @@ export default function UnderwriterSplitViewDemo({
         )}
 
         {/* ==================== RIGHT PANEL: TAB-DRIVEN CALCULATION ENGINES ==================== */}
-        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto bg-white p-6">
+        {/* The income type tabs sit above the QA panel they switch, not above the
+            document, and stay put while the panel below them scrolls. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+          <div className="flex shrink-0 overflow-x-auto border-b border-slate-200 bg-white px-2">
+            {availableTabs.map(([id, label, Icon]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(id);
+                  setInspectDocId(null);
+                  setHighlightFieldId(null);
+                  setCanvasYearIndex(0);
+                }}
+                className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-bold transition ${
+                  activeTab === id
+                    ? 'border-emerald-600 text-emerald-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        {docPopout && isLive && tabDocGroups.length ? docChips : null}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
           {docPopout && (
             <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs">
               <span className="flex items-center gap-2 font-bold text-indigo-800">
@@ -3567,7 +3649,7 @@ export default function UnderwriterSplitViewDemo({
                   setActiveSchCId(remaining[0].id);
                 }}
               />
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
                 {schCYears.slice(0, twoYearSchC ? 2 : 1).map((row, index) => (
                   <YearStack
                     key={row.year}
@@ -3656,13 +3738,19 @@ export default function UnderwriterSplitViewDemo({
                   setActiveSCorpId(remaining[0].id);
                 }}
               />
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
                 {sCorpYears.slice(0, twoYearScorp ? 2 : 1).map((row, index) => (
-                  <YearStack key={row.year} title={`${row.year} K-1`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
+                  <YearStack key={row.year} title={`${row.year} 1120-S and K-1`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
                     <CorpLines
                       row={row}
                       yearKey={index === 0 ? 'y1' : 'y2'}
                       kind="scorp"
+                      ownershipPct={sCorpShareholderPct}
+                      total={
+                        (sCorpShareholderPct < 25
+                          ? corpMinorityAnnual(row, sCorpShareholderPct).capped
+                          : corpBusinessAnnual(row, sCorpShareholderPct)) + row.w2Wages
+                      }
                       selectedId={highlightFieldId}
                       onSelect={handleInspectField}
                       onChange={(patch) =>
@@ -3673,14 +3761,6 @@ export default function UnderwriterSplitViewDemo({
                         })
                       }
                     />
-                    <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
-                      Share of cash flow{' '}
-                      {usd(
-                        (sCorpShareholderPct < 25
-                          ? corpMinorityAnnual(row, sCorpShareholderPct).capped
-                          : corpBusinessAnnual(row, sCorpShareholderPct)) + row.w2Wages,
-                      )}
-                    </p>
                   </YearStack>
                 ))}
               </div>
@@ -3729,7 +3809,7 @@ export default function UnderwriterSplitViewDemo({
                   setActiveCCorpId(remaining[0].id);
                 }}
               />
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
                 {cCorpYears.slice(0, twoYearCCorp ? 2 : 1).map((row, index) => (
                   <YearStack key={row.year} title={`${row.year} Form 1120`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
                     <CCorpLines
@@ -3806,6 +3886,11 @@ export default function UnderwriterSplitViewDemo({
                       className={`w-16 rounded border px-2 py-1 font-mono text-sm ${gseInvestor === 'FNMA' ? 'border-slate-400' : 'border-slate-200 text-slate-400'}`}
                     />
                   </label>
+                  {partnershipPctNote ? (
+                    <p className="w-full rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-900">
+                      {partnershipPctNote}
+                    </p>
+                  ) : null}
                   {partnershipPct < 25 && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800">
                       &lt;25% · not self-employed
@@ -3845,13 +3930,19 @@ export default function UnderwriterSplitViewDemo({
                   setActivePartnershipId(remaining[0].id);
                 }}
               />
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
                 {partnershipYears.slice(0, twoYearPartnership ? 2 : 1).map((row, index) => (
-                  <YearStack key={row.year} title={`${row.year} K-1`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
+                  <YearStack key={row.year} title={`${row.year} 1065 and K-1`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
                     <CorpLines
                       row={row}
                       yearKey={index === 0 ? 'y1' : 'y2'}
                       kind="partnership"
+                      ownershipPct={partnershipPct}
+                      total={
+                        partnershipPct < 25
+                          ? corpMinorityAnnual(row, partnershipPct).capped
+                          : corpBusinessAnnual(row, partnershipPct)
+                      }
                       selectedId={highlightFieldId}
                       onSelect={handleInspectField}
                       onChange={(patch) =>
@@ -3862,14 +3953,6 @@ export default function UnderwriterSplitViewDemo({
                         })
                       }
                     />
-                    <p className="pt-1 text-right font-mono text-xs font-black text-slate-900">
-                      Share of cash flow{' '}
-                      {usd(
-                        partnershipPct < 25
-                          ? corpMinorityAnnual(row, partnershipPct).capped
-                          : corpBusinessAnnual(row, partnershipPct),
-                      )}
-                    </p>
                   </YearStack>
                 ))}
               </div>
@@ -3912,7 +3995,7 @@ export default function UnderwriterSplitViewDemo({
                   setActiveScheduleFId(remaining[0].id);
                 }}
               />
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
                 {activeScheduleF.years.slice(0, twoYearScheduleF ? 2 : 1).map((year, index) => (
                   <YearStack key={year.year} title={`${year.year} Schedule F`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
                     {[
@@ -3968,7 +4051,7 @@ export default function UnderwriterSplitViewDemo({
                   Additional income from these sources may be eligible. The underwriter may choose to include it after verifying receipt history, expected continuance, and sufficient supporting asset balances.
                 </p>
               </div>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4">
                 {assetIncomeYears.slice(0, twoYearAssetIncome ? 2 : 1).map((year, index) => (
                   <YearStack key={year.year} title={`${year.year} tax return`} subtitle={index === 0 ? 'Most recent' : 'Prior year'}>
                     {[
@@ -4246,12 +4329,13 @@ export default function UnderwriterSplitViewDemo({
                                       ? 'border-emerald-300 bg-emerald-50'
                                       : 'border-slate-100 bg-slate-50'
                                   }`}
-                                  onClick={() => {
+                                  onClick={(event) => {
                                     if (!y.source) return;
                                     const sourceId = RENTAL_YEAR_KEY_TO_SOURCE[key];
                                     handleInspectField(
                                       scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, sourceId),
                                       y.source.documentId,
+                                      event.currentTarget,
                                     );
                                   }}
                                 >
@@ -4311,11 +4395,12 @@ export default function UnderwriterSplitViewDemo({
                                     ? 'border-indigo-300 bg-indigo-50'
                                     : 'border-indigo-100 bg-indigo-50/50'
                                 }`}
-                                onClick={() => {
+                                onClick={(event) => {
                                   if (!y.source) return;
                                   handleInspectField(
                                     scheduleEGridFieldId(scheduleEExtracts, y.source.pageIndex, y.source.column, 'ent2-net'),
                                     y.source.documentId,
+                                    event.currentTarget,
                                   );
                                 }}
                               >
@@ -4562,6 +4647,7 @@ export default function UnderwriterSplitViewDemo({
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

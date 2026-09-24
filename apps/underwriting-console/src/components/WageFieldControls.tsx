@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AlertTriangle, FileSearch, Info } from 'lucide-react';
 import type { ReviewNote } from '../parseTypes';
 
@@ -10,10 +11,10 @@ import type { ReviewNote } from '../parseTypes';
  * computed and discarded, so an excluded earning code was invisible.
  */
 
-export function formatMoney(value: number): string {
+export function formatMoney(value: number, decimals = 2): string {
   return value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
 }
 
@@ -46,6 +47,13 @@ export function MoneyField({
   const clickable = Boolean(fieldId && onInspect);
   const missing = extracted === false;
 
+  // While the field has focus the raw keystrokes are shown, and the formatted
+  // value returns on blur. Reformatting on every keystroke fights the typist:
+  // the controlled value is rewritten mid-entry and the caret jumps to the
+  // end, so typing "250" over an existing figure lands as "2.00".
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? (missing ? '' : formatMoney(value, decimals));
+
   return (
     <div
       data-qa-field={fieldId}
@@ -69,12 +77,15 @@ export function MoneyField({
       <input
         type="text"
         inputMode="decimal"
-        value={missing ? '' : formatMoney(value)}
+        value={display}
         placeholder={missing ? 'Not found on document' : undefined}
         onChange={(event) => {
-          const parsed = Number(event.target.value.replace(/[^0-9.-]/g, ''));
+          const raw = event.target.value;
+          setDraft(raw);
+          const parsed = Number(raw.replace(/[^0-9.-]/g, ''));
           onChange(Number.isFinite(parsed) ? Number(parsed.toFixed(decimals)) : 0);
         }}
+        onBlur={() => setDraft(null)}
         // The input covers most of the row, so it must not swallow the click:
         // showing where a figure came from is the point of the panel, and it
         // costs nothing to do that while the field also takes focus for edits.

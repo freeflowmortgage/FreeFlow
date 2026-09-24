@@ -26,6 +26,7 @@ export default function PdfPagePreview({
   highlight = null,
   onSelectField,
   onPageChange,
+  fillHeight = false,
 }: {
   file: File | null;
   pageIndex: number;
@@ -36,6 +37,12 @@ export default function PdfPagePreview({
   highlight?: InspectOverlay | null;
   onSelectField?: (id: string) => void;
   onPageChange: (index: number) => void;
+  /**
+   * Take the height left in a flex column instead of a fixed 78vh. The split
+   * view starts the pane below its toolbars, so 78vh ran past the window and
+   * the bottom of every page could not be scrolled into view.
+   */
+  fillHeight?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
@@ -44,6 +51,26 @@ export default function PdfPagePreview({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileKey = useMemo(() => (file ? `${file.name}-${file.size}-${file.lastModified}` : ''), [file]);
   const pageFields = fields.filter((field) => field.pageIndex === pageIndex);
+
+  // Exactly one field is selected. Every Schedule E property carries the same
+  // sourceFieldId, so matching on it marked all three columns as selected and
+  // one property's value lit up the whole row. The exact id wins; the looser
+  // match is only a fallback for ids that were aliased or entity-suffixed.
+  // With a resolved highlight, mark the field under it. The same source id
+  // repeats across Schedule E columns, so matching on the id alone outlined
+  // column C while the highlight sat on the column actually clicked.
+  const highlightHere = highlight && highlight.pageIndex === pageIndex ? highlight.box : null;
+  const selectedField = highlightHere
+    ? pageFields.find(
+        (field) =>
+          field.box &&
+          Math.abs(field.box.x - highlightHere.x) < 1e-6 &&
+          Math.abs(field.box.y - highlightHere.y) < 1e-6 &&
+          Math.abs(field.box.w - highlightHere.w) < 1e-6 &&
+          Math.abs(field.box.h - highlightHere.h) < 1e-6,
+      )
+    : pageFields.find((field) => field.id === selectedFieldId) ??
+      pageFields.find((field) => fieldMatchesInspectId(field, selectedFieldId));
 
   useEffect(() => {
     let cancelled = false;
@@ -96,21 +123,47 @@ export default function PdfPagePreview({
     };
   }, [pageIndex, ready, zoomIndex]);
 
-  // Keep the active highlight on screen. Once zoomed in, the cell being
-  // verified is usually outside the viewport, so a highlight the user cannot
-  // see is no better than no highlight.
+  // Keep the active highlight on screen once zoomed in, without moving
+  // anything else.
+  //
+  // scrollIntoView cannot be used here. It walks every scrollable ancestor,
+  // so centring a box inside this pane also repositioned the page and pulled
+  // the QA panel out from under the underwriter. Scrolling this container
+  // directly leaves the rest of the layout where it was. The query is scoped
+  // to the container for the same reason: a document-wide selector can match
+  // an overlay belonging to a different pane.
   useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
     const target =
-      document.querySelector('[data-inspect-overlay="true"]') ??
-      (selectedFieldId ? document.querySelector(`[data-box-id="${selectedFieldId}"]`) : null);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      container.querySelector('[data-inspect-overlay="true"]') ??
+      (selectedFieldId ? container.querySelector(`[data-box-id="${selectedFieldId}"]`) : null);
+    if (!(target instanceof HTMLElement)) return;
+
+    // Measure against the part of the pane actually on screen. The pane is
+    // capped at 78vh but starts below the toolbar, so its bottom edge can sit
+    // past the window; a box there counted as visible and was never scrolled to.
+    const rect = container.getBoundingClientRect();
+    const top = Math.max(rect.top, 0);
+    const bottom = Math.min(rect.bottom, window.innerHeight);
+    const pane = { top, bottom, left: rect.left, right: rect.right, width: rect.width, height: Math.max(bottom - top, 0) };
+    const box = target.getBoundingClientRect();
+    const alreadyVisible =
+      box.top >= pane.top && box.bottom <= pane.bottom && box.left >= pane.left && box.right <= pane.right;
+    if (alreadyVisible) return;
+
+    container.scrollTo({
+      top: Math.max(0, container.scrollTop + (box.top - pane.top) - (pane.height - box.height) / 2),
+      left: Math.max(0, container.scrollLeft + (box.left - pane.left) - (pane.width - box.width) / 2),
+      behavior: 'smooth',
+    });
   }, [selectedFieldId, highlight, pageIndex, ready, zoomIndex]);
 
   const last = Math.max(pageCount - 1, 0);
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs text-slate-500">
+    <div className={fillHeight ? 'flex min-h-0 flex-1 flex-col gap-2' : 'space-y-2'}>
+      <div className="flex shrink-0 items-center justify-between text-xs text-slate-500">
         <span>
           Page {pageIndex + 1} / {Math.max(pageCount, 1)} · {pageFields.length} mapped field{pageFields.length === 1 ? '' : 's'}
         </span>
@@ -165,11 +218,14 @@ export default function PdfPagePreview({
           </button>
         </div>
       </div>
-      <div ref={scrollRef} className="max-h-[78vh] overflow-auto rounded-lg border border-slate-200 bg-white">
+      <div
+        ref={scrollRef}
+        className={`${fillHeight ? 'min-h-0 flex-1' : 'max-h-[78vh]'} overflow-auto rounded-lg border border-slate-200 bg-white`}
+      >
         <div className="relative inline-block">
         <canvas ref={canvasRef} className="block" />
         {pageFields.filter((field) => isUsableOverlayBox(field.box)).flatMap((field) => {
-          const selected = fieldMatchesInspectId(field, selectedFieldId);
+          const selected = field === selectedField;
           const sourceBoxes = selected && field.componentBoxes?.length ? field.componentBoxes : [field.box];
           return sourceBoxes.map((sourceBox, componentIndex) => {
             const box = padOverlayBox(sourceBox);
