@@ -534,8 +534,40 @@ def _has_money(financials: dict[str, Any] | None) -> bool:
     return any(abs(float(value or 0)) > 0.005 for value in (financials or {}).values())
 
 
+_ORDINAL_SUFFIX = re.compile(r"^(?:st|nd|rd|th)$", re.I)
+
+
+def _space_street_number(match: re.Match[str]) -> str:
+    """Separate a house number from a street name OCR ran together."""
+    digits, letters = match.group(1), match.group(2)
+    # "3rd", "1st", "42nd" are one word; "1234main" is two.
+    if _ORDINAL_SUFFIX.match(letters):
+        return match.group(0)
+    return f"{digits} {letters}"
+
+
+_FULLWIDTH_PUNCTUATION = str.maketrans({"，": ",", "．": ".", "　": " ", "：": ":"})
+
+
 def clean_address(raw: str) -> str:
-    text = ADDRESS_NOISE.sub(" ", raw or "")
+    """Restore the spacing OCR drops inside a property address.
+
+    Real extractions look like "1895 BroadwayMesa,AZ85212" and
+    "29685 EasterCtGilbert，AZ85297": the house number runs into the street,
+    the street runs into the city, and the state runs into the ZIP. Besides
+    reading badly, a missing space after the house number fails
+    ``is_street_address`` below, which looks for a digit followed by
+    whitespace, so the row stops counting as a property at all.
+    """
+    text = (raw or "").translate(_FULLWIDTH_PUNCTUATION)
+    text = ADDRESS_NOISE.sub(" ", text)
+    # "1234main" -> "1234 main", leaving ordinals such as "3rd" alone.
+    text = re.sub(r"(\d)([A-Za-z]{2,})", _space_street_number, text)
+    # "BroadwayMesa" -> "Broadway Mesa", "EasterCtGilbert" -> "Easter Ct Gilbert".
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
+    # "AZ85212" -> "AZ 85212".
+    text = re.sub(r"(?<=[A-Za-z])(?=\d{5}(?:\D|$))", " ", text)
+    text = re.sub(r"\s*,\s*", ", ", text)
     return re.sub(r"\s+", " ", text).strip(" \t,;:-")
 
 

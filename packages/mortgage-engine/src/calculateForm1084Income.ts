@@ -86,6 +86,10 @@ export interface Form1120SEntry {
   k1OrdinaryIncome?: number;
   k1NetRentalRealEstate?: number;
   k1OtherNetRentalIncome?: number;
+  /** Form 1120-S line 4, removed from qualifying income (× ownership). */
+  gain4797?: number;
+  /** Form 1120-S line 5, removed from qualifying income (× ownership). */
+  otherIncome?: number;
   depreciation?: number;
   depletion?: number;
   amortization?: number;
@@ -115,6 +119,10 @@ export interface Form1065Entry {
   k1NetRentalRealEstate?: number;
   k1OtherNetRentalIncome?: number;
   k1GuaranteedPayments?: number;
+  /** Form 1065 line 6, removed from qualifying income (× ownership). */
+  gain4797?: number;
+  /** Form 1065 line 7, removed from qualifying income (× ownership). */
+  otherIncome?: number;
   depreciation?: number;
   depletion?: number;
   amortization?: number;
@@ -266,10 +274,53 @@ function isActiveW2Role(role: W2EmploymentRole): boolean {
   return role !== 'PRIOR';
 }
 
-function resolve1065Ownership(entry: Form1065Entry, gse: GseInvestor): number {
-  if (gse === 'FREDDIE' && entry.profitPercentageEnd != null) return entry.profitPercentageEnd;
-  if (gse === 'FNMA' && entry.capitalPercentageEnd != null) return entry.capitalPercentageEnd;
-  return entry.ownershipPercentage;
+export interface Form1065OwnershipBasis {
+  percentage: number;
+  /** Which K-1 Item J figure the percentage came from. */
+  basis: 'ENDING_PROFIT' | 'ENDING_CAPITAL' | 'STATED';
+  /** Set when profit and capital disagree, so the choice can be shown. */
+  note?: string;
+}
+
+/**
+ * Resolve the K-1 Item J percentage used to share partnership income.
+ *
+ * FNMA qualifies on the ending CAPITAL percentage and Freddie Mac on the
+ * ending PROFIT percentage. When a partnership agreement splits those
+ * differently the two figures disagree, and taking the agency's own figure at
+ * face value can share more income to the borrower than the other agency would
+ * allow. The lower of the two is used whenever they differ, and the reason is
+ * reported so the file shows which figure was applied and why.
+ */
+export function resolve1065Ownership(entry: Form1065Entry, gse: GseInvestor): Form1065OwnershipBasis {
+  const profit = entry.profitPercentageEnd;
+  const capital = entry.capitalPercentageEnd;
+  const agencyBasis = gse === 'FREDDIE' ? 'ENDING_PROFIT' : 'ENDING_CAPITAL';
+
+  if (profit != null && capital != null) {
+    if (profit === capital) {
+      return { percentage: profit, basis: agencyBasis };
+    }
+    const lower = Math.min(profit, capital);
+    const lowerBasis = lower === capital ? 'ENDING_CAPITAL' : 'ENDING_PROFIT';
+    const agencyFigure = gse === 'FREDDIE' ? profit : capital;
+    return {
+      percentage: lower,
+      basis: lowerBasis,
+      note:
+        `K-1 Item J ending profit ${profit}% and ending capital ${capital}% disagree. ` +
+        `${gse === 'FREDDIE' ? 'Freddie Mac' : 'FNMA'} qualifies on ` +
+        `${gse === 'FREDDIE' ? 'ending profit' : 'ending capital'} (${agencyFigure}%); ` +
+        `the lower ${lowerBasis === 'ENDING_CAPITAL' ? 'ending capital' : 'ending profit'} ` +
+        `${lower}% was applied. Confirm the partnership agreement before using the higher figure.`,
+    };
+  }
+
+  if (gse === 'FREDDIE' && profit != null) return { percentage: profit, basis: 'ENDING_PROFIT' };
+  if (gse === 'FNMA' && capital != null) return { percentage: capital, basis: 'ENDING_CAPITAL' };
+  if (profit != null) return { percentage: profit, basis: 'ENDING_PROFIT' };
+  if (capital != null) return { percentage: capital, basis: 'ENDING_CAPITAL' };
+  return { percentage: entry.ownershipPercentage, basis: 'STATED' };
 }
 
 export function scheduleLQuickRatioFromInput(sheet?: ScheduleLLiquidityInput): {
@@ -487,9 +538,13 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const depl = new Decimal(entry.depletion || 0);
     const amort = new Decimal(entry.amortization || 0);
     const meals = new Decimal(entry.mealsExclusion || 0);
+    const gain4797 = new Decimal(entry.gain4797 || 0);
+    const otherIncome = new Decimal(entry.otherIncome || 0);
     const distributions = new Decimal(entry.k1Distributions || 0);
     const liquidity = scheduleLQuickRatioFromInput(entry.scheduleL);
     const passesLiquidity = liquidity ? liquidity.ratio.gte(1.0) : true;
+    // K-1 boxes are already the shareholder's share and count at 100%.
+    const k1Income = ordinary.add(rentalRealEstate).add(otherRental);
 
     let k1EligibleIncome = new Decimal(0);
 
@@ -503,16 +558,16 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
           message: `S-Corporation Year ${entry.year}: Schedule L quick ratio is ${liquidity.ratio.toFixed(2)} (< 1.0). Business income locked out ($0.00). Officer W-2 wages still qualify.`
         });
       } else {
+      // Only the entity-level return lines are the shareholder's by ownership.
       const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
-      const totalCorpAdjustments = ordinary
-        .add(rentalRealEstate)
-        .add(otherRental)
-        .add(depr)
+      const returnAdjustments = depr
         .add(depl)
         .add(amort)
-        .sub(meals);
+        .sub(meals)
+        .sub(gain4797)
+        .sub(otherIncome);
 
-      const borrowerShareOfAdjustments = totalCorpAdjustments.mul(shareFactor);
+      const borrowerShareOfAdjustments = k1Income.add(returnAdjustments.mul(shareFactor));
 
       if (entry.hasStableDistributions) {
         k1EligibleIncome = borrowerShareOfAdjustments;
@@ -529,8 +584,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // Under 25%: borrower is NOT self-employed. K-1 boxes 1/2/3 remain usable as
       // ordinary income — no business-level non-cash add-backs, no liquidity test —
       // capped at actual distributions received unless a stable history is documented.
-      const shareFactor = new Decimal(entry.ownershipPercentage).div(100);
-      const minorityK1Income = ordinary.add(rentalRealEstate).add(otherRental).mul(shareFactor);
+      const minorityK1Income = k1Income;
       k1EligibleIncome = entry.hasStableDistributions
         ? minorityK1Income
         : Decimal.min(minorityK1Income, distributions);
@@ -562,7 +616,15 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
   // ──────────────────────────────────────────────────────────────────────
   const gseInvestor: GseInvestor = payload.gseInvestor === 'FREDDIE' ? 'FREDDIE' : 'FNMA';
   const form1065Breakdown = (payload.form1065 || []).map((entry) => {
-    const ownershipPercentage = resolve1065Ownership(entry, gseInvestor);
+    const ownership = resolve1065Ownership(entry, gseInvestor);
+    const ownershipPercentage = ownership.percentage;
+    if (ownership.note) {
+      warnings.push({
+        code: 'PARTNERSHIP_OWNERSHIP_BASIS',
+        severity: 'WARNING',
+        message: `Partnership Year ${entry.year}: ${ownership.note}`,
+      });
+    }
     const ordinary = new Decimal(entry.k1OrdinaryIncome || 0);
     const rentalRealEstate = new Decimal(entry.k1NetRentalRealEstate || 0);
     const otherRental = new Decimal(entry.k1OtherNetRentalIncome || 0);
@@ -571,9 +633,13 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const depl = new Decimal(entry.depletion || 0);
     const amort = new Decimal(entry.amortization || 0);
     const meals = new Decimal(entry.mealsExclusion || 0);
+    const gain4797 = new Decimal(entry.gain4797 || 0);
+    const otherIncome = new Decimal(entry.otherIncome || 0);
     const distributions = new Decimal(entry.k1Distributions || 0);
     const liquidity = scheduleLQuickRatioFromInput(entry.scheduleL);
     const passesLiquidity = liquidity ? liquidity.ratio.gte(1.0) : true;
+    // K-1 boxes are already the partner's share and count at 100%.
+    const k1Income = ordinary.add(rentalRealEstate).add(otherRental);
 
     let k1EligibleIncome = new Decimal(0);
 
@@ -586,16 +652,16 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
           message: `Partnership Year ${entry.year}: Schedule L quick ratio is ${liquidity.ratio.toFixed(2)} (< 1.0). Business income locked out ($0.00). Guaranteed payments still qualify.`
         });
       } else {
+      // Only the entity-level return lines are the partner's by ownership.
       const shareFactor = new Decimal(ownershipPercentage).div(100);
-      const totalPartnershipAdjustments = ordinary
-        .add(rentalRealEstate)
-        .add(otherRental)
-        .add(depr)
+      const returnAdjustments = depr
         .add(depl)
         .add(amort)
-        .sub(meals);
+        .sub(meals)
+        .sub(gain4797)
+        .sub(otherIncome);
 
-      const borrowerShareOfAdjustments = totalPartnershipAdjustments.mul(shareFactor);
+      const borrowerShareOfAdjustments = k1Income.add(returnAdjustments.mul(shareFactor));
 
       if (entry.hasStableDistributions) {
         k1EligibleIncome = borrowerShareOfAdjustments;
@@ -613,8 +679,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // ordinary income (guaranteed payments are added separately below) — no
       // business add-backs, no liquidity test — capped at distributions received
       // unless a stable history is documented.
-      const shareFactor = new Decimal(ownershipPercentage).div(100);
-      const minorityK1Income = ordinary.add(rentalRealEstate).add(otherRental).mul(shareFactor);
+      const minorityK1Income = k1Income;
       k1EligibleIncome = entry.hasStableDistributions
         ? minorityK1Income
         : Decimal.min(minorityK1Income, distributions);

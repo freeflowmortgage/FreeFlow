@@ -34,3 +34,23 @@ body {
   color: var(--ff-ink);
   font-family: Roboto, 'Liberation Sans', system-ui, sans-serif;
 }
+
+/*
+ * Income figures are typed or read off a document, never stepped.
+ *
+ * The number spinner turns a stray scroll or a mis-aimed click into a silent
+ * edit of a borrower's income, and the arrows sit right where the value is.
+ * The control keeps type="number" for numeric keyboards and validation; only
+ * the stepper affordance is removed. Wheel edits are blocked separately in
+ * useNumberInputWheelGuard.
+ */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

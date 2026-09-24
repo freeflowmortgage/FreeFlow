@@ -145,6 +145,18 @@ describe('live worksheet hydration', () => {
     ]);
   });
 
+  test('keeps the return line and Form 8825 depreciation apart so the worksheet can sum them', () => {
+    const fields: MappedIncomeField[] = [
+      field('pt-ord', 91200, { form: 'Form 1065', entityId: 'form-1065-p3' }),
+      field('pt-return-dep', 21750, { form: 'Form 1065', entityId: 'form-1065-p0' }),
+      field('form-8825-dep', 8200, { form: 'Form 8825', entityId: 'form-8825-p1' }),
+      field('form-4562-dep', 29950, { form: 'Form 1065', entityId: 'form-4562-p2' }),
+    ];
+    expect(livePartnershipPatches(fields)).toEqual([
+      expect.objectContaining({ ordinaryIncome: 91200, depreciation: 21750, depreciation8825: 8200 }),
+    ]);
+  });
+
   test('falls back to Form 4562 depreciation when Form 8825 Line 14 is absent', () => {
     const fields: MappedIncomeField[] = [
       field('pt-ord', 41000, { form: 'Form 1065', entityId: 'form-1065-p0' }),

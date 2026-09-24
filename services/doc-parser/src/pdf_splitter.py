@@ -177,7 +177,13 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         # Native PDF extraction commonly inserts newlines between a form name
         # and its subtitle. Classifiers describe the visual line, so search a
         # whitespace-normalized view while retaining raw text for glued OCR.
-        search_text = re.sub(r"\s+", " ", text).strip()
+        # Collapse runs of spaces and tabs, but keep line breaks. Folding
+        # newlines into spaces let a pattern's `.*` run the length of the page,
+        # so Schedule E page 1 matched the page 2 rule on its own instruction
+        # text ("report farm rental income ... on page 2, line 40") plus the
+        # "Schedule E (Form 1040)" footer, and a rental page was routed onto
+        # the partnership tab.
+        search_text = re.sub(r"[^\S\n]+", " ", text).strip()
 
         matched = [
             name
@@ -194,10 +200,22 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         if "W-2" in matched and not has_wage_boxes and (is_back or not is_front):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)
+        # Schedule E Part II reports income from K-1s and names the forms it
+        # accepts, so the page reads like every K-1 at once. It is where K-1
+        # income lands, not a K-1 itself, and labelling it as one sent the
+        # rental page to the 1065 and 1120-S tabs.
+        if "Schedule E (Page 2 - K-1s)" in matched:
+            dropped = [name for name in matched if name.startswith("Schedule K-1")]
+            if dropped:
+                matched = [name for name in matched if not name.startswith("Schedule K-1")]
+                logger.info("split_skip_k1_on_schedule_e index=%s dropped=%s", page.index, dropped)
+
         if "Schedule K-1" in matched:
+            # The specific labels are already present; only the generic one is
+            # removed. Re-appending them duplicated every K-1 label.
             specific = [name for name in matched if name.startswith("Schedule K-1 (")]
             if specific:
-                matched = [name for name in matched if name != "Schedule K-1"] + specific
+                matched = [name for name in matched if name != "Schedule K-1"]
 
         if matched:
             classifications[page.index] = matched
