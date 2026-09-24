@@ -17,6 +17,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $terraformDirectory = Join-Path $repoRoot "infrastructure/terraform/environments/dev"
+$terraformBackendConfig = Join-Path $terraformDirectory "backend.hcl"
 $bakeFile = Join-Path $repoRoot "docker-bake.hcl"
 
 function Invoke-Native {
@@ -44,10 +45,51 @@ function Invoke-NativeCapture {
     return ($output -join "`n").Trim()
 }
 
+function Invoke-WithAwsProfileCredentials {
+    param([Parameter(Mandatory = $true)][scriptblock]$Operation)
+
+    $credentialJson = Invoke-NativeCapture -Executable aws -ArgumentList @("configure", "export-credentials", "--profile", $AwsProfile, "--format", "process")
+    $credentials = $credentialJson | ConvertFrom-Json
+    $credentialEnvironment = @{
+        AWS_ACCESS_KEY_ID     = $credentials.AccessKeyId
+        AWS_SECRET_ACCESS_KEY = $credentials.SecretAccessKey
+        AWS_SESSION_TOKEN     = $credentials.SessionToken
+    }
+    $previousEnvironment = @{}
+
+    try {
+        foreach ($entry in $credentialEnvironment.GetEnumerator()) {
+            $previousEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        }
+        return & $Operation
+    } finally {
+        foreach ($entry in $previousEnvironment.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        }
+    }
+}
+
+function Invoke-Terraform {
+    param([string[]]$ArgumentList = @())
+
+    Invoke-WithAwsProfileCredentials -Operation {
+        Invoke-Native -Executable terraform -ArgumentList $ArgumentList
+    }
+}
+
+function Invoke-TerraformCapture {
+    param([string[]]$ArgumentList = @())
+
+    return Invoke-WithAwsProfileCredentials -Operation {
+        Invoke-NativeCapture -Executable terraform -ArgumentList $ArgumentList
+    }
+}
+
 function Get-TerraformOutput {
     param([Parameter(Mandatory = $true)][string]$Name)
 
-    return Invoke-NativeCapture -Executable terraform -ArgumentList @("-chdir=$terraformDirectory", "output", "-raw", $Name)
+    return Invoke-TerraformCapture -ArgumentList @("-chdir=$terraformDirectory", "output", "-raw", $Name)
 }
 
 function Get-EcrImageDigest {
@@ -130,8 +172,10 @@ function Assert-ImageScans {
             }
 
             $counts = $scan.imageScanFindings.findingSeverityCounts
-            $critical = if ($null -ne $counts.CRITICAL) { [int]$counts.CRITICAL } else { 0 }
-            $high = if ($null -ne $counts.HIGH) { [int]$counts.HIGH } else { 0 }
+            $criticalProperty = if ($null -ne $counts) { $counts.PSObject.Properties["CRITICAL"] } else { $null }
+            $highProperty = if ($null -ne $counts) { $counts.PSObject.Properties["HIGH"] } else { $null }
+            $critical = if ($null -ne $criticalProperty) { [int]$criticalProperty.Value } else { 0 }
+            $high = if ($null -ne $highProperty) { [int]$highProperty.Value } else { 0 }
             if ($critical -gt 0 -or $high -gt 0) {
                 throw "ECR scan blocked ${name}: CRITICAL=$critical HIGH=$high."
             }
@@ -155,7 +199,7 @@ function Assert-SafePlan {
         [Parameter(Mandatory = $true)][System.Collections.Generic.HashSet[string]]$AllowedAddresses
     )
 
-    $planJson = Invoke-NativeCapture -Executable terraform -ArgumentList @("-chdir=$terraformDirectory", "show", "-json", $Path)
+    $planJson = Invoke-TerraformCapture -ArgumentList @("-chdir=$terraformDirectory", "show", "-json", $Path)
     $plan = $planJson | ConvertFrom-Json
     foreach ($change in $plan.resource_changes) {
         $actions = @($change.change.actions)
@@ -232,6 +276,9 @@ foreach ($command in @("aws", "docker", "git", "terraform")) {
         throw "Required command is unavailable: $command"
     }
 }
+if (-not (Test-Path -LiteralPath $terraformBackendConfig -PathType Leaf)) {
+    throw "Terraform backend configuration is missing: $terraformBackendConfig"
+}
 
 Assert-CleanWorktree
 
@@ -246,7 +293,7 @@ if ($ImageTag -notmatch "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$") {
 $identity = (Invoke-NativeCapture -Executable aws -ArgumentList @("sts", "get-caller-identity", "--profile", $AwsProfile, "--region", $AwsRegion, "--output", "json")) | ConvertFrom-Json
 Write-Host "AWS account: $($identity.Account); region: $AwsRegion; commit: $commit"
 
-Invoke-Native -Executable terraform -ArgumentList @("-chdir=$terraformDirectory", "init", "-input=false")
+Invoke-Terraform -ArgumentList @("-chdir=$terraformDirectory", "init", "-input=false", "-reconfigure", "-backend-config=$terraformBackendConfig")
 
 $images = @{}
 $missingServices = [System.Collections.Generic.List[string]]::new()
@@ -345,7 +392,7 @@ foreach ($name in $selectedServices) {
 }
 
 if ($PSCmdlet.ShouldProcess($PlanPath, "Create and validate saved Terraform deployment plan")) {
-    Invoke-Native -Executable terraform -ArgumentList $planArguments
+    Invoke-Terraform -ArgumentList $planArguments
     Assert-SafePlan -Path $PlanPath -AllowedAddresses $allowedAddresses
     Write-Host "Saved Terraform plan passed scope and delete checks: $PlanPath"
 } else {
@@ -354,7 +401,7 @@ if ($PSCmdlet.ShouldProcess($PlanPath, "Create and validate saved Terraform depl
 
 if ($Apply) {
     if ($PSCmdlet.ShouldProcess($PlanPath, "Apply the validated Terraform plan and wait for ECS stability")) {
-        Invoke-Native -Executable terraform -ArgumentList @("-chdir=$terraformDirectory", "apply", "-input=false", $PlanPath)
+        Invoke-Terraform -ArgumentList @("-chdir=$terraformDirectory", "apply", "-input=false", $PlanPath)
 
         $requestedEcsServices = @($selectedServices | ForEach-Object { $serviceDefinitions[$_].EcsServices } | Select-Object -Unique)
         if ($requestedEcsServices.Count -gt 0) {
