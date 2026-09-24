@@ -251,7 +251,7 @@ export function fieldForInspection(
   explicitDocumentId?: string,
   preferPageIndex?: number,
 ): MappedIncomeField | undefined {
-const wanted = new Set(inspectFieldIds(fieldId));
+  const wanted = new Set(inspectFieldIds(fieldId));
   const matches = (field: MappedIncomeField) =>
     wanted.has(field.id) || (field.sourceFieldId != null && wanted.has(field.sourceFieldId));
   const documentId = explicitDocumentId ?? currentDocumentId ?? undefined;

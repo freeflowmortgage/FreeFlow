@@ -1,0 +1,24 @@
+{
+  "name": "@mortgage-pos/encompass-connector",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/index.js --external:@prisma/client && esbuild scripts/bootstrapSyntheticBinding.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/bootstrapSyntheticBinding.js --external:@prisma/client && esbuild scripts/privateSmoke.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/privateSmoke.js --external:@prisma/client && esbuild scripts/realConnectorParserSmoke.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/realConnectorParserSmoke.js --external:@prisma/client",
+    "test": "tsx --test tests/*.test.ts",
+    "test:database-bindings": "tsx --test tests/prisma-binding-store.integration.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@mortgage-pos/encompass-connector-contract": "workspace:*",
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "esbuild": "^0.28.2",
+    "prisma": "^5.22.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

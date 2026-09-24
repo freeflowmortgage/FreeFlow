@@ -16,6 +16,10 @@ RUN pnpm install --frozen-lockfile --filter @mortgage-pos/database...
 COPY packages/database/prisma ./packages/database/prisma
 COPY packages/database/scripts/migrate-live-test.sh /usr/local/bin/freeflow-migrate
 
+# The repository is used from Windows as well as Linux. Normalize the copied
+# shell entrypoint so its /bin/sh shebang is executable in the Linux runtime.
+RUN sed -i 's/\r$//' /usr/local/bin/freeflow-migrate
+
 RUN pnpm --filter @mortgage-pos/database prisma:generate \
     && addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 --ingroup nodejs --shell /bin/false appuser \

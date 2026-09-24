@@ -2230,27 +2230,27 @@ export default function UnderwriterSplitViewDemo({
     if (isWageField && live?.documentId) {
       setWageDocKind(fieldId.startsWith('w2-') ? 'w2' : 'paystub');
     }
-const overlay = inspectOverlayFromField(live);
-  if (overlay) {
-    setInspectOverlay(overlay);
-    viewer.triggerHighlight({
-      pageIndex: overlay.pageIndex,
-      box: [overlay.box.x, overlay.box.y, overlay.box.w, overlay.box.h],
-    });
-  } else {
-    setInspectOverlay(null);
-  }
+    const overlay = inspectOverlayFromField(live);
+    if (overlay) {
+      setInspectOverlay(overlay);
+      viewer.triggerHighlight({
+        pageIndex: overlay.pageIndex,
+        box: [overlay.box.x, overlay.box.y, overlay.box.w, overlay.box.h],
+      });
+    } else {
+      setInspectOverlay(null);
+    }
 
-  const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
-  const facsimile = fieldCoordinatesMapping.find((f) => f.id === fieldId);
-  const nav = inspectNavigation({
-    isLive,
-    livePageIndex: overlay ? overlay.pageIndex : live?.pageIndex,
-    entityPageIndex: fromEntity ? Number(fromEntity[1]) : undefined,
-    facsimilePage: facsimile?.boxCoordinates.page,
-  });
-  if (nav.livePageIndex != null) setLivePageIndex(nav.livePageIndex);
-  if (nav.facsimilePage != null) setActivePdfPage(nav.facsimilePage);
+    const fromEntity = fieldId.match(/schedule-e-p(\d+)-/i);
+    const facsimile = fieldCoordinatesMapping.find((f) => f.id === fieldId);
+    const nav = inspectNavigation({
+      isLive,
+      livePageIndex: overlay ? overlay.pageIndex : live?.pageIndex,
+      entityPageIndex: fromEntity ? Number(fromEntity[1]) : undefined,
+      facsimilePage: facsimile?.boxCoordinates.page,
+    });
+    if (nav.livePageIndex != null) setLivePageIndex(nav.livePageIndex);
+    if (nav.facsimilePage != null) setActivePdfPage(nav.facsimilePage);
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
     requestAnimationFrame(() => {

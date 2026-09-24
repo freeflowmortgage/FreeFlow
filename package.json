@@ -11,8 +11,8 @@
     "test:e2e": "pnpm --filter underwriting-console test:e2e"
   },
   "devDependencies": {
-    "turbo": "^2.0.4",
-    "typescript": "^5.4.5"
+    "turbo": "^2.11.3",
+    "typescript": "^5.9.3"
   },
   "packageManager": "pnpm@9.12.0"
 }

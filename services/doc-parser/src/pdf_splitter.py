@@ -300,7 +300,6 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     }
     if not needs:
         return set()
-
     hybrid_form_pages = {
         int(getattr(page, "index", index))
         for index, page in enumerate(pages)

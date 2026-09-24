@@ -1,0 +1,57 @@
+name: Encompass connector service validation
+
+on:
+  pull_request:
+    paths:
+      - 'services/encompass-connector/**'
+      - 'packages/encompass-connector-contract/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/encompass-connector-validation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/encompass-connector/**'
+      - 'packages/encompass-connector-contract/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/encompass-connector-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck and test connector service skeleton
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install locked JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --dir packages/database exec prisma generate --schema prisma/schema.prisma
+
+      - name: Typecheck and test the contract plus service skeleton
+        run: |
+          pnpm --filter @mortgage-pos/encompass-connector-contract build
+          pnpm --filter @mortgage-pos/encompass-connector-contract test
+          pnpm --filter @mortgage-pos/encompass-connector build
+          pnpm --filter @mortgage-pos/encompass-connector test
+
+      - name: Build the connector container
+        run: docker build --file services/encompass-connector/Dockerfile .

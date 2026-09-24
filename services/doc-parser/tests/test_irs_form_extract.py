@@ -158,6 +158,17 @@ def test_select_ocr_hybrid_form_pages_skips_blank_companion_pages() -> None:
     assert select_ocr_page_indices(inspected, split) == {0, 2}
 
 
+def test_select_ocr_hybrid_form_pages_skips_blank_companion_pages() -> None:
+    inspected = [
+        SimpleNamespace(index=0, use_ocr=True, flags=["numeric_form_overlay_ocr_bypass"]),
+        SimpleNamespace(index=1, use_ocr=True, flags=[]),
+        SimpleNamespace(index=2, use_ocr=True, flags=["numeric_form_overlay_ocr_bypass"]),
+        SimpleNamespace(index=3, use_ocr=True, flags=[]),
+    ]
+    split = SplitResult(target_pages=[], classifications={}, statement_refs=[], unresolved_statements=[])
+    assert select_ocr_page_indices(inspected, split) == {0, 2}
+
+
 def test_reads_w2_stacked_box5_not_adjacent_box_number() -> None:
     """IRS W-2 prints Box 5 above the amount and Box 2 in the cell to the right."""
     doc = fitz.open()

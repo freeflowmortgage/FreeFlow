@@ -1,11 +1,11 @@
 fastapi==0.141.1
-uvicorn==0.52.4
-pypdf==6.18.0
+uvicorn==0.53.0
+pypdf==6.19.0
 python-multipart==0.0.32
 Pillow==12.3.0
 numpy==2.2.6
 opencv-python==4.14.0.94
 pypdfium2==5.13.0
-pymupdf==1.26.4
+pymupdf==1.28.2
 rapidocr-onnxruntime==1.4.4
-onnxruntime==1.29.0
+onnxruntime==1.30.0

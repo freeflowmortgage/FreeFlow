@@ -323,11 +323,7 @@ async def process_document(request: Request):
         schedule_e_ms = (time.perf_counter() - schedule_e_started) * 1000
         try:
             w2_extracts = extract_w2_pages(pdf_bytes, ocr_pages=convert_result.pages)
-            logger.info(
-                "w2_grid_complete count=%s box5=%s",
-                len(w2_extracts),
-                [row.get("box5") for row in w2_extracts],
-            )
+            logger.info("w2_grid_complete count=%s", len(w2_extracts))
         except Exception as grid_exc:
             logger.warning("w2_grid_skipped: %s", grid_exc)
 

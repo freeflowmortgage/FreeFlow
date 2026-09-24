@@ -14,6 +14,34 @@ output "migration_repository_url" {
   value = aws_ecr_repository.migration.repository_url
 }
 
+output "connector_repository_url" {
+  value = aws_ecr_repository.connector.repository_url
+}
+
+output "connector_private_url" {
+  value = var.enable_encompass_connector ? "http://encompass-connector.freeflow.local:8080" : null
+}
+
+output "connector_log_group_name" {
+  value = aws_cloudwatch_log_group.connector.name
+}
+
+output "connector_task_definition_arn" {
+  value = var.enable_encompass_connector ? aws_ecs_task_definition.connector[0].arn : null
+}
+
+output "connector_binding_bootstrap_task_definition_arn" {
+  value = var.enable_encompass_connector ? aws_ecs_task_definition.connector_binding_bootstrap[0].arn : null
+}
+
+output "connector_security_group_id" {
+  value = var.enable_encompass_connector ? aws_security_group.connector[0].id : null
+}
+
+output "connector_service_name" {
+  value = var.enable_encompass_connector ? aws_ecs_service.connector[0].name : null
+}
+
 output "portal_url" {
   value = var.enable_edge ? (var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}") : null
 }
