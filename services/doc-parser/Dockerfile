@@ -19,7 +19,8 @@ RUN microdnf update -y \
     && rm -rf /var/cache/dnf
 
 COPY requirements.txt .
-RUN python3.11 -m pip install --no-cache-dir -r requirements.txt \
+RUN --mount=type=cache,id=freeflow-pip-cache,target=/root/.cache/pip,sharing=locked \
+    python3.11 -m pip install -r requirements.txt \
     && python3.11 -m pip check
 
 COPY src/ ./

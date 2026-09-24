@@ -21,7 +21,8 @@ COPY packages/database/package.json ./packages/database/
 COPY packages/ui/package.json ./packages/ui/
 COPY services/encompass-connector/package.json ./services/encompass-connector/
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=freeflow-pnpm-portal,target=/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile
 
 # 2. Builder stage. Inherit the dependency layer so pnpm workspace links remain
 # intact; copying linked node_modules trees between stages breaks Prisma's CLI.
