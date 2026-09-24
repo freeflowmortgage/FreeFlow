@@ -5,6 +5,8 @@
  * standard Encompass loan schema fields and custom field tracking IDs [cite: 28, 102].
  */
 
+import type { EncompassCustomFieldWrite } from './encompass-urla-map';
+
 export interface Form1084CalculationPayload {
   qualifyingMonthlyIncome: number;
   trendingAnalysis: string;
@@ -13,6 +15,10 @@ export interface Form1084CalculationPayload {
   form1120S_MonthlyTotal?: number;
   form1065_MonthlyTotal?: number;
   form1120_MonthlyTotal?: number;
+  /** Wage income from the pay stub / W-2 path, kept separate from business income. */
+  w2BaseMonthly?: number;
+  /** Net rental income from Schedule E. */
+  rentalMonthly?: number;
   auditUrl: string;
 }
 
@@ -31,6 +37,8 @@ export const ENCOMPASS_FIELD_MAP = {
   FREEFLOW_FORM_1120S_TOTAL: 'CX.FREEFLOW.FORM.1120S',
   FREEFLOW_FORM_1065_TOTAL: 'CX.FREEFLOW.FORM.1065',
   FREEFLOW_FORM_1120_TOTAL: 'CX.FREEFLOW.FORM.1120',
+  FREEFLOW_W2_BASE: 'CX.FREEFLOW.W2.BASE',
+  FREEFLOW_RENTAL_TOTAL: 'CX.FREEFLOW.RENTAL',
   FREEFLOW_SYNCED_TIMESTAMP: 'CX.FREEFLOW.SYNCED.AT',
 };
 
@@ -42,36 +50,28 @@ export function buildEncompassFieldUpdatePayload(
   loanId: string, 
   payload: Form1084CalculationPayload
 ) {
-  const customFields: Record<string, string> = {
-    [ENCOMPASS_FIELD_MAP.FREEFLOW_QUALIFYING_INCOME]: payload.qualifyingMonthlyIncome.toFixed(2),
-    [ENCOMPASS_FIELD_MAP.FREEFLOW_TRENDING_ANALYSIS]: payload.trendingAnalysis,
-    [ENCOMPASS_FIELD_MAP.FREEFLOW_AUDIT_URL]: payload.auditUrl,
-    [ENCOMPASS_FIELD_MAP.FREEFLOW_YEARS_ANALYZED]: payload.yearsAnalyzed.join(', '),
-    [ENCOMPASS_FIELD_MAP.FREEFLOW_SYNCED_TIMESTAMP]: new Date().toISOString()
+  // Encompass takes custom fields as a { fieldName, value } array, the same
+  // shape buildEncompassLoanUpdate emits. This helper used to return an object
+  // map and an otherIncome block that booked every dollar as self-employment
+  // income, which is wrong for a wage earner.
+  const customFields: EncompassCustomFieldWrite[] = [];
+  const push = (fieldName: string, value?: string) => {
+    if (value == null || value === '') return;
+    customFields.push({ fieldName, value });
   };
+  const money = (value?: number) => (value === undefined ? undefined : value.toFixed(2));
 
-  if (payload.scheduleC_MonthlyTotal !== undefined) {
-    customFields[ENCOMPASS_FIELD_MAP.FREEFLOW_SCHEDULE_C_TOTAL] = payload.scheduleC_MonthlyTotal.toFixed(2);
-  }
-  if (payload.form1120S_MonthlyTotal !== undefined) {
-    customFields[ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1120S_TOTAL] = payload.form1120S_MonthlyTotal.toFixed(2);
-  }
-  if (payload.form1065_MonthlyTotal !== undefined) {
-    customFields[ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1065_TOTAL] = payload.form1065_MonthlyTotal.toFixed(2);
-  }
-  if (payload.form1120_MonthlyTotal !== undefined) {
-    customFields[ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1120_TOTAL] = payload.form1120_MonthlyTotal.toFixed(2);
-  }
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_QUALIFYING_INCOME, money(payload.qualifyingMonthlyIncome));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_TRENDING_ANALYSIS, payload.trendingAnalysis);
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_AUDIT_URL, payload.auditUrl);
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_YEARS_ANALYZED, payload.yearsAnalyzed.join(', '));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_SCHEDULE_C_TOTAL, money(payload.scheduleC_MonthlyTotal));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1120S_TOTAL, money(payload.form1120S_MonthlyTotal));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1065_TOTAL, money(payload.form1065_MonthlyTotal));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1120_TOTAL, money(payload.form1120_MonthlyTotal));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_W2_BASE, money(payload.w2BaseMonthly));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_RENTAL_TOTAL, money(payload.rentalMonthly));
+  push(ENCOMPASS_FIELD_MAP.FREEFLOW_SYNCED_TIMESTAMP, new Date().toISOString());
 
-  // Generate complete Encompass API Loan Patch body [cite: 28, 102]
-  return {
-    customFields,
-    // Add calculated monthly self-employed income directly to standard 1003 other income slot [cite: 28, 102]
-    otherIncome: [
-      {
-        incomeType: 'SelfEmployment',
-        amount: payload.qualifyingMonthlyIncome
-      }
-    ]
-  };
+  return { loanId, customFields };
 }

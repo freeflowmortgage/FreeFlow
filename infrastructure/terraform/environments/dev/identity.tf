@@ -126,6 +126,34 @@ resource "aws_iam_role_policy" "portal_task" {
   policy = data.aws_iam_policy_document.portal_task.json
 }
 
+resource "aws_iam_role" "parser_execution" {
+  name               = "${local.name_prefix}-parser-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "parser_execution" {
+  role       = aws_iam_role.parser_execution.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+data "aws_iam_policy_document" "parser_execution_secret" {
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
+
+  statement {
+    sid       = "ReadParserDocumentIdKey"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.document_id_hmac[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "parser_execution_secret" {
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
+
+  name   = "parser-document-id-key"
+  role   = aws_iam_role.parser_execution.id
+  policy = data.aws_iam_policy_document.parser_execution_secret[0].json
+}
+
 resource "aws_iam_role" "parser_task" {
   name               = "${local.name_prefix}-parser-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json

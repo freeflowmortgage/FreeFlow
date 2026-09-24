@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
@@ -100,8 +101,17 @@ def _is_w2_back_page(text: str) -> bool:
     return any(needle in folded for needle in W2_BACK_FOLDED)
 
 
+# The form title "wage and tax statement" is on instruction pages too.
+# These four are the numbered wage cells.
+_W2_WAGE_BOX_FOLDED = tuple(needle for needle in W2_FRONT_FOLDED if needle != "wageandtaxstatement")
+
+
 def _has_w2_front_evidence(text: str) -> bool:
-    return sum(bool(pattern.search(text)) for pattern in W2_FRONT_LABELS) >= 2
+    """True when two wage-box labels are present, with or without spaces between words."""
+    if sum(bool(pattern.search(text or "")) for pattern in W2_FRONT_LABELS) >= 2:
+        return True
+    folded = folded_text(text)
+    return sum(needle in folded for needle in _W2_WAGE_BOX_FOLDED) >= 2
 
 
 @dataclass
@@ -167,7 +177,13 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         # Native PDF extraction commonly inserts newlines between a form name
         # and its subtitle. Classifiers describe the visual line, so search a
         # whitespace-normalized view while retaining raw text for glued OCR.
-        search_text = re.sub(r"\s+", " ", text).strip()
+        # Collapse runs of spaces and tabs, but keep line breaks. Folding
+        # newlines into spaces let a pattern's `.*` run the length of the page,
+        # so Schedule E page 1 matched the page 2 rule on its own instruction
+        # text ("report farm rental income ... on page 2, line 40") plus the
+        # "Schedule E (Form 1040)" footer, and a rental page was routed onto
+        # the partnership tab.
+        search_text = re.sub(r"[^\S\n]+", " ", text).strip()
 
         matched = [
             name
@@ -176,17 +192,30 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         ]
         if "W-2" not in matched and (_has_w2_front_evidence(search_text) or _has_w2_front_evidence(text)):
             matched.append("W-2")
-        if "W-2" in matched and (
-            _is_w2_back_page(text)
-            or _is_w2_back_page(search_text)
-            or not (_is_w2_front_page(text) or _is_w2_front_page(search_text))
-        ):
+        is_front = _is_w2_front_page(text) or _is_w2_front_page(search_text)
+        is_back = _is_w2_back_page(text) or _is_w2_back_page(search_text)
+        # Copy C's "Notice to Employee" is often printed on the same sheet as Copy 2.
+        # Wage-box labels keep the page. Drop only a real instruction sheet.
+        has_wage_boxes = _has_w2_front_evidence(text) or _has_w2_front_evidence(search_text)
+        if "W-2" in matched and not has_wage_boxes and (is_back or not is_front):
             matched.remove("W-2")
             logger.info("split_skip_w2_back index=%s", page.index)
+        # Schedule E Part II reports income from K-1s and names the forms it
+        # accepts, so the page reads like every K-1 at once. It is where K-1
+        # income lands, not a K-1 itself, and labelling it as one sent the
+        # rental page to the 1065 and 1120-S tabs.
+        if "Schedule E (Page 2 - K-1s)" in matched:
+            dropped = [name for name in matched if name.startswith("Schedule K-1")]
+            if dropped:
+                matched = [name for name in matched if not name.startswith("Schedule K-1")]
+                logger.info("split_skip_k1_on_schedule_e index=%s dropped=%s", page.index, dropped)
+
         if "Schedule K-1" in matched:
+            # The specific labels are already present; only the generic one is
+            # removed. Re-appending them duplicated every K-1 label.
             specific = [name for name in matched if name.startswith("Schedule K-1 (")]
             if specific:
-                matched = [name for name in matched if name != "Schedule K-1"] + specific
+                matched = [name for name in matched if name != "Schedule K-1"]
 
         if matched:
             classifications[page.index] = matched
@@ -246,8 +275,23 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     )
 
 
+OCR_PAGE_BUDGET = int(os.environ.get("OCR_PAGE_BUDGET", "80"))
+"""Ceiling on pages OCR'd in one request, to bound latency on huge packets."""
+
+
 def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult) -> set[int]:
-    """OCR only keep-set pages that still need it. Scan packets with no labels OCR all."""
+    """Choose which pages to OCR.
+
+    Every page without a usable text layer is selected. The keep set cannot be
+    used to narrow this: it comes from the preview pass, which classifies pages
+    from native text only, so an image-only page is never in it. Gating on the
+    keep set therefore skipped exactly the pages that needed OCR most, and a
+    borrower's scanned return inside an otherwise native packet was dropped
+    with nothing but an INFO log to show for it.
+
+    Only the page budget removes work now, and it prefers already-recognized
+    pages and reports the shortfall to the caller.
+    """
     pages = list(inspected)
     needs = {
         int(getattr(page, "index", index))
@@ -264,13 +308,18 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     if hybrid_form_pages:
         logger.info("ocr_hybrid_form_pages pages=%s", sorted(hybrid_form_pages))
         return hybrid_form_pages
-    kept = set(split_result.target_pages)
-    if kept:
-        selected = needs & kept
-        logger.info("ocr_gated keep=%s ocr=%s skipped=%s", sorted(kept), sorted(selected), sorted(needs - selected))
-        return selected
-    if len(needs) * 2 >= max(len(pages), 1):
-        logger.info("ocr_ungated_scan_packet pages=%s", sorted(needs))
+
+    if len(needs) <= OCR_PAGE_BUDGET:
+        logger.info("ocr_selected pages=%s", sorted(needs))
         return needs
-    logger.info("ocr_skipped_unrecognized needs=%s", sorted(needs))
-    return set()
+
+    kept = set(split_result.target_pages)
+    prioritized = sorted(needs & kept) + sorted(needs - kept)
+    selected = set(prioritized[:OCR_PAGE_BUDGET])
+    logger.warning(
+        "ocr_budget_exceeded budget=%s needed=%s skipped=%s",
+        OCR_PAGE_BUDGET,
+        len(needs),
+        sorted(needs - selected),
+    )
+    return selected

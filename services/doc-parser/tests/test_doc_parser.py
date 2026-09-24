@@ -268,6 +268,40 @@ def test_pdf_splitter_ignores_w2_back_or_instruction_page():
     assert 1 not in result.classifications
 
 
+def test_pdf_splitter_keeps_copy2_when_copy_c_notice_is_on_the_same_page():
+    spaced = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=True,
+        plain_text=(
+            "Copy 2 To Be Filed With Employee's State, City, or Local Income Tax Return "
+            "Form W-2 Wage and Tax Statement "
+            "1 Wages, tips, other compensation 159550.98 "
+            "3 Social security wages 142800.00 "
+            "5 Medicare wages and tips 168641.08 "
+            "Copy C For EMPLOYEE'S RECORDS (See Notice to Employee on the back of Copy B.)"
+        ),
+        words=[],
+    )
+    glued = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=False,
+        plain_text=(
+            "FormW-2WageandTaxStatement Copy2 "
+            "5Medicarewagesandtips 168641.08 3Socialsecuritywages 142800.00 "
+            "CopyC SeeNoticetoEmployeeonthebackofCopyB"
+        ),
+        words=[],
+    )
+    for page in (spaced, glued):
+        result = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
+        assert result.target_pages == [0]
+        assert "W-2" in result.classifications[0]
+
+
 def test_pdf_splitter_keeps_glued_ocr_w2_front_and_drops_glued_instructions():
     front = PageResult(
         index=0,

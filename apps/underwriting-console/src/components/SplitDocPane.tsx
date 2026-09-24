@@ -89,6 +89,7 @@ export default function SplitDocPane() {
               pageCount={snapshot.live.pageCount}
               fields={snapshot.live.fields}
               selectedFieldId={snapshot.selectedId}
+              highlight={snapshot.live.highlight ?? null}
               onSelectField={(id) => send({ type: 'select-field', id })}
               onPageChange={(index) => send({ type: 'page-change', index })}
             />

@@ -32,6 +32,13 @@ resource "random_password" "field_encryption" {
   special = false
 }
 
+resource "random_password" "document_id_hmac" {
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
+
+  length  = 64
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "database_app" {
   name                    = "${local.name_prefix}/database-app"
   description             = "Restricted synthetic dev database application login"
@@ -71,6 +78,26 @@ resource "aws_secretsmanager_secret" "field_encryption" {
 resource "aws_secretsmanager_secret_version" "field_encryption" {
   secret_id     = aws_secretsmanager_secret.field_encryption.id
   secret_string = random_password.field_encryption.result
+}
+
+# Rotating this key changes every parser document_id, so previously seen
+# documents stop matching for resubmission dedup.
+resource "aws_secretsmanager_secret" "document_id_hmac" {
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
+
+  name                    = "${local.name_prefix}/document-id-hmac-key"
+  description             = "Keys the income parser content-derived document id used for submission dedup"
+  recovery_window_in_days = 7
+  tags = {
+    DataClassification = "Confidential"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "document_id_hmac" {
+  count = var.enable_services && var.enable_edge && var.enable_parser ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.document_id_hmac[0].id
+  secret_string = random_password.document_id_hmac[0].result
 }
 
 resource "aws_secretsmanager_secret" "database_connector" {

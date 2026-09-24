@@ -1,3 +1,4 @@
+import type { InspectOverlay } from './livePacket';
 import type { MappedIncomeField } from './parseTypes';
 import type { CorpYear, SchCYear, ScheduleL } from './components/selfEmployedIncome';
 
@@ -32,6 +33,12 @@ export type DocPaneSnapshot = {
     pageIndex: number;
     pageCount: number;
     fields: MappedIncomeField[];
+    /**
+     * The box the main window resolved for the clicked QA row. The selected id
+     * is the QA row's, which matches no box on the PDF, so without this the
+     * second window neither highlighted nor scrolled to the figure.
+     */
+    highlight?: InspectOverlay | null;
   } | null;
 };
 

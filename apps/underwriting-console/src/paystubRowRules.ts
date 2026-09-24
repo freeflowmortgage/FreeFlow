@@ -25,6 +25,13 @@ const FREQ_MONTHLY = new RegExp(rules.frequency.monthly, 'i');
 export const PAYSTUB_YTD_FIELD_BY_KIND: Record<string, string> = rules.ytdFieldByKind;
 
 export function paystubHoursBeforeRate(text: string): boolean {
+  // Header order wins in either direction. The catalog pattern still requires
+  // the word "current", so "Hours Rate Amount" was treated as rate-then-hours.
+  for (const line of text.split(/\r?\n/)) {
+    const hoursAt = line.search(/\bhours?\b/i);
+    const rateAt = line.search(/\brate\b/i);
+    if (hoursAt >= 0 && rateAt >= 0 && hoursAt !== rateAt) return hoursAt < rateAt;
+  }
   return HOURS_BEFORE_RATE.test(text);
 }
 

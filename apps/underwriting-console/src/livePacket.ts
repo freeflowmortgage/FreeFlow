@@ -1,3 +1,4 @@
+import { inspectFamily } from './incomeInspect';
 import { isUsableOverlayBox } from './overlayBox';
 import type { LiveDocument, MappedIncomeField, ParsePage, ParseResponse, ScheduleEPropertyExtract } from './parseTypes';
 
@@ -196,6 +197,13 @@ export function inspectOverlayFromField(field: MappedIncomeField | undefined): I
 export function inspectFieldIds(fieldId: string | null | undefined): string[] {
   if (!fieldId) return [];
   const canonical = canonicalInspectFieldId(fieldId);
+  // 1065 / 1120-S QA rows are keyed per year ("k1-oi-y1") while the parser
+  // uses its own ids ("pt-return-other"), so without this translation a click
+  // on those rows never reached the document. Wage and rental ids already
+  // match the parser and keep exact matching.
+  if (/^(?:k1|scorp)-/.test(fieldId)) {
+    return [...new Set([fieldId, canonical, ...inspectFamily(fieldId)])];
+  }
   return canonical === fieldId ? [fieldId] : [fieldId, canonical];
 }
 
@@ -213,7 +221,11 @@ function pickInspectField(
   preferPageIndex?: number,
 ): MappedIncomeField | undefined {
   if (!candidates.length) return undefined;
-  if (fieldId && fieldId.includes('--')) {
+  // Schedule E ids name their column: the first property's is the bare source
+  // id ("ent2-tax") and the rest carry "--entity". Only the suffixed form was
+  // honoured, so clicking property 1 fell through to the last candidate on the
+  // page and highlighted column C.
+  if (fieldId && (fieldId.includes('--') || fieldId.startsWith('ent2-'))) {
     const exact = candidates.find((field) => field.id === fieldId);
     if (exact) return exact;
   }
@@ -250,6 +262,36 @@ export function fieldForInspection(
   }
   if (isWageField) return undefined;
   return pickInspectField(fields.filter(matches), fieldId, preferPageIndex);
+}
+
+/**
+ * Find a field on any of `documentIds`, ignoring which document is open.
+ *
+ * `fieldForInspection` deliberately refuses to look past the open document for
+ * a wage field, so a click can never land on a different employer's W-2 that
+ * happens to carry the same field id. That rule also meant clicking a W-2
+ * value while the pay stub was open resolved to nothing at all: no highlight,
+ * no page change, and the underwriter had to switch documents by hand first.
+ *
+ * Passing the active employer's own uploads keeps the original protection and
+ * still lets the click reach the document the value actually came from.
+ */
+export function fieldForInspectionWithin(
+  fields: MappedIncomeField[],
+  fieldId: string,
+  documentIds: string[] | undefined,
+  preferPageIndex?: number,
+): MappedIncomeField | undefined {
+  if (!documentIds?.length) return undefined;
+  const wanted = new Set(inspectFieldIds(fieldId));
+  const allowed = new Set(documentIds);
+  const scoped = fields.filter(
+    (field) =>
+      (wanted.has(field.id) || (field.sourceFieldId != null && wanted.has(field.sourceFieldId))) &&
+      field.documentId != null &&
+      allowed.has(field.documentId),
+  );
+  return scoped.length ? pickInspectField(scoped, fieldId, preferPageIndex) : undefined;
 }
 
 /** Live inspect uses extract pageIndex only. Facsimile stub page is demo-only. */

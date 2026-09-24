@@ -1,4 +1,5 @@
-import { Building2 } from 'lucide-react';
+import { useState } from 'react';
+import { Building2, ChevronDown } from 'lucide-react';
 import {
   discoveredSelectId,
   uniqueDiscoveredBusinesses,
@@ -14,18 +15,24 @@ export default function UrlAEntityRoster({
   onSelect?: (rosterId: string) => void;
 }) {
   const discovered = uniqueDiscoveredBusinesses(result.discovered);
+  const [open, setOpen] = useState(false);
   if (!result.roster.length && !discovered.length) return null;
   const located = result.roster.filter((row) => row.located).length;
 
   return (
     <section
       data-testid="urla-entity-roster"
-      className="shrink-0 border-b border-indigo-100 bg-indigo-50/60 px-4 py-2.5"
+      className="shrink-0 border-b border-slate-200 bg-white px-4 py-2"
     >
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-indigo-800">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full flex-wrap items-center gap-2 text-left"
+      >
+        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
           <Building2 className="h-3.5 w-3.5" />
           {result.roster.length ? '1003 entities' : 'Entities on returns'}
+          <ChevronDown className={`h-3.5 w-3.5 transition ${open ? 'rotate-180' : ''}`} />
         </span>
         {result.roster.length ? (
           <span className="text-[10px] font-bold text-indigo-700">
@@ -39,8 +46,9 @@ export default function UrlAEntityRoster({
             {discovered.length} undisclosed on returns (not listed on 1003)
           </span>
         ) : null}
-      </div>
-      <ul className="flex flex-wrap gap-1.5">
+      </button>
+      {open ? (
+      <ul className="mt-2 flex flex-wrap gap-1.5">
         {result.roster.map((row) => (
           <li key={row.entity.id}>
             <button
@@ -77,6 +85,7 @@ export default function UrlAEntityRoster({
           </li>
         ))}
       </ul>
+      ) : null}
     </section>
   );
 }

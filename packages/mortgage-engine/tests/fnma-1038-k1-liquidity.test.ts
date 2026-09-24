@@ -76,7 +76,7 @@ describe('FNMA 1038 rental cash flow and K-1 Schedule L liquidity', () => {
     };
 
     const result = calculateUnifiedIncome(payload);
-    // 20% < 25% → minority: (40000 * 0.20) capped at 6000 distributions + 24000 GP
+    // 20% < 25% → minority: K-1 $40,000 as reported, capped at 6000 distributions + 24000 GP
     expect(result.form1065Breakdown?.[0].ownershipPercentage).toBe(20);
     expect(result.form1065Breakdown?.[0].k1EligibleIncome).toBe(6000);
     expect(result.summary.qualifyingMonthlyIncome).toBe(2500);

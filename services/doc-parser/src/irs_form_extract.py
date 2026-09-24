@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from business_return_grid import extract_business_return_page, form_key_for_page
 from form_signatures import PAYSTUB_TITLE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
 from ocr_match import pattern_matches
 from paystub_row_rules import (
@@ -272,18 +273,52 @@ FORM_8825_FIELDS = (
 )
 
 SCHEDULE_L_FIELDS = (
-    FieldSpec("sch-l-cash", "Form 1120-S", "asset", "Line 1", "Cash", "Line 1", ("Cash",), "money"),
-    FieldSpec("sch-l-securities", "Form 1120-S", "asset", "Line 4", "Tax-Exempt Securities", "Line 4", ("Tax-exempt securities",), "money"),
-    FieldSpec("sch-l-ar", "Form 1120-S", "asset", "Line 2a", "Accounts Receivable", "Line 2a", ("Trade notes and accounts receivable",), "money"),
-    FieldSpec("sch-l-ap", "Form 1120-S", "asset", "Line 16", "Accounts Payable", "Line 16", ("Accounts payable",), "money"),
+    # money_last keeps column (d), the end-of-year balance. "money" kept column (b).
+    FieldSpec("sch-l-cash", "Form 1120-S", "asset", "Line 1", "Cash (End of Year)", "Line 1d", ("Cash",), "money_last"),
+    FieldSpec("sch-l-ar", "Form 1120-S", "asset", "Line 2a", "Accounts Receivable (End of Year)", "Line 2a", ("Trade notes and accounts receivable",), "money_last"),
+    FieldSpec("sch-l-securities", "Form 1120-S", "asset", "Line 4", "Tax-Exempt Securities (End of Year)", "Line 4", ("Tax-exempt securities",), "money_last"),
+    FieldSpec("sch-l-ap", "Form 1120-S", "asset", "Line 16", "Accounts Payable (End of Year)", "Line 16", ("Accounts payable",), "money_last"),
+    FieldSpec("sch-l-notes", "Form 1120-S", "asset", "Line 17", "Mortgages and notes payable in less than 1 year (End of Year)", "Line 17", ("payable in less than 1 year", "less than 1 year"), "money_last"),
+    FieldSpec("sch-l-other-current", "Form 1120-S", "asset", "Line 18", "Other Current Liabilities (End of Year)", "Line 18", ("Other current liabilities",), "money_last"),
+    FieldSpec("sch-l-current-liabilities", "Form 1120-S", "asset", "Line 18", "Total Current Liabilities (End of Year)", "Line 18d", ("Total current liabilities",), "money_last"),
+)
+
+# The K-1 catalogs above cover the borrower's share of an entity. The return
+# face carries the entity-level figures a self-employed worksheet adds back:
+# depreciation, depletion, amortization, officer compensation. Without these
+# the page classified, entered the keep set, and produced nothing.
+SCORP_RETURN_FIELDS = (
+    FieldSpec("scorp-return-name", "Form 1120-S", "identity", "Name", "Corporation Name", "Name", ("Name of corporation", "Name"), "text"),
+    FieldSpec("scorp-return-ein", "Form 1120-S", "identity", "Box B", "Employer Identification Number", "Box B", ("Employer identification number",), "ein"),
+    FieldSpec("scorp-return-ord", "Form 1120-S", "income", "Line 22", "Ordinary Business Income (Loss)", "Line 22", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
+    FieldSpec("scorp-return-officer-comp", "Form 1120-S", "income", "Line 7", "Compensation of Officers", "Line 7", ("Compensation of officers",), "money"),
+    FieldSpec("scorp-return-wages", "Form 1120-S", "income", "Line 8", "Salaries and Wages", "Line 8", ("Salaries and wages",), "money"),
+    FieldSpec("scorp-return-dep", "Form 1120-S", "addback", "Line 14", "Depreciation", "Line 14", ("Depreciation not claimed", "Depreciation"), "money"),
+    FieldSpec("scorp-return-depletion", "Form 1120-S", "addback", "Line 15", "Depletion", "Line 15", ("Depletion",), "money"),
+    FieldSpec("scorp-return-gross", "Form 1120-S", "income", "Line 1c", "Gross Receipts or Sales", "Line 1c", ("Gross receipts or sales",), "money"),
+)
+
+PARTNERSHIP_RETURN_FIELDS = (
+    FieldSpec("pt-return-name", "Form 1065", "identity", "Name", "Partnership Name", "Name", ("Name of partnership", "Name"), "text"),
+    FieldSpec("pt-return-ein", "Form 1065", "identity", "Box D", "Employer Identification Number", "Box D", ("Employer identification number",), "ein"),
+    FieldSpec("pt-return-ord", "Form 1065", "income", "Line 23", "Ordinary Business Income (Loss)", "Line 23", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
+    FieldSpec("pt-return-gp", "Form 1065", "income", "Line 10", "Guaranteed Payments to Partners", "Line 10", ("Guaranteed payments to partners", "Guaranteed payments"), "money"),
+    FieldSpec("pt-return-wages", "Form 1065", "income", "Line 9", "Salaries and Wages", "Line 9", ("Salaries and wages",), "money"),
+    FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16c", "Depreciation", "Line 16c", ("Depreciation, if required", "Depreciation"), "money"),
+    FieldSpec("pt-return-depletion", "Form 1065", "addback", "Line 17", "Depletion", "Line 17", ("Depletion",), "money"),
+    FieldSpec("pt-return-gross", "Form 1065", "income", "Line 1c", "Gross Receipts or Sales", "Line 1c", ("Gross receipts or sales",), "money"),
 )
 
 FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
     (W2_TITLE, W2_FIELDS),
     (re.compile(r"Schedule C.*Profit or Loss From Business|Profit or Loss From Business", re.I), SCHEDULE_C_FIELDS),
     (re.compile(r"Profit or Loss From Farming", re.I), SCHEDULE_F_FIELDS),
+    # K-1 patterns stay ahead of the return faces: a K-1 page often repeats the
+    # return title in its header, and the first matching catalog wins.
     (re.compile(r"Schedule K-1\s*\(Form\s*1120-?S\)", re.I), SCORP_FIELDS),
     (re.compile(r"Schedule K-1\s*\(Form\s*1065\)", re.I), PARTNERSHIP_FIELDS),
+    (re.compile(r"U\.S\. Income Tax Return for an S Corporation", re.I), SCORP_RETURN_FIELDS),
+    (re.compile(r"U\.S\. Return of Partnership Income", re.I), PARTNERSHIP_RETURN_FIELDS),
     (re.compile(r"U\.S\. Corporation Income Tax Return", re.I), FORM_1120_FIELDS),
     (re.compile(r"U\.S\. Individual Income Tax Return", re.I), FORM_1040_FIELDS),
     (re.compile(r"Schedule B.*Interest and Ordinary Dividends", re.I), SCHEDULE_B_FIELDS),
@@ -381,6 +416,52 @@ def _is_form_box_number(token: str, amount: float) -> bool:
     if not re.fullmatch(r"\d{1,2}", stripped):
         return False
     return amount == int(amount) and 0 <= amount <= 20
+
+
+_BUSINESS_FORMS = frozenset({"Form 1065", "Form 1120", "Form 1120-S"})
+# Captions a name clip reads when the name box is empty. Compared folded,
+# because OCR runs them together ("Partnership'semployeridentificationnumber").
+_BUSINESS_CAPTION_NEEDLES = (
+    "identificationnumber", "effectivedate", "businessactivity", "dateincorporated",
+    "totalassets", "nameaddress", "numberstreet", "numberandstreet", "cityortown",
+    "checkif", "seeinstructions", "calendaryear", "taxyearbeginning",
+)
+
+
+def _is_business_caption(value: str) -> bool:
+    folded = re.sub(r"[^a-z0-9]", "", (value or "").lower())
+    if not re.search(r"[a-z]", folded):
+        return True
+    return any(needle in folded for needle in _BUSINESS_CAPTION_NEEDLES)
+
+
+def _is_printed_reference(raw: str, amount: float, labels: Iterable[str] = ()) -> bool:
+    """A number the blank form prints, read as if it were an entry.
+
+    On an empty line the clip beside a caption holds only the form's own text:
+    the line number ("22"), a form it cites ("Form 4562", "Form 1125-A"), or
+    the tax year in the header. Entries carry commas or cents, or at least do
+    not sit right after the word "Form".
+    """
+    value = abs(amount)
+    text = raw or ""
+    spellings = {f"{value:,.2f}", f"{value:.2f}", f"{value:,.1f}", f"{value:.1f}"}
+    if value == int(value):
+        spellings |= {f"{int(value):,}", str(int(value))}
+    if not any(re.search(rf"(?<![\d,.]){re.escape(s)}(?![\d,])", text) for s in spellings):
+        # The amount was pieced together from separate numbers on the page
+        # ("8 ... 9" read as 8.90, "18 19" as 1,819), so it is not an entry.
+        return True
+    if value != int(value):
+        return False
+    number = int(value)
+    if any(re.search(rf"(?<!\d){number}(?!\d)", label) for label in labels):
+        return True
+    if re.search(rf"(?:Forms?|Schedule|section|lines?)\s*\(?{number}\b", text, re.I):
+        return True
+    if number <= 99:
+        return True
+    return 1990 <= number <= 2099
 
 
 def _label_variants(label: str) -> tuple[str, ...]:
@@ -598,7 +679,12 @@ def _parse_capture(raw: str, capture: str) -> tuple[str, float] | None:
             if not _is_form_box_number(match.group(0), parse_tax_amount(match.group(0)))
         ]
         if not matches:
-            amount = parse_tax_amount(text)
+            # Dot leaders reach here as "........" or with line numbers mixed
+            # in ("3....4.."), which is not a number.
+            try:
+                amount = parse_tax_amount(text)
+            except ValueError:
+                return None
             if abs(amount) <= 0.005 or _is_form_box_number(text, amount):
                 return None
             return _format_money(amount), amount
@@ -704,11 +790,8 @@ def _extract_spec(
     if hit is None:
         return None
     boxes: list[list[float]] = []
-    widget_box = _nearest_widget_box(page, hit, pymupdf)
-    if widget_box:
-        boxes.append(widget_box)
-    if spec.form == "W-2":
-        boxes.append(_clip_w2_column(page, hit))
+    # End-of-year column (d) is the last amount on the row. Read that span
+    # before a fillable widget, which is often the beginning-of-year box.
     if spec.capture == "money_last":
         boxes.append(
             [
@@ -718,6 +801,11 @@ def _extract_spec(
                 float(hit.y1) + 3.0,
             ]
         )
+    widget_box = _nearest_widget_box(page, hit, pymupdf)
+    if widget_box:
+        boxes.append(widget_box)
+    if spec.form == "W-2":
+        boxes.append(_clip_w2_column(page, hit))
     boxes.extend(
         [
             _clip_right(page, hit),
@@ -741,6 +829,14 @@ def _extract_spec(
         parsed = _parse_capture(raw, spec.capture)
         if spec.form == "W-2" and spec.capture == "money" and words:
             parsed = _same_column_money(words, box, hit) or parsed
+        if parsed and spec.form in _BUSINESS_FORMS and spec.capture.startswith("money"):
+            if _is_printed_reference(raw, parsed[1], spec.labels):
+                parsed = None
+                continue
+        if parsed and spec.form in _BUSINESS_FORMS and spec.capture == "text":
+            if _is_business_caption(parsed[0]):
+                parsed = None
+                continue
         if parsed:
             used_box = box
             break
@@ -1385,12 +1481,72 @@ def _plausible_w2_fields(rows: list[dict[str, Any]]) -> bool:
     return not (ein_like_box5 or box_number_like_withholding)
 
 
+def _paystub_fields_from_parser(
+    pdf_bytes: bytes | None, page_index: int
+) -> list[dict[str, Any]] | None:
+    """Extract a pay stub with the dedicated parser in ``src/paystub``.
+
+    Returns ``None`` when that parser cannot vouch for the page, which hands
+    the page back to the legacy table reader. The gate is the parser's own
+    reconciliation: it only claims a stub when the earnings lines sum to the
+    printed earnings total and the cash lines sum to printed gross pay. A page
+    it cannot balance is one where its column grid is wrong, and wrong values
+    with confident overlay boxes are worse than no fields at all.
+    """
+    if not pdf_bytes:
+        return None
+    try:
+        from paystub import income_fields, parse_paystub
+    except ImportError:  # pragma: no cover - packaged together in the image
+        logger.warning("paystub_parser_unavailable")
+        return None
+
+    try:
+        result = parse_paystub(pdf_bytes, page_index=page_index)
+    except Exception:  # pragma: no cover - never fail a packet on one page
+        logger.exception("paystub_parser_failed page=%s", page_index)
+        return None
+
+    if not result.lines or not result.reconciliation.balanced:
+        logger.info(
+            "paystub_parser_declined page=%s lines=%s balanced=%s warnings=%s",
+            page_index,
+            len(result.lines),
+            result.reconciliation.balanced,
+            len(result.warnings),
+        )
+        return None
+
+    fields = income_fields(result)
+    if not fields:
+        return None
+
+    # Everything the parser could not resolve, plus the notes an underwriter has
+    # to act on, rides along on the field records so the console can show them.
+    # These were previously computed and discarded, which is how an excluded
+    # earning code or a non-recurring leave code reached a decision unseen.
+    notes = [{"severity": "warning", "message": text} for text in result.warnings]
+    notes += [{"severity": "info", "message": text} for text in result.disclosures]
+    if notes:
+        for field in fields:
+            field["reviewNotes"] = notes
+
+    logger.info(
+        "paystub_parser_used page=%s fields=%s notes=%s",
+        page_index,
+        len(fields),
+        len(notes),
+    )
+    return fields
+
+
 def extract_page_fields(
     page: Any,
     *,
     page_index: int,
     words: list[dict[str, Any]] | None = None,
     text: str | None = None,
+    pdf_bytes: bytes | None = None,
 ) -> list[dict[str, Any]]:
     pymupdf = _require_pymupdf()
     native = page.get_text("text") or ""
@@ -1403,12 +1559,32 @@ def extract_page_fields(
 
     extracted: list[dict[str, Any]] = []
     seen: set[str] = set()
+    # Cells whose caption sits where the IRS blank puts it are read from the
+    # template first; the label catalogs below fill whatever that leaves.
+    form_key = form_key_for_page(blob)
+    if form_key is not None:
+        located: set[str] = set()
+        extracted.extend(
+            extract_business_return_page(
+                page, pymupdf, form_key=form_key, page_index=page_index, ocr_words=words, located=located
+            )
+        )
+        seen.update(row["sourceFieldId"] for row in extracted)
+        seen.update(located)
     catalogs = list(FORM_CATALOGS)
     for matcher, specs in catalogs:
         w2_from_labels = specs is W2_FIELDS and sum(bool(label.search(blob)) for label in W2_FRONT_LABELS) >= 2
         if not pattern_matches(matcher, blob) and not w2_from_labels:
             continue
         if specs is PAYSTUB_FIELDS:
+            delegated = _paystub_fields_from_parser(pdf_bytes, page_index)
+            if delegated is not None:
+                # The dedicated parser reconciled this page, so it owns every
+                # pay stub field on it. Letting the label-anchored specs below
+                # also fire would reintroduce the values it just replaced.
+                extracted.extend(delegated)
+                seen.update(row["sourceFieldId"] for row in delegated)
+                break
             for row in _extract_paystub_table(
                 page, pymupdf, page_index=page_index, blob=row_blob or blob, words=words
             ):
@@ -1527,6 +1703,7 @@ def extract_irs_form_fields(
         if index is None:
             continue
         supplied[int(index)] = page_result
+    source_bytes = bytes(pdf_input) if isinstance(pdf_input, (bytes, bytearray)) else None
     doc = _open_pdf(pymupdf, pdf_input)
     try:
         fields: list[dict[str, Any]] = []
@@ -1550,7 +1727,19 @@ def extract_irs_form_fields(
                         page_words, rotation, float(page.rect.width), float(page.rect.height)
                     )
                     extract_page = _PageView(page, pymupdf.Rect(0, 0, upright_w, upright_h))
-            page_fields = extract_page_fields(extract_page, page_index=index, words=page_words, text=text)
+            # One unreadable page must not cost the packet every other page's
+            # fields; the caller drops the whole result on an exception.
+            try:
+                page_fields = extract_page_fields(
+                    extract_page,
+                    page_index=index,
+                    words=page_words,
+                    text=text,
+                    pdf_bytes=source_bytes,
+                )
+            except Exception:
+                logger.exception("irs_form_extract_page_failed page=%s", index)
+                continue
             if rotation:
                 for row in page_fields:
                     row["box"] = _remap_overlay_box(row.get("box"), rotation)

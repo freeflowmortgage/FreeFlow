@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Info } from 'lucide-react';
 
 export const MILEAGE_DEP_RATE = 0.3;
@@ -17,9 +17,13 @@ export type CorpYear = {
   ordinaryIncome: number;        // K-1 Box 1
   netRentalRealEstate: number;   // K-1 Box 2
   otherNetRental: number;        // K-1 Box 3
-  depreciation: number;
+  gain4797: number;              // return line 6 (1065) / line 4 (1120-S), subtracted
+  otherIncome: number;           // return line 7 (1065) / line 5 (1120-S), subtracted
+  depreciation: number;          // return line 16c (1065) / line 14 (1120-S)
+  depreciation1125A: number;     // Form 1125-A cost of goods sold
+  depreciation8825: number;      // Form 8825 line 14
   depletion: number;
-  mealsM1: number;
+  mealsM1: number;               // Schedule M-1 line 4b (1065) / 3b (1120-S), deducted
   guaranteedPayments: number;    // K-1 Box 4 (1065 only)
   otherNoncash: number;
   w2Wages: number;
@@ -35,6 +39,8 @@ export type ScheduleL = {
   accountsPayable: number;
   notesLt1Yr: number;
   otherCurrentLiab: number;
+  /** Printed total current liabilities, end of year. When set, this is the quick-ratio denominator. */
+  currentLiabilities: number;
 };
 
 export type YtdPnl = {
@@ -123,28 +129,25 @@ export function ProfitLossBlock({
           </label>
           <label className="text-[10px] font-extrabold uppercase text-slate-500">
             Net profit / (loss)
-            <input
-              type="number"
+            <QaAmountInput
               value={pnl.netProfit}
-              onChange={(event) => onChange({ ...pnl, netProfit: Number(event.target.value) })}
+              onChange={(next) => onChange({ ...pnl, netProfit: next ?? 0 })}
               className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
             />
           </label>
           <label className="text-[10px] font-extrabold uppercase text-slate-500">
             Depreciation add-back
-            <input
-              type="number"
+            <QaAmountInput
               value={pnl.depreciation}
-              onChange={(event) => onChange({ ...pnl, depreciation: Number(event.target.value) })}
+              onChange={(next) => onChange({ ...pnl, depreciation: next ?? 0 })}
               className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
             />
           </label>
           <label className="text-[10px] font-extrabold uppercase text-slate-500">
             Other add-backs
-            <input
-              type="number"
+            <QaAmountInput
               value={pnl.otherAddbacks}
-              onChange={(event) => onChange({ ...pnl, otherAddbacks: Number(event.target.value) })}
+              onChange={(next) => onChange({ ...pnl, otherAddbacks: next ?? 0 })}
               className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900"
             />
           </label>
@@ -165,21 +168,129 @@ export function usd(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
+export function centsOf(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export function moneyLabel(value: number): string {
+  return centsOf(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Text amount field — no spinner, no wheel-increment, cents on blur. */
+export function QaAmountInput({
+  value,
+  onChange,
+  className,
+  disabled,
+  cents = true,
+  placeholder,
+  allowEmpty = false,
+  onInspect,
+}: {
+  value: number | null | undefined;
+  onChange: (value: number | null) => void;
+  className?: string;
+  disabled?: boolean;
+  cents?: boolean;
+  placeholder?: string;
+  allowEmpty?: boolean;
+  onInspect?: () => void;
+}) {
+  const shown =
+    value === null || value === undefined
+      ? ''
+      : cents
+        ? centsOf(value).toFixed(2)
+        : String(Math.round(value));
+  const [text, setText] = useState(shown);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(shown);
+  }, [shown, focused]);
+  const commit = (raw: string) => {
+    const trimmed = String(raw).replace(/,/g, '').trim();
+    if (trimmed === '') {
+      if (allowEmpty) {
+        onChange(null);
+        setText('');
+        return;
+      }
+      onChange(0);
+      setText(cents ? (0).toFixed(2) : '0');
+      return;
+    }
+    const parsed = Number(trimmed);
+    const next = Number.isFinite(parsed) ? (cents ? centsOf(parsed) : Math.round(parsed)) : 0;
+    onChange(next);
+    setText(cents ? next.toFixed(2) : String(next));
+  };
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      spellCheck={false}
+      disabled={disabled}
+      placeholder={placeholder}
+      value={text}
+      onWheel={(event) => event.currentTarget.blur()}
+      onMouseDown={(event) => {
+        // Default focus scrolls every ancestor and jumps the QA list back to property 1.
+        event.preventDefault();
+        event.currentTarget.focus({ preventScroll: true });
+      }}
+      onFocus={() => {
+        setFocused(true);
+        onInspect?.();
+      }}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={(event) => {
+        setFocused(false);
+        commit(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+      }}
+      className={className}
+    />
+  );
+}
+
 export function schCAnnual(row: SchCYear) {
   return row.line31 + row.line13 + row.line30 + row.line44aMiles * MILEAGE_DEP_RATE + row.line24bMeals;
 }
 
-export function corpBusinessAnnual(row: CorpYear, ownershipPct: number) {
-  const business =
-    row.ordinaryIncome +
-    row.netRentalRealEstate +
-    row.otherNetRental +
-    row.depreciation +
+export function corpDepreciationTotal(row: CorpYear) {
+  return row.depreciation + row.depreciation1125A + row.depreciation8825;
+}
+
+/** Return-level lines: 4797 and other income removed, non-cash added back, meals deducted. */
+export function corpReturnAdjustments(row: CorpYear) {
+  return (
+    -row.gain4797 -
+    row.otherIncome +
+    corpDepreciationTotal(row) +
     row.depletion +
-    row.mealsM1 +
-    row.otherNoncash +
-    row.guaranteedPayments;
-  return business * (ownershipPct / 100);
+    row.otherNoncash -
+    row.mealsM1
+  );
+}
+
+export function corpK1Income(row: CorpYear) {
+  return row.ordinaryIncome + row.netRentalRealEstate + row.otherNetRental + row.guaranteedPayments;
+}
+
+/**
+ * K-1 figures are already the owner's share and count at 100%. Ownership
+ * applies only to the entity-level lines taken from the return.
+ */
+export function corpBusinessAnnual(row: CorpYear, ownershipPct: number) {
+  return corpK1Income(row) + corpReturnAdjustments(row) * (ownershipPct / 100);
+}
+
+/** Without a stable distribution history the business share is capped at distributions; guaranteed payments are not. */
+export function corpDistributionCapped(row: CorpYear, annual: number) {
+  return Math.min(annual - row.guaranteedPayments, row.distributions) + row.guaranteedPayments;
 }
 
 /**
@@ -188,12 +299,14 @@ export function corpBusinessAnnual(row: CorpYear, ownershipPct: number) {
  * non-cash add-backs, capped at actual distributions received when distributions
  * are documented (> 0).
  */
-export function corpMinorityAnnual(row: CorpYear, ownershipPct: number) {
-  const k1Income =
-    (row.ordinaryIncome + row.netRentalRealEstate + row.otherNetRental + row.guaranteedPayments) *
-    (ownershipPct / 100);
-  const capped = row.distributions > 0 ? Math.min(k1Income, row.distributions) : k1Income;
-  return { k1Income, capped, wasCapped: row.distributions > 0 && k1Income > row.distributions };
+export function corpMinorityAnnual(row: CorpYear, _ownershipPct?: number) {
+  // Boxes 1–3 as reported (already the owner's share); guaranteed payments are
+  // added in full and are not limited by distributions, as in the engine.
+  const boxes = row.ordinaryIncome + row.netRentalRealEstate + row.otherNetRental;
+  const cappedBoxes = row.distributions > 0 ? Math.min(boxes, row.distributions) : boxes;
+  const k1Income = boxes + row.guaranteedPayments;
+  const capped = cappedBoxes + row.guaranteedPayments;
+  return { k1Income, capped, wasCapped: row.distributions > 0 && boxes > row.distributions };
 }
 
 export function monthlyFromYears(year1: number, year2: number, twoYears: boolean) {
@@ -209,7 +322,8 @@ export function declining(year1: number, year2: number) {
 export function scheduleLQuickRatio(sheet: ScheduleL) {
   const assets =
     sheet.cash + (sheet.receivables - sheet.allowance) + sheet.taxExempt + sheet.otherCurrentAssets;
-  const liabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
+  const componentLiabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
+  const liabilities = sheet.currentLiabilities > 0 ? sheet.currentLiabilities : componentLiabilities;
   const quickRatio = liabilities > 0 ? assets / liabilities : 999;
   return { assets, liabilities, quickRatio, passes: quickRatio >= 1 };
 }
@@ -231,29 +345,37 @@ export function LineRow({
   onSelect: () => void;
   onChange: (next: number) => void;
 }) {
+  // The description wraps rather than truncating, and the amount drops to its
+  // own line when the row is too narrow for all three parts. Truncating left
+  // "Mor..." where the underwriter needed "Mortgages / notes payable in < 1
+  // year", and a fixed-width row in a narrow panel pushed the amount past its
+  // card and under the neighbouring column.
   return (
     <div
-      className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+      className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-2.5 py-2 ${
         selected ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white'
       }`}
     >
       <button
         type="button"
         onClick={onSelect}
-        className="w-[4.5rem] shrink-0 text-left font-mono text-[10px] font-black uppercase text-slate-500"
+        className="w-[3.25rem] shrink-0 text-left font-mono text-[10px] font-black uppercase text-slate-500"
       >
         {line}
       </button>
-      <button type="button" onClick={onSelect} className="min-w-0 flex-1 truncate text-left text-xs font-semibold text-slate-800">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="min-w-[8rem] flex-1 break-words text-left text-xs font-semibold leading-snug text-slate-800"
+      >
         {label}
         {hint ? <span className="ml-1 font-normal text-slate-400">· {hint}</span> : null}
       </button>
-      <input
-        type="number"
+      <QaAmountInput
         value={value}
-        onClick={(event) => event.stopPropagation()}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="w-28 shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-emerald-500"
+        onChange={(next) => onChange(next ?? 0)}
+        onInspect={onSelect}
+        className="ml-auto w-28 shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-right font-mono text-sm font-bold text-slate-950 outline-none focus:border-emerald-500"
       />
     </div>
   );
@@ -358,6 +480,7 @@ export function LiquidityBlock({
     { id: 'accountsPayable', line: 'L16', label: 'Accounts payable' },
     { id: 'notesLt1Yr', line: 'L17', label: 'Mortgages / notes payable in < 1 year' },
     { id: 'otherCurrentLiab', line: 'L18', label: 'Other current liabilities' },
+    { id: 'currentLiabilities', line: 'L18d', label: 'Total current liabilities (end of year)' },
   ];
 
   return (
@@ -375,7 +498,11 @@ export function LiquidityBlock({
           {ratio.passes ? 'Passed' : 'Failed — business income $0'}
         </span>
       </div>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+      {/* Sized by the panel, not the window: md: measures the viewport, so on a
+          normal screen this went two-up inside a panel too narrow for it, the
+          inputs overflowed under the next column and the descriptions were
+          squeezed to nothing. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-2">
         {rows.map((row) => (
           <LineRow
             key={row.id}
@@ -559,12 +686,16 @@ export function chosenMonthly(options: AvgOption[], selectedId: string | null, r
 }
 
 export function IncomeChoicePanel({
+  heading = 'Final income used on this page',
+  compact = false,
   options,
   recommendedId,
   reason,
   selectedId,
   onSelect,
 }: {
+  heading?: string;
+  compact?: boolean;
   options: AvgOption[];
   recommendedId: string;
   reason: string;
@@ -576,12 +707,12 @@ export function IncomeChoicePanel({
   const recommended = options.find((option) => option.id === recommendedId);
 
   return (
-    <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className={`rounded-xl border border-emerald-200 bg-emerald-50/70 ${compact ? 'space-y-2 p-3' : 'space-y-3 p-4'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="max-w-2xl">
-          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-800">Final income used on this page</p>
-          <p className="text-2xl font-black text-slate-950">{usd(chosen.monthly)}/mo</p>
-          <p className="mt-1 text-xs leading-relaxed text-slate-700">
+          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-800">{heading}</p>
+          <p className={`font-black text-slate-950 ${compact ? 'text-lg' : 'text-2xl'}`}>{usd(chosen.monthly)}/mo</p>
+          <p className={`leading-relaxed text-slate-700 ${compact ? 'mt-0.5 text-[11px]' : 'mt-1 text-xs'}`}>
             <span className="font-bold text-slate-900">{overridden ? 'UW override. ' : 'Guideline pick. '}</span>
             {overridden && recommended ? `Guideline still recommends ${recommended.label} (${usd(recommended.monthly)}/mo). ` : null}
             {reason}
@@ -599,8 +730,7 @@ export function IncomeChoicePanel({
           <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-800">Guideline</span>
         )}
       </div>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Click a different average to use it on this file</p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-1.5 lg:grid-cols-4 ${compact ? '' : 'sm:grid-cols-2'}`}>
         {options.map((option) => {
           const active = option.id === chosen.id;
           const rec = option.id === recommendedId;
@@ -609,16 +739,16 @@ export function IncomeChoicePanel({
               key={option.id}
               type="button"
               onClick={() => onSelect(option.id === recommendedId ? null : option.id)}
-              className={`rounded-lg border p-3 text-left ${
-                active ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/30' : 'border-slate-200 bg-white hover:border-slate-400'
-              }`}
+              className={`rounded-lg border text-left ${
+                compact ? 'px-2.5 py-2' : 'p-3'
+              } ${active ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/30' : 'border-slate-200 bg-white hover:border-slate-400'}`}
             >
               <span className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">{option.label}</span>
                 {rec ? <span className="text-[9px] font-black uppercase text-emerald-700">Rec</span> : null}
               </span>
-              <span className="mt-1 block font-mono text-lg font-black text-slate-950">{usd(option.monthly)}</span>
-              <span className="text-[10px] text-slate-500">{option.formula}</span>
+              <span className={`mt-0.5 block font-mono font-black text-slate-950 ${compact ? 'text-sm' : 'text-lg'}`}>{usd(option.monthly)}</span>
+              <span className="text-[10px] leading-tight text-slate-500">{option.formula}</span>
             </button>
           );
         })}
@@ -766,6 +896,8 @@ export function CorpLines({
   row,
   yearKey,
   kind,
+  ownershipPct,
+  total,
   selectedId,
   onSelect,
   onChange,
@@ -773,35 +905,101 @@ export function CorpLines({
   row: CorpYear;
   yearKey: 'y1' | 'y2';
   kind: 'scorp' | 'partnership';
+  ownershipPct: number;
+  /** The year's qualifying figure, computed by the caller (liquidity and minority rules live there). */
+  total: number;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onChange: (patch: Partial<CorpYear>) => void;
 }) {
   const p = kind === 'scorp' ? 'scorp' : 'k1';
   const id = (key: string) => `${p}-${key}-${yearKey}`;
+  const row_ = (key: string) => ({ selected: selectedId === id(key), onSelect: () => onSelect(id(key)) });
+  const lines =
+    kind === 'partnership'
+      ? { form: 'Form 1065', gain: 'L6', other: 'L7', dep: 'L16c', depletion: 'L17', meals: 'M-1 4b' }
+      : { form: 'Form 1120-S', gain: 'L4', other: 'L5', dep: 'L14', depletion: 'L15', meals: 'M-1 3b' };
+  const minority = ownershipPct < 25;
+  const adjustments = corpReturnAdjustments(row);
   return (
     <>
-      <LineRow line="K-1 1" label="Ordinary business income" value={row.ordinaryIncome} selected={selectedId === id('ord')} onSelect={() => onSelect(id('ord'))} onChange={(n) => onChange({ ordinaryIncome: n })} />
-      <LineRow line="K-1 2" label="Net rental real estate" value={row.netRentalRealEstate} selected={selectedId === id('rre')} onSelect={() => onSelect(id('rre'))} onChange={(n) => onChange({ netRentalRealEstate: n })} />
-      <LineRow line="K-1 3" label="Other net rental income" value={row.otherNetRental} selected={selectedId === id('onr')} onSelect={() => onSelect(id('onr'))} onChange={(n) => onChange({ otherNetRental: n })} />
+      <SectionHeading title={`${lines.form} return`} note={minority ? 'not counted under 25% ownership' : `× ${ownershipPct}% ownership`} />
+      <LineRow line={lines.gain} label="Net gain (loss), Form 4797" hint="subtract" value={row.gain4797} {...row_('4797')} onChange={(n) => onChange({ gain4797: n })} />
+      <LineRow
+        line={lines.other}
+        label="Other income (loss)"
+        hint={row.otherIncome ? 'subtract · review: confirm whether recurring' : 'subtract'}
+        value={row.otherIncome}
+        {...row_('oi')}
+        onChange={(n) => onChange({ otherIncome: n })}
+      />
+      <LineRow line={lines.dep} label="Depreciation" hint="add-back" value={row.depreciation} {...row_('dep')} onChange={(n) => onChange({ depreciation: n })} />
+      <LineRow line="1125-A" label="Depreciation in cost of goods sold" hint="add-back" value={row.depreciation1125A} {...row_('dep1125a')} onChange={(n) => onChange({ depreciation1125A: n })} />
+      <LineRow line="8825" label="Depreciation, rental real estate" hint="add-back" value={row.depreciation8825} {...row_('dep8825')} onChange={(n) => onChange({ depreciation8825: n })} />
+      <LineRow line={lines.depletion} label="Depletion" hint="add-back" value={row.depletion} {...row_('depl')} onChange={(n) => onChange({ depletion: n })} />
+      <LineRow line="Other" label="Amortization / casualty loss" hint="add-back" value={row.otherNoncash} {...row_('other')} onChange={(n) => onChange({ otherNoncash: n })} />
+      <LineRow line={lines.meals} label="Travel, meals and entertainment" hint="deduct" value={row.mealsM1} {...row_('meals')} onChange={(n) => onChange({ mealsM1: n })} />
+
+      <SectionHeading title="Schedule K-1" note="counted at 100%" />
+      <LineRow line="K-1 1" label="Ordinary business income" value={row.ordinaryIncome} {...row_('ord')} onChange={(n) => onChange({ ordinaryIncome: n })} />
+      <LineRow line="K-1 2" label="Net rental real estate" value={row.netRentalRealEstate} {...row_('rre')} onChange={(n) => onChange({ netRentalRealEstate: n })} />
+      <LineRow line="K-1 3" label="Other net rental income" value={row.otherNetRental} {...row_('onr')} onChange={(n) => onChange({ otherNetRental: n })} />
       {kind === 'partnership' ? (
-        <LineRow line="K-1 4" label="Guaranteed payments" value={row.guaranteedPayments} selected={selectedId === id('gp')} onSelect={() => onSelect(id('gp'))} onChange={(n) => onChange({ guaranteedPayments: n })} />
+        <LineRow line="K-1 4" label="Guaranteed payments" value={row.guaranteedPayments} {...row_('gp')} onChange={(n) => onChange({ guaranteedPayments: n })} />
       ) : (
-        <LineRow line="W-2" label="Officer W-2 wages" hint="counts even if liquidity fails" value={row.w2Wages} selected={selectedId === id('w2')} onSelect={() => onSelect(id('w2'))} onChange={(n) => onChange({ w2Wages: n })} />
+        <LineRow line="W-2" label="Officer W-2 wages" hint="counts even if liquidity fails" value={row.w2Wages} {...row_('w2')} onChange={(n) => onChange({ w2Wages: n })} />
       )}
       <LineRow
         line={kind === 'partnership' ? 'K-1 19A' : 'K-1 16D'}
         label="Distributions received"
         hint="caps K-1 income unless stable history"
         value={row.distributions}
-        selected={selectedId === id('dist')}
-        onSelect={() => onSelect(id('dist'))}
+        {...row_('dist')}
         onChange={(n) => onChange({ distributions: n })}
       />
-      <LineRow line="4562" label="Depreciation" hint="add-back × ownership (≥25% only)" value={row.depreciation} selected={selectedId === id('dep')} onSelect={() => onSelect(id('dep'))} onChange={(n) => onChange({ depreciation: n })} />
-      <LineRow line="M-1" label="Non-deductible meals" hint="add-back" value={row.mealsM1} selected={selectedId === id('meals')} onSelect={() => onSelect(id('meals'))} onChange={(n) => onChange({ mealsM1: n })} />
-      <LineRow line="Other" label="Other non-cash" value={row.otherNoncash} selected={selectedId === id('other')} onSelect={() => onSelect(id('other'))} onChange={(n) => onChange({ otherNoncash: n })} />
+
+      <div className="space-y-1 border-t border-slate-200 pt-2 font-mono text-xs">
+        <TotalLine label="K-1 income (100%)" value={corpK1Income(row)} />
+        <TotalLine label="Return adjustments" value={minority ? 0 : adjustments} muted={minority} />
+        <TotalLine
+          label={`Return adjustments × ${ownershipPct}%`}
+          value={minority ? 0 : adjustments * (ownershipPct / 100)}
+          muted={minority}
+        />
+        {kind === 'scorp' ? <TotalLine label="Officer W-2 wages" value={row.w2Wages} /> : null}
+        <TotalLine label="Total income" value={total} strong />
+      </div>
     </>
+  );
+}
+
+function SectionHeading({ title, note }: { title: string; note?: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-2 pt-1">
+      <h5 className="text-[10px] font-black uppercase tracking-wider text-slate-600">{title}</h5>
+      {note ? <span className="text-[10px] text-slate-400">{note}</span> : null}
+    </div>
+  );
+}
+
+function TotalLine({
+  label,
+  value,
+  text,
+  strong,
+  muted,
+}: {
+  label: string;
+  value?: number;
+  text?: string;
+  strong?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-2 ${strong ? 'pt-1 text-sm font-black text-slate-950' : muted ? 'text-slate-400' : 'text-slate-600'}`}>
+      <span className="font-sans font-semibold">{label}</span>
+      <span>{text ?? usd(value ?? 0)}</span>
+    </div>
   );
 }
 

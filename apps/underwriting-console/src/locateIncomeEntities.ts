@@ -48,6 +48,8 @@ const IDENTITY_NAME_IDS = new Set([
   'ent1-name',
   'scorp-name',
   'pt-name',
+  'pt-return-name',
+  'scorp-return-name',
   'c1120-name',
   'schedule-f-name',
   'form-8825-name',
@@ -58,6 +60,8 @@ const IDENTITY_EIN_IDS = new Set([
   'ent1-ein',
   'scorp-ein',
   'pt-ein',
+  'pt-return-ein',
+  'scorp-return-ein',
   'c1120-ein',
   'schedule-f-ein',
   'form-8825-ein',
@@ -71,9 +75,21 @@ function sourceId(field: MappedIncomeField): string {
   return field.sourceFieldId ?? field.id;
 }
 
+/**
+ * The 1065 / 1120-S return face and its Schedule M-1 page carry entity-level
+ * lines, not a separate business. Left as their own match they became a second
+ * partnership (or a "prior year" of the first); they belong on the K-1.
+ */
+function returnKind(id: string): DocKind | undefined {
+  if (id.startsWith('pt-return-')) return 'partnership';
+  if (id.startsWith('scorp-return-')) return 'scorp';
+  return undefined;
+}
+
 function isSupportingField(field: MappedIncomeField): boolean {
   const id = sourceId(field);
   if (SUPPORTING_FORMS.has(field.form)) return true;
+  if (returnKind(id)) return true;
   return id.startsWith('form-8825-') || id.startsWith('form-4562-') || id.startsWith('sch-l-');
 }
 
@@ -187,6 +203,8 @@ function identityFromFields(fields: MappedIncomeField[]): { name?: string; ein?:
 
 function compatibleKinds(field: MappedIncomeField): DocKind[] {
   const id = sourceId(field);
+  const fromReturn = returnKind(id);
+  if (fromReturn) return [fromReturn];
   if (field.form === 'Form 8825' || id.startsWith('form-8825-') || id.startsWith('form-4562-') || id.startsWith('sch-l-')) {
     return [...CORP_KINDS];
   }
@@ -320,6 +338,26 @@ function attachSupportingFields(
     if (attachBundle(unused, [...CORP_KINDS])) continue;
     if (next.some((match) => CORP_KINDS.has(match.kind))) continue;
     next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
+    unused.forEach((field) => used.add(field));
+  }
+
+  // A return with no K-1 in the packet is still that business. Its face and
+  // M-1 pages sit in separate bundles, so they are joined per document first.
+  const orphanReturns = new Map<string, MappedIncomeField[]>();
+  for (const bundle of leftoverOf((field) => Boolean(returnKind(sourceId(field))))) {
+    for (const field of bundle) {
+      if (used.has(field)) continue;
+      const key = `${field.documentId ?? ''}::${returnKind(sourceId(field))}`;
+      orphanReturns.set(key, [...(orphanReturns.get(key) ?? []), field]);
+    }
+  }
+  for (const unused of orphanReturns.values()) {
+    const kind = returnKind(sourceId(unused[0]))!;
+    if (attachBundle(unused, [kind])) continue;
+    // Several K-1s and no identity to choose between them: guessing would put
+    // one entity's depreciation on another, and inventing a business is worse.
+    if (next.some((match) => match.kind === kind)) continue;
+    next.push(inventMatch(unused, kind, pages));
     unused.forEach((field) => used.add(field));
   }
 

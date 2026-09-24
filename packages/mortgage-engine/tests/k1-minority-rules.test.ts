@@ -12,9 +12,9 @@ describe('Form 1120-S & Form 1065 K-1 Minority (<25%) vs Self-Employed (≥25%) 
           w2WagesFromBusiness: 60000,
           k1OrdinaryIncome: 40000,
           k1NetRentalRealEstate: 5000,
-          k1OtherNetRentalIncome: 5000, // Total K-1 boxes 1-3 = $50,000 * 15% = $7,500
+          k1OtherNetRentalIncome: 5000, // Total K-1 boxes 1-3 = $50,000, already the shareholder's share
           depreciation: 30000, // Non-cash add-back (MUST BE EXCLUDED for <25%)
-          k1Distributions: 5000, // Distribution cap ($5,000 < $7,500)
+          k1Distributions: 5000, // Distribution cap ($5,000 < $50,000)
           hasStableDistributions: false
         },
         {
@@ -46,10 +46,10 @@ describe('Form 1120-S & Form 1065 K-1 Minority (<25%) vs Self-Employed (≥25%) 
           year: 2025,
           ownershipPercentage: 20, // <25% minority
           k1OrdinaryIncome: 30000,
-          k1NetRentalRealEstate: 10000, // Total K-1 1-3 = $40,000 * 20% = $8,000
+          k1NetRentalRealEstate: 10000, // Total K-1 1-3 = $40,000, already the partner's share
           k1GuaranteedPayments: 24000, // Always counts directly
           depreciation: 25000, // Must be excluded for minority
-          k1Distributions: 6000, // Distribution cap ($6,000 < $8,000)
+          k1Distributions: 6000, // Distribution cap ($6,000 < $40,000)
           hasStableDistributions: false
         },
         {
@@ -80,7 +80,7 @@ describe('Form 1120-S & Form 1065 K-1 Minority (<25%) vs Self-Employed (≥25%) 
           year: 2025,
           ownershipPercentage: 50, // >=25% self-employed
           k1OrdinaryIncome: 40000,
-          depreciation: 20000, // Added back: ($40k + $20k) * 50% = $30,000
+          depreciation: 20000, // K-1 at 100% plus depreciation by ownership: $40k + $20k * 50% = $50,000
           k1GuaranteedPayments: 10000,
           hasStableDistributions: true
         },
@@ -96,8 +96,8 @@ describe('Form 1120-S & Form 1065 K-1 Minority (<25%) vs Self-Employed (≥25%) 
     };
 
     const results = calculateUnifiedIncome(payload);
-    // Annual total = $30,000 (K-1 with add-backs) + $10,000 (GP) = $40,000 / yr -> $3,333.33/mo
-    expect(results.summary.qualifyingMonthlyIncome).toBe(3333.33);
-    expect(results.form1065Breakdown?.[0].k1EligibleIncome).toBe(30000);
+    // Annual total = $50,000 (K-1 with add-backs) + $10,000 (GP) = $60,000 / yr -> $5,000.00/mo
+    expect(results.summary.qualifyingMonthlyIncome).toBe(5000);
+    expect(results.form1065Breakdown?.[0].k1EligibleIncome).toBe(50000);
   });
 });
