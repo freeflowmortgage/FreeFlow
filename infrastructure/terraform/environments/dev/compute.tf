@@ -205,7 +205,7 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "LOG_LEVEL", value = "info" },
       { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
-      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : "bearer" },
+      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : "bearer-stub-non-prod" },
       { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
     secrets = concat([

@@ -152,7 +152,7 @@ resource "aws_secretsmanager_secret_version" "connector_service_signing_key" {
 # state; populate clientId/clientSecret/instanceId through the approved secret
 # workflow before selecting real-encompass mode.
 resource "aws_secretsmanager_secret" "connector_encompass_credentials" {
-  count = local.connector_real_encompass ? 1 : 0
+  count = var.enable_encompass_connector ? 1 : 0
 
   name                    = "${local.name_prefix}/encompass-connector-los-credentials"
   description             = "Connector-only Encompass OAuth credentials for one lender deployment"
