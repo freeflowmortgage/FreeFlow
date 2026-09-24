@@ -29,6 +29,8 @@ tmp
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.plan
+*-plan.txt
 **/backend.hcl
 *.tfvars
 !*.tfvars.example

@@ -20,7 +20,8 @@ COPY packages/database/package.json ./packages/database/
 COPY packages/ui/package.json ./packages/ui/
 COPY services/encompass-connector/package.json ./services/encompass-connector/
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=freeflow-pnpm-console,target=/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile
 
 # 2. Builder stage
 FROM base AS builder

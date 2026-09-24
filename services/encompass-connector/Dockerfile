@@ -21,7 +21,8 @@ COPY packages/encompass-connector-contract/package.json ./packages/encompass-con
 COPY services/encompass-connector/package.json ./services/encompass-connector/
 
 RUN corepack install
-RUN pnpm install --frozen-lockfile \
+RUN --mount=type=cache,id=freeflow-pnpm-connector,target=/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile \
     --filter @mortgage-pos/database... \
     --filter @mortgage-pos/encompass-connector...
 RUN pnpm --filter @mortgage-pos/database exec prisma generate --schema prisma/schema.prisma

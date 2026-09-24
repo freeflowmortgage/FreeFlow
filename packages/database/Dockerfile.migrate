@@ -11,7 +11,8 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/database/package.json ./packages/database/
-RUN pnpm install --frozen-lockfile --filter @mortgage-pos/database...
+RUN --mount=type=cache,id=freeflow-pnpm-migration,target=/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile --filter @mortgage-pos/database...
 
 COPY packages/database/prisma ./packages/database/prisma
 COPY packages/database/scripts/migrate-live-test.sh /usr/local/bin/freeflow-migrate
