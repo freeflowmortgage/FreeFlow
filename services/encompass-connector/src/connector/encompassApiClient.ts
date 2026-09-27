@@ -5,6 +5,8 @@ import {
   type EncompassAttachmentRef,
   type EncompassConnector,
   type EncompassConnectorContext,
+  type EncompassApprovedIncomeUpdate,
+  type EncompassWriteResult,
 } from '@mortgage-pos/encompass-connector-contract';
 
 export const MAX_ENCOMPASS_ATTACHMENT_BYTES = 40 * 1024 * 1024;
@@ -89,6 +91,61 @@ export class EncompassV3Connector implements EncompassConnector {
     return readPdf(response);
   }
 
+  async applyApprovedIncomeUpdate(
+    _context: EncompassConnectorContext,
+    loanGuid: string,
+    update: EncompassApprovedIncomeUpdate,
+  ): Promise<EncompassWriteResult> {
+    // Authentication happens before the mutation boundary. A token failure is
+    // safely retryable and must not be mislabeled as an unknown write outcome.
+    const accessToken = await this.getAccessToken();
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${apiOrigin(this.credentials.apiOrigin)}/encompass/v1/loans/${encodeURIComponent(loanGuid)}`, {
+        method: 'PATCH',
+        redirect: 'error',
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          accept: 'application/json',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ customFields: update.fields }),
+      });
+    } catch {
+      throw new EncompassConnectorError(
+        'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+        'Encompass write outcome is unknown and requires reconciliation.',
+        false,
+      );
+    }
+    if (!response.ok) throw httpError('ENCOMPASS_WRITE_FAILED', response.status);
+    return { providerRevision: response.headers.get('etag')?.slice(0, 100) || undefined };
+  }
+
+  async readFields(
+    _context: EncompassConnectorContext,
+    loanGuid: string,
+    fieldNames: ReadonlyArray<string>,
+  ): Promise<Readonly<Record<string, string>>> {
+    const response = await this.apiFetch(
+      `/encompass/v1/loans/${encodeURIComponent(loanGuid)}?entities=customFields`,
+      { method: 'GET', headers: { accept: 'application/json' } },
+      true,
+    );
+    const body = await readJson(response, 'ENCOMPASS_FIELDS_INVALID');
+    if (!isRecord(body) || !Array.isArray(body.customFields)) {
+      throw new EncompassConnectorError('ENCOMPASS_FIELDS_INVALID', 'Encompass returned invalid custom fields.', false);
+    }
+    const allowed = new Set(fieldNames);
+    const result: Record<string, string> = {};
+    for (const item of body.customFields) {
+      if (!isRecord(item) || typeof item.fieldName !== 'string' || !allowed.has(item.fieldName)) continue;
+      if (typeof item.value === 'string' || typeof item.value === 'number') result[item.fieldName] = String(item.value);
+    }
+    return result;
+  }
+
   private async apiFetch(path: string, init: RequestInit, retryable: boolean): Promise<Response> {
     const token = await this.getAccessToken();
     const response = await this.fetchWithRetry(`${apiOrigin(this.credentials.apiOrigin)}${path}`, {
@@ -104,17 +161,22 @@ export class EncompassV3Connector implements EncompassConnector {
   private async getAccessToken(): Promise<string> {
     if (this.accessToken) return this.accessToken;
     const basic = Buffer.from(`${this.credentials.clientId}:${this.credentials.clientSecret}`, 'utf8').toString('base64');
-    const response = await this.fetchImpl(`${apiOrigin(this.credentials.apiOrigin)}/oauth2/v1/token`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
-      headers: {
-        authorization: `Basic ${basic}`,
-        accept: 'application/json',
-        'content-type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({ grant_type: 'client_credentials', instance_id: this.credentials.instanceId, scope: 'lp' }),
-    });
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${apiOrigin(this.credentials.apiOrigin)}/oauth2/v1/token`, {
+        method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        headers: {
+          authorization: `Basic ${basic}`,
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ grant_type: 'client_credentials', instance_id: this.credentials.instanceId, scope: 'lp' }),
+      });
+    } catch {
+      throw new EncompassConnectorError('ENCOMPASS_AUTH_UNAVAILABLE', 'Encompass authentication is unavailable.', true);
+    }
     if (!response.ok) throw httpError('ENCOMPASS_AUTH_FAILED', response.status);
     const body = await readJson(response, 'ENCOMPASS_AUTH_RESPONSE_INVALID');
     const token = isRecord(body) && typeof body.access_token === 'string' ? body.access_token.trim() : '';

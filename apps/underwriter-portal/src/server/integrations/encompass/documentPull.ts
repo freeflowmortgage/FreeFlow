@@ -30,12 +30,14 @@ export async function createDocumentPullJob(
   input: Readonly<{
     loanId: string;
     expectedLoanVersion: number;
+    attachmentIds: ReadonlyArray<string>;
     idempotencyKey: string;
   }>,
 ): Promise<DocumentPullJobResult> {
   const requestHash = hashCanonical({
     loanId: input.loanId,
     expectedLoanVersion: input.expectedLoanVersion,
+    attachmentIds: input.attachmentIds,
   });
   const idempotency = await resolveIdempotencyKey(transaction, context, {
     operation: DOCUMENT_PULL_OPERATION,
@@ -84,14 +86,16 @@ export async function createDocumentPullJob(
     where: { tenantId: context.tenantId },
     select: {
       enableEncompassDocumentPull: true,
-      encompassClientId: true,
-      encompassInstanceId: true,
     },
   });
   if (!configuration?.enableEncompassDocumentPull) {
     throw new ApiError(422, 'ENCOMPASS_DOCUMENT_PULL_DISABLED', 'Encompass document pull is not enabled for this tenant.');
   }
-  if (!configuration.encompassClientId || !configuration.encompassInstanceId) {
+  const binding = await transaction.encompassConnectorBinding.findFirst({
+    where: { tenantId: context.tenantId, isEnabled: true },
+    select: { id: true },
+  });
+  if (!binding) {
     throw new ApiError(422, 'ENCOMPASS_CONFIGURATION_INCOMPLETE', 'The tenant Encompass configuration is incomplete.');
   }
 
@@ -101,6 +105,7 @@ export async function createDocumentPullJob(
       loanId: input.loanId,
       requestedByUserId: context.membershipId,
       expectedLoanVersion: input.expectedLoanVersion,
+      selectedAttachmentIds: [...input.attachmentIds],
       idempotencyKey: input.idempotencyKey,
       correlationId: context.requestId,
     },

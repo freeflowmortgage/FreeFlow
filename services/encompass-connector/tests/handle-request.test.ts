@@ -208,6 +208,12 @@ function unavailableConnector(): EncompassConnector {
     async downloadOriginalAttachment() {
       throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
     },
+    async applyApprovedIncomeUpdate() {
+      throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
+    },
+    async readFields() {
+      throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
+    },
   };
 }
 

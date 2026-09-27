@@ -3,6 +3,8 @@ import type {
   DownloadedEncompassAttachment,
   EncompassAttachmentRef,
   EncompassConnectorContext,
+  EncompassApprovedIncomeUpdate,
+  EncompassWriteResult,
 } from './types';
 
 /**
@@ -20,4 +22,14 @@ export interface EncompassConnector {
     loanGuid: string,
     attachmentId: string,
   ): Promise<DownloadedEncompassAttachment>;
+  applyApprovedIncomeUpdate(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+    update: EncompassApprovedIncomeUpdate,
+  ): Promise<EncompassWriteResult>;
+  readFields(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+    fieldNames: ReadonlyArray<string>,
+  ): Promise<Readonly<Record<string, string>>>;
 }

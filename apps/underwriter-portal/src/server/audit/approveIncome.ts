@@ -1,7 +1,8 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { RequestContext } from '../auth/requestContext';
 import { ApiError } from '../http/apiError';
 import { hashCanonical } from '../http/canonical';
+import { hasCurrentCalculationExtractions } from '../income/extractionFreshness';
 import {
   AUDIT_ACTIONS,
   AUDIT_REASON_CODES,
@@ -33,11 +34,13 @@ export type IncomeApprovalAction = 'INCOME_APPROVED' | 'INCOME_OVERRIDE';
 
 export type IncomeApprovalRequest = Readonly<{
   loanId: string;
+  calculationId: string;
   expectedLoanVersion: number;
   action: IncomeApprovalAction;
   reasonCode: string;
   reasonNarrative: string | null;
   idempotencyKey: string;
+  overrideQualifyingMonthlyIncome: number | null;
 }>;
 
 export type IncomeApprovalResult = Readonly<{
@@ -51,11 +54,17 @@ export type IncomeApprovalResult = Readonly<{
 export function parseIncomeApprovalBody(
   body: unknown,
   defaults: { action?: IncomeApprovalAction } = {},
-): Pick<IncomeApprovalRequest, 'expectedLoanVersion' | 'action' | 'reasonCode' | 'reasonNarrative'> {
+): Pick<IncomeApprovalRequest, 'calculationId' | 'expectedLoanVersion' | 'action' | 'reasonCode' | 'reasonNarrative' | 'overrideQualifyingMonthlyIncome'> {
   const payload = isRecord(body) ? body : {};
   const expectedLoanVersion = payload.expectedLoanVersion;
   if (typeof expectedLoanVersion !== 'number' || !Number.isInteger(expectedLoanVersion) || expectedLoanVersion < 1) {
     throw new ApiError(400, 'INVALID_LOAN_VERSION', 'A positive expectedLoanVersion is required.');
+  }
+  const calculationId = typeof payload.calculationId === 'string' && UUID.test(payload.calculationId)
+    ? payload.calculationId
+    : null;
+  if (!calculationId) {
+    throw new ApiError(400, 'CALCULATION_ID_REQUIRED', 'A reviewed calculationId is required.');
   }
 
   const requestedAction = payload.action ?? defaults.action ?? AUDIT_ACTIONS.INCOME_APPROVED;
@@ -68,12 +77,17 @@ export function parseIncomeApprovalBody(
   if (requestedAction === AUDIT_ACTIONS.INCOME_OVERRIDE && !reasonNarrative) {
     throw new ApiError(400, 'OVERRIDE_NARRATIVE_REQUIRED', 'An override requires a reason narrative.');
   }
+  const overrideQualifyingMonthlyIncome = requestedAction === AUDIT_ACTIONS.INCOME_OVERRIDE
+    ? parseOverrideIncome(payload.overrideQualifyingMonthlyIncome)
+    : null;
 
   return {
+    calculationId,
     expectedLoanVersion,
     action: requestedAction,
     reasonCode,
     reasonNarrative,
+    overrideQualifyingMonthlyIncome,
   };
 }
 
@@ -84,10 +98,12 @@ export async function approveIncomeCalculation(
 ): Promise<IncomeApprovalResult> {
   const requestHash = hashCanonical({
     loanId: input.loanId,
+    calculationId: input.calculationId,
     expectedLoanVersion: input.expectedLoanVersion,
     action: input.action,
     reasonCode: input.reasonCode,
     reasonNarrative: input.reasonNarrative,
+    overrideQualifyingMonthlyIncome: input.overrideQualifyingMonthlyIncome,
   });
 
   const idempotency = await resolveIdempotencyKey(transaction, context, {
@@ -126,8 +142,7 @@ export async function approveIncomeCalculation(
   }
 
   const calculation = await transaction.form1084Audit.findFirst({
-    where: { loanId: loan.id, tenantId: context.tenantId },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    where: { id: input.calculationId, loanId: loan.id, tenantId: context.tenantId },
     select: {
       id: true,
       qualifyingMonthlyIncome: true,
@@ -135,6 +150,35 @@ export async function approveIncomeCalculation(
       yearsAnalyzed: true,
       calculationSchemaVersion: true,
       calculationSource: true,
+      calculatedLoanVersion: true,
+      canonicalInputHash: true,
+      sourceDocumentHashes: true,
+      mortgageRuleVersion: true,
+      trendingResult: true,
+      w2BaseMonthly: true,
+      w2VariableMonthly: true,
+      scheduleCMonthlyTotal: true,
+      scheduleFMonthlyTotal: true,
+      form1120SMonthlyTotal: true,
+      form1065MonthlyTotal: true,
+      form1120MonthlyTotal: true,
+      assetIncomeMonthly: true,
+      rentalMonthly: true,
+      rentalLiabilityMonthly: true,
+      housingExpenseAdjustment: true,
+      entityType: true,
+      extractionBindings: {
+        select: {
+          extractionId: true, extractionHash: true, sourceDocumentId: true,
+          sourceDocumentVersion: true, sourceContentHash: true,
+          metadataReviewId: true, metadataReviewVersion: true, metadataReviewHash: true,
+          extraction: { select: {
+            status: true, canonicalHash: true, sourceDocumentVersion: true, sourceContentHash: true,
+            sourceDocument: { select: { version: true, sourceContentHash: true } },
+            metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { id: true, metadataVersion: true, canonicalHash: true } },
+          } },
+        },
+      },
     },
   });
   if (!calculation) {
@@ -144,29 +188,95 @@ export async function approveIncomeCalculation(
       'A server-side income calculation must exist before approval.',
     );
   }
+  if (calculation.calculatedLoanVersion !== input.expectedLoanVersion) {
+    throw new ApiError(409, 'STALE_CALCULATION', 'The reviewed calculation is stale and must be recalculated.');
+  }
+  if (!hasCurrentCalculationExtractions(calculation.extractionBindings)) {
+    throw new ApiError(409, 'STALE_CALCULATION_EXTRACTION', 'The reviewed calculation no longer has current extraction provenance.');
+  }
+
+  const approvedCalculation = input.action === AUDIT_ACTIONS.INCOME_OVERRIDE
+    ? await transaction.form1084Audit.create({
+      data: {
+        tenantId: context.tenantId,
+        loanId: loan.id,
+        entityType: calculation.entityType,
+        yearsAnalyzed: calculation.yearsAnalyzed,
+        trendingResult: calculation.trendingResult,
+        totalAnnualCashFlow: new Prisma.Decimal(input.overrideQualifyingMonthlyIncome!).mul(12),
+        qualifyingMonthlyIncome: new Prisma.Decimal(input.overrideQualifyingMonthlyIncome!),
+        calculationSchemaVersion: calculation.calculationSchemaVersion,
+        calculationSource: 'human-override',
+        calculatedLoanVersion: calculation.calculatedLoanVersion,
+        canonicalInputHash: hashCanonical({
+          baseCalculationId: calculation.id,
+          baseInputHash: calculation.canonicalInputHash,
+          overrideQualifyingMonthlyIncome: input.overrideQualifyingMonthlyIncome,
+          reasonCode: input.reasonCode,
+          reasonNarrative: input.reasonNarrative,
+        }),
+        sourceDocumentHashes: calculation.sourceDocumentHashes,
+        mortgageRuleVersion: calculation.mortgageRuleVersion,
+        w2BaseMonthly: calculation.w2BaseMonthly,
+        w2VariableMonthly: calculation.w2VariableMonthly,
+        scheduleCMonthlyTotal: calculation.scheduleCMonthlyTotal,
+        scheduleFMonthlyTotal: calculation.scheduleFMonthlyTotal,
+        form1120SMonthlyTotal: calculation.form1120SMonthlyTotal,
+        form1065MonthlyTotal: calculation.form1065MonthlyTotal,
+        form1120MonthlyTotal: calculation.form1120MonthlyTotal,
+        assetIncomeMonthly: calculation.assetIncomeMonthly,
+        rentalMonthly: calculation.rentalMonthly,
+        rentalLiabilityMonthly: calculation.rentalLiabilityMonthly,
+        housingExpenseAdjustment: calculation.housingExpenseAdjustment,
+      },
+      select: {
+        id: true, qualifyingMonthlyIncome: true, totalAnnualCashFlow: true,
+        yearsAnalyzed: true, calculationSchemaVersion: true, calculationSource: true,
+        canonicalInputHash: true, sourceDocumentHashes: true, mortgageRuleVersion: true,
+      },
+    })
+    : calculation;
+
+  if (input.action === AUDIT_ACTIONS.INCOME_OVERRIDE) {
+    await transaction.incomeCalculationExtraction.createMany({
+      data: calculation.extractionBindings.map((binding) => ({
+        tenantId: context.tenantId,
+        loanId: loan.id,
+        calculationId: approvedCalculation.id,
+        extractionId: binding.extractionId,
+        extractionHash: binding.extractionHash,
+        sourceDocumentId: binding.sourceDocumentId,
+        sourceDocumentVersion: binding.sourceDocumentVersion,
+        sourceContentHash: binding.sourceContentHash,
+      })),
+    });
+  }
 
   const event = await appendAuditEvent(transaction, context, {
     loanId: loan.id,
     entityType: 'FORM_1084_AUDIT',
-    entityId: calculation.id,
+    entityId: approvedCalculation.id,
     expectedLoanVersion: input.expectedLoanVersion,
     action: input.action,
     reasonCode: input.reasonCode,
     reasonNarrative: input.reasonNarrative,
-    ruleVersion: calculation.calculationSchemaVersion,
+    ruleVersion: approvedCalculation.mortgageRuleVersion,
     schemaVersion: 'audit-event-v1',
     resultHash: hashAuditResult({
-      calculationId: calculation.id,
-      calculationSchemaVersion: calculation.calculationSchemaVersion,
-      calculationSource: calculation.calculationSource,
-      qualifyingMonthlyIncome: calculation.qualifyingMonthlyIncome.toString(),
-      totalAnnualCashFlow: calculation.totalAnnualCashFlow.toString(),
-      yearsAnalyzed: calculation.yearsAnalyzed,
+      calculationId: approvedCalculation.id,
+      calculationSchemaVersion: approvedCalculation.calculationSchemaVersion,
+      calculationSource: approvedCalculation.calculationSource,
+      canonicalInputHash: approvedCalculation.canonicalInputHash,
+      sourceDocumentHashes: approvedCalculation.sourceDocumentHashes,
+      mortgageRuleVersion: approvedCalculation.mortgageRuleVersion,
+      qualifyingMonthlyIncome: approvedCalculation.qualifyingMonthlyIncome.toString(),
+      totalAnnualCashFlow: approvedCalculation.totalAnnualCashFlow.toString(),
+      yearsAnalyzed: approvedCalculation.yearsAnalyzed,
     }),
   });
 
   await transaction.form1084Audit.update({
-    where: { id: calculation.id },
+    where: { id: approvedCalculation.id },
     data: {
       isHumanVerified: true,
       verifiedAt: event.occurredAt,
@@ -196,7 +306,7 @@ export async function approveIncomeCalculation(
   const result: IncomeApprovalResult = {
     auditEventId: event.id,
     loanVersion: input.expectedLoanVersion + 1,
-    calculationId: calculation.id,
+    calculationId: approvedCalculation.id,
     action: input.action,
     replayed: false,
   };
@@ -210,6 +320,15 @@ export async function approveIncomeCalculation(
   });
 
   return result;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseOverrideIncome(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10_000_000) {
+    throw new ApiError(400, 'INVALID_OVERRIDE_INCOME', 'An override requires a bounded monthly income value.');
+  }
+  return new Prisma.Decimal(value).toDecimalPlaces(2).toNumber();
 }
 
 function parseReasonCode(action: IncomeApprovalAction, value: unknown): string {
