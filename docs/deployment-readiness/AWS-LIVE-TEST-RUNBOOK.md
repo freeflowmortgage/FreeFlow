@@ -7,11 +7,12 @@ This runbook deploys the FreeFlow portal and income parser into the existing
 environment, not production approval.
 
 - Synthetic documents and synthetic identities only.
-- Encompass writes and Stripe processing remain unavailable in protected
-  runtimes; their credentials are not installed.
+- Encompass uses a synthetic connector in this environment. Real ICE and Stripe
+  writes remain unavailable; production credentials are not installed.
 - One task per service keeps the live-test cost low and is not high availability.
-- The console and appraisal parser are not deployed in this slice.
-- Raw document and OCR retention canaries are still required before production.
+- The QA console and appraisal parser are not deployed in this slice.
+- A connector-to-parser retention canary passed on 2026-09-26; the full
+  authenticated extraction-to-sync retention canary remains required.
 
 ## Temporary PLTE boundary (updated 2026-09-07)
 
@@ -33,12 +34,12 @@ environment, not production approval.
 
 ## Implemented topology
 
-The current temporary endpoint is an IP-restricted HTTP ALB. The checked-in
-target topology makes `dev.freeflowmortgage.com` terminate TLS at that ALB; its HTTPS
-listener authenticates through a dedicated Cognito user pool and forwards only
-to the portal task on port 8000. The portal and parser run without public IPs
-in the two existing application subnets. The parser accepts port 8080 only from
-the portal security group and registers as `income-parser.freeflow.local`.
+`dev.freeflowmortgage.com` terminates TLS at the ALB. Its HTTPS listener
+authenticates through a dedicated Cognito user pool and forwards to the portal
+task on port 8000. The portal, parser, synthetic connector, document-pull
+worker, and sync worker run without public IPs in the two application subnets.
+The QA console is disabled. Private service discovery and security groups
+constrain parser and connector traffic to their required callers.
 
 When private-DNS ECR/Logs interface endpoints are enabled for the underwriting
 console, their HTTPS security group must also admit the parser task security
@@ -57,8 +58,8 @@ migrator logins. Runtime tasks never receive the administrative secret.
 
 ## Preconditions
 
-1. `aws login --profile freeflow-dev-deploy` succeeds and
-   `aws sts get-caller-identity --profile freeflow-dev-deploy` identifies the
+1. `aws sso login --profile freeflow-dev` succeeds and
+   `aws sts get-caller-identity --profile freeflow-dev` identifies the
    intended development account.
 2. The operator controls DNS for `freeflowmortgage.com` in Wix. Keep Wix
    authoritative; add the ACM validation and portal CNAME records output by
@@ -95,13 +96,13 @@ for the console, allow the portal application security group to reach those
 same endpoints on HTTPS. Otherwise portal replacement tasks resolve the private
 endpoint but cannot pull ECR authorization or emit logs.
 
-For the temporary PLTE boundary, set `enable_edge = true`,
-`enable_cognito_edge = false`, `enable_parser = true`, and allowlist only the
-operator's current public IPv4 `/32`. The parser image must be digest-pinned and
-scan clean. This
-mode uses the ALB-generated HTTP hostname and must be removed when Cognito/TLS
-is enabled. Keep `portal_desired_count = 0` for the first apply, run and verify
-the private migration, then set it to `1` and apply a second reviewed plan.
+For the current protected dev boundary, set `enable_edge = true`,
+`enable_cognito_edge = true`, `enable_parser = true`, `enable_console = false`,
+and enable the connector and workers only with the explicit synthetic/test
+provider configuration. Every image input must be a reviewed digest. Keep
+`portal_desired_count = 0` for the first database-changing apply, run and
+verify the private migration, then set it to `1` and apply the reviewed service
+plan.
 
 Never apply an unsaved plan. Every plan must contain zero destroys unless an
 approved teardown change explicitly names the resources being removed.
@@ -135,7 +136,8 @@ the dedicated user-access runbook for the complete procedure.
 
 ## Verification
 
-1. ECS reports one healthy portal task and one healthy private parser task.
+1. ECS reports one healthy task for the portal, private parser, connector,
+   document-pull worker, and sync worker.
 2. The target group reports the portal target healthy.
 3. HTTP redirects to HTTPS; unauthenticated HTTPS redirects to Cognito.
 4. The synthetic user completes login and reaches the portal.
@@ -143,8 +145,8 @@ the dedicated user-access runbook for the complete procedure.
    resolves one active tenant membership.
 6. A synthetic PDF traverses portal to parser, respects the 40 MiB limit, and
    leaves no PDF/raw XML in database, queues, task filesystems, or logs.
-7. Billing and Encompass endpoints return their documented protected-runtime
-   `503` responses.
+7. Billing remains fail-closed and the connector identifies itself as the
+   synthetic dev provider unless an approved ICE sandbox binding is installed.
 
 ## Pause and cost control
 
@@ -167,7 +169,7 @@ stopped-task reasons, target health, and the relevant CloudWatch log streams.
 After deployment work finishes:
 
 ```powershell
-aws logout --profile freeflow-dev-deploy
+aws sso logout
 ```
 
 GitHub OIDC and a scoped deployment role must replace root-authority local
