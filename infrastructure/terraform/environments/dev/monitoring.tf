@@ -102,9 +102,18 @@ data "aws_iam_policy_document" "operations_topic" {
   count = var.enable_monitoring ? 1 : 0
 
   statement {
-    sid       = "AllowAccountManagement"
-    effect    = "Allow"
-    actions   = ["SNS:*"]
+    sid    = "AllowAccountManagement"
+    effect = "Allow"
+    actions = [
+      "SNS:AddPermission",
+      "SNS:DeleteTopic",
+      "SNS:GetTopicAttributes",
+      "SNS:ListSubscriptionsByTopic",
+      "SNS:Publish",
+      "SNS:RemovePermission",
+      "SNS:SetTopicAttributes",
+      "SNS:Subscribe",
+    ]
     resources = [aws_sns_topic.operations[0].arn]
 
     principals {
