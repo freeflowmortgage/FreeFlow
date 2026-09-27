@@ -71,7 +71,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/sta
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/static ./apps/underwriter-portal/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/public ./apps/underwriter-portal/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/scripts/start.mjs /app/apps/underwriter-portal/scripts/production-config.mjs ./apps/underwriter-portal/scripts/
-COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/workers ./workers
+COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/workers ./apps/underwriter-portal/workers
 RUN rm -rf /app/apps/underwriter-portal/src /app/node_modules/typescript \
         /app/node_modules/.pnpm/typescript@* /opt/yarn-v* \
     && find /app -type d -name .cache -prune -exec rm -rf '{}' +
