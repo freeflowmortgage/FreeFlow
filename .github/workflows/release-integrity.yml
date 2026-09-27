@@ -65,7 +65,7 @@ jobs:
             dockerfile: apps/underwriter-portal/Dockerfile
             context: .
           - name: parser
-            dockerfile: Dockerfile
+            dockerfile: services/doc-parser/Dockerfile
             context: services/doc-parser
           - name: migration
             dockerfile: packages/database/Dockerfile.migrate
