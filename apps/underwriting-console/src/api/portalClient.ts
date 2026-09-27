@@ -25,6 +25,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const portalClient = {
+  getConsoleContext: (loanId: string) => request(`/api/v1/loans/${encodeURIComponent(loanId)}/console-context`),
   createDocumentPull: (loanId: string, body: { expectedLoanVersion: number; attachmentIds: string[] }, idempotencyKey: string) =>
     request<{ jobId: string; status: string }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-document-pulls`, { method: 'POST', body, idempotencyKey }),
   getDocumentPull: (jobId: string) => request<{ id: string; status: string }>(`/api/v1/encompass-document-pulls/${encodeURIComponent(jobId)}`),

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ConsoleView } from './appTypes';
 import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
+import { PortalApiError, portalClient } from './api/portalClient';
 
 const unavailableActions = [
   ['Load live PDF', 'Available when the portal supplies the tenant-scoped loan and attachment context.'],
@@ -12,6 +13,15 @@ const unavailableActions = [
 
 export default function ProtectedApp() {
   const [requestedView, setRequestedView] = useState<ConsoleView | null>(null);
+  const [contextState, setContextState] = useState<{ loan: { id: string; version: number; borrowerName: string }; extractions: unknown[] } | null>(null);
+  const [contextError, setContextError] = useState<string | null>(null);
+  useEffect(() => {
+    const loanId = new URLSearchParams(window.location.search).get('loanId');
+    if (!loanId) return;
+    void portalClient.getConsoleContext(loanId).then((value: any) => setContextState(value)).catch((error: unknown) => {
+      setContextError(error instanceof PortalApiError && error.status === 404 ? 'The requested loan is unavailable.' : 'Loan context could not be loaded.');
+    });
+  }, []);
   if (!requestedView) return <B2BLanding onOpenService={setRequestedView} />;
   return (
     <main className="mx-auto max-w-[1440px] px-4 py-6 md:px-6">
@@ -29,7 +39,7 @@ export default function ProtectedApp() {
           ))}
         </div>
         <p className="border-t border-slate-200 px-6 py-4 text-xs text-slate-500">
-          Select a loan from the protected portal workflow to load authoritative review data. Synthetic documents and local demo scenarios are not available in this mode.
+          {contextState ? `Authoritative context loaded for ${contextState.loan.borrowerName} · version ${contextState.loan.version}.` : contextError ?? 'Open this workspace from the protected portal with an authorized loan context. Synthetic documents and local demo scenarios are not available in this mode.'}
         </p>
       </div>
     </main>
