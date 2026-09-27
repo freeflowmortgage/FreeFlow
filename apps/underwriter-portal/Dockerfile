@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-alpine AS base
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -32,14 +32,26 @@ WORKDIR /app
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_STANDALONE_BUILD=1
 ENV NODE_ENV=production
 
 RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter @mortgage-pos/mortgage-engine build
 RUN pnpm --filter web build
+RUN mkdir -p apps/underwriter-portal/.next/workers \
+    && ./services/encompass-connector/node_modules/.bin/esbuild \
+        apps/underwriter-portal/scripts/document-pull-worker.ts \
+        --bundle --platform=node --target=node22 --format=cjs \
+        --external:@prisma/client \
+        --outfile=apps/underwriter-portal/.next/workers/document-pull-worker.cjs \
+    && ./services/encompass-connector/node_modules/.bin/esbuild \
+        apps/underwriter-portal/scripts/encompass-sync-worker.ts \
+        --bundle --platform=node --target=node22 --format=cjs \
+        --external:@prisma/client \
+        --outfile=apps/underwriter-portal/.next/workers/encompass-sync-worker.cjs
 
 # 3. Production runner stage
-FROM node:22-alpine AS runner
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -47,21 +59,22 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 --ingroup nodejs nextjs
 
-COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/apps/underwriter-portal/package.json ./apps/underwriter-portal/
-COPY --from=builder /app/apps/underwriter-portal/next.config.js ./apps/underwriter-portal/
-COPY --from=builder /app/apps/underwriter-portal/scripts ./apps/underwriter-portal/scripts
-COPY --from=builder /app/apps/underwriter-portal/src/server ./apps/underwriter-portal/src/server
-COPY --from=builder /app/apps/underwriter-portal/tsconfig.json ./apps/underwriter-portal/
-COPY --from=builder /app/apps/underwriter-portal/node_modules ./apps/underwriter-portal/node_modules
-COPY --from=builder /app/apps/underwriter-portal/.next ./apps/underwriter-portal/.next
+COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/static ./apps/underwriter-portal/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/public ./apps/underwriter-portal/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/scripts/start.mjs /app/apps/underwriter-portal/scripts/production-config.mjs ./apps/underwriter-portal/scripts/
+COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/workers ./apps/underwriter-portal/workers
+RUN rm -rf /app/apps/underwriter-portal/src /app/node_modules/typescript \
+        /app/node_modules/.pnpm/typescript@* /opt/yarn-v* \
+    && find /app -type d -name .cache -prune -exec rm -rf '{}' +
 
 USER nextjs
 

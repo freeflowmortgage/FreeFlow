@@ -1,0 +1,114 @@
+name: Release integrity
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan full history with Gitleaks
+        run: >-
+          docker run --rm
+          --volume "$PWD:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1
+          detect --source=/repo --no-banner --redact
+
+  dependencies:
+    name: Dependency scans
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: services/doc-parser/requirements.txt
+      - name: Audit production JavaScript dependencies
+        run: pnpm audit --prod --audit-level high
+      - name: Audit parser Python dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit==2.9.0
+          python -m pip_audit --requirement services/doc-parser/requirements.txt
+
+  containers:
+    name: Scan ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: portal
+            dockerfile: apps/underwriter-portal/Dockerfile
+            context: .
+          - name: parser
+            dockerfile: services/doc-parser/Dockerfile
+            context: services/doc-parser
+          - name: migration
+            dockerfile: packages/database/Dockerfile.migrate
+            context: .
+          - name: connector
+            dockerfile: services/encompass-connector/Dockerfile
+            context: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build immutable commit image
+        run: >-
+          docker build
+          --file "${{ matrix.dockerfile }}"
+          --tag "freeflow/${{ matrix.name }}:${{ github.sha }}"
+          "${{ matrix.context }}"
+      - name: Scan image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: freeflow/${{ matrix.name }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: freeflow/${{ matrix.name }}:${{ github.sha }}
+          format: spdx-json
+          output-file: ${{ matrix.name }}-${{ github.sha }}.spdx.json
+      - name: Retain rollback SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-${{ github.sha }}-sbom
+          path: ${{ matrix.name }}-${{ github.sha }}.spdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deployment-contract:
+    name: Validate immutable deployment contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Bake targets and deployment script
+        shell: pwsh
+        run: ./infrastructure/scripts/Deploy-FreeFlowDev.ps1 -ValidateOnly

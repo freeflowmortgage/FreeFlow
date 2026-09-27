@@ -1,4 +1,5 @@
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
+import { emitConnectorError } from '../observability/operationalEvents';
 
 const STATUS_BY_CODE: Record<string, number> = {
   CONNECTOR_SERVICE_AUTH_MISSING: 401,
@@ -16,6 +17,7 @@ const STATUS_BY_CODE: Record<string, number> = {
 };
 
 export function safeErrorResponse(status: number, safeCode: string): Response {
+  emitConnectorError(safeCode, status);
   return Response.json({ safeCode }, { status });
 }
 

@@ -5,6 +5,7 @@ import { prisma, setTenantContext } from '../../database/client';
 import type { DocumentPullQueueMessage } from './documentPull';
 import { parseWithIncomeService } from './encompassApi';
 import { runDocumentPullJob, type ClaimedDocumentPull, type DocumentPullWorkerDependencies } from './documentPullWorker';
+import { emitOperationalEvent } from '../../observability/operationalEvents';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
@@ -113,6 +114,7 @@ export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = proce
       await updateJob(job, {
         status: retryable ? 'RETRYABLE_FAILURE' : 'FAILED', safeErrorCode, completedAt: retryable ? null : new Date(),
       });
+      emitOperationalEvent(retryable ? 'document_pull_retry' : 'document_pull_failure', safeErrorCode);
     },
   };
 }

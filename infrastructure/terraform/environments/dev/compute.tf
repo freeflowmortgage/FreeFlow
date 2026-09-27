@@ -321,7 +321,7 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
       capabilities       = { add = [], drop = ["ALL"] }
     }
     workingDirectory = "/app/apps/underwriter-portal"
-    command          = ["./node_modules/.bin/tsx", "scripts/document-pull-worker.ts"]
+    command          = ["node", "/app/apps/underwriter-portal/workers/document-pull-worker.cjs"]
     environment = [
       { name = "DOC_PARSER_SERVICE_URL", value = "http://income-parser.freeflow.local:8080/parse" },
       { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
@@ -370,7 +370,7 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
       capabilities       = { add = [], drop = ["ALL"] }
     }
     workingDirectory = "/app/apps/underwriter-portal"
-    command          = ["./node_modules/.bin/tsx", "scripts/encompass-sync-worker.ts"]
+    command          = ["node", "/app/apps/underwriter-portal/workers/encompass-sync-worker.cjs"]
     environment = [
       { name = "APP_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
       { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
