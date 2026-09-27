@@ -137,6 +137,13 @@ export const ENCOMPASS_CUSTOM_FIELD_SETUP: EncompassCustomFieldDefinition[] = [
     category: 'FreeFlow Audit',
   },
   {
+    fieldName: 'CX.FREEFLOW.APPROVAL.ID',
+    description: 'Immutable FreeFlow approval event identifier used for reconciliation',
+    format: 'STRING',
+    maxLength: 36,
+    category: 'FreeFlow Audit',
+  },
+  {
     fieldName: 'CX.FREEFLOW.SOURCE',
     description: 'Payload source: AI_1003, FORM_1084, or COMBINED',
     format: 'STRING',

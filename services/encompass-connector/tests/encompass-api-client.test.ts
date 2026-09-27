@@ -53,3 +53,54 @@ test('real connector configuration is required and never includes a secret in th
     return error.safeCode === 'ENCOMPASS_CONFIGURATION_MISSING';
   });
 });
+
+test('real connector applies bounded approved fields and reads the reconciliation marker', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = connector((async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith('/oauth2/v1/token')) return Response.json({ access_token: 'provider-token' });
+    if (init?.method === 'PATCH') return new Response(null, { status: 204, headers: { etag: 'revision-1' } });
+    return Response.json({ customFields: [
+      { fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approval-id' },
+      { fieldName: 'CX.UNRELATED', value: 'not-returned' },
+    ] });
+  }) as typeof fetch);
+  const result = await client.applyApprovedIncomeUpdate(context, 'loan-guid', {
+    approvalEventId: '00000000-0000-4000-8000-000000000300',
+    fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approval-id' }],
+  });
+  assert.equal(result.providerRevision, 'revision-1');
+  assert.deepEqual(await client.readFields(context, 'loan-guid', ['CX.FREEFLOW.APPROVAL.ID']), {
+    'CX.FREEFLOW.APPROVAL.ID': 'approval-id',
+  });
+  const patch = calls.find((call) => call.init?.method === 'PATCH');
+  assert.deepEqual(JSON.parse(String(patch?.init?.body)), { customFields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approval-id' }] });
+});
+
+test('network failure during PATCH becomes unknown outcome rather than an automatic retry', async () => {
+  const client = connector((async (url, init) => {
+    if (String(url).endsWith('/oauth2/v1/token')) return Response.json({ access_token: 'provider-token' });
+    if (init?.method === 'PATCH') throw new TypeError('network unavailable');
+    return Response.json({});
+  }) as typeof fetch);
+  await assert.rejects(
+    () => client.applyApprovedIncomeUpdate(context, 'loan-guid', {
+      approvalEventId: '00000000-0000-4000-8000-000000000300',
+      fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approval-id' }],
+    }),
+    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+  );
+});
+
+test('network failure before PATCH is safely retryable and not an unknown write', async () => {
+  const client = connector((async () => { throw new TypeError('network unavailable'); }) as typeof fetch);
+  await assert.rejects(
+    () => client.applyApprovedIncomeUpdate(context, 'loan-guid', {
+      approvalEventId: '00000000-0000-4000-8000-000000000300',
+      fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approval-id' }],
+    }),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'ENCOMPASS_AUTH_UNAVAILABLE'
+      && error.retryable,
+  );
+});

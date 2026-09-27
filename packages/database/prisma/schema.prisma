@@ -73,6 +73,33 @@ enum EncompassDocumentPullStatus {
   FAILED
 }
 
+enum EncompassSyncStatus {
+  QUEUED
+  IN_PROGRESS
+  RECONCILING
+  SUCCEEDED
+  RETRYABLE_FAILURE
+  FAILED
+}
+
+enum IncomeExtractionStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
+enum IncomeMetadataReviewSource {
+  DOCUMENT_VISUAL_REVIEW
+  ENCOMPASS_VERIFIED_METADATA
+  WORKFLOW_VERIFIED_METADATA
+}
+
+enum MortgageLoanProgram {
+  CONVENTIONAL
+  FHA
+  VA
+  USDA
+}
+
 // =============================================================================
 // DATABASE MODELS (Income Point-Solution Focus Only)
 // =============================================================================
@@ -97,6 +124,10 @@ model Tenant {
   auditEvents               AuditEvent[]
   apiIdempotencyKeys        ApiIdempotencyKey[]
   encompassDocumentPullJobs EncompassDocumentPullJob[]
+  encompassSyncJobs         EncompassSyncJob[]
+  incomeExtractions         IncomeExtraction[]
+  calculationExtractions    IncomeCalculationExtraction[]
+  incomeMetadataReviews     IncomeExtractionMetadataReview[]
   encompassConnectorBinding EncompassConnectorBinding?
 
   createdAt DateTime @default(now()) @db.Timestamptz
@@ -108,9 +139,9 @@ model Tenant {
 // Opaque, server-side tenant to connector deployment identity. This is not a
 // credential store; LOS credentials and service tokens are intentionally absent.
 model EncompassConnectorBinding {
-  id           String  @id @default(uuid()) @db.Uuid
-  tenantId     String  @unique @db.Uuid
-  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id           String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String  @unique(map: "encompass_connector_bindings_tenant_id_key") @db.Uuid
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "encompass_connector_bindings_tenant_fkey")
   lenderId     String  @db.VarChar(255)
   deploymentId String  @db.VarChar(255)
   isEnabled    Boolean @default(true)
@@ -160,11 +191,13 @@ model User {
   nmlsNumber   String?  @db.VarChar(50)
 
   // Audit Relations
-  verifiedAudits          Form1084Audit[]            @relation("VerifiedByUser")
-  verifiedAppraisals      AppraisalAudit[]           @relation("AppraisalVerifiedByUser")
-  clearedAppraisalActions AppraisalActionItem[]      @relation("ActionItemClearedByUser")
+  verifiedAudits          Form1084Audit[]                  @relation("VerifiedByUser")
+  verifiedAppraisals      AppraisalAudit[]                 @relation("AppraisalVerifiedByUser")
+  clearedAppraisalActions AppraisalActionItem[]            @relation("ActionItemClearedByUser")
   auditEvents             AuditEvent[]
-  requestedDocumentPulls  EncompassDocumentPullJob[] @relation("DocumentPullRequestedBy")
+  requestedDocumentPulls  EncompassDocumentPullJob[]       @relation("DocumentPullRequestedBy")
+  requestedEncompassSyncs EncompassSyncJob[]               @relation("SyncRequestedBy")
+  incomeMetadataReviews   IncomeExtractionMetadataReview[] @relation("MetadataReviewedBy")
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -181,11 +214,12 @@ model LoanApplication {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Borrowing Meta
-  primaryBorrowerName  String            @db.VarChar(255)
-  primaryBorrowerEmail String            @db.VarChar(255)
-  status               ApplicationStatus @default(DRAFT)
-  encompassGuid        String?           @db.VarChar(255) // Matches active loan in Encompass eFolder
-  version              Int               @default(1)
+  primaryBorrowerName  String              @db.VarChar(255)
+  primaryBorrowerEmail String              @db.VarChar(255)
+  status               ApplicationStatus   @default(DRAFT)
+  encompassGuid        String?             @db.VarChar(255) // Matches active loan in Encompass eFolder
+  loanProgram          MortgageLoanProgram @default(CONVENTIONAL)
+  version              Int                 @default(1)
 
   // Relations
   documents                 LoanDocument[]
@@ -196,6 +230,10 @@ model LoanApplication {
   billingLedgers            TenantBillingLedger[]
   auditEvents               AuditEvent[]
   encompassDocumentPullJobs EncompassDocumentPullJob[]
+  encompassSyncJobs         EncompassSyncJob[]
+  incomeExtractions         IncomeExtraction[]
+  calculationExtractions    IncomeCalculationExtraction[]
+  incomeMetadataReviews     IncomeExtractionMetadataReview[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -220,16 +258,19 @@ model LoanDocument {
   sourcePageCount    Int?
   parserVersion      String?  @db.VarChar(100)
   ocrConfidence      Decimal? @db.Decimal(5, 2) // Aggregate confidence only; no OCR text or payload
+  version            Int      @default(1)
 
   uploadedAt DateTime @default(now()) @db.Timestamptz
 
   // Relations
-  ocrDiffHistories   OcrDiffHistory[]
-  resolvedConditions LoanCondition[]  @relation("ResolvedDocument")
+  ocrDiffHistories      OcrDiffHistory[]
+  resolvedConditions    LoanCondition[]                  @relation("ResolvedDocument")
+  incomeExtractions     IncomeExtraction[]
+  incomeMetadataReviews IncomeExtractionMetadataReview[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, loanId, id])
-  @@unique([tenantId, loanId, sourceAttachmentId])
+  @@unique([tenantId, loanId, sourceAttachmentId], map: "loan_documents_tenant_loan_source_attachment_key")
   @@index([tenantId, loanId])
   @@map("loan_documents")
 }
@@ -273,8 +314,23 @@ model Form1084Audit {
 
   // Allowlisted calculation provenance only; raw request/OCR/override payloads
   // belong neither here nor in any other FreeFlow-managed store.
-  calculationSchemaVersion String @default("legacy-unknown") @db.VarChar(100)
-  calculationSource        String @default("legacy-unknown") @db.VarChar(100)
+  calculationSchemaVersion String   @default("legacy-unknown") @db.VarChar(100)
+  calculationSource        String   @default("legacy-unknown") @db.VarChar(100)
+  calculatedLoanVersion    Int      @default(1)
+  canonicalInputHash       String   @default("0000000000000000000000000000000000000000000000000000000000000000") @db.Char(64)
+  sourceDocumentHashes     String[] @default([])
+  mortgageRuleVersion      String   @default("legacy-unknown") @db.VarChar(100)
+  w2BaseMonthly            Decimal? @db.Decimal(12, 2)
+  w2VariableMonthly        Decimal? @db.Decimal(12, 2)
+  scheduleCMonthlyTotal    Decimal? @db.Decimal(12, 2)
+  scheduleFMonthlyTotal    Decimal? @db.Decimal(12, 2)
+  form1120SMonthlyTotal    Decimal? @db.Decimal(12, 2)
+  form1065MonthlyTotal     Decimal? @db.Decimal(12, 2)
+  form1120MonthlyTotal     Decimal? @db.Decimal(12, 2)
+  assetIncomeMonthly       Decimal? @db.Decimal(12, 2)
+  rentalMonthly            Decimal? @db.Decimal(12, 2)
+  rentalLiabilityMonthly   Decimal? @db.Decimal(12, 2)
+  housingExpenseAdjustment Decimal? @db.Decimal(12, 2)
 
   // Liquidity and Risk Parameters (Schedule L check for Corporations)
   quickRatioComputed  Decimal? @db.Decimal(6, 2)
@@ -289,8 +345,107 @@ model Form1084Audit {
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
+  extractionBindings IncomeCalculationExtraction[]
+
+  @@unique([tenantId, loanId, id], map: "form_1084_audits_tenant_loan_id_key")
   @@index([tenantId, loanId, entityType])
   @@map("form_1084_audits")
+}
+
+// Allowlisted, normalized parser output only. Raw PDF bytes, OCR text/words,
+// provider bodies, and raw XML are prohibited from this table.
+model IncomeExtraction {
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String                 @db.Uuid
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "income_extractions_tenant_fkey")
+  loanId                String                 @db.Uuid
+  loanApplication       LoanApplication        @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "income_extractions_loan_fkey")
+  sourceDocumentId      String                 @db.Uuid
+  sourceDocument        LoanDocument           @relation(fields: [tenantId, loanId, sourceDocumentId], references: [tenantId, loanId, id], onDelete: Restrict, map: "income_extractions_document_fkey")
+  sourceAttachmentId    String                 @db.VarChar(255)
+  sourceDocumentVersion Int
+  sourceContentHash     String                 @db.Char(64)
+  parserVersion         String                 @db.VarChar(100)
+  schemaVersion         String                 @db.VarChar(100)
+  normalizedInput       Json
+  evidence              Json
+  warnings              String[]               @default([])
+  confidence            Decimal?               @db.Decimal(5, 2)
+  canonicalHash         String                 @db.Char(64)
+  status                IncomeExtractionStatus @default(ACTIVE)
+  supersededAt          DateTime?              @db.Timestamptz
+  createdAt             DateTime               @default(now()) @db.Timestamptz
+
+  calculationBindings IncomeCalculationExtraction[]
+  metadataReviews     IncomeExtractionMetadataReview[]
+
+  @@unique([tenantId, loanId, id], map: "income_extractions_tenant_loan_id_key")
+  @@unique([tenantId, sourceDocumentId, sourceDocumentVersion, parserVersion], map: "income_extractions_source_version_parser_key")
+  @@index([tenantId, loanId, status, createdAt], map: "income_extractions_tenant_loan_status_created_idx")
+  @@index([tenantId, sourceDocumentId, status], map: "income_extractions_tenant_document_status_idx")
+  @@map("income_extractions")
+}
+
+// Immutable, versioned reviewer assertions for facts unavailable from the
+// parser contract. Assignments contain only allowlisted entity metadata, never
+// OCR text, document bytes, or caller-supplied calculation values.
+model IncomeExtractionMetadataReview {
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String                     @db.Uuid
+  tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "income_metadata_reviews_tenant_fkey")
+  loanId                String                     @db.Uuid
+  loanApplication       LoanApplication            @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "income_metadata_reviews_loan_fkey")
+  extractionId          String                     @db.Uuid
+  extraction            IncomeExtraction           @relation(fields: [tenantId, loanId, extractionId], references: [tenantId, loanId, id], onDelete: Restrict, map: "income_metadata_reviews_extraction_fkey")
+  sourceDocumentId      String                     @db.Uuid
+  sourceDocument        LoanDocument               @relation(fields: [tenantId, loanId, sourceDocumentId], references: [tenantId, loanId, id], onDelete: Restrict, map: "income_metadata_reviews_document_fkey")
+  sourceDocumentVersion Int
+  sourceContentHash     String                     @db.Char(64)
+  extractionHash        String                     @db.Char(64)
+  metadataVersion       Int
+  assignments           Json
+  source                IncomeMetadataReviewSource
+  reasonCode            String                     @db.VarChar(100)
+  reasonNarrative       String?                    @db.VarChar(500)
+  reviewedByUserId      String                     @db.Uuid
+  reviewedByUser        User                       @relation("MetadataReviewedBy", fields: [tenantId, reviewedByUserId], references: [tenantId, id], onDelete: Restrict, map: "income_metadata_reviews_user_fkey")
+  canonicalHash         String                     @db.Char(64)
+  createdAt             DateTime                   @default(now()) @db.Timestamptz
+
+  calculationBindings IncomeCalculationExtraction[]
+
+  @@unique([tenantId, loanId, id], map: "income_metadata_reviews_tenant_loan_id_key")
+  @@unique([tenantId, extractionId, metadataVersion], map: "income_metadata_reviews_extraction_version_key")
+  @@index([tenantId, loanId, extractionId, metadataVersion], map: "income_metadata_reviews_tenant_loan_extraction_version_idx")
+  @@map("income_extraction_metadata_reviews")
+}
+
+// Immutable provenance edge proving exactly which extraction set generated a
+// calculation. Denormalized hashes/versions make later review independently
+// verifiable without accepting mutable browser state.
+model IncomeCalculationExtraction {
+  tenantId              String                          @db.Uuid
+  tenant                Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "income_calculation_extractions_tenant_fkey")
+  loanId                String                          @db.Uuid
+  loanApplication       LoanApplication                 @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "income_calculation_extractions_loan_fkey")
+  calculationId         String                          @db.Uuid
+  calculation           Form1084Audit                   @relation(fields: [tenantId, loanId, calculationId], references: [tenantId, loanId, id], onDelete: Restrict, map: "income_calculation_extractions_calculation_fkey")
+  extractionId          String                          @db.Uuid
+  extraction            IncomeExtraction                @relation(fields: [tenantId, loanId, extractionId], references: [tenantId, loanId, id], onDelete: Restrict, map: "income_calculation_extractions_extraction_fkey")
+  extractionHash        String                          @db.Char(64)
+  sourceDocumentId      String                          @db.Uuid
+  sourceDocumentVersion Int
+  sourceContentHash     String                          @db.Char(64)
+  metadataReviewId      String?                         @db.Uuid
+  metadataReview        IncomeExtractionMetadataReview? @relation(fields: [tenantId, loanId, metadataReviewId], references: [tenantId, loanId, id], onDelete: Restrict, map: "income_calculation_extractions_metadata_review_fkey")
+  metadataReviewVersion Int?
+  metadataReviewHash    String?                         @db.Char(64)
+  createdAt             DateTime                        @default(now()) @db.Timestamptz
+
+  @@id([tenantId, calculationId, extractionId])
+  @@index([tenantId, loanId, calculationId], map: "income_calculation_extractions_tenant_loan_calculation_idx")
+  @@index([tenantId, extractionId], map: "income_calculation_extractions_tenant_extraction_idx")
+  @@map("income_calculation_extractions")
 }
 
 // 8. IMMUTABLE AUDIT EVENTS (calculation, approval, and override evidence)
@@ -300,13 +455,14 @@ model Form1084Audit {
 // bodies, borrower identifiers, or provider secrets. The database migration
 // grants INSERT/SELECT only and rejects every UPDATE/DELETE attempt.
 model AuditEvent {
-  id              String          @id @default(uuid()) @db.Uuid
-  tenantId        String          @db.Uuid
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  loanId          String          @db.Uuid
-  loanApplication LoanApplication @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
-  actorUserId     String          @db.Uuid
-  actorUser       User            @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String             @db.Uuid
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  loanId            String             @db.Uuid
+  loanApplication   LoanApplication    @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
+  actorUserId       String             @db.Uuid
+  actorUser         User               @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
+  encompassSyncJobs EncompassSyncJob[] @relation("SyncApprovalEvent")
 
   action              String   @db.VarChar(100)
   entityType          String   @db.VarChar(100)
@@ -322,6 +478,7 @@ model AuditEvent {
   eventHash           String   @unique @db.Char(64)
   occurredAt          DateTime @default(now()) @db.Timestamptz
 
+  @@unique([tenantId, id], map: "audit_events_tenant_id_key")
   @@index([tenantId, occurredAt, id])
   @@index([tenantId, loanId, occurredAt, id])
   @@index([tenantId, requestId])
@@ -331,7 +488,7 @@ model AuditEvent {
 // Mutation replay protection. Stores only hashes, status, and a safe
 // identifier reference. Never persist request bodies, documents, or PII.
 model ApiIdempotencyKey {
-  id                String   @id @default(uuid()) @db.Uuid
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId          String   @db.Uuid
   tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   operation         String   @db.VarChar(100)
@@ -342,7 +499,7 @@ model ApiIdempotencyKey {
   expiresAt         DateTime @db.Timestamptz
   createdAt         DateTime @default(now()) @db.Timestamptz
 
-  @@unique([tenantId, operation, key])
+  @@unique([tenantId, operation, key], map: "api_idempotency_keys_tenant_operation_key")
   @@index([tenantId, expiresAt])
   @@map("api_idempotency_keys")
 }
@@ -351,32 +508,66 @@ model ApiIdempotencyKey {
 // identifiers and safe status only. PDF bytes, attachment names, borrower data,
 // OCR text, and provider responses must never be persisted here or placed on SQS.
 model EncompassDocumentPullJob {
-  id                String          @id @default(uuid()) @db.Uuid
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId          String          @db.Uuid
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "encompass_document_pull_jobs_tenant_fkey")
   loanId            String          @db.Uuid
-  loanApplication   LoanApplication @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
+  loanApplication   LoanApplication @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "encompass_document_pull_jobs_loan_fkey")
   requestedByUserId String          @db.Uuid
-  requestedByUser   User            @relation("DocumentPullRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict)
+  requestedByUser   User            @relation("DocumentPullRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "encompass_document_pull_jobs_requester_fkey")
 
-  expectedLoanVersion Int
-  idempotencyKey      String                      @db.VarChar(128)
-  correlationId       String                      @db.VarChar(100)
-  status              EncompassDocumentPullStatus @default(QUEUED)
-  attemptCount        Int                         @default(0)
-  safeErrorCode       String?                     @db.VarChar(100)
-  attachmentCount     Int?
-  processedCount      Int?
-  startedAt           DateTime?                   @db.Timestamptz
-  completedAt         DateTime?                   @db.Timestamptz
-  createdAt           DateTime                    @default(now()) @db.Timestamptz
-  updatedAt           DateTime                    @updatedAt @db.Timestamptz
+  expectedLoanVersion   Int
+  selectedAttachmentIds String[]                    @default([])
+  idempotencyKey        String                      @db.VarChar(128)
+  correlationId         String                      @db.VarChar(100)
+  status                EncompassDocumentPullStatus @default(QUEUED)
+  attemptCount          Int                         @default(0)
+  safeErrorCode         String?                     @db.VarChar(100)
+  attachmentCount       Int?
+  processedCount        Int?
+  startedAt             DateTime?                   @db.Timestamptz
+  completedAt           DateTime?                   @db.Timestamptz
+  createdAt             DateTime                    @default(now()) @db.Timestamptz
+  updatedAt             DateTime                    @updatedAt @db.Timestamptz
 
-  @@unique([tenantId, id])
-  @@unique([tenantId, idempotencyKey])
-  @@index([tenantId, loanId, createdAt])
-  @@index([status, createdAt])
+  @@unique([tenantId, id], map: "encompass_document_pull_jobs_tenant_id_key")
+  @@unique([tenantId, idempotencyKey], map: "encompass_document_pull_jobs_tenant_idempotency_key")
+  @@index([tenantId, loanId, createdAt], map: "encompass_document_pull_jobs_tenant_loan_created_idx")
+  @@index([status, createdAt], map: "encompass_document_pull_jobs_status_created_idx")
   @@map("encompass_document_pull_jobs")
+}
+
+// Durable approved-result outbox and execution state. The row is the database
+// authority; SQS carries only its identifiers and can be replayed safely.
+model EncompassSyncJob {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String              @db.Uuid
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "encompass_sync_jobs_tenant_fkey")
+  loanId              String              @db.Uuid
+  loanApplication     LoanApplication     @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_loan_fkey")
+  approvalEventId     String              @db.Uuid
+  approvalEvent       AuditEvent          @relation("SyncApprovalEvent", fields: [tenantId, approvalEventId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_approval_fkey")
+  requestedByUserId   String              @db.Uuid
+  requestedByUser     User                @relation("SyncRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_requester_fkey")
+  expectedLoanVersion Int
+  idempotencyKey      String              @db.VarChar(128)
+  correlationId       String              @db.VarChar(100)
+  status              EncompassSyncStatus @default(QUEUED)
+  attemptCount        Int                 @default(0)
+  reconciliationCount Int                 @default(0)
+  safeErrorCode       String?             @db.VarChar(100)
+  providerRevision    String?             @db.VarChar(100)
+  startedAt           DateTime?           @db.Timestamptz
+  completedAt         DateTime?           @db.Timestamptz
+  createdAt           DateTime            @default(now()) @db.Timestamptz
+  updatedAt           DateTime            @updatedAt @db.Timestamptz
+
+  @@unique([tenantId, id], map: "encompass_sync_jobs_tenant_id_key")
+  @@unique([tenantId, idempotencyKey], map: "encompass_sync_jobs_tenant_idempotency_key")
+  @@unique([tenantId, approvalEventId], map: "encompass_sync_jobs_tenant_approval_key")
+  @@index([tenantId, loanId, createdAt], map: "encompass_sync_jobs_tenant_loan_created_idx")
+  @@index([status, updatedAt], map: "encompass_sync_jobs_status_updated_idx")
+  @@map("encompass_sync_jobs")
 }
 
 // 9. LOAN CONDITIONS (Encompass Checklist Integration)

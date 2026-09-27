@@ -44,21 +44,21 @@ see production RDS, production Encompass, or real borrower files.
 |---|---|---|---|---|
 | RapidOCR income parser | LIVE (dev image stale) | `services/doc-parser` | P0-12, P0-13 | Digest-pin new image; scan SLO |
 | Portal → parser proxy | PARTIAL | `apps/underwriter-portal/.../process.ts` | P0-07 | Timeouts; no OCR-word dump |
-| Form 1084 calculation | PARTIAL | `packages/mortgage-engine` + `income-approvals` | P0-05 | Approval/override events exist; bind summary export and Encompass sync to those event IDs |
+| Form 1084 calculation | PARTIAL | `packages/mortgage-engine` + persisted `income_extractions` + `income-approvals` | P0-05 | W-2/Schedule E parser output is source-bound and server-calculated; immutable parser records lacking authoritative tax year fail closed pending a separate authoritative year source |
 | MISMO 3.4 cash-flow XML | PARTIAL | `services/doc-parser/src/mismo_xml_exporter.py` | P0-08 | Attach after approval only |
 | MISMO 3.4 URLA (1003) intake | PARTIAL | `apps/underwriting-console/src/intake/mismoExport.ts` | — | QA only; no prod persist |
 | MISMO D1C vendor blocks | PARTIAL | `packages/mortgage-engine/src/mismoD1cMapper.ts` | P0-08 | No vendor APIs yet |
 | ULAD | MISSING | — | — | Out of scope unless LOS requires it |
-| Encompass **web** (Developer Connect) | STUB | `encompass-sync.ts` **503** | P0-08 | Build worker; never password-grant |
-| Encompass **eFolder pull** | STUB | `pull-docs.ts` **503** | P0-08 | Worker fetch; discard bytes |
+| Encompass **web** (Developer Connect) | PARTIAL | v1 sync API + `encompass-sync-worker` + connector | P0-08 | Repository path is complete; qualify one real ICE sandbox write/reconciliation |
+| Encompass **eFolder pull** | PARTIAL | v1 document-pull API + worker + connector | P0-08 | Selected-attachment, bounded, ZDR path exists; qualify real ICE sandbox retrieval |
 | Encompass field PATCH map | PARTIAL | `map-encompass-fields-v2.ts` | P0-08 | Custom fields must exist in instance |
 | Encompass **desktop** (SmartClient / COM / plugin) | MISSING | none | — | iframe CSP only; see §6 |
-| SQS sync + DLQ | PARTIAL (infra) | `infrastructure/terraform/.../messaging.tf` | P0-08 | No worker code |
-| Sync worker ECS task | MISSING | — | P0-08, P0-15 | New service |
+| SQS sync + DLQ | LIVE | `infrastructure/terraform/.../messaging.tf` | P0-08 | Deploy flag remains off until sandbox configuration is supplied |
+| Sync worker ECS task | LIVE | `syncWorkerRuntime.ts` + Terraform task/service | P0-08, P0-15 | Enable only with connector and sandbox binding |
 | Appraisal / URAR 1004 | PARTIAL | `services/appraisal-parser` | P0-11 | Native/AcroForm only; no RapidOCR |
 | Stripe billing | STUB in protected runtime | `billing/webhook.ts` | P0-09 | Authoritative reconcile |
 | Cognito + ALB OIDC | PARTIAL | TF + `albOidc.ts` | P0-01, P0-15 | Live matrix evidence |
-| RDS + RLS | PARTIAL | `packages/database` | P0-03 done; P0-04/17 open | `audit_events` + `api_idempotency_keys` exist; missing `sync_jobs` / `webhook_events` |
+| RDS + RLS | PARTIAL | `packages/database` | P0-03 done; P0-04/17 open | Durable sync and normalized extraction/calculation provenance pass local migration-from-zero, drift, app-role, worker-role, and cross-tenant tests; webhook events and live RDS qualification remain |
 | Shared links | MISSING | — | P0-10 | — |
 | Credit / AUS (DU, LP, GUS) | MISSING | — | — | Out of scope for this launch |
 | Plaid / Truework / Argyle / Work Number APIs | MISSING | D1C **names only** | — | Do not claim D1C live |
@@ -202,11 +202,14 @@ This is the **only** supported live Encompass integration.
 |---|---|
 | `POST /api/underwrite/encompass-sync` | **503** `APPROVED_SYNC_WORKER_REQUIRED` |
 | `POST /api/underwrite/pull-docs` | **503** `APPROVED_DOCUMENT_WORKER_REQUIRED` |
+| `POST /api/v1/loans/{loanId}/encompass-syncs` | Creates one tenant-scoped durable job for one immutable current approval |
+| `GET /api/v1/encompass-syncs/{jobId}` | Returns tenant-scoped safe job status |
+| `POST /api/v1/loans/{loanId}/encompass-document-pulls` | Queues explicit selected attachment IDs through the bound connector |
 | `buildEncompassFieldUpdatePayload` | Maps 1084 → `CX.FREEFLOW.*` + 1003 other-income |
-| SQS + DLQ | Terraform present; **nothing enqueues** |
+| SQS + DLQ | Identifier-only dispatch, bounded exponential retry, five-delivery DLQ |
 | `docs/encompass-sync.ts` | **Forbidden prototype** (password grant, header tenant) |
 
-### Required production flow
+### Implemented production flow (sandbox qualification still required)
 
 ```
 APPROVED → QUEUED → IN_PROGRESS → SUCCEEDED | RETRYABLE_FAILURE | FAILED
@@ -220,7 +223,7 @@ No PDF, no XML, no borrower names.
 
 Worker:
 
-1. Re-auth tenant membership.
+1. Revalidate the tenant-scoped durable job and server-side connector binding.
 2. Load immutable approval; abort if version stale.
 3. Map with `map-encompass-fields-v2.ts` (and MISMO attach if enabled).
 4. OAuth **client credentials** (or ICE-approved grant). **Never** resource
@@ -230,7 +233,7 @@ Worker:
 6. Conditional state update; duplicate SQS delivery is a no-op.
 7. Reconcile unknown outcomes; DLQ gets safe codes only.
 
-API to add (spec):
+Implemented API:
 
 - `POST /api/v1/loans/{loanId}/encompass-syncs` → 202 + job id
 - `GET /api/v1/encompass-syncs/{jobId}`

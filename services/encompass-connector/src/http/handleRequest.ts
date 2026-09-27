@@ -39,6 +39,8 @@ export async function handleConnectorRequest(
   if (
     path !== CONNECTOR_SERVICE_CONTRACT.listPath
     && path !== CONNECTOR_SERVICE_CONTRACT.downloadPath
+    && path !== CONNECTOR_SERVICE_CONTRACT.applyUpdatePath
+    && path !== CONNECTOR_SERVICE_CONTRACT.readFieldsPath
   ) {
     return safeErrorResponse(404, 'CONNECTOR_PATH_NOT_FOUND');
   }
@@ -106,6 +108,21 @@ export async function handleConnectorRequest(
       return Response.json({ attachments });
     }
 
+
+    if (path === CONNECTOR_SERVICE_CONTRACT.applyUpdatePath) {
+      const approvalEventId = readString(body.approvalEventId);
+      const fields = readFields(body.fields);
+      if (!UUID.test(approvalEventId) || !fields) return safeErrorResponse(400, 'CONNECTOR_REQUEST_INVALID');
+      const result = await deps.connector.applyApprovedIncomeUpdate(context, loanGuid, { approvalEventId, fields });
+      return Response.json({ applied: true, ...(result.providerRevision ? { providerRevision: result.providerRevision } : {}) });
+    }
+
+    if (path === CONNECTOR_SERVICE_CONTRACT.readFieldsPath) {
+      const fieldNames = readFieldNames(body.fieldNames);
+      if (!fieldNames) return safeErrorResponse(400, 'CONNECTOR_REQUEST_INVALID');
+      return Response.json({ fields: await deps.connector.readFields(context, loanGuid, fieldNames) });
+    }
+
     const attachmentId = readString(body.attachmentId);
     if (!attachmentId) {
       return safeErrorResponse(400, 'CONNECTOR_REQUEST_INVALID');
@@ -131,6 +148,28 @@ export async function handleConnectorRequest(
   } catch (error) {
     return responseFromUnknown(error);
   }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const FIELD_NAME = /^(?:CX\.FREEFLOW\.[A-Z0-9.]+|10[1-7])$/;
+
+function readFieldNames(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) return null;
+  const names = value.filter((item): item is string => typeof item === 'string' && FIELD_NAME.test(item));
+  return names.length === value.length && new Set(names).size === names.length ? names : null;
+}
+
+function readFields(value: unknown): Array<{ fieldName: string; value: string }> | null {
+  if (!Array.isArray(value)) return null;
+  const result: Array<{ fieldName: string; value: string }> = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.fieldName !== 'string' || !FIELD_NAME.test(item.fieldName)
+      || typeof item.value !== 'string' || item.value.length > 500) return null;
+    result.push({ fieldName: item.fieldName, value: item.value });
+  }
+  return result.length > 0 && result.length <= 32 && new Set(result.map((field) => field.fieldName)).size === result.length
+    ? result
+    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

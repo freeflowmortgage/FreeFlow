@@ -21,7 +21,10 @@ export function safeErrorResponse(status: number, safeCode: string): Response {
 
 export function responseFromUnknown(error: unknown): Response {
   if (error instanceof EncompassConnectorError) {
-    return safeErrorResponse(STATUS_BY_CODE[error.safeCode] ?? 400, error.safeCode);
+    const status = error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN'
+      ? 504
+      : STATUS_BY_CODE[error.safeCode] ?? (error.retryable ? 503 : 400);
+    return safeErrorResponse(status, error.safeCode);
   }
   return safeErrorResponse(400, 'CONNECTOR_REQUEST_INVALID');
 }

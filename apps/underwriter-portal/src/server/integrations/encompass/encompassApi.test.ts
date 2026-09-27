@@ -44,9 +44,14 @@ test('parser adapter keeps only bounded metadata', async () => {
       total_pages_scanned: 2,
       classifications: { 0: ['W2_WAGE'] },
       pages: [{ meanConfidence: 94 }, { meanConfidence: 96 }],
+      w2Extracts: [{ pageIndex: 0, year: 2025, employerName: 'Synthetic Employer', box1: 120000 }],
       formExtracts: [{ ssn: 'never-persist-this' }],
     } })) as typeof fetch,
   });
-  assert.deepEqual(parsed, { pageCount: 2, documentCategory: 'W2_WAGE', parserVersion: 'income-parser-v5', confidence: 95 });
+  assert.equal(parsed.pageCount, 2);
+  assert.equal(parsed.documentCategory, 'W2_WAGE');
+  assert.equal(parsed.parserVersion, 'income-parser-v5');
+  assert.equal(parsed.confidence, 95);
+  assert.equal(parsed.extraction.schemaVersion, 'income-extraction-v2');
   assert.equal(JSON.stringify(parsed).includes('ssn'), false);
 });

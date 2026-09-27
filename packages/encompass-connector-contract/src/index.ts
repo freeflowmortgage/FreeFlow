@@ -9,6 +9,8 @@ export {
   CONNECTOR_SERVICE_CONTRACT,
   type ConnectorServiceListRequest,
   type ConnectorServiceDownloadRequest,
+  type ConnectorServiceApplyUpdateRequest,
+  type ConnectorServiceReadFieldsRequest,
 } from './serviceContract';
 export type {
   EncompassConnectorContext,
@@ -16,6 +18,9 @@ export type {
   ConnectorDeploymentBinding,
   EncompassAttachmentRef,
   DownloadedEncompassAttachment,
+  EncompassFieldWrite,
+  EncompassApprovedIncomeUpdate,
+  EncompassWriteResult,
   ConnectorServiceAuth,
   DeveloperConnectClient,
   CreateEncompassConnectorOptions,

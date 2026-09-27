@@ -1,189 +1,324 @@
-import { NextApiRequest, NextApiResponse } from 'next';
-import {
-  dispatchIncomeCalculation,
-  UnifiedIncomeCalculationPayload,
-  LoanProgram
-} from '@mortgage-pos/mortgage-engine';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { Prisma } from '@prisma/client';
+import { dispatchIncomeCalculation, type LoanProgram } from '@mortgage-pos/mortgage-engine';
 import { withRequestContext, type RequestContext } from '../../../server/auth/requestContext';
 import { withTenantTransaction } from '../../../server/database/client';
 import { appendAuditEvent, hashAuditResult } from '../../../server/audit/appendEvent';
+import { hashCanonical } from '../../../server/http/canonical';
+import { isUuid } from '../../../server/http/identifiers';
+import { ExtractionMetadataRequiredError, mergeAuthoritativeExtractionInputs } from '../../../server/income/authoritativeExtractionInput';
+import { INCOME_EXTRACTION_SCHEMA_VERSION } from '../../../server/integrations/encompass/persistedParserExtraction';
 
-/**
- * 🚀 Next.js API Route: /api/income/calculate
- * 
- * Secure, zero-data-retention calculation gateway for the FreeFlow Income Engine.
- * 
- * CORE OPERATIONS:
- * 1. Enforces NextAuth Session Protection (underwriter verification) [cite: 116].
- * 2. Pulls loan details from multi-tenant PostgreSQL to resolve the active Loan Program [cite: 35].
- * 3. Sanitizes and transforms incoming OCR/API data into unified inputs [cite: 33, 49].
- * 4. Dispatches the data to the calculateForm1084Income-v5 core rules engine [cite: 122].
- * 5. Commits non-PII metrics and audit logs back to PostgreSQL in an atomic transaction [cite: 19, 38].
- * 6. Returns a standardized JSON payload to fuel real-time, interactive frontend updates [cite: 26].
- */
-async function handler(req: NextApiRequest, res: NextApiResponse, context: RequestContext) {
-  // 1. Enforce POST only
+const MAX_EXTRACTIONS = 20;
+
+type Dependencies = Readonly<{ withTenantTransaction: typeof withTenantTransaction }>;
+
+export function createIncomeCalculationHandler(dependencies: Dependencies = { withTenantTransaction }) {
+  return async function handler(req: NextApiRequest, res: NextApiResponse, context: RequestContext) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
-    return res.status(405).json({ error: `Method ${req.method} not allowed.` });
+    return res.status(405).json({ error: safeError('METHOD_NOT_ALLOWED', 'Only POST is supported.', context) });
   }
 
   try {
-    const { loanId, documentData } = req.body;
-
-    // Validate parameters
+    const body = isRecord(req.body) ? req.body : {};
+    if ('documentData' in body || 'loanProgram' in body || 'sourceDocumentIds' in body) {
+      return res.status(400).json({
+        error: safeError(
+          'CALLER_CALCULATION_INPUT_FORBIDDEN',
+          'Calculation input and loan program are loaded from authoritative server-side state.',
+          context,
+        ),
+      });
+    }
+    const loanId = typeof body.loanId === 'string' && isUuid(body.loanId) ? body.loanId : null;
+    const extractionIds = readExtractionIds(body.extractionIds);
     if (!loanId) {
-      return res.status(400).json({ error: 'BAD REQUEST: Missing required field [loanId].' });
+      return res.status(400).json({ error: safeError('INVALID_LOAN_ID', 'loanId must be a valid identifier.', context) });
     }
-    if (!documentData) {
-      return res.status(400).json({ error: 'BAD REQUEST: Missing required field [documentData].' });
-    }
-
-    // 3. Resolve the Active Loan Product / Agency [cite: 35]
-    // Dynamically query our multitenant database to resolve the loan's program parameters [cite: 20, 35].
-    const loan = await withTenantTransaction(
-      { tenantId: context.tenantId, principalId: context.membershipId },
-      (transaction) => transaction.loanApplication.findFirst({
-        where: { id: loanId, tenantId: context.tenantId },
-        select: {
-          id: true,
-          tenantId: true,
-          version: true,
-        }
-      }),
-    );
-
-    if (!loan) {
-      return res.status(404).json({ error: `LOAN NOT FOUND: Active file ID "${loanId}" does not exist.` });
-    }
-
-    // Map requested loan program or default to CONVENTIONAL [cite: 35, 122]
-    const requestedProgram = req.body.loanProgram as string | undefined;
-    let calculatorProgram: LoanProgram = 'CONVENTIONAL';
-    if (requestedProgram === 'FHA') calculatorProgram = 'FHA';
-    else if (requestedProgram === 'VA') calculatorProgram = 'VA';
-    else if (requestedProgram === 'USDA') calculatorProgram = 'USDA';
-
-    // 4. Transform and Package Inbound Data Payload
-    // Build the payload conforming strictly to UnifiedIncomeCalculationPayload structure [cite: 122]
-    const calculationPayload: UnifiedIncomeCalculationPayload = {
-      loanProgram: calculatorProgram,
-      w2Employers: documentData.w2Employers,
-      scheduleC: documentData.scheduleC,
-      scheduleF: documentData.scheduleF,
-      form1120S: documentData.form1120S,
-      form1065: documentData.form1065,
-      form1120: documentData.form1120,
-      benefits: documentData.benefits,
-      assets: documentData.assets,
-      trusts: documentData.trusts,
-      scheduleEProperties: documentData.scheduleEProperties,
-      militaryLES: documentData.militaryLES,
-      subjectPropertyRental: documentData.subjectPropertyRental
-    };
-
-    // 5. Dispatch to a program-isolated engine. USDA never falls through to
-    // retrospective Form 1084 trending: it requires prospective repayment and
-    // household-eligibility inputs supplied directly to this income service.
-    let calculationResults: unknown;
-    let calculationEngine: 'FORM_1084' | 'USDA_STANDALONE';
-    let qualifyingMonthlyIncome: number;
-    let trendingResult: string;
-    let yearsAnalyzed: number[];
-
-    if (calculatorProgram === 'USDA') {
-      if (!documentData.usdaInput) {
-        return res.status(400).json({
-          error: 'BAD REQUEST: USDA calculations require documentData.usdaInput with household members and county income limit.'
-        });
-      }
-      const dispatched = dispatchIncomeCalculation({
-        loanProgram: 'USDA',
-        usdaInput: { ...documentData.usdaInput, loanId }
+    if (!extractionIds) {
+      return res.status(400).json({
+        error: safeError('INVALID_EXTRACTION_SELECTION', 'Provide 1 to 20 unique extractionIds.', context),
       });
-      calculationEngine = dispatched.engine;
-      calculationResults = dispatched.result;
-      qualifyingMonthlyIncome = dispatched.result.repaymentIncomeMonthly;
-      trendingResult = dispatched.result.isEligibleByIncome ? 'USDA_ELIGIBLE' : 'USDA_OVER_INCOME_LIMIT';
-      yearsAnalyzed = [];
-    } else {
-      const dispatched = dispatchIncomeCalculation({
-        loanProgram: calculatorProgram,
-        form1084Input: calculationPayload
-      });
-      calculationEngine = dispatched.engine;
-      calculationResults = dispatched.result;
-      qualifyingMonthlyIncome = dispatched.result.summary.qualifyingMonthlyIncome;
-      trendingResult = dispatched.result.summary.trendingResult;
-      yearsAnalyzed = dispatched.result.summary.yearsAnalyzed;
     }
 
-    // 6. Commit Form 1084 Audit record to Database (Atomic Transaction) [cite: 19, 38]
-    // We strictly avoid saving raw document binaries or borrower SSNs here, complying with ZDR guidelines [cite: 33].
-    const updatedAudit = await withTenantTransaction(
+    const authority = await dependencies.withTenantTransaction(
       { tenantId: context.tenantId, principalId: context.membershipId },
       async (transaction) => {
+        const loan = await transaction.loanApplication.findFirst({
+          where: { id: loanId, tenantId: context.tenantId },
+          select: { id: true, version: true, loanProgram: true },
+        });
+        if (!loan) return null;
+        const extractions = await transaction.incomeExtraction.findMany({
+          where: { id: { in: extractionIds }, tenantId: context.tenantId, loanId },
+          select: {
+            id: true, status: true, schemaVersion: true, parserVersion: true, warnings: true,
+            normalizedInput: true, canonicalHash: true, sourceDocumentId: true,
+            sourceDocumentVersion: true, sourceContentHash: true, sourceAttachmentId: true,
+            sourceDocument: { select: { version: true, sourceContentHash: true, sourceAttachmentId: true } },
+            metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { id: true, metadataVersion: true, assignments: true, canonicalHash: true, extractionHash: true, sourceDocumentVersion: true, sourceContentHash: true } },
+          },
+          orderBy: { id: 'asc' },
+        });
+        return { loan, extractions };
+      },
+    );
+    if (!authority) {
+      return res.status(404).json({ error: safeError('LOAN_NOT_FOUND', 'The requested loan was not found.', context) });
+    }
+    if (authority.extractions.length !== extractionIds.length) {
+      return res.status(404).json({
+        error: safeError('EXTRACTION_NOT_FOUND', 'One or more selected extractions were not found for this loan.', context),
+      });
+    }
+    if (authority.extractions.some((item) => item.schemaVersion !== INCOME_EXTRACTION_SCHEMA_VERSION)) {
+      return res.status(422).json({
+        error: safeError('UNSUPPORTED_EXTRACTION_SCHEMA', 'A selected extraction uses an unsupported schema.', context),
+      });
+    }
+    if (authority.extractions.some((item) => item.status !== 'ACTIVE')) {
+      return res.status(409).json({
+        error: safeError('EXTRACTION_SUPERSEDED', 'A selected extraction has been superseded.', context),
+      });
+    }
+    if (authority.extractions.some((item) =>
+      item.sourceDocument.version !== item.sourceDocumentVersion
+      || item.sourceDocument.sourceContentHash !== item.sourceContentHash
+      || item.sourceDocument.sourceAttachmentId !== item.sourceAttachmentId)) {
+      return res.status(409).json({
+        error: safeError('STALE_EXTRACTION_SOURCE', 'A selected extraction no longer matches its source document.', context),
+      });
+    }
+    if (authority.loan.loanProgram === 'USDA') {
+      return res.status(422).json({
+        error: safeError('UNSUPPORTED_EXTRACTION_PROGRAM', 'USDA requires a separate authoritative household eligibility input.', context),
+      });
+    }
+
+    let calculationInput;
+    try {
+      calculationInput = mergeAuthoritativeExtractionInputs(authority.extractions.map((item) => ({
+        extractionId: item.id,
+        normalizedInput: item.normalizedInput,
+        metadataAssignments: item.metadataReviews[0]?.assignments as never,
+      })));
+    } catch (error) {
+      if (error instanceof ExtractionMetadataRequiredError) {
+        return res.status(422).json({
+          error: { ...safeError('EXTRACTION_REVIEW_DATA_REQUIRED', 'A selected extraction requires authoritative reviewed metadata or parser fields.', context), requirements: error.requirements },
+        });
+      }
+      return res.status(422).json({
+        error: safeError('INVALID_PERSISTED_EXTRACTION', 'A selected extraction failed server-side validation.', context),
+      });
+    }
+    const loanProgram = authority.loan.loanProgram as Exclude<LoanProgram, 'USDA'>;
+    const extractionProvenance = authority.extractions.map((item) => ({
+      extractionId: item.id,
+      extractionHash: item.canonicalHash,
+      parserVersion: item.parserVersion,
+      sourceDocumentId: item.sourceDocumentId,
+      sourceDocumentVersion: item.sourceDocumentVersion,
+      sourceContentHash: item.sourceContentHash,
+      sourceAttachmentId: item.sourceAttachmentId,
+      metadataReviewId: item.metadataReviews[0]?.id ?? null,
+      metadataReviewVersion: item.metadataReviews[0]?.metadataVersion ?? null,
+      metadataReviewHash: item.metadataReviews[0]?.canonicalHash ?? null,
+    }));
+    const canonicalInputHash = hashCanonical({
+      loanId: authority.loan.id,
+      loanVersion: authority.loan.version,
+      loanProgram,
+      extractionProvenance,
+      calculationInput,
+    });
+    const mortgageRuleVersion = 'form-1084-v9';
+    const dispatched = dispatchIncomeCalculation({ loanProgram, form1084Input: calculationInput });
+    const result = dispatched.result;
+    const qualifyingMonthlyIncome = result.summary.qualifyingMonthlyIncome;
+    const mapperOutputs = deriveMapperOutputs(result);
+
+    const persisted = await dependencies.withTenantTransaction(
+      { tenantId: context.tenantId, principalId: context.membershipId },
+      async (transaction) => {
+        const lockedLoans = await transaction.$queryRaw<Array<{ version: number }>>`
+          SELECT "version" FROM "loan_applications"
+          WHERE "id" = CAST(${loanId} AS uuid) AND "tenantId" = CAST(${context.tenantId} AS uuid)
+          FOR UPDATE
+        `;
+        const locked = await transaction.$queryRaw<Array<{
+          id: string; status: string; canonicalHash: string; sourceDocumentId: string;
+          sourceDocumentVersion: number; sourceContentHash: string; documentVersion: number;
+          documentHash: string | null; sourceAttachmentId: string; documentAttachmentId: string | null;
+        }>>(Prisma.sql`
+          SELECT e."id", e."status"::text, e."canonicalHash", e."sourceDocumentId",
+            e."sourceDocumentVersion", e."sourceContentHash", e."sourceAttachmentId",
+            d."version" AS "documentVersion", d."sourceContentHash" AS "documentHash",
+            d."sourceAttachmentId" AS "documentAttachmentId"
+          FROM "income_extractions" e
+          JOIN "loan_documents" d
+            ON d."tenantId" = e."tenantId" AND d."loanId" = e."loanId" AND d."id" = e."sourceDocumentId"
+          WHERE e."tenantId" = CAST(${context.tenantId} AS uuid)
+            AND e."loanId" = CAST(${loanId} AS uuid)
+            AND e."id" = ANY(${extractionIds}::uuid[])
+          ORDER BY e."id" ASC
+        `);
+        const lockedReviews = await transaction.incomeExtractionMetadataReview.findMany({
+          where: { tenantId: context.tenantId, loanId, extractionId: { in: extractionIds } },
+          orderBy: [{ extractionId: 'asc' }, { metadataVersion: 'desc' }],
+          select: { id: true, extractionId: true, metadataVersion: true, canonicalHash: true },
+        });
+        const latestReviewByExtraction = new Map<string, typeof lockedReviews[number]>();
+        for (const review of lockedReviews) if (!latestReviewByExtraction.has(review.extractionId)) latestReviewByExtraction.set(review.extractionId, review);
+        if (lockedLoans[0]?.version !== authority.loan.version
+          || locked.length !== authority.extractions.length
+          || locked.some((item, index) => {
+            const original = authority.extractions[index];
+            return item.id !== original.id || item.status !== 'ACTIVE' || item.canonicalHash !== original.canonicalHash
+              || item.sourceDocumentId !== original.sourceDocumentId
+              || item.sourceDocumentVersion !== item.documentVersion
+              || item.sourceDocumentVersion !== original.sourceDocumentVersion
+              || item.sourceContentHash !== item.documentHash
+              || item.sourceContentHash !== original.sourceContentHash
+              || item.sourceAttachmentId !== item.documentAttachmentId
+              || latestReviewByExtraction.get(item.id)?.id !== original.metadataReviews[0]?.id;
+          })) {
+          throw new StaleCalculationInputError();
+        }
+
         const audit = await transaction.form1084Audit.create({
           data: {
             tenantId: context.tenantId,
-            loanId: loan.id,
+            loanId,
             totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
             qualifyingMonthlyIncome,
-            calculationSchemaVersion: 'calculation-request-v1',
-            calculationSource: 'authenticated-api',
-            yearsAnalyzed,
+            calculationSchemaVersion: 'authoritative-extractions-v1',
+            calculationSource: 'persisted-parser-extractions',
+            calculatedLoanVersion: authority.loan.version,
+            canonicalInputHash,
+            sourceDocumentHashes: extractionProvenance.map((item) => item.sourceContentHash),
+            mortgageRuleVersion,
+            trendingResult: normalizeTrendingResult(result.summary.trendingResult),
+            yearsAnalyzed: result.summary.yearsAnalyzed,
+            ...mapperOutputs,
           },
+          select: { id: true },
         });
-
+        await transaction.incomeCalculationExtraction.createMany({
+          data: extractionProvenance.map((item) => ({
+            tenantId: context.tenantId,
+            loanId,
+            calculationId: audit.id,
+            extractionId: item.extractionId,
+            extractionHash: item.extractionHash,
+            sourceDocumentId: item.sourceDocumentId,
+            sourceDocumentVersion: item.sourceDocumentVersion,
+            sourceContentHash: item.sourceContentHash,
+            metadataReviewId: item.metadataReviewId,
+            metadataReviewVersion: item.metadataReviewVersion,
+            metadataReviewHash: item.metadataReviewHash,
+          })),
+        });
         const event = await appendAuditEvent(transaction, context, {
-          loanId: loan.id,
+          loanId,
           entityType: 'FORM_1084_AUDIT',
           entityId: audit.id,
-          expectedLoanVersion: loan.version,
+          expectedLoanVersion: authority.loan.version,
           action: 'INCOME_CALCULATION_COMPLETED',
           reasonCode: 'SYSTEM_CALCULATION',
-          ruleVersion: calculatorProgram === 'USDA' ? 'usda-income-v2' : 'form-1084-v9',
+          ruleVersion: mortgageRuleVersion,
           schemaVersion: 'audit-event-v1',
           resultHash: hashAuditResult({
-            calculationEngine,
-            loanProgram: calculatorProgram,
+            calculationEngine: dispatched.engine,
+            loanProgram,
             qualifyingMonthlyIncome,
-            totalAnnualCashFlow: qualifyingMonthlyIncome * 12,
-            trendingResult,
-            yearsAnalyzed,
+            trendingResult: result.summary.trendingResult,
+            yearsAnalyzed: result.summary.yearsAnalyzed,
+            canonicalInputHash,
+            extractions: extractionProvenance.map(({ extractionId, extractionHash }) => ({ extractionId, extractionHash })),
           }),
         });
-
-        return { audit, event };
+        return { calculationId: audit.id, auditEventId: event.id };
       },
     );
 
-    // 7. Success: Return fully calculated and compliant JSON to frontend dashboard [cite: 26]
     return res.status(200).json({
       success: true,
-      loanId: loan.id,
+      loanId,
+      calculationId: persisted.calculationId,
       calculatedMonthlyIncome: qualifyingMonthlyIncome,
-      trendingResult,
-      calculationEngine,
-      calculationDetails: calculationResults,
-      auditLogId: updatedAudit.audit.id,
-      auditEventId: updatedAudit.event.id,
-      timestamp: new Date().toISOString()
+      trendingResult: result.summary.trendingResult,
+      calculationEngine: dispatched.engine,
+      calculationDetails: result,
+      extractionWarnings: Array.from(new Set(authority.extractions.flatMap((item) => item.warnings)
+        .filter((warning) => warning !== 'AUTHORITATIVE_TAX_YEAR_REQUIRED' && warning !== 'W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED'))).sort(),
+      auditEventId: persisted.auditEventId,
+      timestamp: new Date().toISOString(),
     });
-
   } catch (error: unknown) {
-    console.error('[income-calculate] calculation failed', {
-      errorType: error instanceof Error ? error.name : 'UnknownError',
-    });
-    return res.status(500).json({
+    if (error instanceof StaleCalculationInputError) {
+      return res.status(409).json({
+        success: false,
+        error: safeError('STALE_CALCULATION_INPUT', 'The loan, extraction, or source document changed during calculation.', context),
+      });
+    }
+    console.error('[income-calculate] calculation failed', { errorType: error instanceof Error ? error.name : 'UnknownError' });
+    return res.status(503).json({
       success: false,
-      error: {
-        code: 'INCOME_CALCULATION_FAILED',
-        message: 'The income calculation could not be completed.',
-        requestId: context.requestId,
-      },
+      error: safeError('CALCULATION_DEPENDENCY_UNAVAILABLE', 'The income calculation is temporarily unavailable.', context),
     });
   }
+  };
 }
 
-export default withRequestContext('income:calculate', handler);
+function readExtractionIds(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_EXTRACTIONS
+    || value.some((id) => typeof id !== 'string' || !isUuid(id))
+    || new Set(value).size !== value.length) return null;
+  return [...value].sort() as string[];
+}
+
+function deriveMapperOutputs(result: ReturnType<typeof dispatchNonUsda>) {
+  const latestYear = result.summary.yearsAnalyzed[0];
+  const sum = (rows: ReadonlyArray<Record<string, unknown>>, field: string) => rows
+    .filter((row) => row.year === latestYear)
+    .reduce((total, row) => total + (typeof row[field] === 'number' ? row[field] as number : 0), 0) / 12;
+  return {
+    w2BaseMonthly: sum(result.w2EmployerBreakdown, 'annualBaseIncome'),
+    w2VariableMonthly: sum(result.w2EmployerBreakdown, 'annualVariableIncome'),
+    scheduleCMonthlyTotal: sum(result.scheduleCBreakdown, 'totalAdjustedIncome'),
+    scheduleFMonthlyTotal: sum(result.scheduleFBreakdown, 'totalAdjustedIncome'),
+    form1120SMonthlyTotal: sum(result.form1120SBreakdown, 'totalCombinedQualifying'),
+    form1065MonthlyTotal: sum(result.form1065Breakdown, 'totalCombinedQualifying'),
+    form1120MonthlyTotal: sum(result.form1120Breakdown, 'totalCombinedQualifying'),
+    assetIncomeMonthly: sum(result.assetIncomeBreakdown, 'totalQualifyingIncome'),
+    rentalMonthly: sum(result.scheduleEPropertiesBreakdown, 'totalCashFlow'),
+    rentalLiabilityMonthly: result.summary.proposedRentalLossDebt,
+    housingExpenseAdjustment: result.summary.subjectHousingExpenseAdjustment,
+  };
+}
+
+function dispatchNonUsda(input: Parameters<typeof dispatchIncomeCalculation>[0] & { loanProgram: Exclude<LoanProgram, 'USDA'> }) {
+  return dispatchIncomeCalculation(input).result;
+}
+
+function normalizeTrendingResult(value: string) {
+  const supported = new Set([
+    'CONVENTIONAL_STABLE_OR_INCREASING', 'CONVENTIONAL_DECLINING',
+    'FHA_STABLE_OR_INCREASING', 'FHA_DECLINE_WARNING', 'FHA_CRITICAL_DECLINE',
+    'VA_STABLE_OR_INCREASING', 'VA_DECLINING', 'USDA_STABLE_OR_INCREASING',
+    'USDA_DECLINING', 'SINGLE_YEAR', 'INSUFFICIENT_DATA',
+  ]);
+  return supported.has(value) ? value as never : 'INSUFFICIENT_DATA' as const;
+}
+
+function safeError(code: string, message: string, context: RequestContext) {
+  return { code, message, requestId: context.requestId };
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+class StaleCalculationInputError extends Error {}
+
+export default withRequestContext('income:calculate', createIncomeCalculationHandler());

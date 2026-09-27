@@ -29,6 +29,17 @@ export type DownloadedEncompassAttachment = Readonly<{
   sha256: string;
 }>;
 
+export type EncompassFieldWrite = Readonly<{ fieldName: string; value: string }>;
+
+export type EncompassApprovedIncomeUpdate = Readonly<{
+  approvalEventId: string;
+  fields: ReadonlyArray<EncompassFieldWrite>;
+}>;
+
+export type EncompassWriteResult = Readonly<{
+  providerRevision?: string;
+}>;
+
 /** Service-to-service auth for the connector ECS process. Never LOS credentials. */
 export type BearerConnectorServiceAuth = Readonly<{
   authorizationHeader: string;
@@ -54,6 +65,11 @@ export type DeveloperConnectClient = {
     loanGuid: string,
     attachmentId: string,
   ): Promise<DownloadedEncompassAttachment>;
+  applyApprovedIncomeUpdate?(
+    loanGuid: string,
+    update: EncompassApprovedIncomeUpdate,
+  ): Promise<EncompassWriteResult>;
+  readFields?(loanGuid: string, fieldNames: ReadonlyArray<string>): Promise<Readonly<Record<string, string>>>;
 };
 
 export type CreateEncompassConnectorOptions = Readonly<{

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { selectPersistableParserExtraction, type PersistableIncomeExtraction } from './persistedParserExtraction';
 
 export const MAX_ENCOMPASS_PDF_BYTES = 40 * 1024 * 1024;
 const DEFAULT_API_ORIGIN = 'https://api.elliemae.com';
@@ -11,6 +12,7 @@ export type ParsedAttachment = Readonly<{
   documentCategory: string;
   parserVersion: string;
   confidence: number | null;
+  extraction: PersistableIncomeExtraction;
 }>;
 
 export type DownloadedAttachment = Readonly<{
@@ -165,11 +167,18 @@ export async function parseWithIncomeService(
   const pages = Array.isArray(result.pages) ? result.pages : [];
   const scores = pages.map((page) => isRecord(page) ? numberValue(page.meanConfidence) : null)
     .filter((score): score is number => score !== null && score >= 0 && score <= 100);
+  let extraction: PersistableIncomeExtraction;
+  try {
+    extraction = selectPersistableParserExtraction(result);
+  } catch {
+    throw new EncompassApiError('PARSER_NORMALIZED_RESULT_INVALID', 'Parser result did not contain a supported normalized income extraction.', false);
+  }
   return {
     pageCount,
     documentCategory: category.slice(0, 100),
     parserVersion: 'income-parser-v5',
     confidence: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null,
+    extraction,
   };
 }
 

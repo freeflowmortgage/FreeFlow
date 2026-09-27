@@ -325,16 +325,66 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
     environment = [
       { name = "DOC_PARSER_SERVICE_URL", value = "http://income-parser.freeflow.local:8080/parse" },
       { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
-      { name = "ENCOMPASS_BASE_URL", value = "https://api.elliemae.com" },
+      { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = "http://encompass-connector.freeflow.local:8080" },
+      { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
     secrets = [
-      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:url::" },
-      { name = "ENCOMPASS_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.encompass_api_client[0].arn },
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
+      { name = "ENCOMPASS_CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
     ]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
         awslogs-group         = aws_cloudwatch_log_group.document_pull_worker[0].name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "ecs"
+      }
+    }
+  }])
+}
+
+resource "aws_ecs_task_definition" "encompass_sync_worker" {
+  count = var.enable_encompass_sync_worker ? 1 : 0
+
+  family                   = "${local.name_prefix}-encompass-sync-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.encompass_sync_worker_task[0].arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([{
+    name                   = "encompass-sync-worker"
+    image                  = var.portal_image
+    essential              = true
+    readonlyRootFilesystem = true
+    user                   = "1001"
+    linuxParameters = {
+      initProcessEnabled = true
+      capabilities       = { add = [], drop = ["ALL"] }
+    }
+    workingDirectory = "/app/apps/underwriter-portal"
+    command          = ["./node_modules/.bin/tsx", "scripts/encompass-sync-worker.ts"]
+    environment = [
+      { name = "APP_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
+      { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
+      { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = "http://encompass-connector.freeflow.local:8080" },
+      { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
+    ]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
+      { name = "ENCOMPASS_CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.encompass_sync_worker[0].name
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "ecs"
       }
@@ -675,6 +725,30 @@ resource "aws_ecs_service" "document_pull_worker" {
   }
 
   depends_on = [aws_ecs_service.parser, aws_route.app_default]
+}
+
+resource "aws_ecs_service" "encompass_sync_worker" {
+  count = var.enable_encompass_sync_worker ? 1 : 0
+
+  name             = "${local.name_prefix}-encompass-sync-worker"
+  cluster          = data.aws_ecs_cluster.existing.arn
+  task_definition  = aws_ecs_task_definition.encompass_sync_worker[0].arn
+  desired_count    = 1
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = var.app_private_subnet_ids
+    security_groups  = [var.app_security_group_id]
+    assign_public_ip = false
+  }
+
+  depends_on = [aws_ecs_service.connector, aws_route.app_default]
 }
 
 resource "aws_lb_target_group" "console" {

@@ -39,11 +39,13 @@ export function createDocumentPullHandler(
       const loanId = readPathUuid(req.query.loanId);
       const idempotencyKey = readIdempotencyKey(req);
       const expectedLoanVersion = readExpectedLoanVersion(req.body);
+      const attachmentIds = readAttachmentIds(req.body);
       const result = await dependencies.withTenantTransaction(
         { tenantId: context.tenantId, principalId: context.membershipId },
         (transaction) => createDocumentPullJob(transaction, context, {
           loanId,
           expectedLoanVersion,
+          attachmentIds,
           idempotencyKey,
         }),
       );
@@ -106,4 +108,14 @@ function readExpectedLoanVersion(body: unknown): number {
     throw new ApiError(400, 'INVALID_LOAN_VERSION', 'expectedLoanVersion must be a positive integer.');
   }
   return value as number;
+}
+
+function readAttachmentIds(body: unknown): string[] {
+  const value = (body as { attachmentIds?: unknown } | null)?.attachmentIds;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20
+    || value.some((id) => typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(id))
+    || new Set(value).size !== value.length) {
+    throw new ApiError(400, 'INVALID_ATTACHMENT_SELECTION', 'attachmentIds must contain 1 to 20 unique attachment identifiers.');
+  }
+  return value as string[];
 }
