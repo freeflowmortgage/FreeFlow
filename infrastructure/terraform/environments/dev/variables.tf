@@ -204,6 +204,17 @@ variable "enable_encompass_connector" {
   }
 }
 
+variable "connector_service_token_rotation_epoch" {
+  type        = string
+  description = "Non-secret operator-controlled epoch. Change it to rotate the non-production connector Bearer smoke-test credential through Terraform."
+  default     = "2026-09-27-burn3"
+
+  validation {
+    condition     = can(regex("^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$", var.connector_service_token_rotation_epoch))
+    error_message = "connector_service_token_rotation_epoch must be a short non-secret identifier."
+  }
+}
+
 variable "encompass_connector_mode" {
   type        = string
   description = "Connector runtime mode. Synthetic is development test-only; real-encompass resolves LOS credentials only inside the connector task."

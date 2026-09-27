@@ -52,6 +52,14 @@ healthy backups, and named rollback owner.
    is suspected, follow the incident runbook and rotate signing/encryption material
    according to its dedicated cryptographic migration plan.
 
+For the non-production connector smoke credential, change the non-secret
+`connector_service_token_rotation_epoch` value, review a plan limited to the
+`random_password` and Secrets Manager version replacements, apply it, and force
+the connector service deployment. Verify `AWSCURRENT` succeeds and
+`AWSPREVIOUS` is rejected from private one-off tasks; never print either value.
+This dev-only Bearer credential is not the worker protocol: document and sync
+workers use the replay-protected HMAC signing key.
+
 ## Authentication or cross-tenant incident
 
 1. Page security/on-call; preserve CloudTrail, WAF, ALB, application, database,

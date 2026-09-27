@@ -54,10 +54,10 @@ see production RDS, production Encompass, or real borrower files.
 | Encompass field PATCH map | PARTIAL | `map-encompass-fields-v2.ts` | P0-08 | Custom fields must exist in instance |
 | Encompass **desktop** (SmartClient / COM / plugin) | MISSING | none | — | iframe CSP only; see §6 |
 | SQS sync + DLQ | LIVE (dev qualified) | `infrastructure/terraform/.../messaging.tf` | P0-08 | Encrypted queue/DLQ redrive passed; keep real provider writes disabled until sandbox binding is supplied |
-| Sync worker ECS task | LIVE (synthetic provider) | `syncWorkerRuntime.ts` + Terraform task/service | P0-08, P0-15 | Dev worker is healthy; enable real writes only with authoritative ICE sandbox binding |
+| Sync worker ECS task | PARTIAL (synthetic provider) | `syncWorkerRuntime.ts` + Terraform task/service | P0-08, P0-15 | Worker and connector now share signed-replay auth and the signed connector/parser smoke passes; synthetic approved-income writes remain intentionally disabled, so live successful sync/reconciliation is unqualified |
 | Appraisal / URAR 1004 | PARTIAL | `services/appraisal-parser` | P0-11 | Native/AcroForm only; no RapidOCR |
 | Stripe billing | STUB in protected runtime | `billing/webhook.ts` | P0-09 | Authoritative reconcile |
-| Cognito + ALB OIDC | PARTIAL | TF + `albOidc.ts` | P0-01, P0-15 | Live negative edge checks and MFA pass; positive reviewer and full object matrix remain |
+| Cognito + ALB OIDC | PARTIAL | TF + `albOidc.ts` | P0-01, P0-15 | Live positive MFA, disabled/no-membership denial, role denial, and persisted two-tenant object non-disclosure pass; successful review/approval remains blocked by document-pull job creation |
 | RDS + RLS | LIVE (dev qualified) | `packages/database` | P0-03 done; P0-04/17 open | All 10 migrations are deployed; restricted roles, FORCE RLS, app/worker isolation, snapshot, and isolated restore pass; production HA/retention approval remains |
 | Shared links | MISSING | — | P0-10 | — |
 | Credit / AUS (DU, LP, GUS) | MISSING | — | — | Out of scope for this launch |

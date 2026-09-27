@@ -1,0 +1,16 @@
+environment                         = "production"
+database_multi_az                   = true
+database_backup_retention_days      = 35
+database_deletion_protection        = true
+database_point_in_time_recovery     = true
+portal_desired_count                = 2
+worker_desired_count                = 2
+enable_waf                          = true
+tls_policy                          = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+private_compute                     = true
+customer_managed_kms                = true
+queue_dlq_encryption                = true
+secrets_manager_only                = true
+enable_monitoring_and_alerts        = true
+production_account_id               = "111111111111"
+development_account_id              = "222222222222"

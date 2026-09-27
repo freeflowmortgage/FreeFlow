@@ -197,15 +197,15 @@ resource "aws_ecs_task_definition" "connector" {
       capabilities       = { add = [], drop = ["ALL"] }
     }
     environment = [
-      # The synthetic Bearer path is explicit development-only configuration.
-      # Its service token is distinct from database and future LOS credentials.
+      # Workers always use replay-protected HMAC authentication, including
+      # against the development-only synthetic provider boundary.
       { name = "NODE_ENV", value = "development" },
       { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
       { name = "PORT", value = "8080" },
       { name = "LOG_LEVEL", value = "info" },
       { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
-      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : "bearer-stub-non-prod" },
+      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = "signed-replay" },
       { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
     secrets = concat([
