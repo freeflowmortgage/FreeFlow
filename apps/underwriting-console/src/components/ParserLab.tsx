@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FileSearch, Loader2, Upload } from 'lucide-react';
 import { mapIncomeFields } from '../incomeFieldMap';
 import type { LiveParseSession, ParseResponse } from '../parseTypes';
-import { postParsePdf } from '../postParsePdf';
+import { postParsePdf } from '@console-document-loader';
 import PdfPagePreview from './PdfPagePreview';
 
 export default function ParserLab() {
