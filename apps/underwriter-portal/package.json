@@ -7,8 +7,9 @@
     "build": "next build && node scripts/verify-production-routes.mjs",
     "start": "node scripts/start.mjs",
     "start:document-pull-worker": "tsx scripts/document-pull-worker.ts",
+    "start:encompass-sync-worker": "tsx scripts/encompass-sync-worker.ts",
     "lint": "next lint",
-    "test": "node --test scripts/*.test.mjs && tsx --test src/server/auth/*.test.ts src/server/audit/*.test.ts src/server/http/*.test.ts src/server/integrations/encompass/*.test.ts",
+    "test": "node --test scripts/*.test.mjs && tsx --test src/server/auth/*.test.ts src/server/audit/*.test.ts src/server/http/*.test.ts src/server/income/*.test.ts src/server/integrations/encompass/*.test.ts",
     "test:database-isolation": "tsx --test src/server/database/*.integration.test.ts",
     "validate:production-config": "node scripts/production-config.mjs"
   },

@@ -12,6 +12,19 @@ INSERT INTO "loan_applications" ("id", "tenantId", "primaryBorrowerName", "prima
   ('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Borrower A', 'borrower-a@example.test', now()),
   ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Borrower B', 'borrower-b@example.test', now());
 
+INSERT INTO "loan_documents" (
+  "id", "tenantId", "loanId", "fileType", "documentCategory", "sourceAttachmentId", "sourceContentHash", "parserVersion"
+) VALUES
+  ('20202020-2020-4020-8020-202020202020', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'application/pdf', 'W2_WAGE', 'attachment-a', repeat('a', 64), 'income-parser-v5'),
+  ('21212121-2121-4121-8121-212121212121', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ffffffff-ffff-4fff-8fff-ffffffffffff', 'application/pdf', 'W2_WAGE', 'attachment-b', repeat('b', 64), 'income-parser-v5');
+
+INSERT INTO "income_extractions" (
+  "id", "tenantId", "loanId", "sourceDocumentId", "sourceAttachmentId", "sourceDocumentVersion",
+  "sourceContentHash", "parserVersion", "schemaVersion", "normalizedInput", "evidence", "canonicalHash"
+) VALUES
+  ('22222222-2222-4222-8222-222222222222', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '20202020-2020-4020-8020-202020202020', 'attachment-a', 1, repeat('a', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-a","employerName":"Synthetic Employer A","year":2025,"annualWages":97481.4}]}', '{"fields":[]}', repeat('c', 64)),
+  ('23232323-2323-4232-8232-232323232323', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ffffffff-ffff-4fff-8fff-ffffffffffff', '21212121-2121-4121-8121-212121212121', 'attachment-b', 1, repeat('b', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-b","employerName":"Synthetic Employer B","year":2025,"annualWages":84000}]}', '{"fields":[]}', repeat('d', 64));
+
 DO $role_assertions$
 DECLARE
   unsafe_roles integer;
@@ -51,7 +64,12 @@ BEGIN
     'public.appraisal_action_items'::regclass,
     'public.audit_events'::regclass,
     'public.api_idempotency_keys'::regclass,
-    'public.encompass_document_pull_jobs'::regclass
+    'public.encompass_document_pull_jobs'::regclass,
+    'public.encompass_connector_bindings'::regclass,
+    'public.encompass_sync_jobs'::regclass,
+    'public.income_extractions'::regclass,
+    'public.income_extraction_metadata_reviews'::regclass,
+    'public.income_calculation_extractions'::regclass
   ) AND (NOT relrowsecurity OR NOT relforcerowsecurity);
   IF unprotected_tables <> 0 THEN
     RAISE EXCEPTION 'One or more tenant tables do not force row-level security';
@@ -70,6 +88,31 @@ BEGIN
   IF has_table_privilege('freeflow_app', 'api_idempotency_keys', 'UPDATE')
     OR has_table_privilege('freeflow_app', 'api_idempotency_keys', 'DELETE') THEN
     RAISE EXCEPTION 'freeflow_app can mutate stored idempotency keys';
+  END IF;
+  IF has_table_privilege('freeflow_app', 'income_extractions', 'INSERT')
+    OR has_table_privilege('freeflow_app', 'income_extractions', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'income_extractions', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_app can mutate authoritative extractions';
+  END IF;
+  IF NOT has_table_privilege('freeflow_worker', 'income_extractions', 'INSERT')
+    OR NOT has_table_privilege('freeflow_worker', 'income_extractions', 'UPDATE')
+    OR has_table_privilege('freeflow_worker', 'income_extractions', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_worker extraction grants are not least privilege';
+  END IF;
+  IF has_table_privilege('freeflow_worker', 'income_calculation_extractions', 'INSERT')
+    OR has_table_privilege('freeflow_worker', 'income_calculation_extractions', 'UPDATE')
+    OR has_table_privilege('freeflow_worker', 'income_calculation_extractions', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_worker can mutate calculation provenance';
+  END IF;
+  IF NOT has_table_privilege('freeflow_app', 'income_extraction_metadata_reviews', 'INSERT')
+    OR has_table_privilege('freeflow_app', 'income_extraction_metadata_reviews', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'income_extraction_metadata_reviews', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_app metadata review grants are not append-only';
+  END IF;
+  IF has_table_privilege('freeflow_worker', 'income_extraction_metadata_reviews', 'INSERT')
+    OR has_table_privilege('freeflow_worker', 'income_extraction_metadata_reviews', 'UPDATE')
+    OR has_table_privilege('freeflow_worker', 'income_extraction_metadata_reviews', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_worker can mutate reviewer metadata';
   END IF;
 END
 $role_assertions$;
@@ -125,11 +168,13 @@ DO $tenant_a_visibility$
 DECLARE
   visible_loans integer;
   visible_tenants integer;
+  visible_extractions integer;
   changed_rows integer;
 BEGIN
   SELECT count(*) INTO visible_loans FROM "loan_applications";
   SELECT count(*) INTO visible_tenants FROM "tenants";
-  IF visible_loans <> 1 OR visible_tenants <> 1 THEN
+  SELECT count(*) INTO visible_extractions FROM "income_extractions";
+  IF visible_loans <> 1 OR visible_tenants <> 1 OR visible_extractions <> 1 THEN
     RAISE EXCEPTION 'Tenant A context did not isolate rows';
   END IF;
 
@@ -226,6 +271,32 @@ INSERT INTO "api_idempotency_keys" (
   now() + interval '24 hours'
 );
 
+INSERT INTO "income_extraction_metadata_reviews" (
+  "id", "tenantId", "loanId", "extractionId", "sourceDocumentId", "sourceDocumentVersion",
+  "sourceContentHash", "extractionHash", "metadataVersion", "assignments", "source", "reasonCode",
+  "reviewedByUserId", "canonicalHash"
+) VALUES (
+  '27272727-2727-4272-8272-272727272727',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '22222222-2222-4222-8222-222222222222',
+  '20202020-2020-4020-8020-202020202020', 1, repeat('a', 64), repeat('c', 64), 1,
+  '[{"entityId":"synthetic-w2-a","employmentRole":"CURRENT"}]',
+  'DOCUMENT_VISUAL_REVIEW', 'DOCUMENT_METADATA_CONFIRMED',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc', repeat('9', 64)
+);
+
+DO $metadata_append_only$
+BEGIN
+  BEGIN
+    UPDATE "income_extraction_metadata_reviews" SET "reasonCode" = 'TAMPERED'
+    WHERE "id" = '27272727-2727-4272-8272-272727272727';
+    RAISE EXCEPTION 'freeflow_app unexpectedly updated reviewer metadata';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END
+$metadata_append_only$;
+
 DO $override_requires_narrative$
 BEGIN
   BEGIN
@@ -275,14 +346,19 @@ DO $audit_event_cross_tenant$
 DECLARE
   visible_events integer;
   visible_keys integer;
+  visible_metadata integer;
 BEGIN
   SELECT count(*) INTO visible_events FROM "audit_events";
   SELECT count(*) INTO visible_keys FROM "api_idempotency_keys";
+  SELECT count(*) INTO visible_metadata FROM "income_extraction_metadata_reviews";
   IF visible_events <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A audit events';
   END IF;
   IF visible_keys <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A idempotency keys';
+  END IF;
+  IF visible_metadata <> 0 THEN
+    RAISE EXCEPTION 'Tenant B observed Tenant A reviewer metadata';
   END IF;
 END
 $audit_event_cross_tenant$;
@@ -319,6 +395,82 @@ BEGIN
   END;
 END
 $append_only_trigger$;
+ROLLBACK;
+RESET ROLE;
+
+BEGIN;
+SET ROLE freeflow_worker;
+SET LOCAL app.tenant_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+SET LOCAL app.principal_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+DO $worker_extraction_isolation$
+DECLARE
+  visible_extractions integer;
+BEGIN
+  SELECT count(*) INTO visible_extractions FROM "income_extractions";
+  IF visible_extractions <> 1 THEN
+    RAISE EXCEPTION 'Worker tenant context exposed % extractions', visible_extractions;
+  END IF;
+  INSERT INTO "loan_documents" (
+    "id", "tenantId", "loanId", "fileType", "documentCategory", "sourceAttachmentId",
+    "sourceContentHash", "parserVersion"
+  ) VALUES (
+    '25252525-2525-4252-8252-252525252525',
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    'application/pdf', 'W2_WAGE', 'worker-attachment-a', repeat('e', 64), 'income-parser-v5'
+  );
+  INSERT INTO "income_extractions" (
+    "id", "tenantId", "loanId", "sourceDocumentId", "sourceAttachmentId", "sourceDocumentVersion",
+    "sourceContentHash", "parserVersion", "schemaVersion", "normalizedInput", "evidence", "canonicalHash"
+  ) VALUES (
+    '26262626-2626-4262-8262-262626262626',
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    '25252525-2525-4252-8252-252525252525',
+    'worker-attachment-a', 1, repeat('e', 64), 'income-parser-v5', 'income-extraction-v1',
+    '{"w2Employers":[]}', '{"fields":[]}', repeat('f', 64)
+  );
+
+  BEGIN
+    INSERT INTO "income_extractions" (
+      "id", "tenantId", "loanId", "sourceDocumentId", "sourceAttachmentId", "sourceDocumentVersion",
+      "sourceContentHash", "parserVersion", "schemaVersion", "normalizedInput", "evidence", "canonicalHash"
+    ) VALUES (
+      '24242424-2424-4242-8242-242424242424',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      '21212121-2121-4121-8121-212121212121',
+      'attachment-b', 1, repeat('b', 64), 'income-parser-v5', 'income-extraction-v1',
+      '{}', '{"fields":[]}', repeat('e', 64)
+    );
+    RAISE EXCEPTION 'Worker created a cross-tenant extraction association';
+  EXCEPTION WHEN foreign_key_violation THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE "income_extractions"
+    SET "canonicalHash" = repeat('f', 64)
+    WHERE "id" = '22222222-2222-4222-8222-222222222222';
+    RAISE EXCEPTION 'Worker mutated immutable extraction provenance';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+
+  UPDATE "income_extractions"
+  SET "status" = 'SUPERSEDED', "supersededAt" = now()
+  WHERE "id" = '22222222-2222-4222-8222-222222222222';
+  BEGIN
+    UPDATE "income_extractions"
+    SET "status" = 'ACTIVE', "supersededAt" = NULL
+    WHERE "id" = '22222222-2222-4222-8222-222222222222';
+    RAISE EXCEPTION 'Worker reactivated a superseded extraction';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END
+$worker_extraction_isolation$;
 ROLLBACK;
 RESET ROLE;
 

@@ -91,14 +91,16 @@ test('approval and override hashes include the persisted narrative and action', 
   assert.match(String(created[0].eventHash), /^[0-9a-f]{64}$/);
 });
 
-test('parseIncomeApprovalBody requires a narrative only for overrides', () => {
-  const approved = parseIncomeApprovalBody({ expectedLoanVersion: 3 });
+test('parseIncomeApprovalBody requires a reviewed calculation and authoritative value for overrides', () => {
+  const calculationId = '00000000-0000-4000-8000-000000000321';
+  const approved = parseIncomeApprovalBody({ calculationId, expectedLoanVersion: 3 });
   assert.equal(approved.action, 'INCOME_APPROVED');
   assert.equal(approved.reasonCode, 'UNDERWRITER_CONFIRMED');
   assert.equal(approved.reasonNarrative, null);
 
   assert.throws(
     () => parseIncomeApprovalBody({
+      calculationId,
       expectedLoanVersion: 3,
       action: 'INCOME_OVERRIDE',
       reasonCode: 'INCOME_ADJUSTED',
@@ -107,12 +109,15 @@ test('parseIncomeApprovalBody requires a narrative only for overrides', () => {
   );
 
   const overridden = parseIncomeApprovalBody({
+    calculationId,
     expectedLoanVersion: 3,
     action: 'INCOME_OVERRIDE',
     reasonCode: 'INCOME_ADJUSTED',
     reasonNarrative: 'Locked to the most recent year after a documented decline.',
+    overrideQualifyingMonthlyIncome: 7123.45,
   });
   assert.equal(overridden.reasonNarrative, 'Locked to the most recent year after a documented decline.');
+  assert.equal(overridden.overrideQualifyingMonthlyIncome, 7123.45);
 });
 
 test('parseIncomeApprovalBody rejects non-integer versions and unknown actions', () => {
@@ -121,7 +126,7 @@ test('parseIncomeApprovalBody rejects non-integer versions and unknown actions',
     (error: unknown) => error instanceof ApiError && error.code === 'INVALID_LOAN_VERSION',
   );
   assert.throws(
-    () => parseIncomeApprovalBody({ expectedLoanVersion: 1, action: 'CLIENT_SUPPLIED_APPROVAL' }),
+    () => parseIncomeApprovalBody({ calculationId: '00000000-0000-4000-8000-000000000321', expectedLoanVersion: 1, action: 'CLIENT_SUPPLIED_APPROVAL' }),
     (error: unknown) => error instanceof ApiError && error.code === 'INVALID_APPROVAL_ACTION',
   );
 });

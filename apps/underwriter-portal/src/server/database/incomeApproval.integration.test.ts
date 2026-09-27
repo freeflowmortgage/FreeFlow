@@ -3,6 +3,9 @@ import test, { after } from 'node:test';
 import { approveIncomeCalculation } from '../audit/approveIncome';
 import { prisma, withTenantTransaction } from './client';
 import type { RequestContext } from '../auth/requestContext';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { createIncomeCalculationHandler } from '../../pages/api/income/calculate';
+import { reviewExtractionMetadata } from '../income/reviewExtractionMetadata';
 
 const TENANT_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TENANT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -10,6 +13,7 @@ const USER_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const USER_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const LOAN_A = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const LOAN_B = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+const EXTRACTION_A = '22222222-2222-4222-8222-222222222222';
 
 after(async () => {
   await prisma.$disconnect();
@@ -20,42 +24,49 @@ const contextA: RequestContext = Object.freeze({
   subject: 'verified-subject-a',
   tenantId: TENANT_A,
   membershipId: USER_A,
-  permissions: ['income:approve'] as const,
+  permissions: ['income:approve', 'income:metadata:review'] as const,
   authTime: new Date('2026-09-11T00:00:00.000Z'),
 });
 
 test('income approval appends an immutable event, bumps loan version, and stays tenant-scoped', async () => {
+  const metadata = await withTenantTransaction(
+    { tenantId: TENANT_A, principalId: USER_A },
+    (transaction) => reviewExtractionMetadata(transaction, contextA, {
+      loanId: LOAN_A, extractionId: EXTRACTION_A, expectedLoanVersion: 1, expectedMetadataVersion: 0,
+      source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null,
+      assignments: [{ entityId: 'synthetic-w2-a', employmentRole: 'CURRENT' }], idempotencyKey: 'metadata-review-integration-01',
+    }),
+  );
+  assert.equal(metadata.loanVersion, 2);
+  const calculationResponse = responseRecorder();
+  await createIncomeCalculationHandler()(
+    { method: 'POST', query: {}, headers: {}, body: { loanId: LOAN_A, extractionIds: [EXTRACTION_A] } } as NextApiRequest,
+    calculationResponse.response,
+    contextA,
+  );
+  assert.equal(calculationResponse.state.status, 200);
+  const calculationId = (calculationResponse.state.body as { calculationId: string }).calculationId;
+
   const first = await withTenantTransaction(
     { tenantId: TENANT_A, principalId: USER_A },
     async (transaction) => {
-      const calculation = await transaction.form1084Audit.create({
-        data: {
-          tenantId: TENANT_A,
-          loanId: LOAN_A,
-          totalAnnualCashFlow: '97481.40',
-          qualifyingMonthlyIncome: '8123.45',
-          yearsAnalyzed: [2025, 2024],
-          calculationSchemaVersion: 'form-1084-v9',
-          calculationSource: 'authenticated-api',
-        },
-        select: { id: true },
-      });
-
       const approved = await approveIncomeCalculation(transaction, contextA, {
         loanId: LOAN_A,
-        expectedLoanVersion: 1,
+        calculationId,
+        expectedLoanVersion: 2,
         action: 'INCOME_APPROVED',
         reasonCode: 'UNDERWRITER_CONFIRMED',
         reasonNarrative: null,
         idempotencyKey: 'income-approval-replay-01',
+        overrideQualifyingMonthlyIncome: null,
       });
 
-      return { calculationId: calculation.id, approved };
+      return { calculationId, approved };
     },
   );
 
   assert.equal(first.approved.action, 'INCOME_APPROVED');
-  assert.equal(first.approved.loanVersion, 2);
+  assert.equal(first.approved.loanVersion, 3);
   assert.equal(first.approved.replayed, false);
   assert.equal(first.approved.calculationId, first.calculationId);
 
@@ -63,27 +74,31 @@ test('income approval appends an immutable event, bumps loan version, and stays 
     { tenantId: TENANT_A, principalId: USER_A },
     (transaction) => approveIncomeCalculation(transaction, contextA, {
       loanId: LOAN_A,
-      expectedLoanVersion: 1,
+      calculationId: first.calculationId,
+      expectedLoanVersion: 2,
       action: 'INCOME_APPROVED',
       reasonCode: 'UNDERWRITER_CONFIRMED',
       reasonNarrative: null,
       idempotencyKey: 'income-approval-replay-01',
+      overrideQualifyingMonthlyIncome: null,
     }),
   );
   assert.equal(replay.replayed, true);
   assert.equal(replay.auditEventId, first.approved.auditEventId);
-  assert.equal(replay.loanVersion, 2);
+  assert.equal(replay.loanVersion, 3);
 
   await assert.rejects(
     () => withTenantTransaction(
       { tenantId: TENANT_A, principalId: USER_A },
       (transaction) => approveIncomeCalculation(transaction, contextA, {
         loanId: LOAN_A,
-        expectedLoanVersion: 2,
+        calculationId: first.calculationId,
+        expectedLoanVersion: 3,
         action: 'INCOME_APPROVED',
         reasonCode: 'UNDERWRITER_CONFIRMED',
         reasonNarrative: null,
         idempotencyKey: 'income-approval-replay-01',
+        overrideQualifyingMonthlyIncome: null,
       }),
     ),
     (error: unknown) => error instanceof Error && error.message === 'IDEMPOTENCY_CONFLICT',
@@ -113,7 +128,7 @@ test('income approval appends an immutable event, bumps loan version, and stays 
     }),
   );
 
-  assert.deepEqual(tenantAState.loan, { version: 2, status: 'VERIFIED' });
+  assert.deepEqual(tenantAState.loan, { version: 3, status: 'VERIFIED' });
   assert.deepEqual(tenantAState.event, {
     action: 'INCOME_APPROVED',
     reasonCode: 'UNDERWRITER_CONFIRMED',
@@ -129,3 +144,13 @@ test('income approval appends an immutable event, bumps loan version, and stays 
   );
   assert.equal(tenantBEvents, 0);
 });
+
+function responseRecorder() {
+  const state: { status?: number; body?: unknown } = {};
+  const response = {
+    setHeader() { return response; },
+    status(code: number) { state.status = code; return response; },
+    json(body: unknown) { state.body = body; return response; },
+  } as unknown as NextApiResponse;
+  return { state, response };
+}

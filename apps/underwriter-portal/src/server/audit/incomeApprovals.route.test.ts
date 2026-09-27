@@ -26,6 +26,16 @@ const LOAN_ID = '00000000-0000-4000-8000-000000000200';
 const TENANT_ID = '00000000-0000-4000-8000-000000000100';
 const OTHER_LOAN_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const USER_ID = '00000000-0000-4000-8000-000000000101';
+const CALCULATION_ID = '00000000-0000-4000-8000-000000000201';
+const currentExtractionBindings = [{
+  extractionId: '00000000-0000-4000-8000-000000000211', extractionHash: 'c'.repeat(64),
+  sourceDocumentId: '00000000-0000-4000-8000-000000000212', sourceDocumentVersion: 1,
+  sourceContentHash: 'b'.repeat(64),
+  extraction: {
+    status: 'ACTIVE' as const, canonicalHash: 'c'.repeat(64), sourceDocumentVersion: 1,
+    sourceContentHash: 'b'.repeat(64), sourceDocument: { version: 1, sourceContentHash: 'b'.repeat(64) },
+  },
+}];
 
 function request(overrides: {
   method?: string;
@@ -42,7 +52,7 @@ function request(overrides: {
       'idempotency-key': 'approval-key-0001',
       ...overrides.headers,
     },
-    body: overrides.body ?? { expectedLoanVersion: 1 },
+    body: overrides.body ?? { calculationId: CALCULATION_ID, expectedLoanVersion: 1 },
   } as unknown as NextApiRequest;
 }
 
@@ -187,12 +197,30 @@ test('returns the append-only approval identifiers on success', async () => {
     },
     form1084Audit: {
       findFirst: async () => ({
-        id: '00000000-0000-4000-8000-000000000201',
+        id: CALCULATION_ID,
         qualifyingMonthlyIncome: { toString: () => '8123.45' },
         totalAnnualCashFlow: { toString: () => '97481.40' },
         yearsAnalyzed: [2025, 2024],
         calculationSchemaVersion: 'form-1084-v9',
         calculationSource: 'authenticated-api',
+        calculatedLoanVersion: 1,
+        canonicalInputHash: 'a'.repeat(64),
+        sourceDocumentHashes: ['b'.repeat(64)],
+        mortgageRuleVersion: 'form-1084-v9',
+        trendingResult: 'CONVENTIONAL_STABLE_OR_INCREASING',
+        entityType: 'SCHEDULE_C',
+        w2BaseMonthly: null,
+        w2VariableMonthly: null,
+        scheduleCMonthlyTotal: null,
+        scheduleFMonthlyTotal: null,
+        form1120SMonthlyTotal: null,
+        form1065MonthlyTotal: null,
+        form1120MonthlyTotal: null,
+        assetIncomeMonthly: null,
+        rentalMonthly: null,
+        rentalLiabilityMonthly: null,
+        housingExpenseAdjustment: null,
+        extractionBindings: currentExtractionBindings,
       }),
       update: async () => ({}),
     },
@@ -213,7 +241,7 @@ test('returns the append-only approval identifiers on success', async () => {
   };
   assert.equal(body.action, 'INCOME_APPROVED');
   assert.equal(body.loanVersion, 2);
-  assert.equal(body.calculationId, '00000000-0000-4000-8000-000000000201');
+  assert.equal(body.calculationId, CALCULATION_ID);
   assert.match(body.auditEventId, /^[0-9a-f-]{36}$/i);
   assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
 });
@@ -225,6 +253,7 @@ test('override without a narrative fails closed with a stable envelope', async (
   const { res, state } = response();
   await wrapped(request({
     body: {
+      calculationId: CALCULATION_ID,
       expectedLoanVersion: 1,
       action: 'INCOME_OVERRIDE',
       reasonCode: 'INCOME_ADJUSTED',
@@ -232,4 +261,84 @@ test('override without a narrative fails closed with a stable envelope', async (
   }), res);
   assert.equal(state.status, 400);
   assert.equal((state.body as { error: { code: string } }).error.code, 'OVERRIDE_NARRATIVE_REQUIRED');
+});
+
+test('a reviewed calculation from an older loan version is stale', async () => {
+  const wrapped = wrap('UNDERWRITER', async (_context, operation) => operation({
+    $executeRaw: async () => 0,
+    apiIdempotencyKey: { findFirst: async () => null },
+    loanApplication: { findFirst: async () => ({ id: LOAN_ID, version: 1, status: 'IN_QA_REVIEW' }) },
+    form1084Audit: { findFirst: async () => ({ id: CALCULATION_ID, calculatedLoanVersion: 0 }) },
+  }));
+  const { res, state } = response();
+  await wrapped(request(), res);
+  assert.equal(state.status, 409);
+  assert.equal((state.body as { error: { code: string } }).error.code, 'STALE_CALCULATION');
+});
+
+test('a reviewed calculation with a superseded extraction is stale', async () => {
+  const wrapped = wrap('UNDERWRITER', async (_context, operation) => operation({
+    $executeRaw: async () => 0,
+    apiIdempotencyKey: { findFirst: async () => null },
+    loanApplication: { findFirst: async () => ({ id: LOAN_ID, version: 1, status: 'IN_QA_REVIEW' }) },
+    form1084Audit: { findFirst: async () => ({
+      id: CALCULATION_ID, calculatedLoanVersion: 1,
+      extractionBindings: [{
+        ...currentExtractionBindings[0],
+        extraction: { ...currentExtractionBindings[0].extraction, status: 'SUPERSEDED' },
+      }],
+    }) },
+  }));
+  const { res, state } = response();
+  await wrapped(request(), res);
+  assert.equal(state.status, 409);
+  assert.equal((state.body as { error: { code: string } }).error.code, 'STALE_CALCULATION_EXTRACTION');
+});
+
+test('override creates and approves an authoritative replacement calculation', async () => {
+  const replacementId = '00000000-0000-4000-8000-000000000202';
+  let created: Record<string, unknown> | undefined;
+  const base = {
+    id: CALCULATION_ID,
+    qualifyingMonthlyIncome: { toString: () => '8123.45' }, totalAnnualCashFlow: { toString: () => '97481.40' },
+    yearsAnalyzed: [2025, 2024], calculationSchemaVersion: 'calculation-request-v2',
+    calculationSource: 'authenticated-api', calculatedLoanVersion: 1,
+    canonicalInputHash: 'a'.repeat(64), sourceDocumentHashes: ['b'.repeat(64)], mortgageRuleVersion: 'form-1084-v9',
+    trendingResult: 'CONVENTIONAL_DECLINING', entityType: 'SCHEDULE_C',
+    w2BaseMonthly: null, w2VariableMonthly: null, scheduleCMonthlyTotal: null, scheduleFMonthlyTotal: null,
+    form1120SMonthlyTotal: null, form1065MonthlyTotal: null, form1120MonthlyTotal: null,
+    assetIncomeMonthly: null, rentalMonthly: null, rentalLiabilityMonthly: null, housingExpenseAdjustment: null,
+    extractionBindings: currentExtractionBindings,
+  };
+  const wrapped = wrap('UNDERWRITER', async (_context, operation) => operation({
+    $executeRaw: async () => 0,
+    apiIdempotencyKey: { findFirst: async () => null, create: async () => ({}) },
+    loanApplication: {
+      findFirst: async () => ({ id: LOAN_ID, version: 1, status: 'IN_QA_REVIEW' }),
+      updateMany: async () => ({ count: 1 }),
+    },
+    form1084Audit: {
+      findFirst: async () => base,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        created = data;
+        return { ...base, ...data, id: replacementId };
+      },
+      update: async () => ({}),
+    },
+    incomeCalculationExtraction: { createMany: async () => ({ count: 1 }) },
+    auditEvent: {
+      findFirst: async () => null,
+      create: async ({ data }: { data: { id: string; occurredAt: Date } }) => data,
+    },
+  }));
+  const { res, state } = response();
+  await wrapped(request({ body: {
+    calculationId: CALCULATION_ID, expectedLoanVersion: 1, action: 'INCOME_OVERRIDE',
+    reasonCode: 'INCOME_ADJUSTED', reasonNarrative: 'Use supported recurring income.',
+    overrideQualifyingMonthlyIncome: 7000.25,
+  } }), res);
+  assert.equal(state.status, 201);
+  assert.equal((state.body as { calculationId: string }).calculationId, replacementId);
+  assert.equal(String(created?.calculationSource), 'human-override');
+  assert.equal(String(created?.qualifyingMonthlyIncome), '7000.25');
 });

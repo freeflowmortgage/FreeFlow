@@ -47,6 +47,14 @@ export class SyntheticFreeflowDevConnector implements EncompassConnector {
       sha256: createHash('sha256').update(bytes).digest('hex'),
     };
   }
+
+  async applyApprovedIncomeUpdate(): Promise<Readonly<{ providerRevision?: string }>> {
+    throw new EncompassConnectorError('SYNTHETIC_WRITE_DISABLED', 'Synthetic connector writes are disabled.', false);
+  }
+
+  async readFields(): Promise<Readonly<Record<string, string>>> {
+    return {};
+  }
 }
 
 function assertSyntheticRequest(context: EncompassConnectorContext, loanGuid: string): void {

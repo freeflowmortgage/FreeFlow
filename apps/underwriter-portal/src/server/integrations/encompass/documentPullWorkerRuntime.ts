@@ -1,26 +1,32 @@
 import { DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { Prisma } from '@prisma/client';
+import { CustomConnectorAdapter, EncompassConnectorError, type EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
 import { prisma, setTenantContext } from '../../database/client';
 import type { DocumentPullQueueMessage } from './documentPull';
-import { EncompassApiClient, parseWithIncomeService } from './encompassApi';
+import { parseWithIncomeService } from './encompassApi';
 import { runDocumentPullJob, type ClaimedDocumentPull, type DocumentPullWorkerDependencies } from './documentPullWorker';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
 
 export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = process.env): DocumentPullWorkerDependencies {
-  const clientSecret = required(environment.ENCOMPASS_CLIENT_SECRET, 'ENCOMPASS_CLIENT_SECRET');
   const parserUrl = required(environment.DOC_PARSER_SERVICE_URL, 'DOC_PARSER_SERVICE_URL');
-  const clients = new Map<string, EncompassApiClient>();
+  const serviceBaseUrl = required(environment.ENCOMPASS_CONNECTOR_SERVICE_URL, 'ENCOMPASS_CONNECTOR_SERVICE_URL');
+  const serviceId = required(environment.ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID, 'ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID');
+  const signingKey = required(environment.ENCOMPASS_CONNECTOR_SIGNING_KEY, 'ENCOMPASS_CONNECTOR_SIGNING_KEY');
+  const clients = new Map<string, EncompassConnector>();
 
   const clientFor = (job: ClaimedDocumentPull) => {
     let client = clients.get(job.jobId);
     if (!client) {
-      client = new EncompassApiClient({
-        clientId: job.encompassClientId,
-        clientSecret,
-        instanceId: job.encompassInstanceId,
-        baseUrl: environment.ENCOMPASS_BASE_URL,
+      client = new CustomConnectorAdapter({
+        binding: {
+          kind: 'custom',
+          lenderId: job.lenderId,
+          deploymentId: job.deploymentId,
+          serviceBaseUrl,
+        },
+        serviceAuth: { kind: 'signed-hmac', serviceId, signingKey },
       });
       clients.set(job.jobId, client);
     }
@@ -46,11 +52,11 @@ export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = proce
           tenantId: true,
           loanId: true,
           loanApplication: { select: { version: true, encompassGuid: true } },
-          tenant: { select: { configurations: { select: {
-            enableEncompassDocumentPull: true,
-            encompassClientId: true,
-            encompassInstanceId: true,
-          } } } },
+          selectedAttachmentIds: true,
+          tenant: { select: {
+            configurations: { select: { enableEncompassDocumentPull: true } },
+            encompassConnectorBinding: { select: { lenderId: true, deploymentId: true, isEnabled: true } },
+          } },
         },
       });
       if (!record) return null;
@@ -62,7 +68,9 @@ export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = proce
         });
         return null;
       }
-      if (!configuration?.enableEncompassDocumentPull || !configuration.encompassClientId || !configuration.encompassInstanceId || !record.loanApplication.encompassGuid) {
+      const binding = record.tenant.encompassConnectorBinding;
+      if (!configuration?.enableEncompassDocumentPull || !binding?.isEnabled || !record.loanApplication.encompassGuid
+        || record.selectedAttachmentIds.length < 1) {
         await transaction.encompassDocumentPullJob.updateMany({
           where: claimWhere,
           data: { status: 'FAILED', safeErrorCode: 'ENCOMPASS_CONFIGURATION_INCOMPLETE', completedAt: new Date() },
@@ -83,41 +91,19 @@ export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = proce
         jobId: record.id,
         tenantId: record.tenantId,
         loanId: record.loanId,
+        correlationId: message.correlationId,
         encompassLoanGuid: record.loanApplication.encompassGuid,
-        encompassClientId: configuration.encompassClientId,
-        encompassInstanceId: configuration.encompassInstanceId,
+        lenderId: binding.lenderId,
+        deploymentId: binding.deploymentId,
+        selectedAttachmentIds: record.selectedAttachmentIds,
       };
     }),
-    listAttachments: async (job) => clientFor(job).listActiveAttachments(job.encompassLoanGuid),
-    download: async (job, attachmentId) => clientFor(job).downloadOriginalAttachment(job.encompassLoanGuid, attachmentId),
+    listAttachments: async (job) => clientFor(job).listActiveAttachments(job, job.encompassLoanGuid),
+    download: async (job, attachmentId) => clientFor(job).downloadOriginalAttachment(job, job.encompassLoanGuid, attachmentId),
     parse: async (bytes) => parseWithIncomeService(bytes, { parserUrl }),
     saveResult: async (job, result) => prisma.$transaction(async (transaction) => {
       await setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
-      await transaction.loanDocument.upsert({
-        where: { tenantId_loanId_sourceAttachmentId: {
-          tenantId: job.tenantId,
-          loanId: job.loanId,
-          sourceAttachmentId: result.attachmentId,
-        } },
-        create: {
-          tenantId: job.tenantId,
-          loanId: job.loanId,
-          fileType: 'application/pdf',
-          documentCategory: result.parsed.documentCategory,
-          sourceAttachmentId: result.attachmentId,
-          sourceContentHash: result.sha256,
-          sourcePageCount: result.parsed.pageCount,
-          parserVersion: result.parsed.parserVersion,
-          ocrConfidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
-        },
-        update: {
-          documentCategory: result.parsed.documentCategory,
-          sourceContentHash: result.sha256,
-          sourcePageCount: result.parsed.pageCount,
-          parserVersion: result.parsed.parserVersion,
-          ocrConfidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
-        },
-      });
+      await persistParsedExtraction(transaction, job, result);
     }),
     succeed: async (job, attachmentCount, processedCount) => updateJob(job, {
       status: 'SUCCEEDED', attachmentCount, processedCount, completedAt: new Date(), safeErrorCode: null,
@@ -129,6 +115,83 @@ export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = proce
       });
     },
   };
+}
+
+type ParsedResult = Parameters<DocumentPullWorkerDependencies['saveResult']>[1];
+
+export async function persistParsedExtraction(
+  transaction: Prisma.TransactionClient,
+  job: ClaimedDocumentPull,
+  result: ParsedResult,
+): Promise<void> {
+  const lockKey = `${job.tenantId}:${job.loanId}:${result.attachmentId}`;
+  await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+  const existing = await transaction.loanDocument.findUnique({
+    where: { tenantId_loanId_sourceAttachmentId: {
+      tenantId: job.tenantId, loanId: job.loanId, sourceAttachmentId: result.attachmentId,
+    } },
+    select: { sourceContentHash: true },
+  });
+  const document = await transaction.loanDocument.upsert({
+    where: { tenantId_loanId_sourceAttachmentId: {
+      tenantId: job.tenantId, loanId: job.loanId, sourceAttachmentId: result.attachmentId,
+    } },
+    create: {
+      tenantId: job.tenantId, loanId: job.loanId, fileType: 'application/pdf',
+      documentCategory: result.parsed.documentCategory, sourceAttachmentId: result.attachmentId,
+      sourceContentHash: result.sha256, sourcePageCount: result.parsed.pageCount,
+      parserVersion: result.parsed.parserVersion,
+      ocrConfidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
+    },
+    update: {
+      documentCategory: result.parsed.documentCategory, sourceContentHash: result.sha256,
+      sourcePageCount: result.parsed.pageCount, parserVersion: result.parsed.parserVersion,
+      ocrConfidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
+      ...(existing?.sourceContentHash !== result.sha256 ? { version: { increment: 1 } } : {}),
+    },
+    select: { id: true, version: true, sourceContentHash: true, sourceAttachmentId: true },
+  });
+  if (!document.sourceAttachmentId || document.sourceContentHash !== result.sha256) {
+    throw new EncompassConnectorError('EXTRACTION_SOURCE_BINDING_INVALID', 'Source document provenance is incomplete.', false);
+  }
+  const extractionKey = {
+    tenantId: job.tenantId, sourceDocumentId: document.id,
+    sourceDocumentVersion: document.version, parserVersion: result.parsed.parserVersion,
+  };
+  const existingExtraction = await transaction.incomeExtraction.findUnique({
+    where: { tenantId_sourceDocumentId_sourceDocumentVersion_parserVersion: extractionKey },
+    select: { canonicalHash: true },
+  });
+  if (existingExtraction && existingExtraction.canonicalHash !== result.parsed.extraction.canonicalHash) {
+    throw new EncompassConnectorError('PARSER_RESULT_NONDETERMINISTIC', 'Repeated parsing produced inconsistent normalized output.', false);
+  }
+  let extractionCreated = false;
+  if (!existingExtraction) {
+    await transaction.incomeExtraction.updateMany({
+      where: { tenantId: job.tenantId, loanId: job.loanId, sourceDocumentId: document.id, status: 'ACTIVE' },
+      data: { status: 'SUPERSEDED', supersededAt: new Date() },
+    });
+    await transaction.incomeExtraction.create({
+      data: {
+        tenantId: job.tenantId, loanId: job.loanId, sourceDocumentId: document.id,
+        sourceAttachmentId: document.sourceAttachmentId, sourceDocumentVersion: document.version,
+        sourceContentHash: result.sha256, parserVersion: result.parsed.parserVersion,
+        schemaVersion: result.parsed.extraction.schemaVersion,
+        normalizedInput: result.parsed.extraction.normalizedInput as Prisma.InputJsonValue,
+        evidence: result.parsed.extraction.evidence as Prisma.InputJsonValue,
+        warnings: Array.from(result.parsed.extraction.warnings),
+        confidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
+        canonicalHash: result.parsed.extraction.canonicalHash,
+      },
+    });
+    extractionCreated = true;
+  }
+  if (!existing || existing.sourceContentHash !== result.sha256 || extractionCreated) {
+    await transaction.loanApplication.updateMany({
+      where: { id: job.loanId, tenantId: job.tenantId },
+      data: { version: { increment: 1 }, status: 'DOCS_UPLOADED' },
+    });
+  }
 }
 
 export async function runQueueWorker(environment: NodeJS.ProcessEnv = process.env): Promise<void> {

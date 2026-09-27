@@ -5,14 +5,14 @@
 | Area | Current state | Production gap |
 |---|---|---|
 | Local orchestration | Seven Docker services can run and report healthy | Databases/parsers are host-published; health does not establish functional readiness |
-| Portal | Next.js demo UI and API prototypes | No real authentication/session; demo fallback; invalid route modules; incomplete workflow persistence |
+| Portal | Protected Next.js APIs derive tenant/permissions from verified identity context and fail closed without dependencies | Live Cognito route/object matrix and remaining workflow surfaces still require qualification |
 | Underwriting console | Vite UI with fixture middleware | Starts a development server in its runtime image and exposes synthetic content; QA-only |
 | Income parser | PDF/OCR path with byte/page limits | Vulnerable dependencies, expensive synchronous OCR, full OCR word output, incomplete admission controls |
 | Appraisal parser | Structured rule/audit prototype | Text-fixture acceptance in production path, no dependable scanned-document OCR, non-source coordinate boxes |
-| Calculations | Deterministic modules and 33 passing assertions | Cross-app test import failure; rule/version/audit lifecycle not integrated end to end |
-| Encompass | Pull/sync prototypes | Credential/model drift, caller-controlled writes, no durable idempotent worker/outbox |
+| Calculations | Deterministic engine plus persisted, source-bound extraction-to-calculation-to-approval flow | Immutable parser output without authoritative tax year is rejected; live end-to-end environment evidence remains |
+| Encompass | Tenant-bound document-pull and approval-sync jobs, workers, idempotency, and reconciliation | Real ICE sandbox retrieval/write/reconciliation qualification remains |
 | Billing | Stripe signature concept and fee model | Route wiring failure, metadata trust, duplicate-event risk, no authoritative reconciliation |
-| Database | Prisma design and manual RLS examples | Zero live app tables, no migrations, incomplete tenant/audit model |
+| Database | Ordered migrations, restricted roles, FORCE RLS, immutable audit/extraction provenance, and zero-drift local PostgreSQL qualification | Live RDS migration/restore and complete route/object isolation matrix remain |
 
 ## Production product boundaries
 

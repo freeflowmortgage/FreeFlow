@@ -32,7 +32,7 @@ function request(overrides: Partial<NextApiRequest> = {}): NextApiRequest {
       'x-amzn-oidc-data': 'signed-token',
       'idempotency-key': 'document-pull-key-0001',
     },
-    body: { expectedLoanVersion: 3 },
+    body: { expectedLoanVersion: 3, attachmentIds: ['attachment-1'] },
     ...overrides,
   } as NextApiRequest;
 }
@@ -80,6 +80,9 @@ function transaction(overrides: Record<string, unknown> = {}) {
         encompassClientId: 'client-id',
         encompassInstanceId: 'instance-id',
       }),
+    },
+    encompassConnectorBinding: {
+      findFirst: async () => ({ id: 'binding-id' }),
     },
     encompassDocumentPullJob: {
       create: async () => ({
@@ -156,6 +159,16 @@ test('fails closed when the tenant has not enabled document pull', async () => {
       }),
     },
   });
+  const handler = wrapCreate('UNDERWRITER', tx, async () => { published = true; });
+  const { res, state } = response();
+  await handler(request(), res);
+  assert.equal(state.status, 422);
+  assert.equal(published, false);
+});
+
+test('fails closed when the tenant has no enabled connector binding', async () => {
+  let published = false;
+  const tx = transaction({ encompassConnectorBinding: { findFirst: async () => null } });
   const handler = wrapCreate('UNDERWRITER', tx, async () => { published = true; });
   const { res, state } = response();
   await handler(request(), res);

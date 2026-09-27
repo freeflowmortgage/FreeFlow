@@ -173,12 +173,23 @@ variable "enable_parser" {
 
 variable "enable_encompass_document_pull_worker" {
   type        = bool
-  description = "Runs the tenant-scoped Encompass eFolder pull worker. Requires the portal, parser, and an externally populated API secret."
+  description = "Runs the tenant-scoped Encompass eFolder pull worker through the private connector service."
   default     = false
 
   validation {
-    condition     = !var.enable_encompass_document_pull_worker || (var.enable_edge && var.enable_services && var.enable_parser)
-    error_message = "The Encompass document pull worker requires edge, services, and the income parser."
+    condition     = !var.enable_encompass_document_pull_worker || (var.enable_edge && var.enable_services && var.enable_parser && var.enable_encompass_connector)
+    error_message = "The Encompass document pull worker requires edge, services, the income parser, and the connector."
+  }
+}
+
+variable "enable_encompass_sync_worker" {
+  type        = bool
+  description = "Runs the durable approval-bound Encompass outbound sync worker through the private connector service."
+  default     = false
+
+  validation {
+    condition     = !var.enable_encompass_sync_worker || (var.enable_edge && var.enable_services && var.enable_encompass_connector)
+    error_message = "The Encompass sync worker requires edge, services, and the connector."
   }
 }
 

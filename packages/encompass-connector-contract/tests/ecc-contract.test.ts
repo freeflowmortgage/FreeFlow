@@ -482,12 +482,13 @@ test('ECC-21: custom factory path does not require DC client/secret/instance', (
   assert.equal(connector.kind, 'custom');
 });
 
-test('ECC-07/ECC-09/ECC-10/ECC-15 deferred: interface has only list + download', () => {
+test('connector exposes bounded approved write and reconciliation operations', () => {
   const connector = connectorFor(BINDING_A, AUTH_A);
   assert.equal(typeof connector.listActiveAttachments, 'function');
   assert.equal(typeof connector.downloadOriginalAttachment, 'function');
+  assert.equal(typeof connector.applyApprovedIncomeUpdate, 'function');
+  assert.equal(typeof connector.readFields, 'function');
   assert.equal('getAttachmentMetadata' in connector, false);
   assert.equal('getStatus' in connector, false);
   assert.equal('writebackApproval' in connector, false);
-  // ECC-16 deferred until writebackApproval exists on EncompassConnector.
 });

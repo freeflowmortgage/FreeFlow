@@ -13,6 +13,8 @@ import type {
   DownloadedEncompassAttachment,
   EncompassAttachmentRef,
   EncompassConnectorContext,
+  EncompassApprovedIncomeUpdate,
+  EncompassWriteResult,
 } from '../types';
 
 export const MAX_CONNECTOR_PDF_BYTES = 40 * 1024 * 1024;
@@ -92,6 +94,41 @@ export class CustomConnectorAdapter implements EncompassConnector {
     return { bytes, sha256 };
   }
 
+  async applyApprovedIncomeUpdate(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+    update: EncompassApprovedIncomeUpdate,
+  ): Promise<EncompassWriteResult> {
+    validateUpdate(update);
+    const body = { ...this.requestBody(context, loanGuid), ...update };
+    const response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.applyUpdatePath, body, REQUEST_TIMEOUT_MS);
+    const value = await readJson(response, 'CONNECTOR_WRITE_INVALID');
+    if (!isRecord(value) || value.applied !== true) {
+      throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+    }
+    return typeof value.providerRevision === 'string'
+      ? { providerRevision: value.providerRevision.slice(0, 100) }
+      : {};
+  }
+
+  async readFields(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+    fieldNames: ReadonlyArray<string>,
+  ): Promise<Readonly<Record<string, string>>> {
+    validateFieldNames(fieldNames);
+    const body = { ...this.requestBody(context, loanGuid), fieldNames };
+    const response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.readFieldsPath, body, REQUEST_TIMEOUT_MS);
+    const value = await readJson(response, 'CONNECTOR_FIELDS_INVALID');
+    if (!isRecord(value) || !isRecord(value.fields)) {
+      throw new EncompassConnectorError('CONNECTOR_FIELDS_INVALID', 'Unexpected connector field response.', false);
+    }
+    const allowed = new Set(fieldNames);
+    return Object.fromEntries(Object.entries(value.fields)
+      .filter(([name, fieldValue]) => allowed.has(name) && typeof fieldValue === 'string')
+      .map(([name, fieldValue]) => [name, String(fieldValue).slice(0, 500)]));
+  }
+
   private requestBody(context: EncompassConnectorContext, loanGuid: string): ConnectorServiceListRequest {
     const payload: ConnectorServiceListRequest = {
       contractVersion: CONNECTOR_SERVICE_CONTRACT.version,
@@ -122,13 +159,42 @@ export class CustomConnectorAdapter implements EncompassConnector {
       body: bodyText,
     });
     if (!response.ok) {
+      let safeCode = `CONNECTOR_SERVICE_FAILED_${response.status}`;
+      try {
+        const errorBody = await response.clone().json() as unknown;
+        if (isRecord(errorBody) && errorBody.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN') {
+          safeCode = errorBody.safeCode;
+        }
+      } catch {
+        // The status-derived code remains safe and provider-neutral.
+      }
       throw new EncompassConnectorError(
-        `CONNECTOR_SERVICE_FAILED_${response.status}`,
+        safeCode,
         `Connector service returned HTTP ${response.status}.`,
-        response.status === 408 || response.status === 429 || response.status >= 500,
+        safeCode !== 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN'
+          && (response.status === 408 || response.status === 429 || response.status >= 500),
       );
     }
     return response;
+  }
+}
+
+const FIELD_NAME = /^(?:CX\.FREEFLOW\.[A-Z0-9.]+|10[1-7])$/;
+
+function validateFieldNames(fieldNames: ReadonlyArray<string>): void {
+  if (fieldNames.length < 1 || fieldNames.length > 32 || fieldNames.some((name) => !FIELD_NAME.test(name))) {
+    throw new EncompassConnectorError('CONNECTOR_FIELDS_INVALID', 'The requested field set is invalid.', false);
+  }
+}
+
+function validateUpdate(update: EncompassApprovedIncomeUpdate): void {
+  if (!/^[0-9a-f-]{36}$/i.test(update.approvalEventId)) {
+    throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'The approval reference is invalid.', false);
+  }
+  validateFieldNames(update.fields.map((field) => field.fieldName));
+  if (new Set(update.fields.map((field) => field.fieldName)).size !== update.fields.length
+    || update.fields.some((field) => typeof field.value !== 'string' || field.value.length > 500)) {
+    throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'The field update is invalid.', false);
   }
 }
 

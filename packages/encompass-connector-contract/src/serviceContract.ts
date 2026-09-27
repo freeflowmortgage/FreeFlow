@@ -7,6 +7,8 @@ export const CONNECTOR_SERVICE_CONTRACT = {
   healthPath: '/health',
   listPath: '/v1/attachments/list',
   downloadPath: '/v1/attachments/download',
+  applyUpdatePath: '/v1/approved-income/apply',
+  readFieldsPath: '/v1/approved-income/fields',
 } as const;
 
 export type ConnectorServiceListRequest = Readonly<{
@@ -21,4 +23,13 @@ export type ConnectorServiceListRequest = Readonly<{
 
 export type ConnectorServiceDownloadRequest = ConnectorServiceListRequest & Readonly<{
   attachmentId: string;
+}>;
+
+export type ConnectorServiceApplyUpdateRequest = ConnectorServiceListRequest & Readonly<{
+  approvalEventId: string;
+  fields: ReadonlyArray<Readonly<{ fieldName: string; value: string }>>;
+}>;
+
+export type ConnectorServiceReadFieldsRequest = ConnectorServiceListRequest & Readonly<{
+  fieldNames: ReadonlyArray<string>;
 }>;

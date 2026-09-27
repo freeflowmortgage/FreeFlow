@@ -4,6 +4,8 @@ import type {
   DownloadedEncompassAttachment,
   EncompassAttachmentRef,
   EncompassConnectorContext,
+  EncompassApprovedIncomeUpdate,
+  EncompassWriteResult,
 } from '../types';
 
 /**
@@ -29,5 +31,23 @@ export class DeveloperConnectAdapter implements EncompassConnector {
     attachmentId: string,
   ): Promise<DownloadedEncompassAttachment> {
     return this.client.downloadOriginalAttachment(loanGuid, attachmentId);
+  }
+
+  applyApprovedIncomeUpdate(
+    _context: EncompassConnectorContext,
+    loanGuid: string,
+    update: EncompassApprovedIncomeUpdate,
+  ): Promise<EncompassWriteResult> {
+    if (!this.client.applyApprovedIncomeUpdate) throw new Error('Developer Connect write capability is unavailable.');
+    return this.client.applyApprovedIncomeUpdate(loanGuid, update);
+  }
+
+  readFields(
+    _context: EncompassConnectorContext,
+    loanGuid: string,
+    fieldNames: ReadonlyArray<string>,
+  ): Promise<Readonly<Record<string, string>>> {
+    if (!this.client.readFields) throw new Error('Developer Connect reconciliation capability is unavailable.');
+    return this.client.readFields(loanGuid, fieldNames);
   }
 }
