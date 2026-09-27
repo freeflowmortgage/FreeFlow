@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/assert-runtime-mode.mjs && tsc -b && vite build",
+    "start:production": "node scripts/serve-production.mjs",
+    "test:runtime": "tsx --test src/runtimeMode.test.ts src/api/portalClient.test.ts && node scripts/serve-production.test.mjs",
     "preview": "vite preview",
     "test:e2e": "playwright test"
   },

@@ -36,7 +36,9 @@ COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
+ARG FREEFLOW_CONSOLE_MODE=protected
 ENV NODE_ENV=production
+ENV VITE_FREEFLOW_RUNTIME_MODE=$FREEFLOW_CONSOLE_MODE
 
 RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
@@ -63,12 +65,10 @@ RUN microdnf update -y \
     && mkdir -p /tmp/freeflow \
     && chown consoleuser:nodejs /tmp/freeflow
 
-COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/apps/underwriting-console ./apps/underwriting-console
+COPY --from=builder /app/apps/underwriting-console/dist ./dist
+COPY --from=builder /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
 
-RUN chown -R consoleuser:nodejs /app/apps/underwriting-console
+RUN chown -R consoleuser:nodejs /app
 
 USER consoleuser
 
@@ -77,5 +77,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["node", "-e", "require('http').get('http://127.0.0.1:3000/health', (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
-WORKDIR /app/apps/underwriting-console
-CMD ["node_modules/.bin/vite", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["node", "/app/serve-production.mjs"]
