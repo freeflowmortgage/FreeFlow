@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertProductionConfig } from './production-config.mjs';
@@ -7,8 +8,12 @@ assertProductionConfig(process.env);
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const nextCli = path.resolve(scriptDirectory, '..', 'node_modules', 'next', 'dist', 'bin', 'next');
+const standaloneServer = path.resolve(scriptDirectory, '..', 'server.js');
 const port = process.env.PORT || '3001';
-const child = spawn(process.execPath, [nextCli, 'start', '-p', port], {
+const childArguments = existsSync(standaloneServer)
+  ? [standaloneServer]
+  : [nextCli, 'start', '-p', port];
+const child = spawn(process.execPath, childArguments, {
   env: process.env,
   stdio: 'inherit',
 });

@@ -1,0 +1,24 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic example and test credentials only"
+paths = [
+  '''(?i)^\.env\.example$''',
+  '''(?i)^docs/env\.development$''',
+  '''(?i)^docker-compose\.yml$''',
+  '''(?i)^apps/underwriter-portal/scripts/production-config\.test\.mjs$''',
+  '''(?i)^apps/underwriter-portal/src/pages/api/billing/payment-intent-succeeded-v4\.json$''',
+  '''(?i)^apps/underwriter-portal/src/server/integrations/encompass/syncWorker\.test\.ts$''',
+  '''(?i)^apps/web/src/pages/api/billing/payment-intent-succeeded-v4\.json$''',
+  '''(?i)^docs/architecture/payment-intent-succeeded-v4\.json$''',
+]
+
+[[allowlists]]
+description = "Verified placeholder-only historical development env revisions"
+condition = "AND"
+commits = [
+  "f82df4c9be4fe2cafbad6c90af832d6c4b208a00",
+  "0087d07dc8a9779e13d4d6f5b620a47ff555a4f8",
+]
+paths = ['''(?i)^\.env\.development$''']

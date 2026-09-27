@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -27,6 +27,10 @@ RUN pnpm --filter @mortgage-pos/database prisma:generate \
     && mkdir -p /tmp/freeflow \
     && chown -R appuser:nodejs /app /tmp/freeflow \
     && chmod 0555 /usr/local/bin/freeflow-migrate
+
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /root/.cache/node/corepack /pnpm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 ENV HOME="/tmp/freeflow"
 ENV TMPDIR="/tmp/freeflow"

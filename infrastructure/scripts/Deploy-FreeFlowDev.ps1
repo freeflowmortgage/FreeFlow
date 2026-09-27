@@ -1,9 +1,9 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
 param(
     [ValidateSet("portal", "parser", "console", "migration", "connector")]
-    [string[]]$Service = @("portal", "parser", "console", "migration", "connector"),
+    [string[]]$Service = @("portal", "parser", "migration", "connector"),
 
-    [string]$AwsProfile = "freeflow-dev-deploy",
+    [string]$AwsProfile = "freeflow-dev",
     [string]$AwsRegion = "us-west-2",
     [string]$ImageTag,
     [string]$BuilderName = "freeflow-deploy",
@@ -203,7 +203,7 @@ function Assert-SafePlan {
     $plan = $planJson | ConvertFrom-Json
     foreach ($change in $plan.resource_changes) {
         $actions = @($change.change.actions)
-        if ($actions.Count -eq 1 -and $actions[0] -eq "no-op") {
+        if ($actions.Count -eq 1 -and $actions[0] -in @("no-op", "read")) {
             continue
         }
         if (-not $AllowedAddresses.Contains([string]$change.address)) {
@@ -224,9 +224,15 @@ $serviceDefinitions = @{
             "aws_ecs_task_definition.portal[0]",
             "aws_ecs_service.portal[0]",
             "aws_ecs_task_definition.document_pull_worker[0]",
-            "aws_ecs_service.document_pull_worker[0]"
+            "aws_ecs_service.document_pull_worker[0]",
+            "aws_ecs_task_definition.encompass_sync_worker[0]",
+            "aws_ecs_service.encompass_sync_worker[0]"
         )
-        EcsServices = @("freeflow-dev-portal", "freeflow-dev-document-pull-worker")
+        EcsServices = @(
+            "freeflow-dev-portal",
+            "freeflow-dev-document-pull-worker",
+            "freeflow-dev-encompass-sync-worker"
+        )
     }
     parser = @{
         EnvironmentVariable = "PARSER_IMAGE"

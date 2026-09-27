@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
+  output: process.env.NEXT_STANDALONE_BUILD === '1' ? 'standalone' : undefined,
   poweredByHeader: false,
   transpilePackages: ['@mortgage-pos/mortgage-engine', '@mortgage-pos/ui', '@mortgage-pos/database', '@mortgage-pos/encompass-connector-contract'],
   async headers() {

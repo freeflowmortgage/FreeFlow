@@ -8,6 +8,7 @@ import {
   type ApplicationRole,
   type Permission,
 } from './permissions';
+import { emitOperationalEvent } from '../observability/operationalEvents';
 
 export type RequestContext = Readonly<{
   requestId: string;
@@ -62,6 +63,7 @@ export function withRequestContext(
       enforceTrustedOrigin(req);
     } catch (error) {
       const originError = normalizeAuthenticationError(error);
+      emitOperationalEvent('auth_denied', originError.code, originError.status);
       return res.status(originError.status).json({
         error: {
           code: originError.code,
@@ -76,6 +78,7 @@ export function withRequestContext(
       context = await createRequestContext(req, requestId, requiredPermission, dependencies);
     } catch (error) {
       const authError = normalizeAuthenticationError(error);
+      emitOperationalEvent('auth_denied', authError.code, authError.status);
       return res.status(authError.status).json({
         error: {
           code: authError.code,

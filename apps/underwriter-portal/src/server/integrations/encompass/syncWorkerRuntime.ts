@@ -8,6 +8,7 @@ import type { RequestContext } from '../../auth/requestContext';
 import { hasCurrentCalculationExtractions } from '../../income/extractionFreshness';
 import type { EncompassSyncQueueMessage } from './sync';
 import { runEncompassSyncJob, type ClaimedSync, type SyncWorkerDependencies } from './syncWorker';
+import { emitOperationalEvent } from '../../observability/operationalEvents';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
@@ -223,6 +224,7 @@ async function updateState(job: RuntimeClaim, status: 'RETRYABLE_FAILURE' | 'REC
       data: { status, safeErrorCode },
     });
   });
+  emitOperationalEvent(status === 'RETRYABLE_FAILURE' ? 'sync_retry' : 'sync_reconciliation', safeErrorCode);
 }
 
 async function finalize(job: RuntimeClaim, status: 'SUCCEEDED' | 'FAILED', safeErrorCode?: string, providerRevision?: string) {
@@ -252,6 +254,7 @@ async function finalize(job: RuntimeClaim, status: 'SUCCEEDED' | 'FAILED', safeE
       });
     }
   });
+  if (status === 'FAILED') emitOperationalEvent('sync_failure', safeErrorCode ?? 'SYNC_FAILED');
 }
 
 function contextFor(job: RuntimeClaim) {
