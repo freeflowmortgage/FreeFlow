@@ -62,6 +62,22 @@ BEGIN
 END
 $worker_role_assertions$;
 
+DO $app_role_assertions$
+BEGIN
+  IF NOT has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'SELECT') THEN
+    RAISE EXCEPTION 'freeflow_app cannot read connector bindings needed to queue tenant-scoped jobs';
+  END IF;
+  IF has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'INSERT')
+    OR has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'DELETE')
+    OR has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'TRUNCATE')
+    OR has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'REFERENCES')
+    OR has_table_privilege('freeflow_app', 'encompass_connector_bindings', 'TRIGGER') THEN
+    RAISE EXCEPTION 'freeflow_app can mutate or administer connector bindings';
+  END IF;
+END
+$app_role_assertions$;
+
 INSERT INTO "tenants" ("id", "companyName", "primaryContactEmail", "updatedAt") VALUES
   ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Tenant A', 'a@example.test', now()),
   ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Tenant B', 'b@example.test', now()),
@@ -80,4 +96,33 @@ ON CONFLICT ("tenantId") DO UPDATE SET
   "isEnabled" = EXCLUDED."isEnabled",
   "updatedAt" = EXCLUDED."updatedAt";
 
-SELECT 'connector binding migration and worker grants verified' AS result;
+SET ROLE freeflow_app;
+BEGIN;
+SET LOCAL app.tenant_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+SET LOCAL app.principal_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+DO $app_binding_visibility$
+DECLARE
+  tenant_a_bindings integer;
+  tenant_b_bindings integer;
+BEGIN
+  SELECT count(*) INTO tenant_a_bindings
+  FROM "encompass_connector_bindings"
+  WHERE "tenantId" = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  IF tenant_a_bindings <> 1 THEN
+    RAISE EXCEPTION 'freeflow_app cannot read its tenant connector binding';
+  END IF;
+
+  SELECT count(*) INTO tenant_b_bindings
+  FROM "encompass_connector_bindings"
+  WHERE "tenantId" = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  IF tenant_b_bindings <> 0 THEN
+    RAISE EXCEPTION 'freeflow_app can read another tenant connector binding';
+  END IF;
+END
+$app_binding_visibility$;
+
+ROLLBACK;
+RESET ROLE;
+
+SELECT 'connector binding migration and role grants verified' AS result;
