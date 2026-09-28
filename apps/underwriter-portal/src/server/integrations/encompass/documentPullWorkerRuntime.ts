@@ -125,6 +125,7 @@ export async function persistParsedExtraction(
   transaction: Prisma.TransactionClient,
   job: ClaimedDocumentPull,
   result: ParsedResult,
+  writer: 'WORKER' | 'AUTHENTICATED_UPLOAD' = 'WORKER',
 ): Promise<void> {
   const lockKey = `${job.tenantId}:${job.loanId}:${result.attachmentId}`;
   await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
@@ -169,24 +170,45 @@ export async function persistParsedExtraction(
   }
   let extractionCreated = false;
   if (!existingExtraction) {
-    await transaction.incomeExtraction.updateMany({
-      where: { tenantId: job.tenantId, loanId: job.loanId, sourceDocumentId: document.id, status: 'ACTIVE' },
-      data: { status: 'SUPERSEDED', supersededAt: new Date() },
-    });
-    await transaction.incomeExtraction.create({
-      data: {
-        tenantId: job.tenantId, loanId: job.loanId, sourceDocumentId: document.id,
-        sourceAttachmentId: document.sourceAttachmentId, sourceDocumentVersion: document.version,
-        sourceContentHash: result.sha256, parserVersion: result.parsed.parserVersion,
-        schemaVersion: result.parsed.extraction.schemaVersion,
-        normalizedInput: result.parsed.extraction.normalizedInput as Prisma.InputJsonValue,
-        evidence: result.parsed.extraction.evidence as Prisma.InputJsonValue,
-        warnings: Array.from(result.parsed.extraction.warnings),
-        confidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
-        canonicalHash: result.parsed.extraction.canonicalHash,
-      },
-    });
-    extractionCreated = true;
+    if (writer === 'AUTHENTICATED_UPLOAD') {
+      const rows = await transaction.$queryRaw<Array<{ created: boolean }>>`
+        SELECT app.persist_uploaded_income_extraction(
+          ${job.tenantId}::uuid,
+          ${job.loanId}::uuid,
+          ${document.id}::uuid,
+          ${document.sourceAttachmentId}::varchar,
+          ${document.version}::integer,
+          ${result.sha256}::char(64),
+          ${result.parsed.parserVersion}::varchar,
+          ${result.parsed.extraction.schemaVersion}::varchar,
+          ${JSON.stringify(result.parsed.extraction.normalizedInput)}::jsonb,
+          ${JSON.stringify(result.parsed.extraction.evidence)}::jsonb,
+          ${Array.from(result.parsed.extraction.warnings)}::text[],
+          ${result.parsed.confidence}::numeric,
+          ${result.parsed.extraction.canonicalHash}::char(64)
+        ) AS created
+      `;
+      extractionCreated = rows[0]?.created === true;
+    } else {
+      await transaction.incomeExtraction.updateMany({
+        where: { tenantId: job.tenantId, loanId: job.loanId, sourceDocumentId: document.id, status: 'ACTIVE' },
+        data: { status: 'SUPERSEDED', supersededAt: new Date() },
+      });
+      await transaction.incomeExtraction.create({
+        data: {
+          tenantId: job.tenantId, loanId: job.loanId, sourceDocumentId: document.id,
+          sourceAttachmentId: document.sourceAttachmentId, sourceDocumentVersion: document.version,
+          sourceContentHash: result.sha256, parserVersion: result.parsed.parserVersion,
+          schemaVersion: result.parsed.extraction.schemaVersion,
+          normalizedInput: result.parsed.extraction.normalizedInput as Prisma.InputJsonValue,
+          evidence: result.parsed.extraction.evidence as Prisma.InputJsonValue,
+          warnings: Array.from(result.parsed.extraction.warnings),
+          confidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
+          canonicalHash: result.parsed.extraction.canonicalHash,
+        },
+      });
+      extractionCreated = true;
+    }
   }
   if (!existing || existing.sourceContentHash !== result.sha256 || extractionCreated) {
     await transaction.loanApplication.updateMany({

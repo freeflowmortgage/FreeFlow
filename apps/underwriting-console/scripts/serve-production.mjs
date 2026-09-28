@@ -46,7 +46,7 @@ createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Security-Policy', `default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors ${frameAncestors}; form-action 'self'`);
+  res.setHeader('Content-Security-Policy', `default-src 'self'; connect-src 'self' blob:; worker-src 'self' blob:; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; frame-ancestors ${frameAncestors}; form-action 'self'`);
   if (runtimeMode === 'protected-web') res.setHeader('X-Frame-Options', 'DENY');
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });

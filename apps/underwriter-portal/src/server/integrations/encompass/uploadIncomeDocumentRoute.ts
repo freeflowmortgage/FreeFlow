@@ -51,7 +51,7 @@ export function createUploadIncomeDocumentHandler(dependencies = { withTenantTra
       await dependencies.withTenantTransaction({ tenantId: context.tenantId, principalId: context.membershipId }, (transaction) => dependencies.persist(transaction, {
         jobId: `upload-${context.requestId}`, tenantId: context.tenantId, loanId, correlationId: context.requestId,
         encompassLoanGuid: '', lenderId: '', deploymentId: '', selectedAttachmentIds: [attachmentId],
-      } as never, { attachmentId, sha256, parsed }));
+      } as never, { attachmentId, sha256, parsed }, 'AUTHENTICATED_UPLOAD'));
       return res.status(201).json({ source: 'UPLOAD', attachmentId, status: 'PROCESSED', requestId: context.requestId });
     } catch (error) {
       if (error instanceof ApiError) return sendApiError(res, context.requestId, error);
