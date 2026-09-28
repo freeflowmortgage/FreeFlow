@@ -120,12 +120,11 @@ ordered migration.
 
 Create the initial Cognito user with `admin-create-user`, set a permanent
 password through the supported Cognito flow, and record the returned `sub`.
-Run the migration task again with container overrides for:
+Run the migration task again with container overrides for a user seed:
 
 ```text
 SEED_OIDC_SUBJECT=<Cognito sub>
 SEED_EMAIL=<synthetic test user email>
-SEED_ENCOMPASS_INTEGRATION_MODE=<optional NONE|ENCOMPASS_HOSTED|DEVELOPER_CONNECT>
 ```
 
 Specify unique `SEED_USER_ID` values for additional users. `SEED_TENANT_ID`
@@ -135,10 +134,11 @@ as `UNDERWRITER` or `BROKER_OWNER`. The seed is idempotent. Do not put an email,
 password, subject, or secret into Terraform variables or source control. Follow
 the dedicated user-access runbook for the complete procedure.
 
-Omit `SEED_ENCOMPASS_INTEGRATION_MODE` unless an approved dev tenant-mode
-change is part of the operation. Supplying it makes the private migration task
-the authoritative configuration path and preserves the existing value when it
-is absent.
+For an approved tenant-mode change, run the same private task separately with
+only `SEED_TENANT_ID` and `SEED_ENCOMPASS_INTEGRATION_MODE` (`NONE`,
+`ENCOMPASS_HOSTED`, or `DEVELOPER_CONNECT`). The mode-only path changes no
+tenant identity, membership, loan, or borrower rows. Omitting the mode preserves
+the existing configuration.
 
 ## Verification
 
