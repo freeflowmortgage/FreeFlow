@@ -30,3 +30,15 @@ test('authentication failures are surfaced safely without logging payloads', asy
     globalThis.fetch = originalFetch;
   }
 });
+
+test('upload intake uses only the same-origin protected portal route', async () => {
+  const originalFetch = globalThis.fetch;
+  let received: { path: string; init: RequestInit | undefined } | undefined;
+  globalThis.fetch = async (input, init) => { received = { path: String(input), init }; return new Response(JSON.stringify({ source: 'UPLOAD', attachmentId: 'upload-1', status: 'PROCESSED' }), { status: 201, headers: { 'Content-Type': 'application/json' } }); };
+  try {
+    await portalClient.uploadIncomeDocument('loan/1', new File(['%PDF-'], 'income.pdf', { type: 'application/pdf' }));
+    assert.equal(received?.path, '/api/v1/loans/loan%2F1/income-documents');
+    assert.equal(received?.init?.credentials, 'same-origin');
+    assert.equal(new Headers(received?.init?.headers).has('x-tenant-id'), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
