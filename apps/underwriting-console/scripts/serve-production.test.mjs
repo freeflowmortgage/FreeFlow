@@ -13,6 +13,8 @@ try {
   const health = await fetch(`http://127.0.0.1:${port}/health`);
   assert.equal(health.status, 200);
   assert.match(health.headers.get('content-security-policy') || '', /frame-ancestors 'none'/);
+  assert.match(health.headers.get('content-security-policy') || '', /connect-src 'self' blob:/);
+  assert.match(health.headers.get('content-security-policy') || '', /worker-src 'self' blob:/);
   assert.equal(health.headers.get('x-frame-options'), 'DENY');
 } finally {
   child.kill();

@@ -79,3 +79,29 @@ test('same parser version producing a different canonical result fails closed', 
     (error: { safeCode?: string }) => error.safeCode === 'PARSER_RESULT_NONDETERMINISTIC',
   );
 });
+
+test('authenticated upload uses only the constrained database writer for authoritative extraction rows', async () => {
+  let rawCalls = 0;
+  let directMutation = false;
+  let loanUpdated = false;
+  const transaction = {
+    $queryRaw: async () => {
+      rawCalls += 1;
+      return rawCalls === 1 ? [{ pg_advisory_xact_lock: null }] : [{ created: true }];
+    },
+    loanDocument: {
+      findUnique: async () => null,
+      upsert: async () => ({ id: 'document', version: 1, sourceContentHash: result.sha256, sourceAttachmentId: result.attachmentId }),
+    },
+    incomeExtraction: {
+      findUnique: async () => null,
+      updateMany: async () => { directMutation = true; },
+      create: async () => { directMutation = true; },
+    },
+    loanApplication: { updateMany: async () => { loanUpdated = true; return { count: 1 }; } },
+  };
+  await persistParsedExtraction(transaction as never, job, result as never, 'AUTHENTICATED_UPLOAD');
+  assert.equal(rawCalls, 2);
+  assert.equal(directMutation, false);
+  assert.equal(loanUpdated, true);
+});

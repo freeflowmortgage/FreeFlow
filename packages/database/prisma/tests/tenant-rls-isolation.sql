@@ -100,6 +100,13 @@ BEGIN
     OR has_table_privilege('freeflow_app', 'income_extractions', 'DELETE') THEN
     RAISE EXCEPTION 'freeflow_app can mutate authoritative extractions';
   END IF;
+  IF NOT has_function_privilege(
+    'freeflow_app',
+    'app.persist_uploaded_income_extraction(uuid,uuid,uuid,character varying,integer,character,character varying,character varying,jsonb,jsonb,text[],numeric,character)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'freeflow_app cannot invoke the constrained authenticated-upload extraction writer';
+  END IF;
   IF NOT has_table_privilege('freeflow_worker', 'income_extractions', 'INSERT')
     OR NOT has_table_privilege('freeflow_worker', 'income_extractions', 'UPDATE')
     OR has_table_privilege('freeflow_worker', 'income_extractions', 'DELETE') THEN
@@ -247,6 +254,68 @@ BEGIN
   END;
 END
 $composite_fk$;
+
+INSERT INTO "loan_documents" (
+  "id", "tenantId", "loanId", "fileType", "documentCategory", "sourceAttachmentId",
+  "sourceContentHash", "parserVersion"
+) VALUES (
+  '24242424-2424-4242-8242-242424242424',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  'application/pdf', 'W2_WAGE', 'authenticated-upload-a', repeat('e', 64), 'income-parser-v5'
+);
+
+DO $authenticated_upload_writer$
+DECLARE
+  created BOOLEAN;
+  repeated BOOLEAN;
+  extraction_count INTEGER;
+BEGIN
+  SELECT app.persist_uploaded_income_extraction(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    '24242424-2424-4242-8242-242424242424',
+    'authenticated-upload-a', 1, repeat('e', 64), 'income-parser-v5', 'income-extraction-v2',
+    '{"w2Records":[{"entityId":"synthetic-upload-a","employerName":"Synthetic Employer","year":2025,"annualWages":96000}]}'::jsonb,
+    '{"fields":[]}'::jsonb, ARRAY[]::text[], 99.00, repeat('f', 64)
+  ) INTO created;
+  IF NOT created THEN
+    RAISE EXCEPTION 'authenticated upload did not append its extraction';
+  END IF;
+
+  SELECT app.persist_uploaded_income_extraction(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    '24242424-2424-4242-8242-242424242424',
+    'authenticated-upload-a', 1, repeat('e', 64), 'income-parser-v5', 'income-extraction-v2',
+    '{"w2Records":[{"entityId":"synthetic-upload-a","employerName":"Synthetic Employer","year":2025,"annualWages":96000}]}'::jsonb,
+    '{"fields":[]}'::jsonb, ARRAY[]::text[], 99.00, repeat('f', 64)
+  ) INTO repeated;
+  IF repeated THEN
+    RAISE EXCEPTION 'authenticated upload writer was not idempotent';
+  END IF;
+
+  SELECT count(*) INTO extraction_count
+  FROM "income_extractions"
+  WHERE "sourceDocumentId" = '24242424-2424-4242-8242-242424242424';
+  IF extraction_count <> 1 THEN
+    RAISE EXCEPTION 'authenticated upload created % extraction rows', extraction_count;
+  END IF;
+
+  BEGIN
+    PERFORM app.persist_uploaded_income_extraction(
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      '21212121-2121-4121-8121-212121212121',
+      'attachment-b', 1, repeat('b', 64), 'income-parser-v5', 'income-extraction-v2',
+      '{}'::jsonb, '{"fields":[]}'::jsonb, ARRAY[]::text[], NULL, repeat('d', 64)
+    );
+    RAISE EXCEPTION 'authenticated upload writer accepted a cross-tenant call';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END
+$authenticated_upload_writer$;
 
 DO $zero_data_retention_schema$
 DECLARE
