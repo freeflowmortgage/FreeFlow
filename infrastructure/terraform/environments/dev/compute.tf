@@ -111,6 +111,7 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "PORT", value = "8000" },
         { name = "HOSTNAME", value = "0.0.0.0" },
         { name = "APP_BASE_URL", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
+        { name = "APP_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
         { name = "TRUSTED_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
         { name = "PARSER_ENABLED", value = var.enable_parser ? "true" : "false" },
         { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080/api/underwrite/process" },
@@ -443,25 +444,10 @@ resource "aws_ecs_task_definition" "console" {
       }
       environment = [
         { name = "PORT", value = "3000" },
-        { name = "HOST", value = "0.0.0.0" },
-        { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080" },
-        { name = "DOC_PARSER_TIMEOUT_MS", value = "300000" },
-        { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
-        { name = "VITE_CACHE_DIR", value = "/tmp/freeflow/vite" },
-        { name = "TMPDIR", value = "/tmp/freeflow" },
-        { name = "VITE_ALLOWED_HOSTS", value = join(",", [aws_lb.portal[0].dns_name, var.portal_hostname]) },
+        { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
+        { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
       ]
-      entryPoint = ["/bin/sh", "-c"]
-      command = [join("\n", [
-        "set -eu",
-        "rm -rf /tmp/freeflow/app",
-        "mkdir -p /tmp/freeflow/app/apps",
-        "cp -R /app/apps/underwriting-console /tmp/freeflow/app/apps/underwriting-console",
-        "rm -rf /tmp/freeflow/app/apps/underwriting-console/node_modules",
-        "ln -s /app/apps/underwriting-console/node_modules /tmp/freeflow/app/apps/underwriting-console/node_modules",
-        "ln -s /app/packages /tmp/freeflow/app/packages",
-        "exec /app/apps/underwriting-console/node_modules/.bin/vite --config /tmp/freeflow/app/apps/underwriting-console/vite.config.ts --host 0.0.0.0 --port 3000 /tmp/freeflow/app/apps/underwriting-console",
-      ])]
+      command = ["node", "/app/serve-production.mjs"]
       portMappings = [{
         name          = "http"
         containerPort = 3000

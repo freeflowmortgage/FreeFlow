@@ -12,9 +12,10 @@ import SplitDocPane from './components/SplitDocPane';
 import AppraisalDocPane from './components/AppraisalDocPane';
 import type { ConsoleView, SourceMode, Surface } from './appTypes';
 import type { LiveDocument } from './parseTypes';
-import { postParsePdf } from './postParsePdf';
+import { postParsePdf } from '@console-document-loader';
 import { findDuplicate } from './livePacket';
 import { useNumberInputWheelGuard } from './hooks/useNumberInputWheelGuard';
+import { consoleRuntime } from './runtimeMode';
 
 const NAV: { id: ConsoleView; label: string; icon: typeof ShieldCheck }[] = [
   { id: 'split', label: 'Income', icon: ShieldCheck },
@@ -100,7 +101,7 @@ export default function App() {
   const [session, setSession] = useState<LiveDocument | null>(null);
   const [documents, setDocuments] = useState<LiveDocument[]>([]);
   const documentsRef = useRef<LiveDocument[]>([]);
-  const [source, setSource] = useState<SourceMode>('demo');
+  const [source, setSource] = useState<SourceMode>(consoleRuntime.demoEnabled ? 'demo' : 'live');
   const [parseBusy, setParseBusy] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -132,6 +133,10 @@ export default function App() {
   };
 
   const parsePdfs = async (list: File[]) => {
+    if (!consoleRuntime.demoEnabled) {
+      setParseError('Document processing is available through the protected loan workflow.');
+      return;
+    }
     if (!list.length) return;
     setParseBusy(true);
     setParseError(null);
@@ -184,6 +189,16 @@ export default function App() {
     return <B2BLanding onOpenService={enterWorkspace} />;
   }
 
+  if (consoleRuntime.protected && !session) {
+    return (
+      <main className="mx-auto max-w-[1440px] px-4 py-6 md:px-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          Select a loan from the protected loan workflow to load authoritative review data.
+        </div>
+      </main>
+    );
+  }
+
   // Standalone demo mode: one service, minimal chrome, no workspace navigation
   if (demoMode) {
     return (
@@ -216,7 +231,7 @@ export default function App() {
                 parseError={parseError}
                 onParseFile={(file) => void parsePdf(file)}
                 onParseFiles={(files) => void parsePdfs(files)}
-                onUseDemo={() => setSource('demo')}
+                onUseDemo={consoleRuntime.demoEnabled ? () => setSource('demo') : undefined}
                 onUseLive={() => documents.length && setSource('live')}
               />
             </div>
@@ -276,7 +291,7 @@ export default function App() {
               parseError={parseError}
               onParseFile={(file) => void parsePdf(file)}
               onParseFiles={(files) => void parsePdfs(files)}
-              onUseDemo={() => setSource('demo')}
+              onUseDemo={consoleRuntime.demoEnabled ? () => setSource('demo') : undefined}
               onUseLive={() => documents.length && setSource('live')}
             />
           </div>

@@ -38,7 +38,7 @@ test('DeveloperConnectAdapter wraps the existing EncompassApiClient', async () =
 
 test('portal factory refuses to host Developer Connect and does not read LOS secrets', () => {
   assert.throws(
-    () => createPortalEncompassConnector({ ENCOMPASS_CONNECTOR_KIND: 'developer-connect' }),
+    () => createPortalEncompassConnector({ ENCOMPASS_CONNECTOR_KIND: 'developer-connect' } as unknown as NodeJS.ProcessEnv),
     (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'DEVELOPER_CONNECT_DISABLED',
   );
 });
