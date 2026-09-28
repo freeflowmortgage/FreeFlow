@@ -52,6 +52,7 @@ if [ -n "${SEED_OIDC_SUBJECT:-}" ] || [ -n "${SEED_EMAIL:-}" ]; then
   : "${SEED_FIRST_NAME:=Synthetic}"
   : "${SEED_LAST_NAME:=Underwriter}"
   : "${SEED_ROLE:=UNDERWRITER}"
+  : "${SEED_ENCOMPASS_INTEGRATION_MODE:=}"
 
   case "$SEED_TENANT_ID:$SEED_USER_ID" in
     *[!0-9a-fA-F:-]*)
@@ -66,6 +67,13 @@ if [ -n "${SEED_OIDC_SUBJECT:-}" ] || [ -n "${SEED_EMAIL:-}" ]; then
       exit 1
       ;;
   esac
+  case "$SEED_ENCOMPASS_INTEGRATION_MODE" in
+    ""|NONE|ENCOMPASS_HOSTED|DEVELOPER_CONNECT) ;;
+    *)
+      echo "SEED_ENCOMPASS_INTEGRATION_MODE is not an allowed integration mode." >&2
+      exit 1
+      ;;
+  esac
 
   psql "$MIGRATOR_DATABASE_URL" --set=ON_ERROR_STOP=1 \
     --set=tenant_id="$SEED_TENANT_ID" \
@@ -75,6 +83,7 @@ if [ -n "${SEED_OIDC_SUBJECT:-}" ] || [ -n "${SEED_EMAIL:-}" ]; then
     --set=first_name="$SEED_FIRST_NAME" \
     --set=last_name="$SEED_LAST_NAME" \
     --set=user_role="$SEED_ROLE" \
+    --set=encompass_integration_mode="$SEED_ENCOMPASS_INTEGRATION_MODE" \
     --file=/app/packages/database/prisma/bootstrap/seed-live-test.sql
 fi
 

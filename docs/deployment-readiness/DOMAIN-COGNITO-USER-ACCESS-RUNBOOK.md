@@ -86,7 +86,12 @@ the human; FreeFlow's database remains authoritative for tenant and role access.
    SEED_FIRST_NAME=<first name>
    SEED_LAST_NAME=<last name>
    SEED_ROLE=<least-privileged role>
+   SEED_ENCOMPASS_INTEGRATION_MODE=<optional NONE|ENCOMPASS_HOSTED|DEVELOPER_CONNECT>
    ```
+
+   Omit `SEED_ENCOMPASS_INTEGRATION_MODE` when adding a user without changing
+   tenant integration configuration. Set it only for an approved tenant-mode
+   change; the private migration task is the supported dev admin path.
 
 4. Wait for the task to stop; require exit code `0` and the successful seed log
    marker. A Cognito user without an active database membership must still be

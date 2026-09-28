@@ -125,6 +125,7 @@ Run the migration task again with container overrides for:
 ```text
 SEED_OIDC_SUBJECT=<Cognito sub>
 SEED_EMAIL=<synthetic test user email>
+SEED_ENCOMPASS_INTEGRATION_MODE=<optional NONE|ENCOMPASS_HOSTED|DEVELOPER_CONNECT>
 ```
 
 Specify unique `SEED_USER_ID` values for additional users. `SEED_TENANT_ID`
@@ -133,6 +134,11 @@ to the same synthetic workspace. `SEED_ROLE` must be an application role such
 as `UNDERWRITER` or `BROKER_OWNER`. The seed is idempotent. Do not put an email,
 password, subject, or secret into Terraform variables or source control. Follow
 the dedicated user-access runbook for the complete procedure.
+
+Omit `SEED_ENCOMPASS_INTEGRATION_MODE` unless an approved dev tenant-mode
+change is part of the operation. Supplying it makes the private migration task
+the authoritative configuration path and preserves the existing value when it
+is absent.
 
 ## Verification
 

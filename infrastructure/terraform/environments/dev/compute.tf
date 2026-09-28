@@ -206,7 +206,7 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "LOG_LEVEL", value = "info" },
       { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
-      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : "bearer-stub-non-prod" },
+      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_service_auth_kind },
       { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
     secrets = concat([
@@ -313,7 +313,7 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
 
   container_definitions = jsonencode([{
     name                   = "document-pull-worker"
-    image                  = var.portal_image
+    image                  = var.developer_connect_worker_image != "" ? var.developer_connect_worker_image : var.portal_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
@@ -362,7 +362,7 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
 
   container_definitions = jsonencode([{
     name                   = "encompass-sync-worker"
-    image                  = var.portal_image
+    image                  = var.developer_connect_worker_image != "" ? var.developer_connect_worker_image : var.portal_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
