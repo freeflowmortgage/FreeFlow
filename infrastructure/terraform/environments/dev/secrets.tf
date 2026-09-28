@@ -18,6 +18,9 @@ resource "random_password" "connector_service_token" {
 
   length  = 64
   special = false
+  keepers = var.connector_service_token_rotation_epoch == "" ? null : {
+    rotation_epoch = var.connector_service_token_rotation_epoch
+  }
 }
 
 resource "random_password" "connector_service_signing_key" {

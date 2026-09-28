@@ -204,6 +204,17 @@ variable "enable_encompass_connector" {
   }
 }
 
+variable "connector_service_token_rotation_epoch" {
+  type        = string
+  description = "Explicit rotation epoch for the optional Developer Connect connector service token. Preserve the deployed value during hosted-only changes."
+  default     = ""
+
+  validation {
+    condition     = var.connector_service_token_rotation_epoch == "" || can(regex("^[A-Za-z0-9._-]{1,64}$", var.connector_service_token_rotation_epoch))
+    error_message = "connector_service_token_rotation_epoch must be empty or a 1-64 character safe identifier."
+  }
+}
+
 variable "encompass_connector_mode" {
   type        = string
   description = "Connector runtime mode. Synthetic is development test-only; real-encompass resolves LOS credentials only inside the connector task."
@@ -296,6 +307,28 @@ variable "portal_image" {
   validation {
     condition     = !var.enable_services || can(regex("@sha256:[0-9a-f]{64}$", var.portal_image))
     error_message = "portal_image must be an immutable @sha256 digest reference when services are enabled."
+  }
+}
+
+variable "encompass_connector_service_auth_kind" {
+  type        = string
+  description = "Optional explicit auth contract for the separately managed connector fallback. Empty derives it from connector mode."
+  default     = ""
+
+  validation {
+    condition     = contains(["", "signed-replay", "bearer-stub-non-prod"], var.encompass_connector_service_auth_kind)
+    error_message = "encompass_connector_service_auth_kind must be empty, signed-replay, or bearer-stub-non-prod."
+  }
+}
+
+variable "developer_connect_worker_image" {
+  type        = string
+  description = "Optional immutable portal-derived image pinned independently for Developer Connect fallback workers. Empty follows portal_image."
+  default     = ""
+
+  validation {
+    condition     = var.developer_connect_worker_image == "" || can(regex("@sha256:[0-9a-f]{64}$", var.developer_connect_worker_image))
+    error_message = "developer_connect_worker_image must be empty or an immutable @sha256 digest reference."
   }
 }
 
