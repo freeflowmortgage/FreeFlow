@@ -52,6 +52,19 @@ test('host launch lookup and creation are constrained to the authenticated tenan
   assert.equal(queries.every((value: any) => value.tenantId === TENANT), true);
 });
 
+test('host launch is denied for a tenant configured with NONE', async () => {
+  let loanQueried = false;
+  const tx = {
+    tenantConfiguration: { findFirst: async () => ({ encompassIntegrationMode: 'NONE' }) },
+    loanApplication: { findFirst: async () => { loanQueried = true; return null; } },
+  };
+  const handler = createHostLaunchHandler({ withTenantTransaction: async (_scope, run) => run(tx as never) } as never);
+  const result = response(); await handler(request(), result.res, context);
+  assert.equal(result.state.status, 409);
+  assert.equal((result.state.body as any).error.code, 'ENCOMPASS_HOSTED_NOT_ENABLED');
+  assert.equal(loanQueried, false);
+});
+
 function request() { return { method: 'POST', body: { encompassLoanGuid: GUID } } as NextApiRequest; }
 function response() {
   const state: { status?: number; body?: unknown } = {};
