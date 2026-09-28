@@ -8,6 +8,17 @@ if (!['protected-web', 'encompass-hosted'].includes(runtimeMode)) {
   throw new Error('FREEFLOW_CONSOLE_PROTECTED_RUNTIME_REQUIRED');
 }
 
+const testHostRequested = process.env.ENCOMPASS_TEST_HOST_ENABLED === 'true';
+const testHostQualification = process.env.FREEFLOW_RUNTIME_ENV === 'development'
+  && process.env.ENCOMPASS_TEST_HOST_QUALIFICATION === 'true';
+if (testHostRequested && (runtimeMode !== 'encompass-hosted' || !testHostQualification)) {
+  throw new Error('ENCOMPASS_TEST_HOST_FORBIDDEN');
+}
+const testHostLoanGuid = testHostRequested ? process.env.ENCOMPASS_TEST_HOST_LOAN_GUID?.trim() : null;
+if (testHostRequested && (!testHostLoanGuid || !/^[A-Za-z0-9-]{1,255}$/.test(testHostLoanGuid))) {
+  throw new Error('ENCOMPASS_TEST_HOST_LOAN_GUID_INVALID');
+}
+
 const frameAncestors = runtimeMode === 'encompass-hosted'
   ? parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS)
   : "'none'";
@@ -40,6 +51,11 @@ createServer(async (req, res) => {
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end('{"status":"HEALTHY","service":"freeflow-underwriting-console"}');
+    return;
+  }
+  if (pathname === '/runtime-config.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ testHost: { enabled: testHostRequested, loanGuid: testHostLoanGuid } }));
     return;
   }
   if (pathname.startsWith('/fixtures/') || pathname === '/parse' || pathname === '/api/underwrite/process') {

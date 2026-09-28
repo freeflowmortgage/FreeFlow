@@ -445,7 +445,11 @@ resource "aws_ecs_task_definition" "console" {
       environment = [
         { name = "PORT", value = "3000" },
         { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
+        { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
         { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
+        { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
+        { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },
+        { name = "ENCOMPASS_TEST_HOST_LOAN_GUID", value = "00000000-0000-4000-8000-00000000d001" },
       ]
       command = ["node", "/app/serve-production.mjs"]
       portMappings = [{
