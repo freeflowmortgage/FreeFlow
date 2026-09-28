@@ -24,6 +24,7 @@ interface PdfCoordinateCanvasProps {
   documentType?: string;
   documentUrl?: string;
   mappedBoxes?: SpatialCoordinates[];
+  allowFallbackMock?: boolean;
   /** Reports the loaded document's real page count (native PDFs only). */
   onPageCount?: (pages: number) => void;
 }
@@ -52,6 +53,7 @@ function NativePdfPage({
   activeHighlight,
   mappedBoxes = [],
   onPageCount,
+  allowFallbackMock = true,
 }: {
   url: string;
   pageNumber: number;
@@ -59,6 +61,7 @@ function NativePdfPage({
   activeHighlight: SpatialCoordinates | null;
   mappedBoxes?: SpatialCoordinates[];
   onPageCount?: (pages: number) => void;
+  allowFallbackMock?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -130,6 +133,9 @@ function NativePdfPage({
   }, [activeHighlight, pageNumber]);
 
   if (failed) {
+    if (!allowFallbackMock) {
+      return <div className="grid min-h-[820px] w-full place-items-center bg-white p-8 text-center text-sm text-red-700">The selected PDF could not be rendered. No fallback document was substituted.</div>;
+    }
     const pageIndex = pageNumber - 1;
     const isCurrentPageHighlighted = Boolean(activeHighlight && activeHighlight.pageIndex === pageIndex);
     const highlightBox = activeHighlight ? boxToPercent(activeHighlight.box) : null;
@@ -222,6 +228,7 @@ export const PdfCoordinateCanvas: React.FC<PdfCoordinateCanvasProps> = ({
   documentUrl,
   mappedBoxes = [],
   onPageCount,
+  allowFallbackMock = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -327,6 +334,7 @@ export const PdfCoordinateCanvas: React.FC<PdfCoordinateCanvasProps> = ({
             activeHighlight={activeHighlight}
             mappedBoxes={mappedBoxes}
             onPageCount={onPageCount}
+            allowFallbackMock={allowFallbackMock}
           />
         ) : (
           <div

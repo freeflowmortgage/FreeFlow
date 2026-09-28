@@ -237,6 +237,17 @@ variable "enable_console" {
   }
 }
 
+variable "enable_encompass_test_host" {
+  type        = bool
+  description = "Enables the deterministic Encompass host only in this synthetic dev qualification stack."
+  default     = false
+
+  validation {
+    condition     = !var.enable_encompass_test_host || var.enable_console
+    error_message = "The deterministic Encompass test host requires the hosted console."
+  }
+}
+
 variable "encompass_frame_ancestors" {
   type        = string
   description = "Space-separated HTTPS CSP frame-ancestor sources for the lender-approved Encompass hosts."

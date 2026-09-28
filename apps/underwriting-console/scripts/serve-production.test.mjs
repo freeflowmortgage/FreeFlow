@@ -28,7 +28,44 @@ try {
   const response = await fetch(`http://127.0.0.1:${hostedPort}/health`);
   assert.match(response.headers.get('content-security-policy') || '', /frame-ancestors https:\/\/dev\.freeflowmortgage\.com/);
   assert.equal(response.headers.has('x-frame-options'), false);
+  assert.deepEqual(await (await fetch(`http://127.0.0.1:${hostedPort}/runtime-config.json`)).json(), { testHost: { enabled: false, loanGuid: null } });
 } finally {
   hosted.kill();
   await once(hosted, 'exit');
 }
+
+const qualificationPort = 3111;
+const qualification = spawn(process.execPath, ['scripts/serve-production.mjs'], {
+  cwd: new URL('..', import.meta.url),
+  env: {
+    ...process.env,
+    FREEFLOW_RUNTIME_MODE: 'encompass-hosted', FREEFLOW_RUNTIME_ENV: 'development',
+    ENCOMPASS_FRAME_ANCESTORS: 'https://dev.freeflowmortgage.com',
+    ENCOMPASS_TEST_HOST_ENABLED: 'true', ENCOMPASS_TEST_HOST_QUALIFICATION: 'true',
+    ENCOMPASS_TEST_HOST_LOAN_GUID: '00000000-0000-4000-8000-00000000d001', PORT: String(qualificationPort),
+  },
+  stdio: 'ignore',
+});
+try {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(await (await fetch(`http://127.0.0.1:${qualificationPort}/runtime-config.json`)).json(), {
+    testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
+  });
+} finally {
+  qualification.kill();
+  await once(qualification, 'exit');
+}
+
+const forbidden = spawn(process.execPath, ['scripts/serve-production.mjs'], {
+  cwd: new URL('..', import.meta.url),
+  env: {
+    ...process.env,
+    FREEFLOW_RUNTIME_MODE: 'encompass-hosted', FREEFLOW_RUNTIME_ENV: 'production',
+    ENCOMPASS_FRAME_ANCESTORS: 'https://app.example.com',
+    ENCOMPASS_TEST_HOST_ENABLED: 'true', ENCOMPASS_TEST_HOST_QUALIFICATION: 'true',
+    ENCOMPASS_TEST_HOST_LOAN_GUID: '00000000-0000-4000-8000-00000000d001', PORT: '3112',
+  },
+  stdio: 'ignore',
+});
+const [forbiddenExit] = await once(forbidden, 'exit');
+assert.notEqual(forbiddenExit, 0);

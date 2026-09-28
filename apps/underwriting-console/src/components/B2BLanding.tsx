@@ -87,8 +87,10 @@ const AUDIENCES = [
 
 export default function B2BLanding({
   onOpenService,
+  protectedMode = false,
 }: {
   onOpenService: (view: ConsoleView) => void;
+  protectedMode?: boolean;
 }) {
   return (
     <div data-testid="b2b-landing" className="min-h-full bg-[#f4f7fb] text-slate-900" style={{ fontFamily: 'Manrope, Roboto, system-ui, sans-serif' }}>
@@ -152,11 +154,13 @@ export default function B2BLanding({
                 onClick={() => onOpenService('split')}
                 className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
               >
-                Try the live demo
+                {protectedMode ? 'Open protected workflow' : 'Try the live demo'}
               </button>
             </div>
             <p className="mt-4 text-xs font-semibold text-slate-400">
-              No sandbox sign-up · every demo below runs in your browser right now
+              {protectedMode
+                ? 'Authenticated tenant and loan context required'
+                : 'No sandbox sign-up · every demo below runs in your browser right now'}
             </p>
           </div>
           <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
@@ -260,7 +264,7 @@ export default function B2BLanding({
                     >
                       Open in workspace
                     </button>
-                    <a
+                    {!protectedMode ? <a
                       href={`#${product.demoHash}`}
                       target="_blank"
                       rel="noreferrer"
@@ -268,7 +272,7 @@ export default function B2BLanding({
                       className="text-xs font-bold text-emerald-700 hover:underline"
                     >
                       Launch solo demo ↗
-                    </a>
+                    </a> : null}
                   </div>
                 </div>
               </li>

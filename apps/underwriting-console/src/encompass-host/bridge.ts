@@ -5,7 +5,7 @@ export class EncompassHostError extends Error {
   constructor(readonly code: 'ENCOMPASS_HOST_UNAVAILABLE' | 'ENCOMPASS_LOAN_CONTEXT_CHANGED' | 'ENCOMPASS_LOAN_READ_ONLY' | 'ENCOMPASS_FIELD_NOT_ALLOWED' | 'ENCOMPASS_COMMIT_NOT_CONFIRMED', message: string) { super(message); }
 }
 
-type LoanObject = Readonly<{
+export type EncompassLoanObject = Readonly<{
   all(): Promise<unknown>;
   getField(fieldId: string): Promise<unknown>;
   setFields(fields: Record<string, string>): Promise<unknown>;
@@ -13,7 +13,7 @@ type LoanObject = Readonly<{
   calculate(): Promise<unknown>;
   commit(): Promise<unknown>;
 }>;
-type ScriptObject = Readonly<{ getObject(name: 'loan'): Promise<LoanObject> }>;
+export type EncompassScriptObject = Readonly<{ getObject(name: 'loan'): Promise<EncompassLoanObject> }>;
 export type EncompassHostBridge = Readonly<{
   available(): boolean;
   activeLoan(fields?: readonly string[]): Promise<HostLoanContext>;
@@ -30,7 +30,7 @@ function readLoanGuid(value: unknown): string {
   return candidate;
 }
 
-export function createEncompassHostBridge(script: ScriptObject | undefined): EncompassHostBridge {
+export function createEncompassHostBridge(script: EncompassScriptObject | undefined): EncompassHostBridge {
   const loan = async () => {
     if (!script) throw new EncompassHostError('ENCOMPASS_HOST_UNAVAILABLE', 'FreeFlow must be launched from Encompass.');
     return script.getObject('loan');
@@ -66,6 +66,6 @@ export function createEncompassHostBridge(script: ScriptObject | undefined): Enc
 }
 
 export function browserEncompassHostBridge(): EncompassHostBridge {
-  const candidate = (globalThis as typeof globalThis & { elli?: { script?: ScriptObject } }).elli?.script;
+  const candidate = (globalThis as typeof globalThis & { elli?: { script?: EncompassScriptObject } }).elli?.script;
   return createEncompassHostBridge(candidate);
 }

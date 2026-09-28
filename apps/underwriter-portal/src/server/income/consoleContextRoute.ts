@@ -15,11 +15,12 @@ export function createConsoleContextHandler(dependencies = { withTenantTransacti
         select: {
           id: true, version: true, status: true, loanProgram: true, primaryBorrowerName: true,
           documents: { where: { sourceAttachmentId: { not: null } }, orderBy: { uploadedAt: 'desc' }, select: { sourceAttachmentId: true, documentCategory: true, version: true, sourcePageCount: true, parserVersion: true } },
-          incomeExtractions: { orderBy: { createdAt: 'desc' }, select: { id: true, sourceAttachmentId: true, sourceDocumentVersion: true, parserVersion: true, schemaVersion: true, status: true, warnings: true, confidence: true, canonicalHash: true, metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { id: true, metadataVersion: true, assignments: true, source: true, reasonCode: true, createdAt: true, extractionHash: true } } } },
+          incomeExtractions: { orderBy: { createdAt: 'desc' }, select: { id: true, sourceAttachmentId: true, sourceDocumentVersion: true, parserVersion: true, schemaVersion: true, status: true, warnings: true, confidence: true, canonicalHash: true, normalizedInput: true, evidence: true, metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { id: true, metadataVersion: true, assignments: true, source: true, reasonCode: true, createdAt: true, extractionHash: true } } } },
           form1084Audits: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, calculatedLoanVersion: true, qualifyingMonthlyIncome: true, trendingResult: true, yearsAnalyzed: true, calculationSchemaVersion: true, calculationSource: true, createdAt: true } },
           auditEvents: { where: { action: { in: ['INCOME_APPROVED', 'INCOME_OVERRIDE'] } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, action: true, entityId: true, expectedLoanVersion: true, occurredAt: true } },
           encompassDocumentPullJobs: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, status: true, expectedLoanVersion: true, attachmentCount: true, processedCount: true, safeErrorCode: true, completedAt: true } },
           encompassSyncJobs: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, status: true, approvalEventId: true, expectedLoanVersion: true, safeErrorCode: true, completedAt: true } },
+          encompassHostWrites: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, status: true, approvalEventId: true, expectedLoanVersion: true, fieldMapHash: true, safeErrorCode: true, completedAt: true } },
         },
       }));
       if (!loan) throw new ApiError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
@@ -29,11 +30,12 @@ export function createConsoleContextHandler(dependencies = { withTenantTransacti
         loan: { id: loan.id, version: loan.version, status: loan.status, program: loan.loanProgram, borrowerName: loan.primaryBorrowerName },
         attachments: loan.documents.map((item) => ({ attachmentId: item.sourceAttachmentId, category: item.documentCategory, version: item.version, pageCount: item.sourcePageCount, parserVersion: item.parserVersion })),
         providerAttachmentListing: { available: false, reason: 'PROVIDER_ATTACHMENT_LISTING_NOT_CONFIGURED' },
-        extractions: loan.incomeExtractions.map((item) => ({ id: item.id, attachmentId: item.sourceAttachmentId, sourceDocumentVersion: item.sourceDocumentVersion, parserVersion: item.parserVersion, schemaVersion: item.schemaVersion, status: item.status, warnings: item.warnings, confidence: item.confidence, metadataReview: item.metadataReviews[0] ? { ...item.metadataReviews[0], current: item.metadataReviews[0].extractionHash === item.canonicalHash } : null })),
+        extractions: loan.incomeExtractions.map((item) => ({ id: item.id, attachmentId: item.sourceAttachmentId, sourceDocumentVersion: item.sourceDocumentVersion, parserVersion: item.parserVersion, schemaVersion: item.schemaVersion, status: item.status, warnings: item.warnings, confidence: item.confidence, normalizedInput: item.normalizedInput, evidence: item.evidence, metadataReview: item.metadataReviews[0] ? { ...item.metadataReviews[0], current: item.metadataReviews[0].extractionHash === item.canonicalHash } : null })),
         calculation: calculation ? { ...calculation, current: calculation.calculatedLoanVersion === loan.version } : null,
         approval: approval ? { ...approval, current: approval.expectedLoanVersion <= loan.version && approval.entityId === calculation?.id } : null,
         documentPull: loan.encompassDocumentPullJobs[0] ?? null,
         sync: loan.encompassSyncJobs[0] ?? null,
+        hostWrite: loan.encompassHostWrites[0] ?? null,
         requestId: context.requestId,
       });
     } catch (error) { if (error instanceof ApiError) return sendApiError(res, context.requestId, error); throw error; }

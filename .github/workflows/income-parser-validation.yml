@@ -109,5 +109,14 @@ jobs:
         # so a type error and a bundling failure are told apart in the log.
         run: pnpm --filter underwriting-console exec tsc -b
 
+      - name: Verify protected runtime and host bridge
+        run: pnpm --filter underwriting-console test:runtime
+
+      - name: Install protected-workflow browser
+        run: pnpm --filter underwriting-console exec playwright install --with-deps chromium
+
+      - name: Verify protected white workflow
+        run: pnpm --filter underwriting-console test:e2e:protected
+
       - name: Build the production console artifact
         run: pnpm --filter underwriting-console exec vite build

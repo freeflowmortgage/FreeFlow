@@ -1,6 +1,6 @@
 export class PortalApiError extends Error {
-  constructor(readonly status: number, readonly code: string) {
-    super(code);
+  constructor(readonly status: number, readonly code: string, message = code) {
+    super(message);
   }
 }
 
@@ -18,8 +18,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   });
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({})) as { error?: { code?: string } };
-    throw new PortalApiError(response.status, payload.error?.code ?? 'PORTAL_API_REQUEST_FAILED');
+    const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
+    throw new PortalApiError(response.status, payload.error?.code ?? 'PORTAL_API_REQUEST_FAILED', payload.error?.message);
   }
   return response.json() as Promise<T>;
 }
@@ -32,11 +32,11 @@ export const portalClient = {
     request<{ writeId: string; status: 'SUCCEEDED' | 'FAILED' }>(`/api/v1/encompass-host-writes/${encodeURIComponent(writeId)}/complete`, { method: 'POST', body, idempotencyKey }),
   getConsoleContext: (loanId: string) => request(`/api/v1/loans/${encodeURIComponent(loanId)}/console-context`),
   getEncompassAttachments: (loanId: string) => request<{ source: 'ENCOMPASS'; attachments: Array<{ id: string; status: 'SELECTABLE' }> }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-attachments`),
-  getMetadataRequirements: (loanId: string, extractionId: string) => request(`/api/v1/loans/${encodeURIComponent(loanId)}/income-extractions/${encodeURIComponent(extractionId)}/metadata-requirements`),
+  getMetadataRequirements: (loanId: string, extractionId: string) => request<{ extractionId: string; status: string; review: { metadataVersion: number; assignments: unknown; current: boolean } | null; requirements: Array<{ extractionId: string; entityId: string; field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField'; form: string }> }>(`/api/v1/loans/${encodeURIComponent(loanId)}/income-extractions/${encodeURIComponent(extractionId)}/metadata-requirements`),
   uploadIncomeDocument: (loanId: string, file: File) => fetch(`/api/v1/loans/${encodeURIComponent(loanId)}/income-documents`, {
     method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/pdf' }, body: file,
   }).then(async (response) => {
-    if (!response.ok) { const payload = await response.json().catch(() => ({})) as { error?: { code?: string } }; throw new PortalApiError(response.status, payload.error?.code ?? 'PORTAL_API_REQUEST_FAILED'); }
+    if (!response.ok) { const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string } }; throw new PortalApiError(response.status, payload.error?.code ?? 'PORTAL_API_REQUEST_FAILED', payload.error?.message); }
     return response.json() as Promise<{ source: 'UPLOAD'; attachmentId: string; status: string }>;
   }),
   createDocumentPull: (loanId: string, body: { expectedLoanVersion: number; attachmentIds: string[] }, idempotencyKey: string) =>
