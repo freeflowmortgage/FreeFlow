@@ -85,6 +85,16 @@ test('cross-tenant or unavailable loan cannot authorize a hosted write', async (
   assert.equal(created, false);
 });
 
+test('a stale loan version cannot authorize a hosted write', async () => {
+  let created = false;
+  const state = transaction({
+    loanApplication: { findFirst: async () => ({ id: LOAN, version: 3, encompassGuid: 'encompass-guid', encompassIntegrationMode: 'ENCOMPASS_HOSTED' }) },
+    encompassHostWrite: { create: async () => { created = true; } },
+  });
+  await assert.rejects(() => authorizeHostWrite(state.tx as never, context, input), (error: unknown) => error instanceof ApiError && error.code === 'STALE_APPROVAL');
+  assert.equal(created, false);
+});
+
 test('host completion is stateful and idempotently reports the committed outcome', async () => {
   const state = transaction();
   const authorized = await authorizeHostWrite(state.tx as never, context, input);
