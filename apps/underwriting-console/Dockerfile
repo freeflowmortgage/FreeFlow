@@ -36,14 +36,14 @@ COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
-ARG FREEFLOW_CONSOLE_MODE=protected
+ARG FREEFLOW_CONSOLE_MODE=encompass-hosted
 ENV NODE_ENV=production
 ENV VITE_FREEFLOW_RUNTIME_MODE=$FREEFLOW_CONSOLE_MODE
 
 RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
 
-# 3. Production runtime stage (runs Vite custom middleware server for PDF/OCR and Appraisal proxy)
+# 3. Static protected runtime. Parser and fixture middleware are demo/QA-only.
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688 AS runner
 WORKDIR /app
 

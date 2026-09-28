@@ -25,7 +25,20 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const portalClient = {
+  launchEncompassHost: (encompassLoanGuid: string) => request<{ loanId: string; loanVersion: number }>('/api/v1/encompass-host/launch', { method: 'POST', body: { encompassLoanGuid } }),
+  authorizeHostWrite: (loanId: string, body: { approvalEventId: string; expectedLoanVersion: number }, idempotencyKey: string) =>
+    request<{ writeId: string; encompassLoanGuid: string; fieldMapHash: string; fields: Record<string, string>; status: 'AUTHORIZED' | 'SUCCEEDED' }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-host-approval-field-map`, { method: 'POST', body, idempotencyKey }),
+  completeHostWrite: (writeId: string, body: { fieldMapHash: string; outcome: 'SUCCEEDED' | 'FAILED' }, idempotencyKey: string) =>
+    request<{ writeId: string; status: 'SUCCEEDED' | 'FAILED' }>(`/api/v1/encompass-host-writes/${encodeURIComponent(writeId)}/complete`, { method: 'POST', body, idempotencyKey }),
   getConsoleContext: (loanId: string) => request(`/api/v1/loans/${encodeURIComponent(loanId)}/console-context`),
+  getEncompassAttachments: (loanId: string) => request<{ source: 'ENCOMPASS'; attachments: Array<{ id: string; status: 'SELECTABLE' }> }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-attachments`),
+  getMetadataRequirements: (loanId: string, extractionId: string) => request(`/api/v1/loans/${encodeURIComponent(loanId)}/income-extractions/${encodeURIComponent(extractionId)}/metadata-requirements`),
+  uploadIncomeDocument: (loanId: string, file: File) => fetch(`/api/v1/loans/${encodeURIComponent(loanId)}/income-documents`, {
+    method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/pdf' }, body: file,
+  }).then(async (response) => {
+    if (!response.ok) { const payload = await response.json().catch(() => ({})) as { error?: { code?: string } }; throw new PortalApiError(response.status, payload.error?.code ?? 'PORTAL_API_REQUEST_FAILED'); }
+    return response.json() as Promise<{ source: 'UPLOAD'; attachmentId: string; status: string }>;
+  }),
   createDocumentPull: (loanId: string, body: { expectedLoanVersion: number; attachmentIds: string[] }, idempotencyKey: string) =>
     request<{ jobId: string; status: string }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-document-pulls`, { method: 'POST', body, idempotencyKey }),
   getDocumentPull: (jobId: string) => request<{ id: string; status: string }>(`/api/v1/encompass-document-pulls/${encodeURIComponent(jobId)}`),

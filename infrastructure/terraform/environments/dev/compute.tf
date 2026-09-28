@@ -111,6 +111,7 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "PORT", value = "8000" },
         { name = "HOSTNAME", value = "0.0.0.0" },
         { name = "APP_BASE_URL", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
+        { name = "APP_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
         { name = "TRUSTED_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
         { name = "PARSER_ENABLED", value = var.enable_parser ? "true" : "false" },
         { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080/api/underwrite/process" },
@@ -443,7 +444,8 @@ resource "aws_ecs_task_definition" "console" {
       }
       environment = [
         { name = "PORT", value = "3000" },
-        { name = "FREEFLOW_RUNTIME_MODE", value = "protected" },
+        { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
+        { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
       ]
       command = ["node", "/app/serve-production.mjs"]
       portMappings = [{

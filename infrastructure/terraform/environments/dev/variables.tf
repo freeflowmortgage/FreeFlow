@@ -217,12 +217,31 @@ variable "encompass_connector_mode" {
 
 variable "enable_console" {
   type        = bool
-  description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."
+  description = "Enables the Encompass-hosted underwriting console behind the authenticated HTTPS listener."
   default     = false
 
   validation {
-    condition     = !var.enable_console || (var.enable_edge && var.enable_services)
-    error_message = "The underwriting console requires edge and services."
+    condition     = !var.enable_console || (var.enable_edge && var.enable_services && var.enable_cognito_edge)
+    error_message = "The Encompass-hosted console requires edge, services, and the authenticated HTTPS listener."
+  }
+}
+
+variable "encompass_frame_ancestors" {
+  type        = string
+  description = "Space-separated HTTPS CSP frame-ancestor sources for the lender-approved Encompass hosts."
+  default     = ""
+
+  validation {
+    condition = !var.enable_console || (
+      length(trimspace(var.encompass_frame_ancestors)) > 0 &&
+      !strcontains(var.encompass_frame_ancestors, "*") &&
+      !strcontains(var.encompass_frame_ancestors, ";") &&
+      alltrue([
+        for origin in split(" ", trimspace(var.encompass_frame_ancestors)) :
+        can(regex("^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$", origin))
+      ])
+    )
+    error_message = "Hosted console frame ancestors must be explicit HTTPS origins without wildcards or directive separators."
   }
 }
 

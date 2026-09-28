@@ -67,6 +67,7 @@ BEGIN
     'public.encompass_document_pull_jobs'::regclass,
     'public.encompass_connector_bindings'::regclass,
     'public.encompass_sync_jobs'::regclass,
+    'public.encompass_host_writes'::regclass,
     'public.income_extractions'::regclass,
     'public.income_extraction_metadata_reviews'::regclass,
     'public.income_calculation_extractions'::regclass
@@ -88,6 +89,11 @@ BEGIN
   IF has_table_privilege('freeflow_app', 'api_idempotency_keys', 'UPDATE')
     OR has_table_privilege('freeflow_app', 'api_idempotency_keys', 'DELETE') THEN
     RAISE EXCEPTION 'freeflow_app can mutate stored idempotency keys';
+  END IF;
+  IF NOT has_table_privilege('freeflow_app', 'encompass_host_writes', 'INSERT')
+    OR NOT has_table_privilege('freeflow_app', 'encompass_host_writes', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'encompass_host_writes', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_app hosted-write grants are not least privilege';
   END IF;
   IF has_table_privilege('freeflow_app', 'income_extractions', 'INSERT')
     OR has_table_privilege('freeflow_app', 'income_extractions', 'UPDATE')
@@ -188,6 +194,41 @@ BEGIN
 END
 $tenant_a_visibility$;
 
+INSERT INTO "loan_applications" (
+  "id", "tenantId", "encompassGuid", "encompassIntegrationMode", "updatedAt"
+) VALUES (
+  '29292929-2929-4292-8292-292929292929',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'synthetic-encompass-host-guid-a', 'ENCOMPASS_HOSTED', now()
+);
+
+DO $identity_only_host_binding$
+DECLARE
+  borrower_fields integer;
+BEGIN
+  SELECT count(*) INTO borrower_fields
+  FROM "loan_applications"
+  WHERE "id" = '29292929-2929-4292-8292-292929292929'
+    AND ("primaryBorrowerName" IS NOT NULL OR "primaryBorrowerEmail" IS NOT NULL);
+  IF borrower_fields <> 0 THEN
+    RAISE EXCEPTION 'Identity-only host binding fabricated borrower identity';
+  END IF;
+
+  BEGIN
+    INSERT INTO "loan_applications" (
+      "id", "tenantId", "encompassGuid", "encompassIntegrationMode", "updatedAt"
+    ) VALUES (
+      '30303030-3030-4030-8030-303030303030',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      'synthetic-cross-tenant-host-guid', 'ENCOMPASS_HOSTED', now()
+    );
+    RAISE EXCEPTION 'Tenant A created a Tenant B host binding';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END
+$identity_only_host_binding$;
+
 DO $composite_fk$
 BEGIN
   BEGIN
@@ -271,6 +312,18 @@ INSERT INTO "api_idempotency_keys" (
   now() + interval '24 hours'
 );
 
+INSERT INTO "encompass_host_writes" (
+  "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+  "expectedLoanVersion", "idempotencyKey", "correlationId", "fieldMapHash", "updatedAt"
+) VALUES (
+  '28282828-2828-4282-8282-282828282828',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '17171717-1717-4171-8171-171717171717',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  2, 'host-write-sql-key-01', 'host-write-request', repeat('a', 64), now()
+);
+
 INSERT INTO "income_extraction_metadata_reviews" (
   "id", "tenantId", "loanId", "extractionId", "sourceDocumentId", "sourceDocumentVersion",
   "sourceContentHash", "extractionHash", "metadataVersion", "assignments", "source", "reasonCode",
@@ -347,10 +400,14 @@ DECLARE
   visible_events integer;
   visible_keys integer;
   visible_metadata integer;
+  visible_host_writes integer;
+  visible_loans integer;
 BEGIN
   SELECT count(*) INTO visible_events FROM "audit_events";
   SELECT count(*) INTO visible_keys FROM "api_idempotency_keys";
   SELECT count(*) INTO visible_metadata FROM "income_extraction_metadata_reviews";
+  SELECT count(*) INTO visible_host_writes FROM "encompass_host_writes";
+  SELECT count(*) INTO visible_loans FROM "loan_applications";
   IF visible_events <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A audit events';
   END IF;
@@ -359,6 +416,12 @@ BEGIN
   END IF;
   IF visible_metadata <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A reviewer metadata';
+  END IF;
+  IF visible_host_writes <> 0 THEN
+    RAISE EXCEPTION 'Tenant B observed Tenant A hosted writes';
+  END IF;
+  IF visible_loans <> 1 THEN
+    RAISE EXCEPTION 'Tenant B observed a cross-tenant identity-only host binding';
   END IF;
 END
 $audit_event_cross_tenant$;

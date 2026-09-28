@@ -82,6 +82,12 @@ enum EncompassSyncStatus {
   FAILED
 }
 
+enum EncompassHostWriteStatus {
+  AUTHORIZED
+  SUCCEEDED
+  FAILED
+}
+
 enum IncomeExtractionStatus {
   ACTIVE
   SUPERSEDED
@@ -125,6 +131,7 @@ model Tenant {
   apiIdempotencyKeys        ApiIdempotencyKey[]
   encompassDocumentPullJobs EncompassDocumentPullJob[]
   encompassSyncJobs         EncompassSyncJob[]
+  encompassHostWrites       EncompassHostWrite[]
   incomeExtractions         IncomeExtraction[]
   calculationExtractions    IncomeCalculationExtraction[]
   incomeMetadataReviews     IncomeExtractionMetadataReview[]
@@ -159,11 +166,12 @@ model TenantConfiguration {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Feature Toggles (Specific to Income Point-Solution)
-  enable1084Ocr               Boolean @default(true) // Standard Form 1084 scanning active
-  enableEncompassSync         Boolean @default(false) // Approved-result writes remain fail-closed by default
-  enableEncompassDocumentPull Boolean @default(false) // eFolder reads require explicit tenant enablement
-  enableUshdaValidation       Boolean @default(true) // USDA dual-track math activated
-  enableAppraisalReview       Boolean @default(true) // URAR 1004 coordinate QA workspace
+  enable1084Ocr               Boolean                  @default(true) // Standard Form 1084 scanning active
+  enableEncompassSync         Boolean                  @default(false) // Approved-result writes remain fail-closed by default
+  enableEncompassDocumentPull Boolean                  @default(false) // eFolder reads require explicit tenant enablement
+  enableUshdaValidation       Boolean                  @default(true) // USDA dual-track math activated
+  enableAppraisalReview       Boolean                  @default(true) // URAR 1004 coordinate QA workspace
+  encompassIntegrationMode    EncompassIntegrationMode @default(NONE)
 
   // Encrypted API Keys for Ellie Mae Developer Connect and Stripe
   encompassClientId   String? @db.VarChar(255)
@@ -173,6 +181,12 @@ model TenantConfiguration {
   updatedAt DateTime @updatedAt @db.Timestamptz
 
   @@map("tenant_configurations")
+}
+
+enum EncompassIntegrationMode {
+  ENCOMPASS_HOSTED
+  DEVELOPER_CONNECT
+  NONE
 }
 
 // 3. USERS (Underwriters, Processors, Sales LOs, Borrowers)
@@ -191,13 +205,14 @@ model User {
   nmlsNumber   String?  @db.VarChar(50)
 
   // Audit Relations
-  verifiedAudits          Form1084Audit[]                  @relation("VerifiedByUser")
-  verifiedAppraisals      AppraisalAudit[]                 @relation("AppraisalVerifiedByUser")
-  clearedAppraisalActions AppraisalActionItem[]            @relation("ActionItemClearedByUser")
-  auditEvents             AuditEvent[]
-  requestedDocumentPulls  EncompassDocumentPullJob[]       @relation("DocumentPullRequestedBy")
-  requestedEncompassSyncs EncompassSyncJob[]               @relation("SyncRequestedBy")
-  incomeMetadataReviews   IncomeExtractionMetadataReview[] @relation("MetadataReviewedBy")
+  verifiedAudits               Form1084Audit[]                  @relation("VerifiedByUser")
+  verifiedAppraisals           AppraisalAudit[]                 @relation("AppraisalVerifiedByUser")
+  clearedAppraisalActions      AppraisalActionItem[]            @relation("ActionItemClearedByUser")
+  auditEvents                  AuditEvent[]
+  requestedDocumentPulls       EncompassDocumentPullJob[]       @relation("DocumentPullRequestedBy")
+  requestedEncompassSyncs      EncompassSyncJob[]               @relation("SyncRequestedBy")
+  requestedEncompassHostWrites EncompassHostWrite[]             @relation("HostWriteRequestedBy")
+  incomeMetadataReviews        IncomeExtractionMetadataReview[] @relation("MetadataReviewedBy")
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -214,12 +229,15 @@ model LoanApplication {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Borrowing Meta
-  primaryBorrowerName  String              @db.VarChar(255)
-  primaryBorrowerEmail String              @db.VarChar(255)
-  status               ApplicationStatus   @default(DRAFT)
-  encompassGuid        String?             @db.VarChar(255) // Matches active loan in Encompass eFolder
-  loanProgram          MortgageLoanProgram @default(CONVENTIONAL)
-  version              Int                 @default(1)
+  // Borrower identity is populated only from an authoritative application
+  // source. An externally bound workflow may exist before that import/review.
+  primaryBorrowerName      String?                  @db.VarChar(255)
+  primaryBorrowerEmail     String?                  @db.VarChar(255)
+  status                   ApplicationStatus        @default(DRAFT)
+  encompassGuid            String?                  @db.VarChar(255) // Matches active loan in Encompass eFolder
+  encompassIntegrationMode EncompassIntegrationMode @default(NONE)
+  loanProgram              MortgageLoanProgram      @default(CONVENTIONAL)
+  version                  Int                      @default(1)
 
   // Relations
   documents                 LoanDocument[]
@@ -231,6 +249,7 @@ model LoanApplication {
   auditEvents               AuditEvent[]
   encompassDocumentPullJobs EncompassDocumentPullJob[]
   encompassSyncJobs         EncompassSyncJob[]
+  encompassHostWrites       EncompassHostWrite[]
   incomeExtractions         IncomeExtraction[]
   calculationExtractions    IncomeCalculationExtraction[]
   incomeMetadataReviews     IncomeExtractionMetadataReview[]
@@ -455,14 +474,15 @@ model IncomeCalculationExtraction {
 // bodies, borrower identifiers, or provider secrets. The database migration
 // grants INSERT/SELECT only and rejects every UPDATE/DELETE attempt.
 model AuditEvent {
-  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId          String             @db.Uuid
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  loanId            String             @db.Uuid
-  loanApplication   LoanApplication    @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
-  actorUserId       String             @db.Uuid
-  actorUser         User               @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
-  encompassSyncJobs EncompassSyncJob[] @relation("SyncApprovalEvent")
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String               @db.Uuid
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  loanId              String               @db.Uuid
+  loanApplication     LoanApplication      @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
+  actorUserId         String               @db.Uuid
+  actorUser           User                 @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
+  encompassSyncJobs   EncompassSyncJob[]   @relation("SyncApprovalEvent")
+  encompassHostWrites EncompassHostWrite[] @relation("HostWriteApprovalEvent")
 
   action              String   @db.VarChar(100)
   entityType          String   @db.VarChar(100)
@@ -568,6 +588,35 @@ model EncompassSyncJob {
   @@index([tenantId, loanId, createdAt], map: "encompass_sync_jobs_tenant_loan_created_idx")
   @@index([status, updatedAt], map: "encompass_sync_jobs_status_updated_idx")
   @@map("encompass_sync_jobs")
+}
+
+// Durable authorization and completion evidence for writes performed by the
+// authenticated Encompass host. Field values and borrower data are not stored.
+model EncompassHostWrite {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String                   @db.Uuid
+  tenant              Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "encompass_host_writes_tenant_fkey")
+  loanId              String                   @db.Uuid
+  loanApplication     LoanApplication          @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "encompass_host_writes_loan_fkey")
+  approvalEventId     String                   @db.Uuid
+  approvalEvent       AuditEvent               @relation("HostWriteApprovalEvent", fields: [tenantId, approvalEventId], references: [tenantId, id], onDelete: Restrict, map: "encompass_host_writes_approval_fkey")
+  requestedByUserId   String                   @db.Uuid
+  requestedByUser     User                     @relation("HostWriteRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "encompass_host_writes_requester_fkey")
+  expectedLoanVersion Int
+  idempotencyKey      String                   @db.VarChar(128)
+  correlationId       String                   @db.VarChar(100)
+  fieldMapHash        String                   @db.Char(64)
+  status              EncompassHostWriteStatus @default(AUTHORIZED)
+  safeErrorCode       String?                  @db.VarChar(100)
+  completedAt         DateTime?                @db.Timestamptz
+  createdAt           DateTime                 @default(now()) @db.Timestamptz
+  updatedAt           DateTime                 @updatedAt @db.Timestamptz
+
+  @@unique([tenantId, id], map: "encompass_host_writes_tenant_id_key")
+  @@unique([tenantId, idempotencyKey], map: "encompass_host_writes_tenant_idempotency_key")
+  @@unique([tenantId, approvalEventId], map: "encompass_host_writes_tenant_approval_key")
+  @@index([tenantId, loanId, createdAt], map: "encompass_host_writes_tenant_loan_created_idx")
+  @@map("encompass_host_writes")
 }
 
 // 9. LOAN CONDITIONS (Encompass Checklist Integration)
