@@ -21,22 +21,6 @@ ON CONFLICT (id) DO UPDATE SET
   "isBillingActive" = false,
   "updatedAt" = now();
 
--- Integration mode is an explicit operator-owned tenant setting. Omitting the
--- seed variable preserves the current value, so adding a tester cannot
--- accidentally enable or disable an LOS integration.
-INSERT INTO tenant_configurations (
-  id, "tenantId", "encompassIntegrationMode", "updatedAt"
-)
-SELECT
-  gen_random_uuid(),
-  :'tenant_id'::uuid,
-  NULLIF(:'encompass_integration_mode', '')::"EncompassIntegrationMode",
-  now()
-WHERE :'encompass_integration_mode' <> ''
-ON CONFLICT ("tenantId") DO UPDATE SET
-  "encompassIntegrationMode" = EXCLUDED."encompassIntegrationMode",
-  "updatedAt" = now();
-
 INSERT INTO users (
   id, "tenantId", email, "oidcSubject", "isActive",
   "firstName", "lastName", role, "createdAt", "updatedAt"

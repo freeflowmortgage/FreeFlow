@@ -87,6 +87,19 @@ jobs:
       - name: Verify SQL RLS, immutable audit, and retention controls
         run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/tests/tenant-rls-isolation.sql
 
+      - name: Verify mode-only tenant administration
+        run: |
+          sh -n packages/database/scripts/migrate-live-test.sh
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO tenant_configurations (id, \"tenantId\", \"updatedAt\") VALUES (gen_random_uuid(), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', now())"
+          psql "$MIGRATOR_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            --set=tenant_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa \
+            --set=encompass_integration_mode=ENCOMPASS_HOSTED \
+            --file=packages/database/prisma/bootstrap/set-tenant-integration-mode.sql
+          test "$(psql "$ADMIN_DATABASE_URL" -Atc \
+            "SELECT \"encompassIntegrationMode\" || '|' || (SELECT count(*) FROM users) || '|' || (SELECT count(*) FROM loan_applications) FROM tenant_configurations WHERE \"tenantId\" = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'")" = \
+            "ENCOMPASS_HOSTED|2|2"
+
       - name: Verify connector binding migration and worker grants
         run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/database/prisma/tests/encompass-connector-bindings.sql
 
