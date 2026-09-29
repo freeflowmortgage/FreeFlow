@@ -128,7 +128,7 @@ export async function persistParsedExtraction(
   writer: 'WORKER' | 'AUTHENTICATED_UPLOAD' = 'WORKER',
 ): Promise<void> {
   const lockKey = `${job.tenantId}:${job.loanId}:${result.attachmentId}`;
-  await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+  await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
   const existing = await transaction.loanDocument.findUnique({
     where: { tenantId_loanId_sourceAttachmentId: {
       tenantId: job.tenantId, loanId: job.loanId, sourceAttachmentId: result.attachmentId,
