@@ -41,6 +41,8 @@ export type ScheduleL = {
   otherCurrentLiab: number;
   /** Printed total current liabilities, end of year. When set, this is the quick-ratio denominator. */
   currentLiabilities: number;
+  /** Underwriter's decision, which replaces the computed result. */
+  override?: 'PASS' | 'FAIL';
 };
 
 export type YtdPnl = {
@@ -235,9 +237,26 @@ export function QaAmountInput({
       value={text}
       onWheel={(event) => event.currentTarget.blur()}
       onMouseDown={(event) => {
-        // Default focus scrolls every ancestor and jumps the QA list back to property 1.
-        event.preventDefault();
-        event.currentTarget.focus({ preventScroll: true });
+        // Let the click focus the field so the caret lands where it was
+        // clicked. Cancelling it and calling focus() put the caret after the
+        // decimals every time. Focusing can still scroll the panels, which
+        // jumped the QA list back to property 1, so their positions are put
+        // back once focus has moved.
+        if (document.activeElement === event.currentTarget) return;
+        const saved: Array<[Element, number, number]> = [];
+        for (let node = event.currentTarget.parentElement; node; node = node.parentElement) {
+          if (node.scrollTop || node.scrollLeft) saved.push([node, node.scrollTop, node.scrollLeft]);
+        }
+        const restore = () => {
+          for (const [node, top, left] of saved) {
+            node.scrollTop = top;
+            node.scrollLeft = left;
+          }
+        };
+        requestAnimationFrame(() => {
+          restore();
+          requestAnimationFrame(restore);
+        });
       }}
       onFocus={() => {
         setFocused(true);
@@ -325,7 +344,15 @@ export function scheduleLQuickRatio(sheet: ScheduleL) {
   const componentLiabilities = sheet.accountsPayable + sheet.notesLt1Yr + sheet.otherCurrentLiab;
   const liabilities = sheet.currentLiabilities > 0 ? sheet.currentLiabilities : componentLiabilities;
   const quickRatio = liabilities > 0 ? assets / liabilities : 999;
-  return { assets, liabilities, quickRatio, passes: quickRatio >= 1 };
+  // An empty balance sheet is no evidence of liquidity. It used to divide by
+  // zero liabilities, read as a ratio of 999 and pass.
+  const provided = assets !== 0 || liabilities !== 0;
+  const computed = provided && quickRatio >= 1;
+  const passes = sheet.override ? sheet.override === 'PASS' : computed;
+  const status: 'PASSED' | 'FAILED' | 'NOT_PROVIDED' = sheet.override
+    ? passes ? 'PASSED' : 'FAILED'
+    : !provided ? 'NOT_PROVIDED' : computed ? 'PASSED' : 'FAILED';
+  return { assets, liabilities, quickRatio, passes, provided, status, overridden: Boolean(sheet.override) };
 }
 
 export function LineRow({
@@ -459,6 +486,12 @@ export function FacsimileSheet({
   );
 }
 
+export function liquidityReason(ratio: ReturnType<typeof scheduleLQuickRatio>): string {
+  if (ratio.overridden) return 'liquidity was marked failed by the underwriter';
+  if (!ratio.provided) return 'Schedule L liquidity was not provided';
+  return `Schedule L quick ratio ${ratio.quickRatio.toFixed(2)} is below 1.0`;
+}
+
 export function LiquidityBlock({
   sheet,
   onChange,
@@ -471,7 +504,7 @@ export function LiquidityBlock({
   onSelect: (id: string) => void;
 }) {
   const ratio = scheduleLQuickRatio(sheet);
-  const rows: Array<{ id: keyof ScheduleL; line: string; label: string }> = [
+  const rows: Array<{ id: Exclude<keyof ScheduleL, 'override'>; line: string; label: string }> = [
     { id: 'cash', line: 'L1', label: 'Cash' },
     { id: 'receivables', line: 'L2a', label: 'Trade notes / accounts receivable' },
     { id: 'allowance', line: 'L2b', label: 'Less allowance for bad debts' },
@@ -490,14 +523,50 @@ export function LiquidityBlock({
           <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">Schedule L liquidity (after the two-year analysis)</h4>
           <p className="text-[11px] text-slate-500">Fannie/Freddie: quick ratio must be ≥ 1.0 before business income (other than W-2 / guaranteed payments) can qualify.</p>
         </div>
-        <span
-          className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${
-            ratio.passes ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-          }`}
-        >
-          {ratio.passes ? 'Passed' : 'Failed — business income $0'}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${
+              ratio.status === 'PASSED'
+                ? 'bg-emerald-100 text-emerald-800'
+                : ratio.status === 'NOT_PROVIDED'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-rose-100 text-rose-800'
+            }`}
+          >
+            {ratio.status === 'PASSED'
+              ? ratio.overridden ? 'Passed · UW override' : 'Passed'
+              : ratio.status === 'NOT_PROVIDED'
+                ? 'Not provided — business income $0'
+                : ratio.overridden ? 'Failed · UW override — business income $0' : 'Failed — business income $0'}
+          </span>
+          <div className="flex rounded-md border border-slate-200 p-0.5" role="group" aria-label="Liquidity decision">
+            {([
+              ['AUTO', 'Auto'],
+              ['PASS', 'Pass'],
+              ['FAIL', 'Fail'],
+            ] as const).map(([value, label]) => {
+              const active = (sheet.override ?? 'AUTO') === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onChange({ ...sheet, override: value === 'AUTO' ? undefined : value })}
+                  className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${active ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
+      {ratio.status === 'NOT_PROVIDED' ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-900">
+          No Schedule L figures were read. Enter the end-of-year balances, or choose Pass if liquidity is documented
+          elsewhere (for example, distributions history or business bank statements).
+        </p>
+      ) : null}
       {/* Sized by the panel, not the window: md: measures the viewport, so on a
           normal screen this went two-up inside a panel too narrow for it, the
           inputs overflowed under the next column and the descriptions were
@@ -519,7 +588,9 @@ export function LiquidityBlock({
         <span className="font-semibold text-slate-600">
           Quick ratio · {usd(ratio.assets)} assets / {usd(ratio.liabilities)} liabilities
         </span>
-        <span className={`font-black ${ratio.passes ? 'text-emerald-700' : 'text-rose-700'}`}>{ratio.quickRatio.toFixed(2)}</span>
+        <span className={`font-black ${ratio.passes ? 'text-emerald-700' : 'text-rose-700'}`}>
+          {ratio.liabilities > 0 ? ratio.quickRatio.toFixed(2) : '—'}
+        </span>
       </div>
     </div>
   );

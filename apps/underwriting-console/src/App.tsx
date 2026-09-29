@@ -140,6 +140,11 @@ export default function App() {
       for (const file of list) {
         try {
           const [sha256, payload] = await Promise.all([sha256File(file), postParsePdf(file)]);
+          if (payload.parser_engine === 'native-pdf') {
+            errors.push(
+              `The document parser is not running, so ${file.name} was read without OCR, the Schedule E grid or IRS templates. Start the parser and drop it again.`,
+            );
+          }
           const duplicate = findDuplicate(documentsRef.current, { sha256, fileName: file.name, result: payload });
           if (duplicate) {
             errors.push(duplicate.reason);

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Layers, MonitorX } from 'lucide-react';
 import { DemoDocumentCanvas, InspectNote } from './selfEmployedIncome';
-import PdfPagePreview from './PdfPagePreview';
+import PdfDocumentViewer from './PdfDocumentViewer';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 
 /**
@@ -83,7 +83,7 @@ export default function SplitDocPane() {
           </div>
         ) : snapshot.mode === 'live' && snapshot.live ? (
           stableFileRef.current ? (
-            <PdfPagePreview
+            <PdfDocumentViewer
               file={stableFileRef.current.file}
               pageIndex={snapshot.live.pageIndex}
               pageCount={snapshot.live.pageCount}

@@ -24,6 +24,7 @@ os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 import cv2
 import numpy as np
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_raw
 from pypdf import PdfReader
 
 logger = logging.getLogger("freeflow.ocr")
@@ -32,6 +33,9 @@ MAX_PDF_BYTES = 40 * 1024 * 1024
 MAX_PAGES = 150
 RENDER_DPI = 300
 NATIVE_TEXT_CHARS = 40
+# A screenshot printed onto a letter page lands near 96 DPI; small print is
+# not reliably legible to OCR below this.
+LOW_RESOLUTION_IMAGE_DPI = 150
 # Pages with a real readable native layer have varied form-label vocabulary.
 # Value-only overlays (the failure mode this gate is meant to rescue) contain
 # mostly names, addresses, IDs, and repeated amounts instead.
@@ -49,6 +53,16 @@ _IRS_CHROME = re.compile(
     r"Supplemental Income and Loss|Profit or Loss From (?:Business|Farming)",
     re.IGNORECASE,
 )
+# A browser "Print to PDF" of an image (a pay stub screenshot, a portal
+# download) adds a text header and footer around the picture: timestamp, page
+# title, source URL and a page counter. That is enough native text to pass
+# NATIVE_TEXT_CHARS, so the image itself was never OCR'd.
+_PRINT_TIMESTAMP = re.compile(
+    r"\b\d{1,2}/\d{1,2}/\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AP]M)?",
+    re.IGNORECASE,
+)
+_PRINT_URL = re.compile(r"\b(?:file|https?|about|blob):/*\S*", re.IGNORECASE)
+_PRINT_PAGE_COUNTER = re.compile(r"(?:^|\s)\d{1,3}\s*/\s*\d{1,3}\s*$", re.MULTILINE)
 _CONTENT_AMOUNT = re.compile(
     r"\$\s*\d|"
     r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?|"
@@ -285,6 +299,11 @@ class AIPDFConverter:
     def _inspect_pages(self, pdf_bytes: bytes) -> list[PageInspect]:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         try:
+            try:
+                title = (reader.metadata or {}).get("/Title")
+                title = str(title) if title else None
+            except Exception:
+                title = None
             pages: list[PageInspect] = []
             for index, page in enumerate(reader.pages):
                 try:
@@ -295,7 +314,7 @@ class AIPDFConverter:
                 has_widgets = self._has_form_widgets(page)
                 fields = self._widget_words(page)
                 filled = [word for word in fields if word.text.strip()]
-                use_ocr, page_flags = self._page_strategy(text, filled, has_widgets=has_widgets)
+                use_ocr, page_flags = self._page_strategy(text, filled, has_widgets=has_widgets, title=title)
                 if filled:
                     page_flags.append("acroform_merged")
                 pages.append(
@@ -314,13 +333,30 @@ class AIPDFConverter:
                 reader.close()
 
     @staticmethod
+    def _without_print_chrome(text: str, title: str | None = None) -> str:
+        content = _PRINT_URL.sub(" ", text)
+        content = _PRINT_TIMESTAMP.sub(" ", content)
+        if title and title.strip():
+            content = content.replace(title.strip(), " ")
+        content = _PRINT_PAGE_COUNTER.sub(" ", content)
+        return content
+
+    @staticmethod
     def _page_strategy(
         text: str,
         filled_fields: list[OcrWord],
         *,
         has_widgets: bool = False,
+        title: str | None = None,
     ) -> tuple[bool, list[str]]:
         stripped = text.strip()
+        if (
+            not filled_fields
+            and not has_widgets
+            and len(stripped) >= NATIVE_TEXT_CHARS
+            and len(AIPDFConverter._without_print_chrome(stripped, title).strip()) < NATIVE_TEXT_CHARS
+        ):
+            return True, ["print_chrome_only_text"]
         has_amounts = bool(_CONTENT_AMOUNT.search(stripped))
         amount_count = len(_CONTENT_AMOUNT.findall(stripped))
         irs_chrome = bool(_IRS_CHROME.search(stripped))
@@ -466,7 +502,28 @@ class AIPDFConverter:
             _clamp01((rtop - rbottom) / disp_h),
         )
 
+    @staticmethod
+    def _main_image_dpi(page: pdfium.PdfPage) -> float | None:
+        """Effective DPI of the largest embedded image covering a fifth of the page."""
+        try:
+            page_w, page_h = page.get_size()
+            best_area = 0.0
+            best_dpi: float | None = None
+            for obj in page.get_objects(filter=(pdfium_raw.FPDF_PAGEOBJ_IMAGE,), max_depth=3):
+                left, bottom, right, top = obj.get_bounds()
+                width_pt, height_pt = right - left, top - bottom
+                area = width_pt * height_pt
+                if area < 0.2 * page_w * page_h or area <= best_area:
+                    continue
+                px_w, px_h = obj.get_px_size()
+                best_area = area
+                best_dpi = min(px_w / (width_pt / 72.0), px_h / (height_pt / 72.0))
+            return best_dpi
+        except Exception:
+            return None
+
     def _ocr_page(self, page: pdfium.PdfPage, index: int, info: PageInspect) -> PageResult:
+        image_dpi = self._main_image_dpi(page)
         scale = RENDER_DPI / 72.0
         bitmap = page.render(scale=scale)
         try:
@@ -483,6 +540,8 @@ class AIPDFConverter:
         del rgb
 
         page_flags = list(info.flags)
+        if image_dpi is not None and image_dpi < LOW_RESOLUTION_IMAGE_DPI:
+            page_flags.append("low_resolution_image")
         orig_h, orig_w = bgr.shape[:2]
         rotation = self._page_content_rotation(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
         if rotation == 90:

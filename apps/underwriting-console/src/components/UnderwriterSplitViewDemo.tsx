@@ -65,7 +65,7 @@ import {
 import { loadIntakeSession } from '../intake/sessionStore';
 import UrlAEntityRoster from './UrlAEntityRoster';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
-import PdfPagePreview from './PdfPagePreview';
+import PdfDocumentViewer from './PdfDocumentViewer';
 import FixturePdfViewer from './FixturePdfViewer';
 import { usePdfViewer } from '../hooks/usePdfViewer';
 import {
@@ -85,6 +85,7 @@ import {
   corpBusinessAnnual,
   corpDistributionCapped,
   corpMinorityAnnual,
+  liquidityReason,
   monthlyFromYears,
   schCAnnual,
   scheduleLQuickRatio,
@@ -1484,8 +1485,8 @@ export default function UnderwriterSplitViewDemo({
   const partnershipFlow = useMemo(() => {
     const isMinority = partnershipPct < 25;
     const gpMonthly = monthlyFromYears(
-      partnershipYears[0].guaranteedPayments * (partnershipPct / 100),
-      partnershipYears[1].guaranteedPayments * (partnershipPct / 100),
+      partnershipYears[0].guaranteedPayments,
+      partnershipYears[1].guaranteedPayments,
       twoYearPartnership,
     );
 
@@ -1504,8 +1505,8 @@ export default function UnderwriterSplitViewDemo({
 
     const y1Raw = corpBusinessAnnual(partnershipYears[0], partnershipPct);
     const y2Raw = corpBusinessAnnual(partnershipYears[1], partnershipPct);
-    const y1 = activePartnership.hasStableDistributions ? y1Raw : Math.min(y1Raw, partnershipYears[0].distributions);
-    const y2 = activePartnership.hasStableDistributions ? y2Raw : Math.min(y2Raw, partnershipYears[1].distributions);
+    const y1 = activePartnership.hasStableDistributions ? y1Raw : corpDistributionCapped(partnershipYears[0], y1Raw);
+    const y2 = activePartnership.hasStableDistributions ? y2Raw : corpDistributionCapped(partnershipYears[1], y2Raw);
     return {
       y1,
       y2,
@@ -1567,14 +1568,14 @@ export default function UnderwriterSplitViewDemo({
     const partnership = partnershipEntities
       .filter((entity) => entity.id !== activePartnership.id)
       .reduce((sum, entity) => {
-        const pct = gseInvestor === 'FREDDIE' ? entity.profitPctEnd : entity.capitalPctEnd;
+        const pct = Math.min(entity.profitPctEnd, entity.capitalPctEnd);
         const ratio = scheduleLQuickRatio(entity.scheduleL);
         const first = pct < 25
           ? corpMinorityAnnual(entity.years[0], pct).capped
-          : ratio.passes ? corpBusinessAnnual(entity.years[0], pct) : entity.years[0].guaranteedPayments * (pct / 100);
+          : ratio.passes ? corpBusinessAnnual(entity.years[0], pct) : entity.years[0].guaranteedPayments;
         const second = pct < 25
           ? corpMinorityAnnual(entity.years[1], pct).capped
-          : ratio.passes ? corpBusinessAnnual(entity.years[1], pct) : entity.years[1].guaranteedPayments * (pct / 100);
+          : ratio.passes ? corpBusinessAnnual(entity.years[1], pct) : entity.years[1].guaranteedPayments;
         return sum + monthlyFromYears(first, second, twoYearPartnership);
       }, 0);
     const cCorp = cCorpEntities
@@ -2107,14 +2108,14 @@ export default function UnderwriterSplitViewDemo({
       list.push({
         id: 'SCORP_LIQUIDITY',
         type: 'ERROR',
-        message: `S-Corp Schedule L quick ratio ${sCorpLRatio.quickRatio.toFixed(2)} is below 1.0. Business income is excluded; officer W-2 still counts.`,
+        message: `S-Corp ${liquidityReason(sCorpLRatio)}. Business income is excluded; officer W-2 still counts.`,
       });
     }
     if (!partnershipLRatio.passes && !partnershipFlow.isMinority) {
       list.push({
         id: 'PARTNERSHIP_LIQUIDITY',
         type: 'ERROR',
-        message: `Partnership Schedule L quick ratio ${partnershipLRatio.quickRatio.toFixed(2)} is below 1.0. Ordinary income is excluded; guaranteed payments still count.`,
+        message: `Partnership ${liquidityReason(partnershipLRatio)}. Ordinary income is excluded; guaranteed payments still count.`,
       });
     }
 
@@ -2257,7 +2258,7 @@ export default function UnderwriterSplitViewDemo({
       // Only the worksheet field is scrolled here, and only within its own
       // pane. scrollIntoView walks every scrollable ancestor, so scrolling the
       // PDF overlay box from here dragged the whole page and sent the QA panel
-      // back to the top on every click. PdfPagePreview scrolls its own pane.
+      // back to the top on every click. PdfDocumentViewer scrolls its own pane.
       // Prefer the element that was actually clicked. Field ids can repeat
       // across documents (two Schedule Es each have a page 1 column A), so a
       // selector returns the first match, which sat at the top of the panel
@@ -3078,7 +3079,7 @@ export default function UnderwriterSplitViewDemo({
             {isLive && tabDocGroups.length ? docChips : null}
 
             {isLive && canvasDoc ? (
-              <PdfPagePreview
+              <PdfDocumentViewer
                 file={canvasDoc.file}
                 pageIndex={livePageIndex}
                 pageCount={canvasDoc.result.total_pages_scanned}
@@ -3087,6 +3088,7 @@ export default function UnderwriterSplitViewDemo({
                 highlight={inspectOverlay}
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
+                ocrPages={canvasDoc.result.pages}
                 fillHeight
               />
             ) : parseBusy ? (

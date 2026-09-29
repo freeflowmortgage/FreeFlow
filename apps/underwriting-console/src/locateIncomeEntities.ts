@@ -325,24 +325,11 @@ function attachSupportingFields(
   const leftoverOf = (predicate: (field: MappedIncomeField) => boolean) =>
     [...bundles.values()].filter((bundle) => bundle.some((field) => !used.has(field) && predicate(field)));
 
-  for (const bundle of leftoverOf((field) => field.form === 'Form 8825' || sourceId(field).startsWith('form-8825-'))) {
-    const unused = bundle.filter((field) => !used.has(field));
-    if (!unused.length) continue;
-    next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
-    unused.forEach((field) => used.add(field));
-  }
-
-  for (const bundle of leftoverOf((field) => sourceId(field).startsWith('form-4562-') || sourceId(field).startsWith('sch-l-'))) {
-    const unused = bundle.filter((field) => !used.has(field));
-    if (!unused.length) continue;
-    if (attachBundle(unused, [...CORP_KINDS])) continue;
-    if (next.some((match) => CORP_KINDS.has(match.kind))) continue;
-    next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
-    unused.forEach((field) => used.add(field));
-  }
-
   // A return with no K-1 in the packet is still that business. Its face and
   // M-1 pages sit in separate bundles, so they are joined per document first.
+  // This runs before the anonymous 8825 / 4562 / Schedule L leftovers invent
+  // an entity: an invented one has no name, so the named return face would
+  // refuse it and be dropped, leaving Schedule L on a business of its own.
   const orphanReturns = new Map<string, MappedIncomeField[]>();
   for (const bundle of leftoverOf((field) => Boolean(returnKind(sourceId(field))))) {
     for (const field of bundle) {
@@ -361,11 +348,33 @@ function attachSupportingFields(
     unused.forEach((field) => used.add(field));
   }
 
+  for (const bundle of leftoverOf((field) => field.form === 'Form 8825' || sourceId(field).startsWith('form-8825-'))) {
+    const unused = bundle.filter((field) => !used.has(field));
+    if (!unused.length) continue;
+    if (attachBundle(unused, [...CORP_KINDS])) continue;
+    next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
+    unused.forEach((field) => used.add(field));
+  }
+
+  for (const bundle of leftoverOf((field) => sourceId(field).startsWith('form-4562-') || sourceId(field).startsWith('sch-l-'))) {
+    const unused = bundle.filter((field) => !used.has(field));
+    if (!unused.length) continue;
+    if (attachBundle(unused, [...CORP_KINDS])) continue;
+    if (next.some((match) => CORP_KINDS.has(match.kind))) continue;
+    next.push(inventMatch(unused, kindFromSupportingBundle(unused, pages), pages));
+    unused.forEach((field) => used.add(field));
+  }
+
   for (const bundle of leftoverOf((field) => field.form === 'Paystub' || field.form === 'WVOE')) {
     const unused = bundle.filter((field) => !used.has(field));
     if (!unused.length) continue;
     if (attachBundle(unused, ['w2'])) continue;
-    if (next.some((match) => match.kind === 'w2')) continue;
+    // A stub that names its employer and matches none of the jobs so far is a
+    // separate job. Skipping it whenever any job existed dropped the second
+    // employer's pay stub. Only an anonymous stub is left out, since there is
+    // nothing to say which job it belongs to.
+    const identity = identityFromFields(unused);
+    if (!identity.name && !identity.ein && next.some((match) => match.kind === 'w2')) continue;
     next.push(inventMatch(unused, 'w2', pages));
     unused.forEach((field) => used.add(field));
   }
@@ -556,7 +565,10 @@ export function locateIncomeEntities(options: {
   for (const page of options.pages ?? []) {
     const form = formFromPageLabels(page.formIds);
     if (!form || !BUSINESS_FORMS.has(form)) continue;
-    if (covered.some((item) => samePageForm(item, { pageIndex: page.pageIndex, form, documentId: page.documentId }))) {
+    const here = { pageIndex: page.pageIndex, form, documentId: page.documentId };
+    // A return face folded onto its K-1 is covered by that K-1's match even
+    // though the match is anchored on the K-1's page.
+    if (covered.some((item) => samePageForm(item, here) || item.fields.some((field) => samePageForm(field, here)))) {
       continue;
     }
     const identity = identityFromPageText(page.text);

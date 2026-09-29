@@ -90,7 +90,13 @@ async function readPdf(req: IncomingMessage): Promise<{ bytes: Buffer; name: str
     return parsed;
   }
   if (contentType.includes('application/pdf') || body.slice(0, 5).toString() === '%PDF-') {
-    const name = (req.headers['x-document-title'] as string) || 'document.pdf';
+    const raw = (req.headers['x-document-title'] as string) || 'document.pdf';
+    let name = raw;
+    try {
+      name = decodeURIComponent(raw);
+    } catch {
+      // An unencoded title with a literal '%' is used as sent.
+    }
     return { bytes: body, name };
   }
   throw new Error('Expected application/pdf body or multipart file field.');
@@ -217,27 +223,45 @@ function toParseResponse(pages: ParsePage[], filename: string, engine: ParseResp
   return payload;
 }
 
-async function tryPythonParse(bytes: Buffer, name: string): Promise<{ payload: ParseResponse } | { timeout: true } | null> {
+type PythonParseOutcome =
+  | { payload: ParseResponse }
+  | { timeout: true }
+  | { failed: { status: number; detail: string } }
+  | null;
+
+async function tryPythonParse(bytes: Buffer, name: string): Promise<PythonParseOutcome> {
+  let response: Response;
   try {
-    const response = await fetch(PYTHON_PARSE, {
+    response = await fetch(PYTHON_PARSE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/pdf',
-        'X-Document-Title': name,
+        // Header values must be Latin-1; a file named with a dash or accent
+        // would otherwise fail the request before it reaches the parser.
+        'X-Document-Title': name.replace(/[^\x20-\x7E]/g, '_'),
       },
       body: new Uint8Array(bytes),
       signal: AbortSignal.timeout(Number.isFinite(PARSER_TIMEOUT_MS) ? PARSER_TIMEOUT_MS : 90_000),
     });
-    if (!response.ok) return null;
-    const payload = (await response.json()) as ParseResponse;
-    payload.parser_engine = 'python-ocr';
-    payload.incomeFields = mapIncomeFields(payload);
-    return { payload };
   } catch (error) {
-    const name = error instanceof Error ? error.name : '';
-    if (name === 'TimeoutError' || name === 'AbortError') return { timeout: true };
+    const kind = error instanceof Error ? error.name : '';
+    if (kind === 'TimeoutError' || kind === 'AbortError') {
+      console.warn(`[parse] ${name}: parser did not answer within ${PARSER_TIMEOUT_MS} ms`);
+      return { timeout: true };
+    }
+    console.warn(`[parse] ${name}: parser unreachable (${error instanceof Error ? error.message : String(error)})`);
     return null;
   }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    const detail = typeof body?.detail === 'string' ? body.detail : `Parser returned ${response.status}.`;
+    console.warn(`[parse] ${name}: parser returned ${response.status}: ${detail}`);
+    return { failed: { status: response.status, detail } };
+  }
+  const payload = (await response.json()) as ParseResponse;
+  payload.parser_engine = 'python-ocr';
+  payload.incomeFields = mapIncomeFields(payload);
+  return { payload };
 }
 
 async function tryPythonHealth(): Promise<boolean> {
@@ -385,12 +409,25 @@ export function parseMiddleware(): Connect.NextHandleFunction {
           sendJson(res, 200, python.payload);
           return;
         }
+        // The native reader has no Schedule E grid or template extraction and
+        // reads a return's inner pages as pay stubs, so its output is only
+        // acceptable when there is no parser at all. A slow or failing parser
+        // is reported so the file can be retried.
+        if (python && 'timeout' in python) {
+          sendJson(res, 504, {
+            detail: `${name} took longer than ${Math.round(PARSER_TIMEOUT_MS / 1000)} s to read. Retry it on its own.`,
+          });
+          return;
+        }
+        if (python && 'failed' in python) {
+          sendJson(res, python.failed.status >= 500 ? 502 : python.failed.status, {
+            detail: `${name} could not be read: ${python.failed.detail}`,
+          });
+          return;
+        }
         const pages = await extractNativePages(bytes);
         const fallback = toParseResponse(pages, name, 'native-pdf');
-        fallback.flags = [
-          ...fallback.flags,
-          python && 'timeout' in python ? 'python_parse_timeout' : 'python_parse_unavailable',
-        ];
+        fallback.flags = [...fallback.flags, 'python_parse_unavailable'];
         sendJson(res, 200, fallback);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Document processing failed.';
