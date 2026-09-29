@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:f51865590efa69b202321d1eca2763aee43b82a4f4495b5c604d681be30810aa
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
