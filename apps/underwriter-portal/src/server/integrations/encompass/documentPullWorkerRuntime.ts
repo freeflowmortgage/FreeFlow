@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { Prisma } from '@prisma/client';
 import { CustomConnectorAdapter, EncompassConnectorError, type EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
@@ -5,6 +6,7 @@ import { prisma, setTenantContext } from '../../database/client';
 import type { DocumentPullQueueMessage } from './documentPull';
 import { parseWithIncomeService } from './encompassApi';
 import { runDocumentPullJob, type ClaimedDocumentPull, type DocumentPullWorkerDependencies } from './documentPullWorker';
+import { isUniqueViolation, logDocumentPullPersistRecovery } from './documentPullFailure';
 import { emitOperationalEvent } from '../../observability/operationalEvents';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -121,42 +123,61 @@ export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = proce
 
 type ParsedResult = Parameters<DocumentPullWorkerDependencies['saveResult']>[1];
 
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const documentSelect = {
+  id: true, version: true, sourceContentHash: true, sourceAttachmentId: true,
+} as const;
+
+type StoredDocument = Readonly<{
+  id: string;
+  version: number;
+  sourceContentHash: string | null;
+  sourceAttachmentId: string | null;
+}>;
+
+/**
+ * Persists one parsed attachment. The source-attachment key is a nullable
+ * compound unique, so this path does not use Prisma upsert/findUnique on it.
+ * A failure from that upsert is not an Encompass* error and was reported as
+ * DOCUMENT_PULL_UNEXPECTED after a successful parse. Insert or update by
+ * primary key, and treat a unique conflict as a reload. CHAR(64) hashes are
+ * trimmed before compare because PostgreSQL bpchar values can come back padded.
+ */
 export async function persistParsedExtraction(
   transaction: Prisma.TransactionClient,
   job: ClaimedDocumentPull,
   result: ParsedResult,
   writer: 'WORKER' | 'AUTHENTICATED_UPLOAD' = 'WORKER',
 ): Promise<void> {
-  const lockKey = `${job.tenantId}:${job.loanId}:${result.attachmentId}`;
-  await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
-  const existing = await transaction.loanDocument.findUnique({
-    where: { tenantId_loanId_sourceAttachmentId: {
-      tenantId: job.tenantId, loanId: job.loanId, sourceAttachmentId: result.attachmentId,
-    } },
-    select: { sourceContentHash: true },
-  });
-  const document = await transaction.loanDocument.upsert({
-    where: { tenantId_loanId_sourceAttachmentId: {
-      tenantId: job.tenantId, loanId: job.loanId, sourceAttachmentId: result.attachmentId,
-    } },
-    create: {
-      tenantId: job.tenantId, loanId: job.loanId, fileType: 'application/pdf',
-      documentCategory: result.parsed.documentCategory, sourceAttachmentId: result.attachmentId,
-      sourceContentHash: result.sha256, sourcePageCount: result.parsed.pageCount,
-      parserVersion: result.parsed.parserVersion,
-      ocrConfidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
-    },
-    update: {
-      documentCategory: result.parsed.documentCategory, sourceContentHash: result.sha256,
-      sourcePageCount: result.parsed.pageCount, parserVersion: result.parsed.parserVersion,
-      ocrConfidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
-      ...(existing?.sourceContentHash !== result.sha256 ? { version: { increment: 1 } } : {}),
-    },
-    select: { id: true, version: true, sourceContentHash: true, sourceAttachmentId: true },
-  });
-  if (!document.sourceAttachmentId || document.sourceContentHash !== result.sha256) {
+  if (!SHA256_HEX.test(result.sha256)
+    || result.attachmentId.length < 1
+    || result.attachmentId.length > 255
+    || !SHA256_HEX.test(result.parsed.extraction.canonicalHash)) {
     throw new EncompassConnectorError('EXTRACTION_SOURCE_BINDING_INVALID', 'Source document provenance is incomplete.', false);
   }
+  const lockKey = `${job.tenantId}:${job.loanId}:${result.attachmentId}`;
+  await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+
+  let existing = await findLoanDocument(transaction, job, result.attachmentId);
+  let document: StoredDocument;
+  if (existing) {
+    document = await updateLoanDocument(transaction, job, existing, result);
+  } else {
+    try {
+      document = await createLoanDocument(transaction, job, result);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      logDocumentPullPersistRecovery(error);
+      existing = await findLoanDocument(transaction, job, result.attachmentId);
+      if (!existing) throw error;
+      document = await updateLoanDocument(transaction, job, existing, result);
+    }
+  }
+  const persistedHash = canonicalStoredHash(document.sourceContentHash);
+  if (!document.sourceAttachmentId || persistedHash !== result.sha256) {
+    throw new EncompassConnectorError('EXTRACTION_SOURCE_BINDING_INVALID', 'Source document provenance is incomplete.', false);
+  }
+  const hashChanged = canonicalStoredHash(existing?.sourceContentHash) !== result.sha256;
   const extractionKey = {
     tenantId: job.tenantId, sourceDocumentId: document.id,
     sourceDocumentVersion: document.version, parserVersion: result.parsed.parserVersion,
@@ -165,7 +186,7 @@ export async function persistParsedExtraction(
     where: { tenantId_sourceDocumentId_sourceDocumentVersion_parserVersion: extractionKey },
     select: { canonicalHash: true },
   });
-  if (existingExtraction && existingExtraction.canonicalHash !== result.parsed.extraction.canonicalHash) {
+  if (existingExtraction && canonicalStoredHash(existingExtraction.canonicalHash) !== result.parsed.extraction.canonicalHash) {
     throw new EncompassConnectorError('PARSER_RESULT_NONDETERMINISTIC', 'Repeated parsing produced inconsistent normalized output.', false);
   }
   let extractionCreated = false;
@@ -184,7 +205,7 @@ export async function persistParsedExtraction(
           ${JSON.stringify(result.parsed.extraction.normalizedInput)}::jsonb,
           ${JSON.stringify(result.parsed.extraction.evidence)}::jsonb,
           ${Array.from(result.parsed.extraction.warnings)}::text[],
-          ${result.parsed.confidence}::numeric,
+          ${confidenceParameter(result.parsed.confidence)}::numeric,
           ${result.parsed.extraction.canonicalHash}::char(64)
         ) AS created
       `;
@@ -203,19 +224,103 @@ export async function persistParsedExtraction(
           normalizedInput: result.parsed.extraction.normalizedInput as Prisma.InputJsonValue,
           evidence: result.parsed.extraction.evidence as Prisma.InputJsonValue,
           warnings: Array.from(result.parsed.extraction.warnings),
-          confidence: result.parsed.confidence === null ? null : new Prisma.Decimal(result.parsed.confidence),
+          confidence: confidenceDecimal(result.parsed.confidence),
           canonicalHash: result.parsed.extraction.canonicalHash,
         },
       });
       extractionCreated = true;
     }
   }
-  if (!existing || existing.sourceContentHash !== result.sha256 || extractionCreated) {
+  if (!existing || hashChanged || extractionCreated) {
     await transaction.loanApplication.updateMany({
       where: { id: job.loanId, tenantId: job.tenantId },
       data: { version: { increment: 1 }, status: 'DOCS_UPLOADED' },
     });
   }
+}
+
+function documentWrite(result: ParsedResult): {
+  documentCategory: string;
+  sourceContentHash: string;
+  sourcePageCount: number;
+  parserVersion: string;
+  ocrConfidence: Prisma.Decimal | null;
+} {
+  return {
+    documentCategory: result.parsed.documentCategory.slice(0, 100),
+    sourceContentHash: result.sha256,
+    sourcePageCount: result.parsed.pageCount,
+    parserVersion: result.parsed.parserVersion,
+    ocrConfidence: confidenceDecimal(result.parsed.confidence),
+  };
+}
+
+async function findLoanDocument(
+  transaction: Prisma.TransactionClient,
+  job: ClaimedDocumentPull,
+  attachmentId: string,
+): Promise<StoredDocument | null> {
+  return transaction.loanDocument.findFirst({
+    where: { tenantId: job.tenantId, loanId: job.loanId, sourceAttachmentId: attachmentId },
+    select: documentSelect,
+  });
+}
+
+async function createLoanDocument(
+  transaction: Prisma.TransactionClient,
+  job: ClaimedDocumentPull,
+  result: ParsedResult,
+): Promise<StoredDocument> {
+  return transaction.loanDocument.create({
+    data: {
+      id: randomUUID(),
+      tenantId: job.tenantId,
+      loanId: job.loanId,
+      fileType: 'application/pdf',
+      sourceAttachmentId: result.attachmentId,
+      ...documentWrite(result),
+    },
+    select: documentSelect,
+  });
+}
+
+async function updateLoanDocument(
+  transaction: Prisma.TransactionClient,
+  job: ClaimedDocumentPull,
+  existing: StoredDocument,
+  result: ParsedResult,
+): Promise<StoredDocument> {
+  const hashChanged = canonicalStoredHash(existing.sourceContentHash) !== result.sha256;
+  return transaction.loanDocument.update({
+    where: { tenantId_id: { tenantId: job.tenantId, id: existing.id } },
+    data: {
+      ...documentWrite(result),
+      ...(hashChanged ? { version: { increment: 1 } } : {}),
+    },
+    select: documentSelect,
+  });
+}
+
+/** Fit Decimal(5, 2) and the 0–100 check. A raw average can exceed the scale after a successful parse. */
+function confidenceDecimal(value: number | null): Prisma.Decimal | null {
+  const quantized = quantizeConfidence(value);
+  return quantized === null ? null : new Prisma.Decimal(quantized);
+}
+
+function confidenceParameter(value: number | null): string | null {
+  return quantizeConfidence(value);
+}
+
+function quantizeConfidence(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const clamped = Math.min(100, Math.max(0, Math.round(value * 100) / 100));
+  return clamped.toFixed(2);
+}
+
+function canonicalStoredHash(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return SHA256_HEX.test(normalized) ? normalized : null;
 }
 
 export async function runQueueWorker(environment: NodeJS.ProcessEnv = process.env): Promise<void> {

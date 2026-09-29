@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EncompassApiError } from './encompassApi';
 import { runDocumentPullJob, validateAggregateDocumentLimits, type DocumentPullWorkerDependencies } from './documentPullWorker';
+import { classifyDocumentPullFailure, redactOperationalMessage } from './documentPullFailure';
 
 const message = { jobId: 'job', tenantId: 'tenant', loanId: 'loan', expectedLoanVersion: 1, correlationId: 'request' };
 const job = {
@@ -85,6 +86,88 @@ test('fails closed when a selected attachment is not active', async () => {
   };
   assert.equal(await runDocumentPullJob(message, deps), 'FAILED');
   assert.deepEqual(failure, { safeCode: 'ENCOMPASS_ATTACHMENT_NOT_AVAILABLE', retryable: false });
+});
+
+test('catch logs a redacted diagnostic and maps Prisma conflicts off the catch-all', async () => {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (line?: unknown) => { lines.push(String(line)); };
+  let failure: unknown;
+  const error = new Error([
+    'Invalid `prisma.loanDocument.upsert()` invocation:',
+    '{ "employerName": "Jane Doe", "note": "%PDF-1.4 borrower", "authorization": "Bearer secret-token" }',
+    'Unique constraint failed on the fields: (`tenantId`,`loanId`,`sourceAttachmentId`)',
+  ].join('\n'));
+  error.name = 'PrismaClientKnownRequestError';
+  error.stack = 'Error: boom\n    at persist (/home/ubuntu/app/documentPullWorkerRuntime.ts:1:1)\n    DATABASE_URL=postgres://user:secret@db/app';
+  (error as Error & { code: string }).code = 'P2002';
+  const deps: DocumentPullWorkerDependencies = {
+    claim: async () => job,
+    listAttachments: async () => { throw error; },
+    download: async () => assert.fail(),
+    parse: async () => assert.fail(),
+    saveResult: async () => assert.fail(),
+    succeed: async () => assert.fail(),
+    fail: async (_job, safeCode, retryable) => { failure = { safeCode, retryable }; },
+  };
+  try {
+    assert.equal(await runDocumentPullJob(message, deps), 'RETRYABLE_FAILURE');
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(failure, { safeCode: 'DOCUMENT_PULL_DB_CONFLICT', retryable: true });
+  assert.equal(lines.length, 1);
+  const logged = JSON.parse(lines[0]!) as Record<string, unknown>;
+  assert.equal(logged.source, 'freeflow');
+  assert.equal(logged.event, 'document_pull_error');
+  assert.equal(logged.errorName, 'PrismaClientKnownRequestError');
+  assert.equal(logged.prismaCode, 'P2002');
+  assert.equal(logged.safeCode, 'DOCUMENT_PULL_DB_CONFLICT');
+  assert.equal(logged.message, 'Invalid `prisma.loanDocument.upsert()` invocation: Unique constraint failed on the fields: (`tenantId`,`loanId`,`sourceAttachmentId`)');
+  const serialized = lines[0]!;
+  assert.equal(serialized.includes('Jane Doe'), false);
+  assert.equal(serialized.includes('%PDF'), false);
+  assert.equal(serialized.includes('Bearer'), false);
+  assert.equal(serialized.includes('secret'), false);
+  assert.equal(serialized.includes('documentPullWorkerRuntime.ts'), false);
+  assert.equal(serialized.includes('DATABASE_URL'), false);
+});
+
+test('untyped throws stay DOCUMENT_PULL_UNEXPECTED and still log a safe name', async () => {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (line?: unknown) => { lines.push(String(line)); };
+  let failure: unknown;
+  const deps: DocumentPullWorkerDependencies = {
+    claim: async () => job,
+    listAttachments: async () => [{ id: 'one' }, { id: 'two' }],
+    download: async () => ({ bytes: new Uint8Array([1]), sha256: 'a'.repeat(64) }),
+    parse: async () => { throw new TypeError('Cannot read properties of undefined reading box1 jane@example.com'); },
+    saveResult: async () => assert.fail(),
+    succeed: async () => assert.fail(),
+    fail: async (_job, safeCode, retryable) => { failure = { safeCode, retryable }; },
+  };
+  try {
+    assert.equal(await runDocumentPullJob(message, deps), 'RETRYABLE_FAILURE');
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(failure, { safeCode: 'DOCUMENT_PULL_UNEXPECTED', retryable: true });
+  const logged = JSON.parse(lines[0]!) as Record<string, unknown>;
+  assert.equal(logged.errorName, 'TypeError');
+  assert.equal(logged.safeCode, 'DOCUMENT_PULL_UNEXPECTED');
+  assert.equal(String(logged.message).includes('jane@example.com'), false);
+  assert.equal(String(logged.message).includes('box1'), true);
+});
+
+test('postgres conflict-target and check failures are not retryable catch-alls', () => {
+  const conflict = new Error('there is no unique or exclusion constraint matching the ON CONFLICT specification');
+  (conflict as Error & { meta: { code: string } }).meta = { code: '42P10' };
+  assert.deepEqual(classifyDocumentPullFailure(conflict), { safeCode: 'DOCUMENT_PULL_DB_CONFLICT_TARGET', retryable: false });
+  const check = new Error('new row for relation "income_extractions" violates check constraint "income_extractions_confidence_range"');
+  (check as Error & { meta: { code: string } }).meta = { code: '23514' };
+  assert.deepEqual(classifyDocumentPullFailure(check), { safeCode: 'DOCUMENT_PULL_DB_CHECK', retryable: false });
+  assert.equal(redactOperationalMessage('DATABASE_URL=postgres://user:secret@db/app %PDF-1.4').includes('secret'), false);
 });
 
 test('aggregate document limits are bounded and typed', () => {
