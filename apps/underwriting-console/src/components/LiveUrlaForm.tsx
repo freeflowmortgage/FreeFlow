@@ -1,4 +1,4 @@
-import type { AgentTurn, IntakeAnswers } from '../intake/intake-agent';
+import { coborrowersOf, type AgentTurn, type IntakeAnswers } from '../intake/intake-agent';
 import type { IntakeLang } from '../intake/detect-spoken-language';
 import { localizedYn, ui } from '../intake/uiCopy';
 
@@ -111,6 +111,44 @@ export default function LiveUrlaForm({
           active={active === 'hasOtherIncome' || active === 'otherIncomeType'}
         />
       </section>
+
+      {coborrowersOf(answers).map((coborrower, index) => {
+        const prefix = `cob${index}.`;
+        const at = (...keys: string[]) => keys.some((key) => active === `${prefix}${key}`);
+        return (
+          <section key={prefix} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <h3 className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-700">
+              {L.coborrower} {index + 1} · {coborrower.name || '—'}
+            </h3>
+            <Row label={L.legalName} value={coborrower.name} active={at('name')} />
+            <Row
+              label={L.employment}
+              value={coborrower.employmentType ? copy.employment[coborrower.employmentType] : undefined}
+              active={at('employmentType')}
+            />
+            <Row label={L.employer} value={coborrower.employerName} active={at('employerName')} />
+            <Row label={L.jobTitle} value={coborrower.jobTitle} active={at('jobTitle')} />
+            <Row
+              label={L.yearsAtJob}
+              value={coborrower.yearsAtJob || coborrower.yearsInBusiness}
+              active={at('yearsAtJob', 'yearsInBusiness')}
+            />
+            <Row label={L.gross} value={money(coborrower.monthlyIncome)} active={at('monthlyIncome')} />
+            <Row
+              label={L.secondJob}
+              value={
+                coborrower.hasSecondJob
+                  ? `${coborrower.secondEmployer ?? ''} ${money(coborrower.secondMonthlyIncome)}`
+                  : yn(coborrower.hasSecondJob, lang)
+              }
+              active={at('hasSecondJob', 'secondEmployer', 'secondMonthlyIncome')}
+            />
+            {coborrower.previousEmployer ? (
+              <Row label="Previous employer" value={coborrower.previousEmployer} active={at('previousEmployer')} />
+            ) : null}
+          </section>
+        );
+      })}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <h3 className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-700">

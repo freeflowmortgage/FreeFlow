@@ -6,11 +6,30 @@
  * stopping at the first W-2, K-1, or Schedule C in the packet.
  */
 
+import { borrowerIdAt, PRIMARY_BORROWER_ID, type LoanBorrower } from './borrowers';
+
 export type UrlAEmploymentClassification = 'Primary' | 'Secondary' | 'Previous' | 'REO';
 export type UrlAIncomeKind = 'wages' | 'self-employed' | 'rental';
 export type UrlAEntitySource = 'intake' | 'mismo' | 'demo';
 
+type UrlABorrowerEmployment = {
+  employmentType?: 'W2' | 'SELF_EMPLOYED';
+  employerName?: string;
+  yearsAtJob?: string;
+  yearsInBusiness?: string;
+  monthlyIncome?: string;
+  hasSecondJob?: boolean;
+  secondEmployer?: string;
+  secondMonthlyIncome?: string;
+  previousEmployer?: string;
+  previousEmployerYears?: string;
+};
+
 export type UrlAEmploymentAnswers = {
+  borrowerName?: string;
+  hasCoborrower?: boolean;
+  coborrowerName?: string;
+  coborrowers?: Array<UrlABorrowerEmployment & { name?: string }>;
   employmentType?: 'W2' | 'SELF_EMPLOYED';
   employerName?: string;
   yearsAtJob?: string;
@@ -35,6 +54,9 @@ export type UrlAListedEntity = {
   monthlyIncome?: number;
   years?: number;
   source: UrlAEntitySource;
+  /** The borrower this employer or business belongs to. Unset for REO, which is held jointly. */
+  borrowerId?: string;
+  borrowerName?: string;
 };
 
 const LEGAL_SUFFIX =
@@ -94,17 +116,85 @@ function pushEntity(
   const name = entity.name.trim();
   if (!name) return;
   const duplicate = out.some(
-    (existing) => namesMatch(existing.name, name) && existing.classification === entity.classification,
+    (existing) =>
+      namesMatch(existing.name, name) &&
+      existing.classification === entity.classification &&
+      existing.borrowerId === entity.borrowerId,
   );
   if (duplicate) return;
+  // The primary borrower keeps the original ids so saved choices still apply.
+  const owner = entity.borrowerId && entity.borrowerId !== PRIMARY_BORROWER_ID ? `${entity.borrowerId}-` : '';
   out.push({
     ...entity,
     name,
-    id: uniqueId(used, `urla-${entity.classification.toLowerCase()}-${slug(name)}`),
+    id: uniqueId(used, `urla-${owner}${entity.classification.toLowerCase()}-${slug(name)}`),
   });
 }
 
-/** Every employer / business / REO listed on a 1003 intake session. */
+function coborrowerEntries(answers: UrlAEmploymentAnswers): Array<UrlABorrowerEmployment & { name?: string }> {
+  if (answers.hasCoborrower === false) return [];
+  if (answers.coborrowers?.length) return answers.coborrowers;
+  if (answers.hasCoborrower && answers.coborrowerName?.trim()) return [{ name: answers.coborrowerName.trim() }];
+  return [];
+}
+
+/** Everyone applying on the 1003, primary borrower first. */
+export function borrowersFromUrlA(answers: UrlAEmploymentAnswers | null | undefined): LoanBorrower[] {
+  if (!answers) return [];
+  const out: LoanBorrower[] = [];
+  if (answers.borrowerName?.trim()) {
+    out.push({ id: PRIMARY_BORROWER_ID, name: answers.borrowerName.trim(), role: 'Borrower' });
+  }
+  coborrowerEntries(answers).forEach((coborrower, index) => {
+    if (!coborrower.name?.trim()) return;
+    out.push({ id: borrowerIdAt(index + 1), name: coborrower.name.trim(), role: 'CoBorrower' });
+  });
+  return out;
+}
+
+function pushEmployment(
+  out: UrlAListedEntity[],
+  used: Set<string>,
+  employment: UrlABorrowerEmployment,
+  owner: { borrowerId?: string; borrowerName?: string },
+  source: UrlAEntitySource,
+): void {
+  const selfEmployed = employment.employmentType === 'SELF_EMPLOYED';
+  pushEntity(out, used, {
+    name: employment.employerName ?? '',
+    kind: selfEmployed ? 'self-employed' : 'wages',
+    classification: 'Primary',
+    selfEmployed,
+    monthlyIncome: money(employment.monthlyIncome),
+    years: selfEmployed ? years(employment.yearsInBusiness) : years(employment.yearsAtJob),
+    source,
+    ...owner,
+  });
+
+  if (employment.hasSecondJob) {
+    pushEntity(out, used, {
+      name: employment.secondEmployer ?? '',
+      kind: 'wages',
+      classification: 'Secondary',
+      selfEmployed: false,
+      monthlyIncome: money(employment.secondMonthlyIncome),
+      source,
+      ...owner,
+    });
+  }
+
+  pushEntity(out, used, {
+    name: employment.previousEmployer ?? '',
+    kind: 'wages',
+    classification: 'Previous',
+    selfEmployed: false,
+    years: years(employment.previousEmployerYears),
+    source,
+    ...owner,
+  });
+}
+
+/** Every employer / business / REO listed on a 1003 intake session, for every borrower on it. */
 export function employmentEntitiesFromUrlA(
   answers: UrlAEmploymentAnswers | null | undefined,
   source: UrlAEntitySource = 'intake',
@@ -112,36 +202,13 @@ export function employmentEntitiesFromUrlA(
   if (!answers) return [];
   const out: UrlAListedEntity[] = [];
   const used = new Set<string>();
-  const selfEmployed = answers.employmentType === 'SELF_EMPLOYED';
+  const borrowers = borrowersFromUrlA(answers);
+  const primary = borrowers.find((borrower) => borrower.id === PRIMARY_BORROWER_ID);
 
-  pushEntity(out, used, {
-    name: answers.employerName ?? '',
-    kind: selfEmployed ? 'self-employed' : 'wages',
-    classification: 'Primary',
-    selfEmployed,
-    monthlyIncome: money(answers.monthlyIncome),
-    years: selfEmployed ? years(answers.yearsInBusiness) : years(answers.yearsAtJob),
-    source,
-  });
-
-  if (answers.hasSecondJob) {
-    pushEntity(out, used, {
-      name: answers.secondEmployer ?? '',
-      kind: 'wages',
-      classification: 'Secondary',
-      selfEmployed: false,
-      monthlyIncome: money(answers.secondMonthlyIncome),
-      source,
-    });
-  }
-
-  pushEntity(out, used, {
-    name: answers.previousEmployer ?? '',
-    kind: 'wages',
-    classification: 'Previous',
-    selfEmployed: false,
-    years: years(answers.previousEmployerYears),
-    source,
+  pushEmployment(out, used, answers, { borrowerId: PRIMARY_BORROWER_ID, borrowerName: primary?.name }, source);
+  coborrowerEntries(answers).forEach((coborrower, index) => {
+    const borrowerId = borrowerIdAt(index + 1);
+    pushEmployment(out, used, coborrower, { borrowerId, borrowerName: coborrower.name?.trim() || undefined }, source);
   });
 
   if (answers.ownsOtherRE) {
@@ -167,12 +234,39 @@ function xmlFlag(block: string, tag: string): boolean {
   return /true|1|yes/i.test(xmlText(block, tag) ?? '');
 }
 
-/** Every EMPLOYER (and optional REO address) in a MISMO 3.4 URLA payload. */
-export function employmentEntitiesFromMismo(xml: string | null | undefined): UrlAListedEntity[] {
-  if (!xml) return [];
-  const out: UrlAListedEntity[] = [];
-  const used = new Set<string>();
+function partyName(block: string): string | undefined {
+  const individual = block.match(/<INDIVIDUAL>([\s\S]*?)<\/INDIVIDUAL>/i)?.[1] ?? '';
+  const full = xmlText(individual, 'FullName');
+  if (full) return full;
+  const parts = ['FirstName', 'MiddleName', 'LastName'].map((tag) => xmlText(individual, tag)).filter(Boolean);
+  return parts.length ? parts.join(' ') : undefined;
+}
 
+function borrowerParties(xml: string): Array<{ name?: string; block: string }> {
+  return [...xml.matchAll(/<PARTY\b[^>]*>([\s\S]*?)<\/PARTY>/gi)]
+    .map((match) => match[1])
+    .filter((block) => /<PartyRoleType>\s*Borrower\s*<\/PartyRoleType>/i.test(block))
+    .map((block) => ({ name: partyName(block), block }));
+}
+
+/** Every borrower PARTY in a MISMO 3.4 URLA payload, in file order. */
+export function borrowersFromMismo(xml: string | null | undefined): LoanBorrower[] {
+  if (!xml) return [];
+  return borrowerParties(xml)
+    .filter((party) => party.name)
+    .map((party, index) => ({
+      id: borrowerIdAt(index),
+      name: party.name!,
+      role: index === 0 ? 'Borrower' : 'CoBorrower',
+    }));
+}
+
+function pushMismoEmployers(
+  out: UrlAListedEntity[],
+  used: Set<string>,
+  xml: string,
+  owner: { borrowerId?: string; borrowerName?: string },
+): void {
   for (const match of xml.matchAll(/<EMPLOYER>([\s\S]*?)<\/EMPLOYER>/gi)) {
     const block = match[1];
     const name = xmlText(block, 'FullName');
@@ -189,9 +283,24 @@ export function employmentEntitiesFromMismo(xml: string | null | undefined): Url
       monthlyIncome: money(xmlText(block, 'EmploymentMonthlyIncomeAmount')),
       years: years(xmlText(block, 'EmploymentTimeInLineOfWorkYearsCount')),
       source: 'mismo',
+      ...owner,
     });
   }
+}
 
+/** Every EMPLOYER in a MISMO 3.4 URLA payload, tagged with the borrower PARTY it sits under. */
+export function employmentEntitiesFromMismo(xml: string | null | undefined): UrlAListedEntity[] {
+  if (!xml) return [];
+  const out: UrlAListedEntity[] = [];
+  const used = new Set<string>();
+  const parties = borrowerParties(xml);
+  if (!parties.some((party) => /<EMPLOYER>/i.test(party.block))) {
+    pushMismoEmployers(out, used, xml, {});
+    return out;
+  }
+  parties.forEach((party, index) => {
+    pushMismoEmployers(out, used, party.block, { borrowerId: borrowerIdAt(index), borrowerName: party.name });
+  });
   return out;
 }
 
@@ -199,7 +308,7 @@ export function employmentEntitiesFromMismo(xml: string | null | undefined): Url
  * Demo 1003 employment list used when no live intake/MISMO file is present.
  * Names match the income workspace demo entities so locate can be exercised.
  */
-export const DEMO_URLA_ENTITIES: UrlAListedEntity[] = [
+export const DEMO_URLA_ENTITIES: UrlAListedEntity[] = ([
   {
     id: 'urla-primary-apex-technology-partners',
     name: 'Apex Technology Partners LLC',
@@ -287,7 +396,12 @@ export const DEMO_URLA_ENTITIES: UrlAListedEntity[] = [
     selfEmployed: false,
     source: 'demo',
   },
-];
+] satisfies UrlAListedEntity[]).map((entity): UrlAListedEntity =>
+  entity.kind === 'rental' ? entity : { ...entity, borrowerId: PRIMARY_BORROWER_ID, borrowerName: 'Sarah K. Vance' },
+);
+
+/** The demo file has one borrower. */
+export const DEMO_BORROWERS: LoanBorrower[] = [{ id: PRIMARY_BORROWER_ID, name: 'Sarah K. Vance', role: 'Borrower' }];
 
 export function resolveUrlARoster(options: {
   answers?: UrlAEmploymentAnswers | null;

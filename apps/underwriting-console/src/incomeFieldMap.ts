@@ -1840,7 +1840,7 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
     (field) => field.sourceFieldId === 'w2-box5' && keepGridWage(field.numericValue, fourUp),
   );
   const extractFields = fieldsFromFormExtracts(result.formExtracts).filter(
-    (field) => !(gridHasBox5 && field.form === 'W-2'),
+    (field) => !(gridHasBox5 && field.form === 'W-2' && field.sourceFieldId !== 'w2-employee-name'),
   );
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
   const claimed = new Set(

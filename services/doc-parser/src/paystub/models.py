@@ -122,6 +122,7 @@ class Identity:
     check_date: str | None = None
     check_number: str | None = None
     employer_box: OverlayBox | None = None
+    employee_box: OverlayBox | None = None
     period_end_box: OverlayBox | None = None
 
 

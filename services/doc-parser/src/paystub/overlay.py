@@ -23,6 +23,7 @@ here rather than left to chance:
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 from .models import (
@@ -267,6 +268,24 @@ def income_fields(result: PaystubResult) -> list[dict]:
                 value=result.identity.employer,
                 numeric=Decimal("0"),
                 box=result.identity.employer_box,
+            )
+        )
+
+    # A lone word is a column split mid-name ("Nathan" | "Jenson"), which would
+    # tie the stub to the wrong person; only a first-and-last name is emitted.
+    employee = result.identity.employee or ""
+    if len(re.findall(r"[A-Za-z]{2,}", employee)) >= 2 and result.identity.employee_box:
+        records.append(
+            _record(
+                page_index=page,
+                source_id="ps-employee-name",
+                box_label="Employee",
+                field_label="Employee Name",
+                line_num="Employee",
+                category="identity",
+                value=result.identity.employee,
+                numeric=Decimal("0"),
+                box=result.identity.employee_box,
             )
         )
 

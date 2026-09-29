@@ -1,10 +1,36 @@
 import type { MappedIncomeField, ParsePage } from './parseTypes';
 import type { DocKind } from './livePacket';
 import {
+  borrowerIdAt,
+  borrowersNamedIn,
+  documentPersonName,
+  personNameTokens,
+  samePerson,
+  type LoanBorrower,
+} from './borrowers';
+import {
   namesMatch,
   normalizeBusinessName,
   type UrlAListedEntity,
 } from './urlaEmploymentRoster';
+
+/**
+ * - `matched`: the document names a borrower, the underwriter assigned it, or
+ *   it is a return with no person on it and one borrower owns that business.
+ * - `unidentified`: a 1003 is loaded and the document belongs to someone not
+ *   on it. Its income is held out until it is assigned.
+ * - `unknown`: nothing says whose it is and there is no 1003 to check against.
+ */
+export type BorrowerStatus = 'matched' | 'unidentified' | 'unknown';
+
+export type BorrowerWarning = {
+  code: 'UNIDENTIFIED_BORROWER' | 'UNCONFIRMED_BORROWERS';
+  message: string;
+  /** Key for `assignments` when the warning is about one document. */
+  assignmentKey?: string;
+  documentId?: string;
+  pageIndex?: number;
+};
 
 export type LocatePage = {
   documentId?: string;
@@ -29,6 +55,11 @@ export type LocatedMatch = {
   name?: string;
   ein?: string;
   fields: MappedIncomeField[];
+  /** The employee, partner, shareholder or proprietor the document names. */
+  personName?: string;
+  /** Borrowers this document belongs to; the first owns its income. */
+  borrowerIds?: string[];
+  borrowerStatus?: BorrowerStatus;
 };
 
 export type LocatedRosterRow = {
@@ -40,7 +71,108 @@ export type LocatedRosterRow = {
 export type LocateResult = {
   roster: LocatedRosterRow[];
   discovered: LocatedMatch[];
+  /** The 1003 borrowers, or the people the documents name when no 1003 is loaded. */
+  borrowers?: LoanBorrower[];
+  /** Documents for someone not on the 1003. Not in `roster` or `discovered`, so not in income. */
+  unidentified?: LocatedMatch[];
+  warnings?: BorrowerWarning[];
 };
+
+const PERSON_NAME_IDS = new Set([
+  'w2-employee-name',
+  'ps-employee-name',
+  'pt-partner-name',
+  'scorp-shareholder-name',
+  'ent1-proprietor',
+]);
+
+/** Kinds whose documents print the person they belong to. */
+const PERSON_KINDS = new Set<DocKind>(['w2', 'paystub', 'schedule-c', 'scorp', 'partnership']);
+
+type Person = { personName?: string; borrowerIds: string[] };
+
+function personNameFrom(fields: MappedIncomeField[]): string | undefined {
+  for (const field of fields) {
+    if (!PERSON_NAME_IDS.has(field.sourceFieldId ?? field.id)) continue;
+    const name = documentPersonName(field.value);
+    if (name) return name;
+  }
+  return undefined;
+}
+
+function pageTexts(
+  fields: MappedIncomeField[],
+  pages: LocatePage[] | undefined,
+  anchor?: { documentId?: string; pageIndex: number },
+): string {
+  const keys = new Set(fields.map((field) => `${field.documentId ?? ''}:${field.pageIndex}`));
+  if (anchor) keys.add(`${anchor.documentId ?? ''}:${anchor.pageIndex}`);
+  return (pages ?? [])
+    .filter((page) => keys.has(`${page.documentId ?? ''}:${page.pageIndex}`))
+    .map((page) => page.text)
+    .join(' ');
+}
+
+/** Whose document: the printed person when read, otherwise any borrower the page text names. */
+function personOf(
+  fields: MappedIncomeField[],
+  pages: LocatePage[] | undefined,
+  borrowers: LoanBorrower[],
+  anchor?: { documentId?: string; pageIndex: number },
+): Person {
+  const personName = personNameFrom(fields);
+  if (personName) {
+    return { personName, borrowerIds: borrowers.filter((b) => samePerson(personName, b.name)).map((b) => b.id) };
+  }
+  return { borrowerIds: borrowersNamedIn(pageTexts(fields, pages, anchor), borrowers).map((b) => b.id) };
+}
+
+function peopleConflict(left: Person, right: Person): boolean {
+  if (left.personName && right.personName) return !samePerson(left.personName, right.personName);
+  if (left.borrowerIds.length && right.borrowerIds.length) {
+    return !left.borrowerIds.some((id) => right.borrowerIds.includes(id));
+  }
+  return false;
+}
+
+function personKey(person: Person): string {
+  return person.borrowerIds[0] ?? (person.personName ? personNameTokens(person.personName).join('-') : '');
+}
+
+function isK1Field(field: MappedIncomeField): boolean {
+  const id = field.sourceFieldId ?? field.id;
+  return /^(?:pt|scorp)-/.test(id) && !returnKind(id);
+}
+
+/** A W-2, pay stub, Schedule C or K-1 names its person; a return face or 1120 does not. */
+function expectsPerson(match: LocatedMatch, pages: LocatePage[] | undefined): boolean {
+  if (!PERSON_KINDS.has(match.kind)) return false;
+  if (match.kind !== 'scorp' && match.kind !== 'partnership') return true;
+  if (match.fields.some(isK1Field)) return true;
+  const page = pages?.find((item) => item.pageIndex === match.pageIndex && (item.documentId ?? '') === (match.documentId ?? ''));
+  return Boolean(page && /K-1/i.test(page.formIds.join(' ')));
+}
+
+/** Key the underwriter's "assign to borrower" choice is stored under. */
+export function assignmentKey(match: Pick<LocatedMatch, 'documentId' | 'pageIndex' | 'form'>): string {
+  return `${match.documentId ?? ''}:${match.pageIndex}:${match.form}`;
+}
+
+/** Everyone the documents name, in packet order, for a file with no 1003. */
+export function borrowersFromDocuments(fields: MappedIncomeField[]): LoanBorrower[] {
+  const names: string[] = [];
+  for (const field of fields) {
+    if (!PERSON_NAME_IDS.has(field.sourceFieldId ?? field.id)) continue;
+    const name = documentPersonName(field.value);
+    if (name && !names.some((known) => samePerson(known, name))) names.push(name);
+  }
+  return names.map((name, index) => ({
+    id: borrowerIdAt(index),
+    name,
+    role: index === 0 ? 'Borrower' : 'CoBorrower',
+    fromDocuments: true,
+  }));
+}
 
 const IDENTITY_NAME_IDS = new Set([
   'w2-employer-name',
@@ -153,6 +285,7 @@ export function groupFieldsByEntity(
   fields: MappedIncomeField[],
   form?: MappedIncomeField['form'],
   pages?: LocatePage[],
+  borrowers: LoanBorrower[] = [],
 ): LocatedMatch[] {
   const groups = new Map<string, MappedIncomeField[]>();
   const supporting: MappedIncomeField[] = [];
@@ -184,7 +317,7 @@ export function groupFieldsByEntity(
     } satisfies LocatedMatch;
   });
 
-  return attachSupportingFields(matches, supporting, pages);
+  return attachSupportingFields(matches, supporting, pages, borrowers);
 }
 
 function pageTextFor(field: MappedIncomeField, pages?: LocatePage[]): string {
@@ -241,32 +374,62 @@ function pushField(target: LocatedMatch, field: MappedIncomeField): void {
   if (!target.ein && IDENTITY_EIN_IDS.has(id) && field.value.trim()) target.ein = field.value.trim();
 }
 
-function pickSupportingTarget(
-  candidates: LocatedMatch[],
+/**
+ * K-1s for one business issued to different borrowers. The return face and its
+ * schedules are the business's, so each partner's K-1 carries them.
+ */
+function oneBusinessManyPeople(
+  matches: LocatedMatch[],
   bundle: MappedIncomeField[],
-  pages?: LocatePage[],
-): LocatedMatch | undefined {
-  if (!candidates.length) return undefined;
+  pages: LocatePage[] | undefined,
+  borrowers: LoanBorrower[],
+): LocatedMatch[] | undefined {
+  if (matches.length < 2 || bundle.some((field) => field.form === 'Paystub' || field.form === 'WVOE')) return undefined;
+  const [head, ...rest] = matches;
+  const sameBusiness = rest.every(
+    (match) => einsMatch(match.ein, head.ein) || Boolean(match.name && head.name && namesMatch(match.name, head.name)),
+  );
+  if (!sameBusiness) return undefined;
+  const keys = matches.map((match) => personKey(personOf(match.fields, pages, borrowers, match)));
+  if (keys.some((key) => !key) || new Set(keys).size !== keys.length) return undefined;
+  return matches;
+}
+
+function pickSupportingTargets(
+  allCandidates: LocatedMatch[],
+  bundle: MappedIncomeField[],
+  pages: LocatePage[] | undefined,
+  borrowers: LoanBorrower[],
+): LocatedMatch[] {
+  // A pay stub for one spouse never lands on the other spouse's W-2 at the same employer.
+  const bundlePerson = personOf(bundle, pages, borrowers);
+  const candidates = allCandidates.filter(
+    (match) => !peopleConflict(personOf(match.fields, pages, borrowers, match), bundlePerson),
+  );
+  if (!candidates.length) return [];
   const identity = identityFromFields(bundle);
   const pageText = pageTextFor(bundle[0], pages);
   const byEin = identity.ein ? candidates.filter((match) => einsMatch(match.ein, identity.ein)) : [];
-  if (byEin.length === 1) return byEin[0];
+  if (byEin.length === 1) return byEin;
   const byName = identity.name ? candidates.filter((match) => match.name && namesMatch(match.name, identity.name!)) : [];
-  if (byName.length === 1) return byName[0];
+  if (byName.length === 1 && !byEin.length) return byName;
+  const shared = oneBusinessManyPeople(byEin.length ? byEin : byName, bundle, pages, borrowers);
+  if (shared) return shared;
+  if (byName.length === 1) return byName;
   // An explicit identity that conflicts with every candidate is evidence of a
   // separate employer/business, not permission to attach to the only candidate.
-  if (identity.ein || identity.name) return undefined;
+  if (identity.ein || identity.name) return [];
   const byPageText = pageText
     ? candidates.filter((match) => match.name && namesMatch(match.name, pageText))
     : [];
-  if (byPageText.length === 1) return byPageText[0];
+  if (byPageText.length === 1) return byPageText;
   const documentId = bundle[0].documentId;
   if (documentId) {
     const sameDoc = candidates.filter((match) => match.documentId === documentId);
-    if (sameDoc.length === 1) return sameDoc[0];
+    if (sameDoc.length === 1) return sameDoc;
   }
-  if (candidates.length === 1) return candidates[0];
-  return undefined;
+  if (candidates.length === 1) return candidates;
+  return oneBusinessManyPeople(candidates, bundle, pages, borrowers) ?? [];
 }
 
 function inventMatch(bundle: MappedIncomeField[], kind: DocKind, pages?: LocatePage[]): LocatedMatch {
@@ -294,7 +457,8 @@ function inventMatch(bundle: MappedIncomeField[], kind: DocKind, pages?: LocateP
 function attachSupportingFields(
   matches: LocatedMatch[],
   supporting: MappedIncomeField[],
-  pages?: LocatePage[],
+  pages: LocatePage[] | undefined,
+  borrowers: LoanBorrower[],
 ): LocatedMatch[] {
   if (!supporting.length) return matches;
   const next = matches.map((match) => ({ ...match, fields: [...match.fields] }));
@@ -309,10 +473,10 @@ function attachSupportingFields(
 
   const attachBundle = (bundle: MappedIncomeField[], kinds: DocKind[]): boolean => {
     const candidates = next.filter((match) => kinds.includes(match.kind));
-    const target = pickSupportingTarget(candidates, bundle, pages);
-    if (!target) return false;
+    const targets = pickSupportingTargets(candidates, bundle, pages, borrowers);
+    if (!targets.length) return false;
     bundle.forEach((field) => {
-      pushField(target, field);
+      targets.forEach((target) => pushField(target, field));
       used.add(field);
     });
     return true;
@@ -392,12 +556,21 @@ function einsMatch(left?: string, right?: string): boolean {
   return a.length === 9 && a === b;
 }
 
-export function discoveredIdentityKey(match: Pick<LocatedMatch, 'kind' | 'name' | 'ein' | 'entityId' | 'documentId' | 'pageIndex'>): string {
+export function discoveredIdentityKey(
+  match: Pick<LocatedMatch, 'kind' | 'name' | 'ein' | 'entityId' | 'documentId' | 'pageIndex'> &
+    Partial<Pick<LocatedMatch, 'personName' | 'borrowerIds'>>,
+): string {
+  // Two spouses' W-2s from one employer, or two partners' K-1s from one
+  // partnership, are separate income: the person is part of the identity.
+  const owner = PERSON_KINDS.has(match.kind)
+    ? match.borrowerIds?.[0] ?? (match.personName ? personNameTokens(match.personName).join('-') : '')
+    : '';
+  const kind = owner ? `${match.kind}@${owner}` : match.kind;
   const ein = normalizeEin(match.ein);
-  if (ein.length === 9) return `${match.kind}:ein:${ein}`;
+  if (ein.length === 9) return `${kind}:ein:${ein}`;
   const name = normalizeBusinessName(match.name ?? '');
-  if (name) return `${match.kind}:name:${name}`;
-  return `${match.kind}:page:${match.documentId ?? ''}::${match.entityId}::${match.pageIndex}`;
+  if (name) return `${kind}:name:${name}`;
+  return `${kind}:page:${match.documentId ?? ''}::${match.entityId}::${match.pageIndex}`;
 }
 
 export function discoveredSelectId(match: LocatedMatch): string {
@@ -516,14 +689,95 @@ function rentalMatch(rental: LocateRentalExtract): LocatedMatch {
  * Anything in the packet that never matched a 1003 name stays in `discovered`
  * (undisclosed businesses and extra Schedule E properties).
  */
+const FORM_LABEL: Partial<Record<DocKind, string>> = {
+  w2: 'W-2',
+  paystub: 'Pay stub',
+  'schedule-c': 'Schedule C',
+  scorp: 'K-1 (1120-S)',
+  partnership: 'K-1 (1065)',
+};
+
+function documentLabel(match: LocatedMatch): string {
+  const form = match.form === 'Paystub' ? 'Pay stub' : match.form === 'WVOE' ? 'WVOE' : FORM_LABEL[match.kind] ?? match.form;
+  return `${form}${match.name ? ` from ${match.name}` : ''} (p.${match.pageIndex + 1})`;
+}
+
+/**
+ * Decide whose document a match is. Borrower-less kinds (a return face, an
+ * 1120) stay unassigned here and take the borrower of the 1003 entry that
+ * claims them.
+ */
+function assignBorrower(
+  match: LocatedMatch,
+  context: {
+    pages?: LocatePage[];
+    borrowers: LoanBorrower[];
+    fromLoan: boolean;
+    assignments?: Record<string, string>;
+  },
+): void {
+  const person = personOf(match.fields, context.pages, context.borrowers, match);
+  match.personName = person.personName;
+  const manual = context.assignments?.[assignmentKey(match)];
+  if (manual && context.borrowers.some((borrower) => borrower.id === manual)) {
+    match.borrowerIds = [manual];
+    match.borrowerStatus = 'matched';
+    return;
+  }
+  if (person.borrowerIds.length) {
+    match.borrowerIds = person.borrowerIds;
+    match.borrowerStatus = 'matched';
+    return;
+  }
+  match.borrowerIds = [];
+  if (!context.borrowers.length || !expectsPerson(match, context.pages)) {
+    match.borrowerStatus = 'unknown';
+    return;
+  }
+  if (context.fromLoan) {
+    // It prints a person and that person is not on the 1003 (or its name
+    // could not be read). Counting it would put a stranger's income on the loan.
+    match.borrowerStatus = 'unidentified';
+    return;
+  }
+  if (context.borrowers.length === 1 && !person.personName) {
+    match.borrowerIds = [context.borrowers[0].id];
+    match.borrowerStatus = 'matched';
+    return;
+  }
+  match.borrowerStatus = 'unknown';
+}
+
+function belongsToOther(match: LocatedMatch, entity: UrlAListedEntity): boolean {
+  if (!entity.borrowerId || !match.borrowerIds?.length) return false;
+  return !match.borrowerIds.includes(entity.borrowerId);
+}
+
 export function locateIncomeEntities(options: {
   roster: UrlAListedEntity[];
   fields: MappedIncomeField[];
   pages?: LocatePage[];
   rentals?: LocateRentalExtract[];
+  /** Borrowers on the 1003. Without them, the people the documents name are used. */
+  borrowers?: LoanBorrower[];
+  /** Underwriter's "assign to borrower" choices, keyed by `assignmentKey`. */
+  assignments?: Record<string, string>;
 }): LocateResult {
-  const groups = groupFieldsByEntity(options.fields, undefined, options.pages);
+  const loanBorrowers = (options.borrowers ?? []).filter((borrower) => borrower.name.trim());
+  const fromLoan = loanBorrowers.length > 0;
+  const borrowers = fromLoan ? loanBorrowers : borrowersFromDocuments(options.fields);
+  const context = { pages: options.pages, borrowers, fromLoan, assignments: options.assignments };
+  const warnings: BorrowerWarning[] = [];
+
+  const allGroups = groupFieldsByEntity(options.fields, undefined, options.pages, borrowers);
+  allGroups.forEach((group) => assignBorrower(group, context));
+  const unidentified = allGroups.filter((group) => group.borrowerStatus === 'unidentified');
+  const groups = allGroups.filter((group) => group.borrowerStatus !== 'unidentified');
+  const heldOut = (here: { pageIndex: number; form: MappedIncomeField['form']; documentId?: string }) =>
+    unidentified.some((item) => samePageForm(item, here) || item.fields.some((field) => samePageForm(field, here)));
+
   const claimed = new Set<string>();
+  const claimedBy = new Map<LocatedMatch, Set<string>>();
   const roster: LocatedRosterRow[] = options.roster.map((entity) => {
     const matches: LocatedMatch[] = [];
 
@@ -541,26 +795,49 @@ export function locateIncomeEntities(options: {
     for (const group of groups) {
       const score = scoreMatch(entity, group);
       if (score < 70) continue;
+      if (belongsToOther(group, entity)) continue;
       matches.push(group);
       claimed.add(matchKey(group));
+      if (entity.borrowerId) claimedBy.set(group, new Set([...(claimedBy.get(group) ?? []), entity.borrowerId]));
     }
 
     for (const page of options.pages ?? []) {
       const fromPage = matchFromPage(page, entity);
       if (!fromPage) continue;
       if (matches.some((item) => samePageForm(item, fromPage))) continue;
+      if (heldOut(fromPage)) continue;
       const overlapping = groups.find((group) => samePageForm(group, fromPage));
-      const match = overlapping ?? fromPage;
-      matches.push(match);
-      claimed.add(matchKey(match));
+      if (overlapping) {
+        if (belongsToOther(overlapping, entity)) continue;
+        matches.push(overlapping);
+        claimed.add(matchKey(overlapping));
+        if (entity.borrowerId) claimedBy.set(overlapping, new Set([...(claimedBy.get(overlapping) ?? []), entity.borrowerId]));
+        continue;
+      }
+      assignBorrower(fromPage, context);
+      if (fromPage.borrowerStatus === 'unidentified' || belongsToOther(fromPage, entity)) continue;
+      if (entity.borrowerId && !fromPage.borrowerIds?.length) {
+        fromPage.borrowerIds = [entity.borrowerId];
+        fromPage.borrowerStatus = 'matched';
+      }
+      matches.push(fromPage);
+      claimed.add(matchKey(fromPage));
     }
 
     matches.sort((a, b) => a.pageIndex - b.pageIndex || a.form.localeCompare(b.form));
     return { entity, located: matches.length > 0, matches };
   });
 
+  // A return or 1120 with no person on it belongs to the one borrower whose
+  // 1003 entry claimed it.
+  for (const [group, owners] of claimedBy) {
+    if (group.borrowerIds?.length || owners.size !== 1) continue;
+    group.borrowerIds = [...owners];
+    group.borrowerStatus = 'matched';
+  }
+
   const discovered: LocatedMatch[] = groups.filter((group) => !claimed.has(matchKey(group)));
-  const covered = [...roster.flatMap((row) => row.matches), ...discovered];
+  const covered = [...roster.flatMap((row) => row.matches), ...discovered, ...unidentified];
 
   for (const page of options.pages ?? []) {
     const form = formFromPageLabels(page.formIds);
@@ -582,7 +859,9 @@ export function locateIncomeEntities(options: {
       ein: identity.ein,
       fields: [],
     };
-    discovered.push(match);
+    assignBorrower(match, context);
+    if (match.borrowerStatus === 'unidentified') unidentified.push(match);
+    else discovered.push(match);
     covered.push(match);
   }
 
@@ -593,7 +872,26 @@ export function locateIncomeEntities(options: {
     discovered.push(match);
   }
 
-  return { roster, discovered };
+  for (const match of unidentified) {
+    const who = match.personName ? `names ${match.personName}, who is not a borrower on the 1003` : 'does not name any borrower on the 1003';
+    warnings.push({
+      code: 'UNIDENTIFIED_BORROWER',
+      message: `${documentLabel(match)} ${who}. Its income is left out until it is assigned to a borrower.`,
+      assignmentKey: assignmentKey(match),
+      documentId: match.documentId,
+      pageIndex: match.pageIndex,
+    });
+  }
+  if (!fromLoan && borrowers.length > 1) {
+    warnings.push({
+      code: 'UNCONFIRMED_BORROWERS',
+      message: `No 1003 is loaded and the documents name ${borrowers.length} people (${borrowers
+        .map((borrower) => borrower.name)
+        .join(', ')}). Income is split by the person on each document; load the 1003 to confirm who is applying.`,
+    });
+  }
+
+  return { roster, discovered, borrowers, unidentified, warnings };
 }
 
 export function pagesFromParsePages(

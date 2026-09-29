@@ -18,6 +18,9 @@ export default function UrlAEntityRoster({
   const [open, setOpen] = useState(false);
   if (!result.roster.length && !discovered.length) return null;
   const located = result.roster.filter((row) => row.located).length;
+  const borrowers = result.borrowers ?? [];
+  const ownerOf = (borrowerId: string | undefined) =>
+    borrowers.length > 1 ? borrowers.find((borrower) => borrower.id === borrowerId)?.name : undefined;
 
   return (
     <section
@@ -63,6 +66,7 @@ export default function UrlAEntityRoster({
             >
               {row.entity.name}
               <span className="ml-1.5 font-semibold opacity-70">
+                {ownerOf(row.entity.borrowerId) ? `${ownerOf(row.entity.borrowerId)} · ` : ''}
                 {row.entity.classification}
                 {row.entity.selfEmployed ? ' · SE' : ''}
                 {row.located ? '' : ' · missing'}
@@ -80,7 +84,9 @@ export default function UrlAEntityRoster({
               title={`On ${match.form} · not listed on the 1003`}
             >
               {match.name || 'Undisclosed business'}
-              <span className="ml-1.5 font-semibold opacity-70">Undisclosed · {match.form}</span>
+              <span className="ml-1.5 font-semibold opacity-70">
+                {ownerOf(match.borrowerIds?.[0]) ? `${ownerOf(match.borrowerIds?.[0])} · ` : ''}Undisclosed · {match.form}
+              </span>
             </button>
           </li>
         ))}

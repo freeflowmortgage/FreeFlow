@@ -1,4 +1,11 @@
-import { buildDocumentPlan, firstName, type IntakeAnswers, type LoanProgram } from './intake-agent';
+import {
+  buildDocumentPlan,
+  coborrowersOf,
+  firstName,
+  type BorrowerEmploymentAnswers,
+  type IntakeAnswers,
+  type LoanProgram,
+} from './intake-agent';
 import {
   generatePaystubCurrentIncomeItemsXml,
   type MortgageDocumentPaystubParser,
@@ -84,6 +91,19 @@ function employerBlock(
             </EMPLOYER>`;
 }
 
+/** Current, second and prior employers for one borrower. */
+function employersXml(employment: BorrowerEmploymentAnswers, paymentFrequency?: string): string {
+  const selfEmployed = employment.employmentType === 'SELF_EMPLOYED';
+  const currentYears = selfEmployed ? employment.yearsInBusiness : employment.yearsAtJob;
+  return [
+    employerBlock(employment.employerName, currentYears, employment.monthlyIncome, 'Primary', selfEmployed, paymentFrequency),
+    employment.hasSecondJob
+      ? employerBlock(employment.secondEmployer, undefined, employment.secondMonthlyIncome, 'Secondary', false)
+      : '',
+    employerBlock(employment.previousEmployer, employment.previousEmployerYears, undefined, 'Previous', false),
+  ].join('');
+}
+
 /**
  * Serialize the intake session as a MISMO 3.4-style URLA payload for client
  * (lender/broker LOS) delivery. This is the deliverable — the borrower never
@@ -95,21 +115,30 @@ export function buildMismo34Xml(
 ): string {
   const program: LoanProgram =
     answers.program && answers.program !== 'UNSURE' ? answers.program : 'CONVENTIONAL';
-  const selfEmployed = answers.employmentType === 'SELF_EMPLOYED';
   const generatedAt = new Date().toISOString();
 
-  const currentEmployerYears = selfEmployed ? answers.yearsInBusiness : answers.yearsAtJob;
   const payFrequency = paystub?.documentMetadata.paymentFrequencyType;
-  const priorEmployer = employerBlock(
-    answers.previousEmployer,
-    answers.previousEmployerYears,
-    undefined,
-    'Previous',
-    false,
-  );
-  const secondEmployer = answers.hasSecondJob
-    ? employerBlock(answers.secondEmployer, undefined, answers.secondMonthlyIncome, 'Secondary', false)
-    : '';
+  const coborrowerParties = coborrowersOf(answers)
+    .filter((coborrower) => coborrower.name?.trim())
+    .map(
+      (coborrower) => `
+      <PARTY>
+        <INDIVIDUAL><NAME><FullName>${esc(coborrower.name)}</FullName></NAME></INDIVIDUAL>
+        <ROLES>
+          <ROLE>
+            <BORROWER>
+              <BORROWER_DETAIL>
+                <BorrowerClassificationType>Secondary</BorrowerClassificationType>
+              </BORROWER_DETAIL>
+              <EMPLOYERS>${employersXml(coborrower)}
+              </EMPLOYERS>
+            </BORROWER>
+            <ROLE_DETAIL><PartyRoleType>Borrower</PartyRoleType></ROLE_DETAIL>
+          </ROLE>
+        </ROLES>
+      </PARTY>`,
+    )
+    .join('');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <MESSAGE xmlns="http://www.mismo.org/residential/2009/schemas"
@@ -160,6 +189,7 @@ export function buildMismo34Xml(
           <ROLE>
             <BORROWER>
               <BORROWER_DETAIL>
+                <BorrowerClassificationType>Primary</BorrowerClassificationType>
                 <BorrowerBirthDate>${esc(answers.dob)}</BorrowerBirthDate>
                 <MaritalStatusType>${esc(answers.maritalStatus ?? '')}</MaritalStatusType>
                 <DependentCount>${num(answers.dependentsCount)}</DependentCount>
@@ -172,7 +202,7 @@ export function buildMismo34Xml(
                 'Prior',
               )}
               </RESIDENCES>
-              <EMPLOYERS>${employerBlock(answers.employerName, currentEmployerYears, answers.monthlyIncome, 'Primary', selfEmployed, payFrequency)}${secondEmployer}${priorEmployer}
+              <EMPLOYERS>${employersXml(answers, payFrequency)}
               </EMPLOYERS>${
                 paystub
                   ? `
@@ -202,15 +232,7 @@ export function buildMismo34Xml(
             <ROLE_DETAIL><PartyRoleType>Borrower</PartyRoleType></ROLE_DETAIL>
           </ROLE>
         </ROLES>
-      </PARTY>${
-        answers.hasCoborrower && answers.coborrowerName
-          ? `
-      <PARTY>
-        <INDIVIDUAL><NAME><FullName>${esc(answers.coborrowerName)}</FullName></NAME></INDIVIDUAL>
-        <ROLES><ROLE><ROLE_DETAIL><PartyRoleType>Borrower</PartyRoleType></ROLE_DETAIL></ROLE></ROLES>
-      </PARTY>`
-          : ''
-      }
+      </PARTY>${coborrowerParties}
     </PARTIES>
     <EXTENSION>
       <FREEFLOW:INTAKE>

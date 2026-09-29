@@ -1,6 +1,6 @@
 import type { IntakeLang } from './detect-spoken-language';
 import type { IntakeAnswers, IntakeChoice } from './intake-agent';
-import { firstName } from './intake-agent';
+import { coborrowerDocumentLines, coborrowersOf, firstName } from './intake-agent';
 
 type Copy = {
   kicker: string;
@@ -499,6 +499,7 @@ function englishPlan(answers: IntakeAnswers): string[] {
   } else {
     lines.push('As a W-2 borrower we will collect your most recent paystubs covering 30 days and two years of W-2s.');
   }
+  lines.push(...coborrowerDocumentLines(answers));
   if (answers.loanPurpose === 'PURCHASE') {
     lines.push('Assets: two months of bank statements to source the down payment and closing funds.');
   } else {
@@ -527,6 +528,15 @@ function spanishPlan(answers: IntakeAnswers): string[] {
     }
   } else {
     lines.push('Como empleado W-2 recolectaremos los recibos de pago más recientes (30 días) y dos años de W-2.');
+  }
+  for (const coborrower of coborrowersOf(answers)) {
+    const name = coborrower.name?.trim().split(/\s+/)[0];
+    if (!name) continue;
+    lines.push(
+      coborrower.employmentType === 'SELF_EMPLOYED'
+        ? `${name} (co-prestatario) es trabajador independiente: dos años de declaraciones personales y del negocio. ${name} tendrá su propio Formulario 1084.`
+        : `${name} (co-prestatario): recibos de pago de los últimos 30 días y dos años de W-2.`,
+    );
   }
   if (answers.loanPurpose === 'PURCHASE') {
     lines.push('Activos: dos meses de estados de cuenta para documentar el enganche y los costos de cierre.');
