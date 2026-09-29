@@ -156,3 +156,46 @@ def test_page_strategy_short_unlabeled_page_needs_ocr() -> None:
     use_ocr, flags = AIPDFConverter._page_strategy("x" * (NATIVE_TEXT_CHARS - 1), [])
     assert use_ocr is True
     assert flags == []
+
+
+def _browser_printed_image_pdf(image_px: tuple[int, int] = (615, 498)) -> bytes:
+    """An image printed from a browser tab: header, footer and one picture."""
+    doc = fitz.open()
+    page = doc.new_page(width=792, height=612)
+    page.insert_text((20, 20), "9/18/26, 5:48 PM", fontsize=7)
+    page.insert_text((360, 20), "download (615x498)", fontsize=7)
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, *image_px), False)
+    pix.clear_with(255)
+    page.insert_image(fitz.Rect(166, 120, 627, 494), pixmap=pix)
+    page.insert_text((20, 590), "file:///C:/Users/someone/Downloads/download", fontsize=7)
+    page.insert_text((740, 590), "1/1", fontsize=7)
+    doc.set_metadata({"title": "download (615x498)"})
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def test_browser_print_header_and_footer_do_not_count_as_page_text() -> None:
+    inspected = AIPDFConverter().inspect_pages(_browser_printed_image_pdf())
+    assert inspected[0].use_ocr is True
+    assert "print_chrome_only_text" in inspected[0].flags
+
+
+def test_page_with_real_text_and_a_print_header_stays_native() -> None:
+    text = "9/18/26, 5:48 PM\nAcme Payroll Services earnings statement for Jane Smith, regular hours 80.00\n1/1"
+    use_ocr, flags = AIPDFConverter._page_strategy(text, [])
+    assert use_ocr is False
+    assert "print_chrome_only_text" not in flags
+
+
+def test_small_screenshot_on_a_page_is_flagged_low_resolution() -> None:
+    import pypdfium2 as pdfium
+
+    low = pdfium.PdfDocument(_browser_printed_image_pdf((615, 498)))
+    sharp = pdfium.PdfDocument(_browser_printed_image_pdf((1921, 1558)))
+    try:
+        assert AIPDFConverter._main_image_dpi(low[0]) < 100
+        assert AIPDFConverter._main_image_dpi(sharp[0]) > 290
+    finally:
+        low.close()
+        sharp.close()

@@ -13,6 +13,13 @@ WVOE_TITLE_PATTERN = (
     r"Written Verification of Employment|Verification of Employment|The Work Number|\bWVOE\b"
 )
 
+# Header and footer a browser adds when printing a page or image to PDF:
+# "9/18/26, 5:48 PM", "download (615×498)", "file:///C:/…". Never a company name.
+PRINT_CHROME_LINE = re.compile(
+    r"^\s*\d{1,2}/\d{1,2}/\d{2,4},?\s*\d{1,2}:\d{2}|\b(?:file|https?|about|blob):/|\(\s*\d{2,5}\s*[×x]\s*\d{2,5}\s*\)",
+    re.IGNORECASE,
+)
+
 W2_TITLE = re.compile(W2_TITLE_PATTERN, re.IGNORECASE)
 PAYSTUB_TITLE = re.compile(PAYSTUB_TITLE_PATTERN, re.IGNORECASE)
 WVOE_TITLE = re.compile(WVOE_TITLE_PATTERN, re.IGNORECASE)

@@ -765,3 +765,19 @@ def test_page_content_rotation_detects_sideways_scan() -> None:
     sideways = np.rot90(upright, 1)
     assert AIPDFConverter._page_content_rotation(upright) == 0
     assert AIPDFConverter._page_content_rotation(sideways) in {90, 270}
+
+
+def test_paystub_employer_skips_a_browser_print_header() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((20, 20), "9/18/26, 5:48 PM download (615x498)", fontsize=7)
+    page.insert_text((72, 60), "Riverside Medical Center", fontsize=11)
+    page.insert_text((72, 80), "Earnings Statement", fontsize=10)
+    page.insert_text((72, 110), "Regular Pay 80.00 44.44 3,555.20 42,662.40", fontsize=9)
+    page.insert_text((20, 770), "file:///C:/Users/someone/Downloads/download 1/1", fontsize=7)
+    data = doc.tobytes()
+    doc.close()
+
+    fields = extract_irs_form_fields(data, page_indices=[0])
+    employer = [field["value"] for field in fields if field["sourceFieldId"] == "ps-employer-name"]
+    assert employer == ["Riverside Medical Center"]

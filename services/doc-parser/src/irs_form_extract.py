@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from business_return_grid import extract_business_return_page, form_key_for_page
-from form_signatures import PAYSTUB_TITLE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
+from form_signatures import PAYSTUB_TITLE, PRINT_CHROME_LINE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
 from ocr_match import pattern_matches
 from paystub_row_rules import (
     EXCLUDE_ROW as _PAYSTUB_EXCLUDE_ROW,
@@ -1185,6 +1185,8 @@ def _paystub_header_employer(
             line,
             re.I,
         ):
+            continue
+        if PRINT_CHROME_LINE.search(line):
             continue
         if re.search(r"\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2}", line):
             continue
