@@ -31,7 +31,10 @@ enable_monitoring = false
 operations_alert_email = null
 portal_desired_count = 0
 portal_image     = ""
-connector_worker_image = ""
+# Live document-pull :3 / sync worker digest. Use the portal ECR repository URL
+# plus @sha256. Leave empty only if the dev module pin (same digest) should apply;
+# do not point this at an older portal_image or the deleted developer_connect_worker_image name.
+connector_worker_image = "098767424191.dkr.ecr.us-west-2.amazonaws.com/mortgage-api@sha256:b0cefb31306eed2792d3eea5deb157928ea09ff1ef94a4592a47f97f50519836"
 parser_image     = ""
 console_image    = ""
 migration_image  = ""

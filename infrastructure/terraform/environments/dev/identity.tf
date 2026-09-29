@@ -30,6 +30,8 @@ data "aws_iam_policy_document" "task_execution_secrets" {
       ],
       (var.enable_encompass_document_pull_worker || var.enable_encompass_sync_worker) ? [
         aws_secretsmanager_secret.database_connector.arn,
+      ] : [],
+      var.enable_encompass_connector ? [
         aws_secretsmanager_secret.connector_service_signing_key[0].arn,
       ] : [],
     )

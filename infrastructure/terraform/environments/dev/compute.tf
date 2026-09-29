@@ -121,6 +121,9 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
         ], var.enable_encompass_document_pull_worker ? [
         { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
+        ] : [], var.enable_encompass_connector ? [
+        { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = local.custom_connector_service_url },
+        { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = local.custom_connector_signed_service_id },
         ] : [], var.enable_cognito_edge ? [
         { name = "OIDC_ISSUER", value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.live_test[0].id}" },
         { name = "OIDC_CLIENT_ID", value = aws_cognito_user_pool_client.alb[0].id },
@@ -133,10 +136,12 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "DEV_AUTH_TENANT_ID", value = "00000000-0000-4000-8000-000000000100" },
         { name = "DEV_AUTH_SUBJECT", value = "plte-dev-underwriter" },
       ])
-      secrets = [
+      secrets = concat([
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:url::" },
         { name = "FIELD_ENCRYPTION_KEY", valueFrom = aws_secretsmanager_secret.field_encryption.arn },
-      ]
+        ], var.enable_encompass_connector ? [
+        { name = "ENCOMPASS_CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
+      ] : [])
       portMappings = [{
         name          = "http"
         containerPort = 8000
@@ -207,7 +212,7 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "CONNECTOR_MODE", value = "synthetic-freeflow-dev" },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
       { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_service_auth_kind },
-      { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
+      { name = "CONNECTOR_SIGNED_SERVICE_ID", value = local.custom_connector_signed_service_id },
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
@@ -309,7 +314,7 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
 
   container_definitions = jsonencode([{
     name                   = "document-pull-worker"
-    image                  = var.connector_worker_image != "" ? var.connector_worker_image : var.portal_image
+    image                  = local.connector_worker_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
@@ -322,8 +327,8 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
     environment = [
       { name = "DOC_PARSER_SERVICE_URL", value = "http://income-parser.freeflow.local:8080/parse" },
       { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
-      { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = "http://encompass-connector.freeflow.local:8080" },
-      { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
+      { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = local.custom_connector_service_url },
+      { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = local.custom_connector_signed_service_id },
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
@@ -358,7 +363,7 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
 
   container_definitions = jsonencode([{
     name                   = "encompass-sync-worker"
-    image                  = var.connector_worker_image != "" ? var.connector_worker_image : var.portal_image
+    image                  = local.connector_worker_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
@@ -371,8 +376,8 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
     environment = [
       { name = "APP_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
       { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
-      { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = "http://encompass-connector.freeflow.local:8080" },
-      { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
+      { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = local.custom_connector_service_url },
+      { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = local.custom_connector_signed_service_id },
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },

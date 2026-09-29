@@ -334,7 +334,7 @@ variable "encompass_connector_service_auth_kind" {
 
 variable "connector_worker_image" {
   type        = string
-  description = "Optional immutable portal-derived image pinned independently for custom connector workers. Empty follows portal_image."
+  description = "Optional immutable override for the document-pull and sync workers. Empty pins the live freeflow-dev digest in the portal ECR repository instead of following portal_image."
   default     = ""
 
   validation {

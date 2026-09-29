@@ -42,14 +42,20 @@ data "aws_route53_zone" "public" {
 }
 
 locals {
-  name_prefix                       = "freeflow-${var.environment}"
-  synthetic_connector_tenant_id     = "00000000-0000-4000-8000-000000000100"
-  synthetic_connector_lender_id     = "freeflow-dev"
-  synthetic_connector_deployment_id = "freeflow-dev"
-  connector_service_auth_kind       = var.encompass_connector_service_auth_kind != "" ? var.encompass_connector_service_auth_kind : "bearer-stub-non-prod"
-  public_hosted_zone_id             = var.create_hosted_zone ? aws_route53_zone.public[0].zone_id : (var.dns_managed_externally ? null : ((var.enable_https_certificate || var.enable_cognito_edge) ? data.aws_route53_zone.public[0].zone_id : null))
-  rds_master_secret_arn             = data.aws_db_instance.existing.master_user_secret[0].secret_arn
-  rds_endpoint                      = data.aws_db_instance.existing.address
+  name_prefix                        = "freeflow-${var.environment}"
+  synthetic_connector_tenant_id      = "00000000-0000-4000-8000-000000000100"
+  synthetic_connector_lender_id      = "freeflow-dev"
+  synthetic_connector_deployment_id  = "freeflow-dev"
+  connector_service_auth_kind        = var.encompass_connector_service_auth_kind != "" ? var.encompass_connector_service_auth_kind : "bearer-stub-non-prod"
+  custom_connector_service_url       = "http://encompass-connector.freeflow.local:8080"
+  custom_connector_signed_service_id = "freeflow-connector-smoke"
+  # Live freeflow-dev document-pull task definition :3. Empty connector_worker_image
+  # stays on this digest in the portal repository so a plan cannot follow an older portal_image.
+  connector_worker_image_digest = "sha256:b0cefb31306eed2792d3eea5deb157928ea09ff1ef94a4592a47f97f50519836"
+  connector_worker_image        = var.connector_worker_image != "" ? var.connector_worker_image : "${data.aws_ecr_repository.portal.repository_url}@${local.connector_worker_image_digest}"
+  public_hosted_zone_id         = var.create_hosted_zone ? aws_route53_zone.public[0].zone_id : (var.dns_managed_externally ? null : ((var.enable_https_certificate || var.enable_cognito_edge) ? data.aws_route53_zone.public[0].zone_id : null))
+  rds_master_secret_arn         = data.aws_db_instance.existing.master_user_secret[0].secret_arn
+  rds_endpoint                  = data.aws_db_instance.existing.address
   common_environment = [
     { name = "NODE_ENV", value = "production" },
     { name = "FREEFLOW_RUNTIME_ENV", value = var.enable_cognito_edge ? "staging" : "development" },
