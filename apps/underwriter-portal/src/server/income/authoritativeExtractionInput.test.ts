@@ -39,6 +39,26 @@ test('rejects unknown or malformed persisted calculation fields', () => {
   }]));
 });
 
+test('keeps persisted paystub evidence fail-closed until authoritative annualization exists', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000101';
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: [
+        { sourceFieldId: 'ps-employer-name', value: 'Synthetic Employer' },
+        { sourceFieldId: 'ps-base-ytd', numericValue: 54000 },
+      ],
+    }] },
+  }]), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{
+      extractionId, entityId: 'Paystub:paystub-p0', field: 'unsupportedCalculation', form: 'Paystub',
+    }]);
+    return true;
+  });
+});
+
 test('calculation extraction freshness binds active hash and source document version', () => {
   const current = [{
     extractionId: 'extraction', extractionHash: 'a'.repeat(64), sourceDocumentId: 'document',
