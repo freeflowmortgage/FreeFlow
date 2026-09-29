@@ -609,6 +609,60 @@ describe('entity-scoped income field mapping', () => {
     expect(fields.find((field) => field.sourceFieldId === 'ps-base-ytd')?.numericValue).toBe(54000);
   });
 
+  test('skips a browser print header and warns on a low-resolution stub', () => {
+    const fields = mapIncomeFields(
+      response([
+        {
+          index: 0,
+          formIds: ['Paystub'],
+          isNativeText: false,
+          meanConfidence: 80,
+          skewDegrees: 0,
+          flags: ['print_chrome_only_text', 'low_resolution_image'],
+          words: words([
+            '9/18/26, 5:48 PM download (615x498)',
+            'University of California',
+            'Earnings Statement',
+            'Regular Pay 80.00 44.44 3,555.20 42,662.40',
+          ]),
+        },
+      ]),
+    );
+    const employer = fields.find((field) => field.sourceFieldId === 'ps-employer-name');
+    expect(employer?.value).toBe('University of California');
+    expect(fields.length).toBeGreaterThan(0);
+    for (const field of fields) {
+      expect(field.reviewNotes?.some((note) => /low-resolution image/.test(note.message))).toBe(true);
+    }
+  });
+
+  test('does not read an unclassified return page as a pay stub or W-2', () => {
+    const page = (index: number, lines: string[]): ParsePage => ({
+      index,
+      formIds: [],
+      isNativeText: true,
+      meanConfidence: 99,
+      skewDegrees: 0,
+      flags: [],
+      words: words(lines),
+    });
+    const fields = mapIncomeFields(
+      response([
+        page(1, [
+          'Form 1065 (2025) Page 2',
+          'Schedule B Other Information',
+          'Salaries and wages 42,000.00',
+          'Net earnings from self-employment 18,250.00',
+        ]),
+        page(2, ['Schedule K (Form 1065) 2025', 'Guaranteed payments 12,000.00']),
+        page(3, ['Riverside Market LLC', 'Pay period 01/01/2026 - 01/15/2026', 'Regular 40 25.00 1,000.00 12,000.00']),
+      ]),
+    );
+    const wageFields = fields.filter((field) => ['Paystub', 'W-2', 'WVOE'].includes(field.form));
+    expect(wageFields.every((field) => field.pageIndex === 3)).toBe(true);
+    expect(fields.find((field) => field.sourceFieldId === 'ps-employer-name')?.value).toBe('Riverside Market LLC');
+  });
+
   test('does not duplicate paystub rows already present in formExtracts', () => {
     const fields = mapIncomeFields({
       ...response([

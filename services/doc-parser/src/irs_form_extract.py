@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from business_return_grid import extract_business_return_page, form_key_for_page
-from form_signatures import PAYSTUB_TITLE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
+from form_signatures import PAYSTUB_TITLE, PRINT_CHROME_LINE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
 from ocr_match import pattern_matches
 from paystub_row_rules import (
     EXCLUDE_ROW as _PAYSTUB_EXCLUDE_ROW,
@@ -1186,6 +1186,8 @@ def _paystub_header_employer(
             re.I,
         ):
             continue
+        if PRINT_CHROME_LINE.search(line):
+            continue
         if re.search(r"\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2}", line):
             continue
         cleaned = re.sub(r"\s+", " ", line).strip(" ·-|")
@@ -1540,6 +1542,156 @@ def _paystub_fields_from_parser(
     return fields
 
 
+@dataclass(frozen=True)
+class _PersonNameSpec:
+    """Where a form prints the person it belongs to, relative to the caption.
+
+    The value band starts ``dx0`` points left of the caption's first word and
+    ends ``dx1`` points right of it; ``below`` puts the band under the caption,
+    otherwise it runs to the right on the caption's own line.
+    """
+
+    spec: FieldSpec
+    dx0: float
+    dx1: float
+    below: bool = True
+
+
+PERSON_NAME_SPECS: dict[int, _PersonNameSpec] = {
+    id(W2_FIELDS): _PersonNameSpec(
+        FieldSpec("w2-employee-name", "W-2", "identity", "Box e", "Employee Name", "Box e", ("first name and initial",), "person"),
+        dx0=-52.0,
+        dx1=240.0,
+    ),
+    id(PARTNERSHIP_FIELDS): _PersonNameSpec(
+        FieldSpec(
+            "pt-partner-name",
+            "Form 1065",
+            "identity",
+            "Box F",
+            "Partner's Name",
+            "Box F",
+            ("ZIP code for partner", "for partner entered in E", "Partner's name, address", "Partner’s name, address"),
+            "person",
+        ),
+        dx0=-150.0,
+        dx1=125.0,
+    ),
+    id(SCORP_FIELDS): _PersonNameSpec(
+        FieldSpec(
+            "scorp-shareholder-name",
+            "Form 1120-S",
+            "identity",
+            "Box F",
+            "Shareholder's Name",
+            "Box F",
+            ("Shareholder’s name, address", "Shareholder's name, address", "Shareholder’s name", "Shareholder's name"),
+            "person",
+        ),
+        dx0=-20.0,
+        dx1=250.0,
+    ),
+    id(SCHEDULE_C_FIELDS): _PersonNameSpec(
+        FieldSpec("ent1-proprietor", "Schedule C", "identity", "Name", "Name of Proprietor", "Name", ("Name of proprietor",), "person"),
+        dx0=0.0,
+        dx1=330.0,
+        below=False,
+    ),
+}
+
+_NOT_A_PERSON = re.compile(
+    r"\b(?:name|names|address|city|state|zip|code|partner|partnership|shareholder|corporation|employee|employer|"
+    r"instructions?|see|entered|initial|last|first|suff|identifying|number|ssn|tin|social|security|copy|form|"
+    r"department|treasury|internal|revenue|service|omb|llc|inc|corp|ltd|lp|llp|trust|estate)\b",
+    re.I,
+)
+
+
+def _person_name(raw: str) -> str | None:
+    """A person's name from the first line of a name-and-address cell, or None."""
+    first = next((line.strip() for line in (raw or "").splitlines() if line.strip()), "")
+    first = re.split(r"\d", first, maxsplit=1)[0]
+    cleaned = re.sub(r"[^A-Za-z.,'’\- ]+", " ", first)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:-.")
+    if not cleaned or _NOT_A_PERSON.search(cleaned):
+        return None
+    tokens = [token for token in re.split(r"[\s,]+", cleaned) if re.search(r"[A-Za-z]{2,}", token)]
+    if not 2 <= len(tokens) <= 5:
+        return None
+    return cleaned
+
+
+def _top_row_text(words: list[dict[str, Any]], band: list[float]) -> str:
+    hits = words_in_box(words, band)
+    if not hits:
+        return ""
+    top = min(float(word["y0"]) for word in hits)
+    row = sorted((word for word in hits if float(word["y0"]) - top <= 4.0), key=lambda word: float(word["x0"]))
+    return re.sub(r"\s+", " ", " ".join(str(word["text"]) for word in row)).strip()
+
+
+def _band_text(page: Any, pymupdf: Any, band: list[float], words: list[dict[str, Any]] | None) -> str:
+    """Printed text in the band, or every filled widget in it read left to right.
+
+    Words are kept whole when their center is in the band, so a name that
+    starts a little left of the caption is not clipped, and first and last
+    name cells on one row read as one name.
+    """
+    rect = pymupdf.Rect(band)
+    if words:
+        line = _top_row_text(words, band)
+        if line:
+            return line
+    native = [
+        {"x0": w[0], "y0": w[1], "x1": w[2], "y1": w[3], "text": w[4]}
+        for w in page.get_text("words") or []
+    ]
+    line = _top_row_text(native, band)
+    if line:
+        return line
+    values: list[tuple[float, str]] = []
+    for widget in page.widgets() or []:
+        value = str(getattr(widget, "field_value", "") or "").strip()
+        if not value or (rect & widget.rect).is_empty:
+            continue
+        # A widget taller than the band holds name and address; keep its first line.
+        values.append((float(widget.rect.x0), value.splitlines()[0].strip()))
+    return " ".join(value for _, value in sorted(values))
+
+
+def _person_name_row(
+    page: Any,
+    pymupdf: Any,
+    person: _PersonNameSpec,
+    *,
+    page_index: int,
+    words: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    hit = _first_hit(page, person.spec.labels, words)
+    if hit is None:
+        return None
+    width = _page_width(page)
+    x0 = max(8.0, float(hit.x0) + person.dx0)
+    x1 = min(width - 8.0, float(hit.x0) + person.dx1)
+    if person.below:
+        band = [x0, float(hit.y1) + 1.0, x1, float(hit.y1) + 14.0]
+    else:
+        band = [float(hit.x1) + 2.0, float(hit.y0) - 3.0, min(width - 8.0, float(hit.x1) + person.dx1), float(hit.y1) + 3.0]
+    name = _person_name(_band_text(page, pymupdf, band, words))
+    if not name:
+        return None
+    return _field_record(
+        page=page,
+        page_index=page_index,
+        spec=person.spec,
+        form=person.spec.form,
+        entity_id=f"{_form_slug(person.spec.form)}-p{page_index}",
+        value=name,
+        numeric=0.0,
+        used_box=band,
+    )
+
+
 def extract_page_fields(
     page: Any,
     *,
@@ -1598,6 +1750,12 @@ def extract_page_fields(
                 continue
             seen.add(row["sourceFieldId"])
             extracted.append(row)
+        person = PERSON_NAME_SPECS.get(id(specs))
+        if person and person.spec.source_id not in seen:
+            row = _person_name_row(page, pymupdf, person, page_index=page_index, words=words)
+            if row is not None:
+                seen.add(row["sourceFieldId"])
+                extracted.append(row)
         if specs is FORM_8825_FIELDS:
             for row in _extract_8825_columns(page, pymupdf, page_index=page_index, words=words):
                 if row["sourceFieldId"] in seen:

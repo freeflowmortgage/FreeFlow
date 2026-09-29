@@ -1165,6 +1165,19 @@ const PROPERTY_TYPE_CODES: Record<number, string> = {
   8: 'Other',
 };
 
+/**
+ * The words before the first wide horizontal gap. A pay stub header puts the
+ * company name, the address block and "Pay End Date" side by side, and OCR
+ * clusters them into one line.
+ */
+function leadingCell(line: LineCluster, gap = 0.035): LineCluster {
+  const items = [...line.items].sort((a, b) => a.word.x - b.word.x);
+  let end = 1;
+  while (end < items.length && items[end].word.x - (items[end - 1].word.x + items[end - 1].word.w) < gap) end += 1;
+  const cell = items.slice(0, end);
+  return { y: line.y, items: cell, text: cell.map((item) => item.word.text).join(' ') };
+}
+
 function lineBox(line: LineCluster): { box: MappedIncomeField['box']; wordIndex: number } | null {
   const first = line.items[0]?.word;
   const last = line.items[line.items.length - 1]?.word;
@@ -1272,6 +1285,34 @@ function pagesForScheduleL(
   );
 }
 
+const TAX_RETURN_PAGE_HEADER =
+  /\bForm\s+(?:1040|1065|1120|1125|4562|4797|8825)[A-Z-]*\s*\(\s*(?:19|20)\d{2}\s*\)|\bSchedule\s+[A-Z0-9-]+\s*\(\s*Form\s+(?:1040|1065|1120)/i;
+
+/**
+ * Inner pages of a return (1065 page 2, Schedule K, statements) carry no form
+ * title the splitter recognises, so they arrive unclassified. Their running
+ * header still names the return, and they are never a wage document.
+ */
+function isTaxReturnPage(page: ParsePage): boolean {
+  return TAX_RETURN_PAGE_HEADER.test(pageTextBlob(page));
+}
+
+function isUnclassifiedWagePage(page: ParsePage): boolean {
+  return page.formIds.length === 0 && !isTaxReturnPage(page);
+}
+
+/** Browser print header/footer ("9/18/26, 5:48 PM", "download (615×498)", "file:///…"). */
+const PRINT_CHROME_LINE =
+  /^\s*\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d{2}|\b(?:file|https?|about|blob):\/|\(\s*\d{2,5}\s*[×x]\s*\d{2,5}\s*\)/i;
+
+const LOW_RESOLUTION_NOTE: ReviewNote = {
+  severity: 'warning',
+  message:
+    'The source is a low-resolution image (under 150 DPI), so these values were read by OCR from blurred print. Check each against the document, or request the original PDF.',
+};
+
+const PAYSTUB_EVIDENCE = /\b(?:gross|net)\s+pay\b|\bpay\s+(?:period|date)\b|\bcheck\s+date\b|\bytd\b|year[- ]to[- ]date|\bearnings\b/i;
+
 function pagesForDef(
   pageLines: Array<{ page: ParsePage; lines: LineCluster[] }>,
   form: IncomeForm,
@@ -1279,7 +1320,7 @@ function pagesForDef(
   const preferred = pageLines.filter(({ page }) => pagePrefers(page, form));
   if (preferred.length) return preferred;
   if (form === 'W-2' || form === 'Paystub' || form === 'WVOE') {
-    return pageLines.filter(({ page }) => page.formIds.length === 0);
+    return pageLines.filter(({ page }) => isUnclassifiedWagePage(page));
   }
   return [];
 }
@@ -1399,9 +1440,10 @@ function fieldsFromPaystubTable(
   claimed: Set<string> = new Set(),
 ): MappedIncomeField[] {
   const found: MappedIncomeField[] = [];
-  const paystubPages = pageLines.filter(({ page }) => pagePrefers(page, 'Paystub') || page.formIds.length === 0);
+  const paystubPages = pageLines.filter(
+    ({ page }) => pagePrefers(page, 'Paystub') || (isUnclassifiedWagePage(page) && PAYSTUB_EVIDENCE.test(pageTextBlob(page))),
+  );
   for (const { page, lines } of paystubPages) {
-    if (!pagePrefers(page, 'Paystub') && page.formIds.length > 0) continue;
     const entityId = formEntityId('Paystub', page.index);
     const pageText = lines.map((line) => line.text).join('\n');
     const paysPerYear = paystubPaysPerYear(pageText);
@@ -1445,15 +1487,18 @@ function fieldsFromPaystubTable(
       push(defId, numeric, line, match);
     };
     if (!/employer(?:['’]s)?(?:\s+name)?\s*[:#]/i.test(pageText)) {
-      const header = lines.find((line) => {
-        const text = line.text.trim();
-        return (
-          text.length >= 3 &&
-          text.length <= 80 &&
-          !/earnings statement|pay\s*stub|pay statement|pay advice|payroll|employee|pay period|advice/i.test(text) &&
-          !MONEY.test(text)
-        );
-      });
+      const header = lines
+        .filter((line) => !PRINT_CHROME_LINE.test(line.text))
+        .map((line) => leadingCell(line))
+        .find((cell) => {
+          const text = cell.text.trim();
+          return (
+            text.length >= 3 &&
+            text.length <= 80 &&
+            !/earnings statement|pay\s*stub|pay statement|pay advice|payroll|employee|pay period|advice/i.test(text) &&
+            !MONEY.test(text)
+          );
+        });
       if (header) push('ps-employer-name', 0, header, undefined, header.text.trim());
     }
     if (frequency) {
@@ -1795,7 +1840,7 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
     (field) => field.sourceFieldId === 'w2-box5' && keepGridWage(field.numericValue, fourUp),
   );
   const extractFields = fieldsFromFormExtracts(result.formExtracts).filter(
-    (field) => !(gridHasBox5 && field.form === 'W-2'),
+    (field) => !(gridHasBox5 && field.form === 'W-2' && field.sourceFieldId !== 'w2-employee-name'),
   );
   const pageLines = result.pages.map((page) => ({ page, lines: clusterLines(page.words) }));
   const claimed = new Set(
@@ -1941,6 +1986,17 @@ export function mapIncomeFields(result: ParseResponse): MappedIncomeField[] {
         break;
       }
       if (mappedOnPage && !allowMultipleEntities) break;
+    }
+  }
+
+  const lowResolutionPages = new Set(
+    (result.pages ?? []).filter((page) => page.flags?.includes('low_resolution_image')).map((page) => page.index),
+  );
+  if (lowResolutionPages.size) {
+    for (const field of found) {
+      if (!lowResolutionPages.has(field.pageIndex)) continue;
+      if (field.reviewNotes?.some((note) => note.message === LOW_RESOLUTION_NOTE.message)) continue;
+      field.reviewNotes = [...(field.reviewNotes ?? []), LOW_RESOLUTION_NOTE];
     }
   }
 

@@ -28,6 +28,12 @@ export const ENCOMPASS_URLA_FIELD_IDS = {
   BORROWER_HOUSING_PAYMENT: '119',
   COBORROWER_FIRST_NAME: '4004',
   COBORROWER_LAST_NAME: '4006',
+  COBORROWER_INCOME_BASE: '110',
+  COBORROWER_INCOME_OVERTIME: '111',
+  COBORROWER_EMPLOYER_NAME: 'CE0102',
+  COBORROWER_EMPLOYER_POSITION: 'CE0116',
+  COBORROWER_EMPLOYER_SELF_EMPLOYED: 'CE0151',
+  COBORROWER_EMPLOYER_YEARS_ON_JOB: 'CE0144',
   SUBJECT_PROPERTY_STREET: '12',
   LOAN_AMOUNT: '1109',
   PURCHASE_PRICE: '136',
@@ -56,6 +62,25 @@ export const ENCOMPASS_URLA_FIELD_IDS = {
   DECL_COMAKER: '173',
 } as const;
 
+/** One borrower's URLA employment section (1b–1d). */
+export interface Urla1003Employment {
+  employmentType?: 'W2' | 'SELF_EMPLOYED';
+  employerName?: string;
+  jobTitle?: string;
+  yearsAtJob?: string;
+  yearsInBusiness?: string;
+  monthlyIncome?: string;
+  hasSecondJob?: boolean;
+  secondEmployer?: string;
+  secondMonthlyIncome?: string;
+  previousEmployer?: string;
+  previousEmployerYears?: string;
+}
+
+export interface Urla1003Coborrower extends Urla1003Employment {
+  name?: string;
+}
+
 export interface Urla1003Intake {
   borrowerName?: string;
   email?: string;
@@ -74,6 +99,8 @@ export interface Urla1003Intake {
   monthlyHousing?: string;
   hasCoborrower?: boolean;
   coborrowerName?: string;
+  /** Every co-borrower in 1003 order. When absent, `coborrowerName` is the only co-borrower. */
+  coborrowers?: Urla1003Coborrower[];
   loanPurpose?: 'PURCHASE' | 'REFINANCE';
   propertyAddress?: string;
   propertyType?: 'SFR' | 'CONDO' | '2_4_UNIT' | 'PUD' | 'MANUFACTURED';
@@ -122,8 +149,20 @@ export interface Urla1003Intake {
   program?: 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA' | 'UNSURE';
 }
 
+/** One borrower's share of the 1084 result. `borrowerIndex` 0 is the primary borrower, 1 the first co-borrower. */
+export interface Form1084BorrowerIncome {
+  borrowerIndex: number;
+  w2BaseMonthly?: number;
+  w2VariableMonthly?: number;
+  /** Schedule C, 1120-S, 1065, 1120 and Schedule F cash flow owned by this borrower. */
+  selfEmployedMonthly?: number;
+  qualifyingMonthlyIncome: number;
+}
+
 export interface Form1084EncompassIncome {
   qualifyingMonthlyIncome: number;
+  /** Per-borrower split. Without it every figure is written to the primary borrower. */
+  byBorrower?: Form1084BorrowerIncome[];
   trendingAnalysis?: string;
   yearsAnalyzed?: number[];
   w2BaseMonthly?: number;
@@ -147,6 +186,8 @@ export interface EncompassCustomFieldWrite {
 }
 
 export interface EncompassEmploymentWrite {
+  /** Which borrower of the application pair holds this job. */
+  owner: 'Borrower' | 'CoBorrower';
   employerName?: string;
   positionDescription?: string;
   currentEmploymentIndicator: boolean;
@@ -177,6 +218,7 @@ export interface EncompassGiftWrite {
 export interface EncompassLoanPatch {
   applications: Array<{
     borrower: Record<string, unknown>;
+    coborrower?: Record<string, unknown>;
     residences: EncompassResidenceWrite[];
     employment: EncompassEmploymentWrite[];
     giftsGrants?: EncompassGiftWrite[];
@@ -334,6 +376,70 @@ function giftSource(source?: Urla1003Intake['giftSource']) {
   return undefined;
 }
 
+function coborrowersOfIntake(urla: Urla1003Intake): Urla1003Coborrower[] {
+  if (urla.hasCoborrower === false) return [];
+  const listed = urla.coborrowers?.filter((coborrower) => coborrower.name?.trim()) ?? [];
+  if (listed.length) return listed;
+  if (urla.hasCoborrower && urla.coborrowerName?.trim()) return [{ name: urla.coborrowerName.trim() }];
+  return [];
+}
+
+function splitFor(income: Form1084EncompassIncome | undefined, borrowerIndex: number): Form1084BorrowerIncome | undefined {
+  return income?.byBorrower?.find((entry) => entry.borrowerIndex === borrowerIndex);
+}
+
+function personRecord(fullName?: string): Record<string, unknown> {
+  const name = splitLegalName(fullName);
+  const person: Record<string, unknown> = {};
+  if (name.firstName) person.firstName = name.firstName;
+  if (name.middleName) person.middleName = name.middleName;
+  if (name.lastName) person.lastName = name.lastName;
+  return person;
+}
+
+/** A co-borrower's current, second and prior jobs, with 1084 income when the split is known. */
+function employmentWrites(
+  employment: Urla1003Employment,
+  owner: EncompassEmploymentWrite['owner'],
+  split?: Form1084BorrowerIncome,
+): EncompassEmploymentWrite[] {
+  const selfEmployed = employment.employmentType === 'SELF_EMPLOYED';
+  const stated = parseMoney(employment.monthlyIncome);
+  const writes: EncompassEmploymentWrite[] = [];
+  if (employment.employerName || stated != null || split) {
+    writes.push({
+      owner,
+      employerName: employment.employerName,
+      positionDescription: employment.jobTitle,
+      currentEmploymentIndicator: true,
+      selfEmployedIndicator: selfEmployed,
+      monthlyIncomeAmount: selfEmployed
+        ? (split?.selfEmployedMonthly || stated)
+        : split?.w2BaseMonthly ?? stated,
+      timeOnJobTermYears: parseYears(selfEmployed ? employment.yearsInBusiness : employment.yearsAtJob),
+    });
+  }
+  if (employment.hasSecondJob && (employment.secondEmployer || employment.secondMonthlyIncome)) {
+    writes.push({
+      owner,
+      employerName: employment.secondEmployer,
+      currentEmploymentIndicator: true,
+      selfEmployedIndicator: false,
+      monthlyIncomeAmount: parseMoney(employment.secondMonthlyIncome),
+    });
+  }
+  if (employment.previousEmployer) {
+    writes.push({
+      owner,
+      employerName: employment.previousEmployer,
+      currentEmploymentIndicator: false,
+      selfEmployedIndicator: false,
+      timeOnJobTermYears: parseYears(employment.previousEmployerYears),
+    });
+  }
+  return writes;
+}
+
 export function buildEncompassLoanUpdate(input: {
   urla?: Urla1003Intake;
   income1084?: Form1084EncompassIncome;
@@ -350,7 +456,6 @@ export function buildEncompassLoanUpdate(input: {
   }
 
   const borrowerName = splitLegalName(urla.borrowerName);
-  const coborrowerName = splitLegalName(urla.coborrowerName);
   const statedPrimaryIncome = parseMoney(urla.monthlyIncome);
   const statedOtherIncome = urla.hasOtherIncome ? parseMoney(urla.otherIncomeMonthly) : undefined;
   const statedSecondIncome = urla.hasSecondJob ? parseMoney(urla.secondMonthlyIncome) : undefined;
@@ -359,11 +464,12 @@ export function buildEncompassLoanUpdate(input: {
   // 1084 business totals, not in the base-income field. Reading w2BaseMonthly
   // first put wage income into field 101 even when the borrower was flagged
   // self-employed, double-counting it against the business total.
+  const primarySplit = splitFor(income, 0);
   const baseIncome =
     urla.employmentType === 'SELF_EMPLOYED'
       ? undefined
-      : income?.w2BaseMonthly ?? statedPrimaryIncome;
-  const overtimeIncome = income?.w2VariableMonthly;
+      : (primarySplit ? primarySplit.w2BaseMonthly : income?.w2BaseMonthly) ?? statedPrimaryIncome;
+  const overtimeIncome = primarySplit ? primarySplit.w2VariableMonthly : income?.w2VariableMonthly;
   const rentalIncome = income?.rentalMonthly;
   const otherIncomePieces = [
     statedOtherIncome,
@@ -402,7 +508,7 @@ export function buildEncompassLoanUpdate(input: {
   if (race) borrower.hmdaRaceType = race;
   const sex = hmdaSex(urla.hmdaSex);
   if (sex) borrower.hmdaGenderType = sex;
-  if (urla.hasCoborrower && coborrowerName.firstName) {
+  if (coborrowersOfIntake(urla).length) {
     borrower.hasNonApplicantSpouseIndicator = false;
   }
   if (urla.monthlyDebts) borrower.totalMonthlyLiabilitiesImportedAmount = parseMoney(urla.monthlyDebts);
@@ -429,14 +535,16 @@ export function buildEncompassLoanUpdate(input: {
   }
 
   const selfEmployed = urla.employmentType === 'SELF_EMPLOYED';
-  const primarySeMonthly =
-    (income?.scheduleC_MonthlyTotal ?? 0) +
-    (income?.form1120S_MonthlyTotal ?? 0) +
-    (income?.form1065_MonthlyTotal ?? 0) +
-    (income?.form1120_MonthlyTotal ?? 0);
+  const primarySeMonthly = primarySplit
+    ? primarySplit.selfEmployedMonthly ?? 0
+    : (income?.scheduleC_MonthlyTotal ?? 0) +
+      (income?.form1120S_MonthlyTotal ?? 0) +
+      (income?.form1065_MonthlyTotal ?? 0) +
+      (income?.form1120_MonthlyTotal ?? 0);
   const employment: EncompassEmploymentWrite[] = [];
   if (urla.employerName || statedPrimaryIncome != null || selfEmployed || primarySeMonthly > 0) {
     employment.push({
+      owner: 'Borrower',
       employerName: urla.employerName,
       positionDescription: urla.jobTitle,
       currentEmploymentIndicator: true,
@@ -449,6 +557,7 @@ export function buildEncompassLoanUpdate(input: {
   }
   if (urla.hasSecondJob && (urla.secondEmployer || statedSecondIncome != null)) {
     employment.push({
+      owner: 'Borrower',
       employerName: urla.secondEmployer,
       currentEmploymentIndicator: true,
       selfEmployedIndicator: false,
@@ -457,6 +566,7 @@ export function buildEncompassLoanUpdate(input: {
   }
   if (urla.previousEmployer) {
     employment.push({
+      owner: 'Borrower',
       employerName: urla.previousEmployer,
       currentEmploymentIndicator: false,
       selfEmployedIndicator: false,
@@ -489,8 +599,30 @@ export function buildEncompassLoanUpdate(input: {
     ];
   }
 
+  // Encompass holds borrowers in pairs: each application has a borrower and a
+  // co-borrower. The 1003's second person is application 1's co-borrower, the
+  // third starts application 2, and so on.
+  const coborrowers = coborrowersOfIntake(urla);
+  const applications: EncompassLoanPatch['applications'] = [application];
+  coborrowers.forEach((coborrower, index) => {
+    const personIndex = index + 1;
+    const appIndex = Math.floor(personIndex / 2);
+    const owner = personIndex % 2 === 1 ? 'CoBorrower' : 'Borrower';
+    const target = applications[appIndex] ?? { borrower: {}, residences: [], employment: [] };
+    applications[appIndex] = target;
+    const person = personRecord(coborrower.name);
+    if (owner === 'CoBorrower') target.coborrower = person;
+    else target.borrower = person;
+    target.employment.push(...employmentWrites(coborrower, owner, splitFor(income, personIndex)));
+  });
+  if (coborrowers.length > 1) {
+    omitted.push(
+      `Field Writer covers the first borrower pair only; ${coborrowers.length - 1} more borrower(s) are written through applications[1..] in the loan PATCH`,
+    );
+  }
+
   const loan: EncompassLoanPatch = {
-    applications: [application],
+    applications,
     customFields,
   };
 
@@ -522,9 +654,31 @@ export function buildEncompassLoanUpdate(input: {
   setField(fields, ENCOMPASS_URLA_FIELD_IDS.BORROWER_PRESENT_STREET, urla.currentAddress);
   setField(fields, ENCOMPASS_URLA_FIELD_IDS.BORROWER_YEARS_AT_ADDRESS, parseYears(urla.yearsAtAddress));
   setField(fields, ENCOMPASS_URLA_FIELD_IDS.BORROWER_HOUSING_PAYMENT, parseMoney(urla.monthlyHousing));
-  if (urla.hasCoborrower) {
-    setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_FIRST_NAME, coborrowerName.firstName);
-    setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_LAST_NAME, coborrowerName.lastName);
+  const firstCoborrower = coborrowers[0];
+  if (firstCoborrower) {
+    const name = splitLegalName(firstCoborrower.name);
+    const split = splitFor(income, 1);
+    const coborrowerSelfEmployed = firstCoborrower.employmentType === 'SELF_EMPLOYED';
+    setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_FIRST_NAME, name.firstName);
+    setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_LAST_NAME, name.lastName);
+    if (!coborrowerSelfEmployed) {
+      setField(
+        fields,
+        ENCOMPASS_URLA_FIELD_IDS.COBORROWER_INCOME_BASE,
+        moneyText(split?.w2BaseMonthly ?? parseMoney(firstCoborrower.monthlyIncome)),
+      );
+      setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_INCOME_OVERTIME, moneyText(split?.w2VariableMonthly));
+    }
+    setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_EMPLOYER_NAME, firstCoborrower.employerName);
+    setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_EMPLOYER_POSITION, firstCoborrower.jobTitle);
+    if (firstCoborrower.employmentType) {
+      setField(fields, ENCOMPASS_URLA_FIELD_IDS.COBORROWER_EMPLOYER_SELF_EMPLOYED, yn(coborrowerSelfEmployed));
+    }
+    setField(
+      fields,
+      ENCOMPASS_URLA_FIELD_IDS.COBORROWER_EMPLOYER_YEARS_ON_JOB,
+      parseYears(coborrowerSelfEmployed ? firstCoborrower.yearsInBusiness : firstCoborrower.yearsAtJob),
+    );
   }
   setField(fields, ENCOMPASS_URLA_FIELD_IDS.SUBJECT_PROPERTY_STREET, urla.propertyAddress);
   setField(fields, ENCOMPASS_URLA_FIELD_IDS.LOAN_AMOUNT, moneyText(loanAmount));

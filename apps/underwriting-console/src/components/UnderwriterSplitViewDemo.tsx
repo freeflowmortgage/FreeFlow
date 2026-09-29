@@ -58,14 +58,19 @@ import {
   type LocatedMatch,
 } from '../locateIncomeEntities';
 import {
+  DEMO_BORROWERS,
   DEMO_URLA_ENTITIES,
+  borrowersFromUrlA,
   employmentEntitiesFromUrlA,
   namesMatch,
 } from '../urlaEmploymentRoster';
+import type { LoanBorrower } from '../borrowers';
 import { loadIntakeSession } from '../intake/sessionStore';
+import { buildEncompassPayloadFromIntake } from '../intake/encompassExport';
 import UrlAEntityRoster from './UrlAEntityRoster';
+import BorrowerWarningsPanel from './BorrowerWarningsPanel';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
-import PdfPagePreview from './PdfPagePreview';
+import PdfDocumentViewer from './PdfDocumentViewer';
 import FixturePdfViewer from './FixturePdfViewer';
 import { usePdfViewer } from '../hooks/usePdfViewer';
 import {
@@ -85,6 +90,7 @@ import {
   corpBusinessAnnual,
   corpDistributionCapped,
   corpMinorityAnnual,
+  liquidityReason,
   monthlyFromYears,
   schCAnnual,
   scheduleLQuickRatio,
@@ -101,6 +107,7 @@ import {
   compactSourceLines,
   computeRental1038CashFlow,
   qualifyingProgramNote,
+  type Form1084BorrowerIncome,
 } from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
@@ -130,6 +137,8 @@ interface PrevEmployerW2 {
 interface W2Employer {
   id: string;
   documentIds?: string[];
+  /** The borrower whose wages these are; unset means the primary borrower. */
+  borrowerId?: string;
   employerName: string;
   ein: string;
   employmentStartDate: string;
@@ -251,6 +260,8 @@ function scheduleLFromFields(
 
 interface BusinessEntity<TYear> {
   id: string;
+  /** The borrower who owns this business interest; unset means the primary borrower. */
+  borrowerId?: string;
   businessName: string;
   ein: string;
   years: [TYear, TYear];
@@ -521,9 +532,16 @@ export default function UnderwriterSplitViewDemo({
     () => (isLive ? employmentEntitiesFromUrlA(loadIntakeSession()?.answers) : DEMO_URLA_ENTITIES),
     [isLive],
   );
+  const loanBorrowers = useMemo<LoanBorrower[]>(
+    () => (isLive ? borrowersFromUrlA(loadIntakeSession()?.answers) : DEMO_BORROWERS),
+    [isLive],
+  );
+  /** Underwriter's "assign to borrower" choices for documents that name nobody on the 1003. */
+  const [borrowerAssignments, setBorrowerAssignments] = useState<Record<string, string>>({});
   const locateResult: LocateResult = useMemo(() => {
     if (!isLive) {
       return {
+        borrowers: DEMO_BORROWERS,
         roster: DEMO_URLA_ENTITIES.map((entity) => {
           const kind =
             entity.kind === 'wages'
@@ -584,6 +602,8 @@ export default function UnderwriterSplitViewDemo({
     }
     return locateIncomeEntities({
       roster: urlARoster,
+      borrowers: loanBorrowers,
+      assignments: borrowerAssignments,
       fields: mappedFields,
       pages: packet.flatMap((doc) => pagesFromParsePages(doc.result.pages, doc.id)),
       rentals: scheduleEExtracts.map((extract) => ({
@@ -593,7 +613,14 @@ export default function UnderwriterSplitViewDemo({
         column: extract.column,
       })),
     });
-  }, [isLive, urlARoster, mappedFields, packet, scheduleEExtracts]);
+  }, [isLive, urlARoster, loanBorrowers, borrowerAssignments, mappedFields, packet, scheduleEExtracts]);
+  const borrowers = locateResult.borrowers?.length ? locateResult.borrowers : loanBorrowers;
+  const multipleBorrowers = borrowers.length > 1;
+  const borrowerName = (id: string | undefined) =>
+    borrowers.find((borrower) => borrower.id === (id ?? borrowers[0]?.id))?.name ?? '';
+  /** The previous-employer history on the 1003 is the primary borrower's, so only their jobs merge it. */
+  const ownedByPrimary = (entry: { borrowerId?: string }) =>
+    !multipleBorrowers || !entry.borrowerId || entry.borrowerId === borrowers[0]?.id;
 
   // 1. Navigation & View States
   const [activeTab, setActiveTab] = useState<IncomeTab>('PAYSTUB_RECONCILIATION');
@@ -1160,6 +1187,7 @@ export default function UnderwriterSplitViewDemo({
       emptyW2Employer(seed.id, {
         ...seed.patch,
         documentIds: seed.documentIds,
+        borrowerId: seed.borrowerId,
         employerName: seed.employerName,
         ein: seed.ein,
         role: seed.role,
@@ -1189,6 +1217,7 @@ export default function UnderwriterSplitViewDemo({
       schCSeeds.length
         ? schCSeeds.map((seed) => ({
             id: seed.id,
+            borrowerId: seed.borrowerId,
             businessName: seed.businessName,
             ein: seed.ein,
             years: [
@@ -1229,6 +1258,7 @@ export default function UnderwriterSplitViewDemo({
             const { ownershipPct: _o2, businessName: _n2, ein: _e2, ...rest2 } = year2;
             return {
               id: seed.id,
+              borrowerId: seed.borrowerId,
               businessName: seed.businessName,
               ein: seed.ein,
               ownershipPct: ownershipPct ?? 100,
@@ -1258,6 +1288,7 @@ export default function UnderwriterSplitViewDemo({
             const { profitPctEnd: _p2, capitalPctEnd: _c2, ownershipPct: _o2, businessName: _n2, ein: _e2, ...rest2 } = year2;
             return {
               id: seed.id,
+              borrowerId: seed.borrowerId,
               businessName: seed.businessName,
               ein: seed.ein,
               profitPctEnd: profitPctEnd ?? 100,
@@ -1287,6 +1318,7 @@ export default function UnderwriterSplitViewDemo({
             const { businessName: _n2, ein: _e2, ...rest2 } = seed.years[1] ?? {};
             return {
               id: seed.id,
+              borrowerId: seed.borrowerId,
               businessName: seed.businessName,
               ein: seed.ein,
               ownershipPct: 100,
@@ -1313,6 +1345,7 @@ export default function UnderwriterSplitViewDemo({
             const { businessName: _n2, ein: _e2, ...rest2 } = seed.years[1] ?? {};
             return {
               id: seed.id,
+              borrowerId: seed.borrowerId,
               businessName: seed.businessName,
               ein: seed.ein,
               years: [{ ...emptyFarmYear(2025), ...rest1 }, { ...emptyFarmYear(2024), ...rest2 }] as [ScheduleFYear, ScheduleFYear],
@@ -1342,6 +1375,8 @@ export default function UnderwriterSplitViewDemo({
   const borrowerMetadata = {
     loanId: isLive ? 'Live' : 'LN-2026-88042',
     borrowerName: isLive ? (liveBorrowerName(mappedFields) || intakeBorrowerName || '—') : 'Sarah K. Vance',
+    /** Everyone on the loan, for the header. The single-name field above feeds the pay stub checks. */
+    borrowerNames: multipleBorrowers ? borrowers.map((borrower) => borrower.name).join(' & ') : '',
     currentEmployer: activeW2Employer.employerName,
     employmentStartDate: activeW2Employer.employmentStartDate,
     loanProgram,
@@ -1381,7 +1416,8 @@ export default function UnderwriterSplitViewDemo({
     const hourlyMethod = (currentHourlyRate * currentWeeklyHours * 52) / 12; // Standard Hourly Pay Rate Method
     const periodAnnualizedMethod = (currentPeriodBasePay * payPeriodsPerYear) / 12;
     const ytdAverageMethod = currentBaseYtd / 7.5; // August 15 represents 7.5 elapsed months of the year
-    const priorYearW2Average = (activeW2Employer.w2Year1Box5 || prevEmployerW2.box5Wages) / 12;
+    const priorYearW2Average =
+      (activeW2Employer.w2Year1Box5 || (ownedByPrimary(activeW2Employer) ? prevEmployerW2.box5Wages : 0)) / 12;
 
     return {
       hourlyMethod,
@@ -1390,7 +1426,8 @@ export default function UnderwriterSplitViewDemo({
       priorYearW2Average,
       maxVariancePct: Math.abs(((hourlyMethod - ytdAverageMethod) / hourlyMethod) * 100)
     };
-  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box5Wages, payPeriodsPerYear, activeW2Employer.w2Year1Box5]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
+  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box5Wages, payPeriodsPerYear, activeW2Employer.w2Year1Box5, activeW2Employer.borrowerId, borrowers]);
 
   // B. Variable Income Rolling & Continuity (Job Transition Adapter) [cite: 177]
   const variableContinuityCalculations = useMemo(() => {
@@ -1429,18 +1466,52 @@ export default function UnderwriterSplitViewDemo({
     return { y1, y2 };
   }, [schCYears]);
 
+  const pickMonthly = (options: Record<string, number>, selected: string | null | undefined, recommendedId: string) =>
+    options[selected && selected in options ? selected : recommendedId] ?? 0;
+  // Employers not on screen still count with the method the underwriter chose for
+  // them (or the recommended one), so each borrower's share matches their own tab.
+  const w2BaseMonthlyOf = (entry: W2Employer) => {
+    const periods = entry.payFrequency === 'WEEKLY' ? 52 : entry.payFrequency === 'BIWEEKLY' ? 26 : entry.payFrequency === 'MONTHLY' ? 12 : 24;
+    const hourly = (entry.hourlyRate * entry.weeklyHours * 52) / 12;
+    const ytd = entry.baseYtd / 7.5;
+    const priorBox5 = entry.w2Year1Box5 || (ownedByPrimary(entry) ? prevEmployerW2.box5Wages : 0);
+    const variancePct = Math.abs(((hourly - ytd) / hourly) * 100);
+    return pickMonthly(
+      { hourly, period: (entry.currentPeriodBasePay * periods) / 12, ytd, prior: priorBox5 / 12, not_used: 0 },
+      w2BaseChoices[entry.id],
+      variancePct > 10 ? (hourly <= ytd ? 'hourly' : 'ytd') : 'period',
+    );
+  };
+  const w2VariableMonthlyOf = (entry: W2Employer) => {
+    const fromWvoe = entry.wageDocSource === 'WVOE';
+    const total = fromWvoe
+      ? entry.wvoeBonus + entry.wvoeOvertime
+      : entry.bonusYtd + entry.overtimeYtd + entry.tipsYtd + entry.commissionYtd;
+    const months = Math.max(fromWvoe ? entry.wvoeMonths : entry.monthsAtJob, 1);
+    const current = total / months;
+    const withPrior = ownedByPrimary(entry);
+    const merged = withPrior
+      ? (entry.bonusYtd + entry.overtimeYtd + prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime) / (entry.monthsAtJob + 12)
+      : current;
+    return pickMonthly(
+      { current, avg24: merged, not_used: 0 },
+      w2VarChoices[entry.id],
+      withPrior && entry.monthsAtJob < 12 ? 'avg24' : 'current',
+    );
+  };
   const additionalW2Monthly = useMemo(
     () =>
       w2Employers
         .filter((entry) => entry.id !== activeW2Employer.id)
         .reduce(
           (totals, entry) => ({
-            base: totals.base + (entry.hourlyRate * entry.weeklyHours * 52) / 12,
-            variable: totals.variable + (entry.bonusYtd + entry.overtimeYtd + entry.tipsYtd + entry.commissionYtd) / Math.max(entry.monthsAtJob, 1),
+            base: totals.base + w2BaseMonthlyOf(entry),
+            variable: totals.variable + w2VariableMonthlyOf(entry),
           }),
           { base: 0, variable: 0 },
         ),
-    [w2Employers, activeW2Employer.id],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the per-entry helpers read only these
+    [w2Employers, activeW2Employer.id, w2BaseChoices, w2VarChoices, prevEmployerW2, borrowers],
   );
 
   const sCorpLRatio = useMemo(() => scheduleLQuickRatio(sCorpL), [sCorpL]);
@@ -1484,8 +1555,8 @@ export default function UnderwriterSplitViewDemo({
   const partnershipFlow = useMemo(() => {
     const isMinority = partnershipPct < 25;
     const gpMonthly = monthlyFromYears(
-      partnershipYears[0].guaranteedPayments * (partnershipPct / 100),
-      partnershipYears[1].guaranteedPayments * (partnershipPct / 100),
+      partnershipYears[0].guaranteedPayments,
+      partnershipYears[1].guaranteedPayments,
       twoYearPartnership,
     );
 
@@ -1504,8 +1575,8 @@ export default function UnderwriterSplitViewDemo({
 
     const y1Raw = corpBusinessAnnual(partnershipYears[0], partnershipPct);
     const y2Raw = corpBusinessAnnual(partnershipYears[1], partnershipPct);
-    const y1 = activePartnership.hasStableDistributions ? y1Raw : Math.min(y1Raw, partnershipYears[0].distributions);
-    const y2 = activePartnership.hasStableDistributions ? y2Raw : Math.min(y2Raw, partnershipYears[1].distributions);
+    const y1 = activePartnership.hasStableDistributions ? y1Raw : corpDistributionCapped(partnershipYears[0], y1Raw);
+    const y2 = activePartnership.hasStableDistributions ? y2Raw : corpDistributionCapped(partnershipYears[1], y2Raw);
     return {
       y1,
       y2,
@@ -1545,47 +1616,50 @@ export default function UnderwriterSplitViewDemo({
     [activeScheduleF],
   );
 
+  // Monthly income of an entity that is not the one open in its tab. The open
+  // one uses the underwriter's chosen method instead (`*Chosen.monthly`).
+  const schCMonthlyOf = (entity: BusinessEntity<SchCYear>) =>
+    monthlyFromYears(schCAnnual(entity.years[0]), schCAnnual(entity.years[1]), twoYearSchC);
+  const scheduleFMonthlyOf = (entity: BusinessEntity<ScheduleFYear>) =>
+    monthlyFromYears(scheduleFAnnual(entity.years[0]), scheduleFAnnual(entity.years[1]), twoYearScheduleF);
+  const sCorpMonthlyOf = (entity: SCorpEntity) => {
+    const ratio = scheduleLQuickRatio(entity.scheduleL);
+    const first = entity.ownershipPct < 25
+      ? corpMinorityAnnual(entity.years[0], entity.ownershipPct).capped + entity.years[0].w2Wages
+      : (ratio.passes ? corpBusinessAnnual(entity.years[0], entity.ownershipPct) : 0) + entity.years[0].w2Wages;
+    const second = entity.ownershipPct < 25
+      ? corpMinorityAnnual(entity.years[1], entity.ownershipPct).capped + entity.years[1].w2Wages
+      : (ratio.passes ? corpBusinessAnnual(entity.years[1], entity.ownershipPct) : 0) + entity.years[1].w2Wages;
+    return monthlyFromYears(first, second, twoYearScorp);
+  };
+  const partnershipMonthlyOf = (entity: PartnershipEntity) => {
+    const pct = Math.min(entity.profitPctEnd, entity.capitalPctEnd);
+    const ratio = scheduleLQuickRatio(entity.scheduleL);
+    const first = pct < 25
+      ? corpMinorityAnnual(entity.years[0], pct).capped
+      : ratio.passes ? corpBusinessAnnual(entity.years[0], pct) : entity.years[0].guaranteedPayments;
+    const second = pct < 25
+      ? corpMinorityAnnual(entity.years[1], pct).capped
+      : ratio.passes ? corpBusinessAnnual(entity.years[1], pct) : entity.years[1].guaranteedPayments;
+    return monthlyFromYears(first, second, twoYearPartnership);
+  };
+  const cCorpMonthlyOf = (entity: CCorpEntity) => {
+    const ratio = scheduleLQuickRatio(entity.scheduleL);
+    const first = cCorpBusinessAnnual(entity.years[0], entity.ownershipPct, ratio.passes);
+    const second = cCorpBusinessAnnual(entity.years[1], entity.ownershipPct, ratio.passes);
+    return monthlyFromYears(first, second, twoYearCCorp);
+  };
+
   const additionalBusinessMonthly = useMemo(() => {
-    const scheduleC = schCEntities
-      .filter((entity) => entity.id !== activeSchC.id)
-      .reduce((sum, entity) => sum + monthlyFromYears(schCAnnual(entity.years[0]), schCAnnual(entity.years[1]), twoYearSchC), 0);
-    const scheduleF = scheduleFEntities
-      .filter((entity) => entity.id !== activeScheduleF.id)
-      .reduce((sum, entity) => sum + monthlyFromYears(scheduleFAnnual(entity.years[0]), scheduleFAnnual(entity.years[1]), twoYearScheduleF), 0);
-    const sCorp = sCorpEntities
-      .filter((entity) => entity.id !== activeSCorp.id)
-      .reduce((sum, entity) => {
-        const ratio = scheduleLQuickRatio(entity.scheduleL);
-        const first = entity.ownershipPct < 25
-          ? corpMinorityAnnual(entity.years[0], entity.ownershipPct).capped + entity.years[0].w2Wages
-          : (ratio.passes ? corpBusinessAnnual(entity.years[0], entity.ownershipPct) : 0) + entity.years[0].w2Wages;
-        const second = entity.ownershipPct < 25
-          ? corpMinorityAnnual(entity.years[1], entity.ownershipPct).capped + entity.years[1].w2Wages
-          : (ratio.passes ? corpBusinessAnnual(entity.years[1], entity.ownershipPct) : 0) + entity.years[1].w2Wages;
-        return sum + monthlyFromYears(first, second, twoYearScorp);
-      }, 0);
-    const partnership = partnershipEntities
-      .filter((entity) => entity.id !== activePartnership.id)
-      .reduce((sum, entity) => {
-        const pct = gseInvestor === 'FREDDIE' ? entity.profitPctEnd : entity.capitalPctEnd;
-        const ratio = scheduleLQuickRatio(entity.scheduleL);
-        const first = pct < 25
-          ? corpMinorityAnnual(entity.years[0], pct).capped
-          : ratio.passes ? corpBusinessAnnual(entity.years[0], pct) : entity.years[0].guaranteedPayments * (pct / 100);
-        const second = pct < 25
-          ? corpMinorityAnnual(entity.years[1], pct).capped
-          : ratio.passes ? corpBusinessAnnual(entity.years[1], pct) : entity.years[1].guaranteedPayments * (pct / 100);
-        return sum + monthlyFromYears(first, second, twoYearPartnership);
-      }, 0);
-    const cCorp = cCorpEntities
-      .filter((entity) => entity.id !== activeCCorp.id)
-      .reduce((sum, entity) => {
-        const ratio = scheduleLQuickRatio(entity.scheduleL);
-        const first = cCorpBusinessAnnual(entity.years[0], entity.ownershipPct, ratio.passes);
-        const second = cCorpBusinessAnnual(entity.years[1], entity.ownershipPct, ratio.passes);
-        return sum + monthlyFromYears(first, second, twoYearCCorp);
-      }, 0);
-    return { scheduleC, scheduleF, sCorp, partnership, cCorp };
+    const sumOthers = <T extends { id: string }>(entities: T[], activeId: string, monthlyOf: (entity: T) => number) =>
+      entities.filter((entity) => entity.id !== activeId).reduce((sum, entity) => sum + monthlyOf(entity), 0);
+    return {
+      scheduleC: sumOthers(schCEntities, activeSchC.id, schCMonthlyOf),
+      scheduleF: sumOthers(scheduleFEntities, activeScheduleF.id, scheduleFMonthlyOf),
+      sCorp: sumOthers(sCorpEntities, activeSCorp.id, sCorpMonthlyOf),
+      partnership: sumOthers(partnershipEntities, activePartnership.id, partnershipMonthlyOf),
+      cCorp: sumOthers(cCorpEntities, activeCCorp.id, cCorpMonthlyOf),
+    };
   }, [
     schCEntities, activeSchC.id, twoYearSchC, scheduleFEntities, activeScheduleF.id, twoYearScheduleF,
     sCorpEntities, activeSCorp.id, twoYearScorp, partnershipEntities, activePartnership.id,
@@ -1867,13 +1941,23 @@ export default function UnderwriterSplitViewDemo({
 
   const w2VarPicks = useMemo(() => {
     const current = variableContinuityCalculations.currentMonthlyVariableAvg;
-    const merged = (currentBonusYtd + currentOtYtd + prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime) / (monthsAtCurrentJob + 12);
+    const withPrior = ownedByPrimary(activeW2Employer);
+    const merged = withPrior
+      ? (currentBonusYtd + currentOtYtd + prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime) / (monthsAtCurrentJob + 12)
+      : current;
     const options = [
       { id: 'current', label: 'Current job only', monthly: current, formula: `(Bonus YTD + OT YTD) / ${monthsAtCurrentJob} months` },
-      { id: 'avg24', label: '24-month merged', monthly: merged, formula: `(Current variable + prior W-2 bonus/OT) / ${monthsAtCurrentJob + 12} months` },
+      {
+        id: 'avg24',
+        label: '24-month merged',
+        monthly: merged,
+        formula: withPrior
+          ? `(Current variable + prior W-2 bonus/OT) / ${monthsAtCurrentJob + 12} months`
+          : 'No previous employer on the 1003 for this borrower; same as current job',
+      },
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
-    if (monthsAtCurrentJob < 12) {
+    if (monthsAtCurrentJob < 12 && withPrior) {
       return {
         options,
         recommendedId: 'avg24',
@@ -1883,9 +1967,12 @@ export default function UnderwriterSplitViewDemo({
     return {
       options,
       recommendedId: 'current',
-      reason: 'Twelve or more months at the current job. Guideline uses the current-job variable average unless the underwriter elects the 24-month merge.',
+      reason: withPrior
+        ? 'Twelve or more months at the current job. Guideline uses the current-job variable average unless the underwriter elects the 24-month merge.'
+        : `The previous-employer history on the 1003 is ${borrowerName(undefined)}'s, so ${borrowerName(activeW2Employer.borrowerId)}'s variable income uses this job only.`,
     };
-  }, [variableContinuityCalculations.currentMonthlyVariableAvg, currentBonusYtd, currentOtYtd, prevEmployerW2.box12Bonus, prevEmployerW2.box14Overtime, monthsAtCurrentJob]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
+  }, [variableContinuityCalculations.currentMonthlyVariableAvg, currentBonusYtd, currentOtYtd, prevEmployerW2.box12Bonus, prevEmployerW2.box14Overtime, monthsAtCurrentJob, activeW2Employer.borrowerId, borrowers]);
 
   const schCPicks = useMemo(() => {
     const rec = seRecommend(schCFlow.y1, schCFlow.y2, twoYearSchC, false, loanProgram);
@@ -2008,6 +2095,64 @@ export default function UnderwriterSplitViewDemo({
       rentalChosen.monthly,
   };
 
+  // Each borrower's share of the 1084, so the Encompass export writes each
+  // person's income to their own fields instead of crediting the primary with all of it.
+  const incomeByBorrower: Form1084BorrowerIncome[] = (() => {
+    if (!multipleBorrowers) return [];
+    const rows = borrowers.map((_, borrowerIndex) => ({
+      borrowerIndex,
+      w2BaseMonthly: 0,
+      w2VariableMonthly: 0,
+      selfEmployedMonthly: 0,
+      qualifyingMonthlyIncome: 0,
+    }));
+    const rowFor = (borrowerId?: string) => rows[Math.max(0, borrowers.findIndex((borrower) => borrower.id === borrowerId))];
+    for (const entry of w2Employers) {
+      const active = entry.id === activeW2Employer.id;
+      rowFor(entry.borrowerId).w2BaseMonthly += active ? w2BaseChosen.monthly : w2BaseMonthlyOf(entry);
+      rowFor(entry.borrowerId).w2VariableMonthly += active ? w2VarChosen.monthly : w2VariableMonthlyOf(entry);
+    }
+    const addBusiness = <T extends { id: string; borrowerId?: string }>(
+      entities: T[],
+      activeId: string,
+      activeMonthly: number,
+      monthlyOf: (entity: T) => number,
+    ) => {
+      for (const entity of entities) {
+        rowFor(entity.borrowerId).selfEmployedMonthly += entity.id === activeId ? activeMonthly : monthlyOf(entity);
+      }
+    };
+    addBusiness(schCEntities, activeSchC.id, schCChosen.monthly, schCMonthlyOf);
+    addBusiness(sCorpEntities, activeSCorp.id, sCorpChosen.monthly, sCorpMonthlyOf);
+    addBusiness(partnershipEntities, activePartnership.id, partnershipChosen.monthly, partnershipMonthlyOf);
+    addBusiness(cCorpEntities, activeCCorp.id, cCorpChosen.monthly, cCorpMonthlyOf);
+    addBusiness(scheduleFEntities, activeScheduleF.id, scheduleFChosen.monthly, scheduleFMonthlyOf);
+    for (const row of rows) {
+      row.qualifyingMonthlyIncome = row.w2BaseMonthly + row.w2VariableMonthly + row.selfEmployedMonthly;
+    }
+    // Rental and asset income are held jointly; Encompass carries them once, on the primary borrower.
+    rows[0].qualifyingMonthlyIncome += form1084CashFlow.rentalMonthly + form1084CashFlow.assetIncomeMonthly;
+    return rows;
+  })();
+
+  const intakeAnswers = isLive ? loadIntakeSession()?.answers : undefined;
+  const encompassPayload = intakeAnswers
+    ? buildEncompassPayloadFromIntake(intakeAnswers, {
+        qualifyingMonthlyIncome: form1084CashFlow.finalTotalQualifyingMonthly,
+        w2BaseMonthly: form1084CashFlow.w2BaseMonthly,
+        w2VariableMonthly: form1084CashFlow.w2VariableMonthly,
+        scheduleC_MonthlyTotal: form1084CashFlow.qualifyingMonthlySelfEmployed,
+        form1120S_MonthlyTotal: form1084CashFlow.sCorpShareholderDraw,
+        form1065_MonthlyTotal: form1084CashFlow.partnershipMonthly,
+        form1120_MonthlyTotal: form1084CashFlow.cCorpMonthly,
+        scheduleF_MonthlyTotal: form1084CashFlow.scheduleFMonthly,
+        assetIncomeMonthly: form1084CashFlow.assetIncomeMonthly,
+        rentalMonthly: form1084CashFlow.rentalMonthly,
+        byBorrower: incomeByBorrower.length ? incomeByBorrower : undefined,
+      })
+    : null;
+  const unassignedDocuments = locateResult.unidentified?.length ?? 0;
+
   const summarySourceLines = compactSourceLines([
     { source: 'W-2 base', method: w2BaseChosen.label, monthly: form1084CashFlow.w2BaseMonthly },
     { source: 'W-2 variable', method: w2VarChosen.label, monthly: form1084CashFlow.w2VariableMonthly },
@@ -2087,6 +2232,14 @@ export default function UnderwriterSplitViewDemo({
   const activeIncomeWarnings = useMemo(() => {
     const list: { id: string; type: 'ERROR' | 'WARNING'; message: string }[] = [];
 
+    for (const warning of locateResult.warnings ?? []) {
+      list.push({
+        id: warning.code,
+        type: warning.code === 'UNIDENTIFIED_BORROWER' ? 'ERROR' : 'WARNING',
+        message: warning.message,
+      });
+    }
+
     // Job tenure warning
     if (monthsAtCurrentJob < 12) {
       list.push({
@@ -2107,14 +2260,14 @@ export default function UnderwriterSplitViewDemo({
       list.push({
         id: 'SCORP_LIQUIDITY',
         type: 'ERROR',
-        message: `S-Corp Schedule L quick ratio ${sCorpLRatio.quickRatio.toFixed(2)} is below 1.0. Business income is excluded; officer W-2 still counts.`,
+        message: `S-Corp ${liquidityReason(sCorpLRatio)}. Business income is excluded; officer W-2 still counts.`,
       });
     }
     if (!partnershipLRatio.passes && !partnershipFlow.isMinority) {
       list.push({
         id: 'PARTNERSHIP_LIQUIDITY',
         type: 'ERROR',
-        message: `Partnership Schedule L quick ratio ${partnershipLRatio.quickRatio.toFixed(2)} is below 1.0. Ordinary income is excluded; guaranteed payments still count.`,
+        message: `Partnership ${liquidityReason(partnershipLRatio)}. Ordinary income is excluded; guaranteed payments still count.`,
       });
     }
 
@@ -2193,7 +2346,7 @@ export default function UnderwriterSplitViewDemo({
     }
 
     return list;
-  }, [monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor, assetIncomeAnnual, assetIncomeIncluded]);
+  }, [locateResult.warnings, monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor, assetIncomeAnnual, assetIncomeIncluded]);
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
@@ -2257,7 +2410,7 @@ export default function UnderwriterSplitViewDemo({
       // Only the worksheet field is scrolled here, and only within its own
       // pane. scrollIntoView walks every scrollable ancestor, so scrolling the
       // PDF overlay box from here dragged the whole page and sent the QA panel
-      // back to the top on every click. PdfPagePreview scrolls its own pane.
+      // back to the top on every click. PdfDocumentViewer scrolls its own pane.
       // Prefer the element that was actually clicked. Field ids can repeat
       // across documents (two Schedule Es each have a page 1 column A), so a
       // selector returns the first match, which sat at the top of the panel
@@ -2268,28 +2421,34 @@ export default function UnderwriterSplitViewDemo({
     });
   };
 
-  const asEntityOptions = <T extends { id: string; businessName?: string; employerName?: string; ein?: string }>(
+  const borrowerTag = (borrowerId: string | undefined) => (multipleBorrowers ? borrowerName(borrowerId) : '');
+
+  const asEntityOptions = <T extends { id: string; businessName?: string; employerName?: string; ein?: string; borrowerId?: string }>(
     entries: T[],
   ): IncomeEntityOption[] =>
     entries.map((entry) => {
       const name = entry.businessName ?? entry.employerName ?? '';
-      const on1003 = locateResult.roster.find(
-        (row) => row.entity.id === entry.id || namesMatch(row.entity.name, name),
-      );
+      const on1003 =
+        locateResult.roster.find((row) => row.entity.id === entry.id) ??
+        locateResult.roster.find(
+          (row) => namesMatch(row.entity.name, name) && (!entry.borrowerId || row.entity.borrowerId === entry.borrowerId),
+        );
       const onReturn = locateResult.discovered.find(
         (match) => match.entityId === entry.id || namesMatch(match.name ?? '', name),
       );
+      const source = on1003
+        ? on1003.located
+          ? 'From 1003 · located'
+          : 'From 1003 · not in packet'
+        : onReturn
+          ? 'Undisclosed · on return, not on 1003'
+          : undefined;
+      const owner = borrowerTag(entry.borrowerId);
       return {
         id: entry.id,
         name: name || 'Unnamed entity',
         ein: entry.ein,
-        detail: on1003
-          ? on1003.located
-            ? 'From 1003 · located'
-            : 'From 1003 · not in packet'
-          : onReturn
-            ? 'Undisclosed · on return, not on 1003'
-            : undefined,
+        detail: [owner, source].filter(Boolean).join(' · ') || undefined,
       };
     });
 
@@ -2642,8 +2801,14 @@ export default function UnderwriterSplitViewDemo({
   };
 
   const handleExportSync = () => {
+    const perBorrower = incomeByBorrower.length
+      ? `\n\nBy borrower:\n${incomeByBorrower
+          .map((row) => `- ${borrowers[row.borrowerIndex]?.name}: $${row.qualifyingMonthlyIncome.toFixed(2)}/mo`)
+          .join('\n')}`
+      : '';
+    const heldOut = unassignedDocuments ? `\n\n${unassignedDocuments} unassigned document(s) left out.` : '';
     alert(
-      `Payload Locked & Transmitted to Encompass eFolder successfully!\n\nStandard Fields Mapped:\n- Field 108 (W-2 base): $${form1084CashFlow.w2BaseMonthly.toFixed(2)}\n- Field 109 (W-2 variable): $${form1084CashFlow.w2VariableMonthly.toFixed(2)}\n- Field 110 (Schedule C): $${form1084CashFlow.qualifyingMonthlySelfEmployed.toFixed(2)}\n- Field 111 (S-Corp): $${form1084CashFlow.sCorpShareholderDraw.toFixed(2)}\n- Field 112 (Partnership): $${form1084CashFlow.partnershipMonthly.toFixed(2)}\n- Field 113 (Rental Income): $${form1084CashFlow.rentalMonthly.toFixed(2)}`,
+      `Payload Locked & Transmitted to Encompass eFolder successfully!\n\nStandard Fields Mapped:\n- Field 108 (W-2 base): $${form1084CashFlow.w2BaseMonthly.toFixed(2)}\n- Field 109 (W-2 variable): $${form1084CashFlow.w2VariableMonthly.toFixed(2)}\n- Field 110 (Schedule C): $${form1084CashFlow.qualifyingMonthlySelfEmployed.toFixed(2)}\n- Field 111 (S-Corp): $${form1084CashFlow.sCorpShareholderDraw.toFixed(2)}\n- Field 112 (Partnership): $${form1084CashFlow.partnershipMonthly.toFixed(2)}\n- Field 113 (Rental Income): $${form1084CashFlow.rentalMonthly.toFixed(2)}${perBorrower}${heldOut}`,
     );
   };
 
@@ -2656,6 +2821,8 @@ export default function UnderwriterSplitViewDemo({
     if (alert.id.startsWith('RENTAL_')) {
       return activeTab === 'SCHEDULE_E' || activeTab === 'ENCOMPASS_SYNC';
     }
+    // Shown with its assign control above the tabs; repeated only where the export is reviewed.
+    if (alert.id === 'UNIDENTIFIED_BORROWER' || alert.id === 'UNCONFIRMED_BORROWERS') return activeTab === 'ENCOMPASS_SYNC';
     return true;
   });
 
@@ -2923,7 +3090,7 @@ export default function UnderwriterSplitViewDemo({
               </span>
             </h1>
             <p className="text-xs text-slate-500">
-              {borrowerMetadata.borrowerName} · {borrowerMetadata.loanId}
+              <span data-testid="header-borrowers">{borrowerMetadata.borrowerNames || borrowerMetadata.borrowerName}</span> · {borrowerMetadata.loanId}
               {borrowerMetadata.currentEmployer ? ` · ${borrowerMetadata.currentEmployer}` : ''}
             </p>
           </div>
@@ -3013,6 +3180,11 @@ export default function UnderwriterSplitViewDemo({
       </div>
 
       <UrlAEntityRoster result={locateResult} onSelect={selectUrlAEntity} />
+      <BorrowerWarningsPanel
+        borrowers={borrowers}
+        warnings={locateResult.warnings ?? []}
+        onAssign={(key, borrowerId) => setBorrowerAssignments((current) => ({ ...current, [key]: borrowerId }))}
+      />
 
 
       {/* Always split on this surface (desk / laptop). Dual monitor pops the document out. */}
@@ -3078,7 +3250,7 @@ export default function UnderwriterSplitViewDemo({
             {isLive && tabDocGroups.length ? docChips : null}
 
             {isLive && canvasDoc ? (
-              <PdfPagePreview
+              <PdfDocumentViewer
                 file={canvasDoc.file}
                 pageIndex={livePageIndex}
                 pageCount={canvasDoc.result.total_pages_scanned}
@@ -3087,6 +3259,7 @@ export default function UnderwriterSplitViewDemo({
                 highlight={inspectOverlay}
                 onSelectField={handleInspectField}
                 onPageChange={setLivePageIndex}
+                ocrPages={canvasDoc.result.pages}
                 fillHeight
               />
             ) : parseBusy ? (
@@ -3288,7 +3461,11 @@ export default function UnderwriterSplitViewDemo({
 
               <IncomeEntitySelector
                 label="Employer / W-2"
-                entities={asEntityOptions(w2Employers).map(({ id, name }) => ({ id, name }))}
+                entities={w2Employers.map((entry) => ({
+                  id: entry.id,
+                  name: entry.employerName || 'Unnamed entity',
+                  detail: borrowerTag(entry.borrowerId) || undefined,
+                }))}
                 activeId={activeW2Employer.id}
                 onSelect={selectW2Employer}
                 onAdd={addW2Employer}
@@ -4608,6 +4785,77 @@ export default function UnderwriterSplitViewDemo({
                 </div>
               </div>
 
+              {unassignedDocuments > 0 ? (
+                <p data-testid="held-out-documents" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-900">
+                  {unassignedDocuments} document{unassignedDocuments === 1 ? '' : 's'} name{unassignedDocuments === 1 ? 's' : ''} someone not on the 1003 and{' '}
+                  {unassignedDocuments === 1 ? 'is' : 'are'} left out of these totals and the export. Assign them to a borrower above to include them.
+                </p>
+              ) : null}
+
+              {incomeByBorrower.length ? (
+                <div data-testid="income-by-borrower" className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Borrower</th>
+                        <th className="px-3 py-2 text-right">W-2 base</th>
+                        <th className="px-3 py-2 text-right">W-2 variable</th>
+                        <th className="px-3 py-2 text-right">Self-employed</th>
+                        <th className="px-3 py-2 text-right">Qualifying</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {incomeByBorrower.map((row) => {
+                        const borrower = borrowers[row.borrowerIndex];
+                        return (
+                          <tr key={borrower.id} data-testid="borrower-income-row">
+                            <td className="px-3 py-2 font-bold text-slate-900">
+                              {borrower.name}
+                              <span className="ml-1.5 font-semibold text-slate-500">
+                                {row.borrowerIndex === 0 ? 'Borrower' : 'Co-borrower'}
+                                {row.borrowerIndex === 0 ? ' · incl. rental & asset income' : ''}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-right">{usd(row.w2BaseMonthly ?? 0)}</td>
+                            <td className="px-3 py-2 text-right">{usd(row.w2VariableMonthly ?? 0)}</td>
+                            <td className="px-3 py-2 text-right">{usd(row.selfEmployedMonthly ?? 0)}</td>
+                            <td className="px-3 py-2 text-right font-black text-indigo-800">{usd(row.qualifyingMonthlyIncome)}/mo</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {encompassPayload ? (
+                <details data-testid="encompass-preview" className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+                  <summary className="cursor-pointer font-bold text-slate-800">
+                    Encompass export · {encompassPayload.loan.applications.length} application
+                    {encompassPayload.loan.applications.length === 1 ? '' : 's'}
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {encompassPayload.loan.applications.flatMap((application, index) =>
+                      application.employment.map((job, jobIndex) => {
+                        const person = job.owner === 'CoBorrower' ? application.coborrower : application.borrower;
+                        const name = [person?.firstName, person?.lastName].filter(Boolean).join(' ');
+                        return (
+                          <li key={`${index}-${jobIndex}`} data-testid="encompass-employment-row" className="text-slate-700">
+                            Application {index + 1} · {job.owner === 'CoBorrower' ? 'Co-borrower' : 'Borrower'} {name}:{' '}
+                            <strong>{job.employerName || 'Employer'}</strong>
+                            {job.currentEmploymentIndicator ? '' : ' (prior)'}
+                            {job.monthlyIncomeAmount != null ? ` · ${usd(job.monthlyIncomeAmount)}/mo` : ''}
+                          </li>
+                        );
+                      }),
+                    )}
+                  </ul>
+                  <pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-900 p-3 text-[10px] leading-relaxed text-slate-100">
+                    {JSON.stringify({ applications: encompassPayload.loan.applications, fieldWriter: encompassPayload.fieldWriter.fields }, null, 2)}
+                  </pre>
+                </details>
+              ) : null}
+
               <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900">Sync these selections</h4>
@@ -4633,7 +4881,7 @@ export default function UnderwriterSplitViewDemo({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
                 {visibleWarnings.map((alert) => (
-                  <div key={alert.id} className="flex gap-2.5 bg-white p-3 rounded-lg border border-rose-100 text-xs shadow-sm">
+                  <div key={`${alert.id}:${alert.message}`} className="flex gap-2.5 bg-white p-3 rounded-lg border border-rose-100 text-xs shadow-sm">
                     <span className={`px-2 py-0.5 rounded text-[8px] font-extrabold uppercase self-start ${
                       alert.type === 'ERROR' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
                     }`}>

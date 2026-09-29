@@ -27,6 +27,10 @@ export type HydratedW2Seed = {
   role: 'PRIMARY' | 'SECONDARY';
   located: boolean;
   undisclosed?: boolean;
+  /** The borrower this job's income belongs to. */
+  borrowerId?: string;
+  /** The employee printed on the W-2 or pay stub. */
+  personName?: string;
   patch: LiveWagePatch | null;
 };
 
@@ -37,6 +41,8 @@ export type HydratedBusinessSeed<TPatch> = {
   ein: string;
   located: boolean;
   undisclosed?: boolean;
+  borrowerId?: string;
+  personName?: string;
   years: [TPatch | null, TPatch | null];
 };
 
@@ -64,7 +70,8 @@ function uniqueByRosterThenEntity<T extends { id: string }>(items: T[]): T[] {
 
 function unusedWageDocs(result: LocateResult, allFields: MappedIncomeField[]): MappedIncomeField[] {
   const used = new Set(
-    [...result.roster.flatMap((row) => row.matches), ...result.discovered]
+    // Held-out documents count as used so they cannot be folded back in by employer name.
+    [...result.roster.flatMap((row) => row.matches), ...result.discovered, ...(result.unidentified ?? [])]
       .flatMap((match) => match.fields)
       .filter((field) => field.form === 'Paystub' || field.form === 'WVOE')
       .map((field) => `${field.documentId ?? ''}:${field.pageIndex}:${field.sourceFieldId ?? field.id}`),
@@ -104,9 +111,12 @@ export function seedW2FromLocation(
   const current: HydratedW2Seed[] = [];
   let previous: LivePrevW2Patch | null = null;
 
+  const primaryId = result.borrowers?.[0]?.id;
   for (const row of result.roster) {
     const w2Matches = row.matches.filter((match) => match.kind === 'w2');
     if (row.entity.classification === 'Previous') {
+      // The wage tab holds one prior employer: the primary borrower's.
+      if (row.entity.borrowerId && primaryId && row.entity.borrowerId !== primaryId) continue;
       const first = w2Matches[0];
       const patch = first ? liveWagePatch(first.fields) : null;
       previous = {
@@ -135,6 +145,8 @@ export function seedW2FromLocation(
       ein: patch?.ein || row.entity.ein || '',
       role: row.entity.classification === 'Secondary' ? 'SECONDARY' : 'PRIMARY',
       located: w2Matches.length > 0 || extras.length > 0,
+      borrowerId: row.entity.borrowerId ?? first?.borrowerIds?.[0],
+      personName: first?.personName,
       patch,
     });
   }
@@ -158,12 +170,18 @@ export function seedW2FromLocation(
       role: current.some((item) => item.role === 'PRIMARY') ? 'SECONDARY' : 'PRIMARY',
       located: true,
       undisclosed: true,
+      borrowerId: matches.find((match) => match.borrowerIds?.length)?.borrowerIds?.[0],
+      personName: matches.find((match) => match.personName)?.personName,
       patch,
     });
   }
 
   if (!previous) {
-    const prevRow = result.roster.find((row) => row.entity.classification === 'Previous');
+    const prevRow = result.roster.find(
+      (row) =>
+        row.entity.classification === 'Previous' &&
+        (!row.entity.borrowerId || !primaryId || row.entity.borrowerId === primaryId),
+    );
     if (prevRow) {
       previous = { employerName: prevRow.entity.name, ein: prevRow.entity.ein || '' };
     }
@@ -200,6 +218,8 @@ function seedBusinesses<TPatch>(
       ein: einFromPatch(patch) || entity?.ein || matches[0]?.ein || '',
       located: true,
       undisclosed: !entity,
+      borrowerId: entity?.borrowerId ?? matches.find((match) => match.borrowerIds?.length)?.borrowerIds?.[0],
+      personName: matches.find((match) => match.personName)?.personName,
       years,
     });
   }

@@ -14,7 +14,7 @@ import {
   seedW2FromLocation,
 } from '../../../apps/underwriting-console/src/hydrateFromUrlA';
 import { employmentEntitiesFromUrlA } from '../../../apps/underwriting-console/src/urlaEmploymentRoster';
-import type { ParsePage, ParseResponse, ParseWord } from '../../../apps/underwriting-console/src/parseTypes';
+import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord } from '../../../apps/underwriting-console/src/parseTypes';
 
 declare global {
   interface File {}
@@ -385,6 +385,20 @@ describe('undisclosed businesses on returns', () => {
     expect(weekend?.patch).toMatchObject({ w2Year1Box5: 24000, baseYtd: 9600 });
   });
 
+  test('keeps a second employer when the packet has only pay stubs', () => {
+    const pages = [
+      page(0, ['Paystub'], ['Employer: Contoso Freight Inc', 'Regular 30.00 80.00 2,400.00 31,200.00']),
+      page(1, ['Paystub'], ['Employer: Northwind Medical Group', 'Regular 22.00 40.00 880.00 11,440.00']),
+    ];
+    const { located, fields } = locatePages(pages);
+    const jobs = located.discovered.filter((match) => match.kind === 'w2').map((match) => match.name);
+    expect(jobs).toEqual(expect.arrayContaining([
+      expect.stringMatching(/Contoso Freight/),
+      expect.stringMatching(/Northwind Medical/),
+    ]));
+    expect(seedW2FromLocation(located, fields).current).toHaveLength(2);
+  });
+
   test('does not merge page zero from an unrelated PDF into a matched employer', () => {
     const w2Page = page(0, ['W-2'], [
       "c Employer's name Hidden Payroll Inc",
@@ -441,6 +455,59 @@ describe('undisclosed businesses on returns', () => {
     expect(businesses.map((seed) => seed.businessName).join(' ')).toMatch(/Hidden Consulting/);
     expect(businesses.map((seed) => seed.businessName).join(' ')).toMatch(/Night Market/);
     expect(businesses.every((seed) => seed.undisclosed)).toBe(true);
+  });
+});
+
+describe('a 1065 return with its Schedule L', () => {
+  function field(sourceFieldId: string, pageIndex: number, value: string, numericValue = 0): MappedIncomeField {
+    return {
+      id: sourceFieldId,
+      sourceFieldId,
+      entityId: `form-1065-p${pageIndex}`,
+      documentId: 'doc1',
+      form: 'Form 1065',
+      boxLabel: '',
+      fieldLabel: sourceFieldId,
+      lineNum: '',
+      category: '',
+      value,
+      numericValue,
+      pageIndex,
+      wordIndex: 0,
+      box: { x: 0, y: 0, w: 0, h: 0 },
+    };
+  }
+
+  const returnFace = [
+    field('pt-return-name', 0, 'Riverbend Holdings LLC'),
+    field('pt-return-ein', 0, '86-1234567'),
+    field('pt-return-ord', 0, '$4,570.00', 4570),
+  ];
+  const scheduleL = [field('sch-l-cash', 5, '$55,000.00', 55000), field('sch-l-ap', 5, '$22,000.00', 22000)];
+  const k1 = [
+    field('pt-name', 6, 'Riverbend Holdings LLC'),
+    field('pt-ein', 6, '86-1234567'),
+    field('pt-ord', 6, '$42,000.00', 42000),
+  ];
+  const pages = [
+    { documentId: 'doc1', pageIndex: 0, formIds: ['Form 1065 (Partnership Return)'], text: 'Form 1065 Riverbend Holdings LLC 86-1234567' },
+    { documentId: 'doc1', pageIndex: 5, formIds: ['Schedule L'], text: 'Schedule L Balance Sheets per Books' },
+    { documentId: 'doc1', pageIndex: 6, formIds: ['Schedule K-1 (1065)'], text: 'Schedule K-1 (Form 1065)' },
+  ];
+
+  test('keeps Schedule L on the return when the packet has no K-1', () => {
+    const located = locateIncomeEntities({ roster: [], fields: [...returnFace, ...scheduleL], pages: pages.slice(0, 2) });
+    expect(located.discovered).toHaveLength(1);
+    expect(located.discovered[0].name).toBe('Riverbend Holdings LLC');
+    const ids = located.discovered[0].fields.map((item) => item.sourceFieldId);
+    expect(ids).toEqual(expect.arrayContaining(['pt-return-ord', 'sch-l-cash', 'sch-l-ap']));
+  });
+
+  test('does not add the return face as a second, empty partnership beside its K-1', () => {
+    const located = locateIncomeEntities({ roster: [], fields: [...returnFace, ...scheduleL, ...k1], pages });
+    expect(located.discovered).toHaveLength(1);
+    const ids = located.discovered[0].fields.map((item) => item.sourceFieldId);
+    expect(ids).toEqual(expect.arrayContaining(['pt-ord', 'pt-return-ord', 'sch-l-cash']));
   });
 });
 

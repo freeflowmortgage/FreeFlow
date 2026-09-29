@@ -9,7 +9,7 @@ export async function postParsePdf(file: File): Promise<ParseResponse> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/pdf',
-        'X-Document-Title': file.name.endsWith('.pdf') ? file.name : `${file.name}.pdf`,
+        'X-Document-Title': encodeURIComponent(file.name.endsWith('.pdf') ? file.name : `${file.name}.pdf`),
       },
       body: file,
     });
