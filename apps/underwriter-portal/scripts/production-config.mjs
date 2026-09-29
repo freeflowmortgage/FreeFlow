@@ -20,9 +20,6 @@ const CORE_REQUIRED_VARIABLES = [
 ];
 const PRODUCTION_INTEGRATION_VARIABLES = [
   'REDIS_URL',
-  'ENCOMPASS_BASE_URL',
-  'ENCOMPASS_CLIENT_ID',
-  'ENCOMPASS_CLIENT_SECRET',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
 ];
@@ -128,7 +125,6 @@ export function validateProductionConfig(env) {
   parseUrl(env, 'DOC_PARSER_SERVICE_URL', errors, ['http:', 'https:']);
   parseUrl(env, 'APPRAISAL_PARSER_URL', errors, ['http:', 'https:']);
   parseUrl(env, 'OIDC_ISSUER', errors, ['https:']);
-  parseUrl(env, 'ENCOMPASS_BASE_URL', errors, ['https:']);
   parseUrl(env, 'SYNC_QUEUE_URL', errors, ['https:']);
   parseUrl(env, 'SYNC_DLQ_URL', errors, ['https:']);
 

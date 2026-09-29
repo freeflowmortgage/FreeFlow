@@ -10,7 +10,7 @@ Under the **Perpetual Enterprise License**, FreeFlow's engineering team will tra
 
 *   **Deployment Model:** Private VPC (AWS ECS / Azure Kubernetes Service) with zero telemetry or external calling to FreeFlow servers.
 *   **Data Custody Boundary:** Strict **Zero-Data-Retention (ZDR)** execution model. All files are processed ephemerally in RAM buffers and purged immediately upon database commit, completely eliminating external data-at-rest liabilities.
-*   **Integration Target:** Direct synchronization with your native **ICE Encompass** instance via Encompass Developer Connect OAuth 2.0 REST APIs, accompanied by manual offline **MISMO v3.4 XML** export capabilities.
+*   **Integration Target:** Direct synchronization with your Encompass instance through the hosted bridge or separately deployed custom connector, accompanied by manual offline **MISMO v3.4 XML** export capabilities.
 
 ---
 
@@ -59,13 +59,13 @@ Configure an S3 bucket with **AWS Key Management Service (KMS) AES-256 server-si
 
 The final phase connects the newly private instance of FreeFlow to your native core systems and executes strict automated adversarial tests for operational sign-off.
 
-#### **3.1 ICE Encompass Web Control & Iframe Handshake**
+#### **3.1 Encompass Hosted Tool & Connector Handshake**
 Configure your local Encompass custom Web Input Forms to frame the secure React split-screen UI:
 *   **Next.js CSP Restriction:** Adjust `next.config.js` response headers to lock down frame authorization:
     ```javascript
     Content-Security-Policy: frame-ancestors 'self' https://*.encompass.epic.com;
     ```
-*   **REST API Mapping:** Map the Python generator (`mismo_xml_exporter.py`) with your corporate Encompass Instance ID and Client ID credentials inside your secure database configuration to enable automatic XML payload pushing.
+*   **Connector Mapping:** Bind the tenant to its separately deployed custom connector and map `mismo_xml_exporter.py` output to approved Encompass fields. LOS credentials must remain outside the FreeFlow core database.
 
 #### **3.2 Automated QA Adversarial Testing Suite**
 We run our regression unit-testing framework (`stress_test_runner.py` and `adversarial_test_runner.py`) on your production-mirrored staging environment to verify accuracy.

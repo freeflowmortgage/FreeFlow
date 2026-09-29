@@ -206,23 +206,12 @@ variable "enable_encompass_connector" {
 
 variable "connector_service_token_rotation_epoch" {
   type        = string
-  description = "Explicit rotation epoch for the optional Developer Connect connector service token. Preserve the deployed value during hosted-only changes."
+  description = "Explicit rotation epoch for the custom connector service token. Preserve the deployed value during hosted-only changes."
   default     = ""
 
   validation {
     condition     = var.connector_service_token_rotation_epoch == "" || can(regex("^[A-Za-z0-9._-]{1,64}$", var.connector_service_token_rotation_epoch))
     error_message = "connector_service_token_rotation_epoch must be empty or a 1-64 character safe identifier."
-  }
-}
-
-variable "encompass_connector_mode" {
-  type        = string
-  description = "Connector runtime mode. Synthetic is development test-only; real-encompass resolves LOS credentials only inside the connector task."
-  default     = "synthetic-freeflow-dev"
-
-  validation {
-    condition     = contains(["synthetic-freeflow-dev", "real-encompass"], var.encompass_connector_mode)
-    error_message = "encompass_connector_mode must be synthetic-freeflow-dev or real-encompass."
   }
 }
 
@@ -343,14 +332,14 @@ variable "encompass_connector_service_auth_kind" {
   }
 }
 
-variable "developer_connect_worker_image" {
+variable "connector_worker_image" {
   type        = string
-  description = "Optional immutable portal-derived image pinned independently for Developer Connect fallback workers. Empty follows portal_image."
+  description = "Optional immutable portal-derived image pinned independently for custom connector workers. Empty follows portal_image."
   default     = ""
 
   validation {
-    condition     = var.developer_connect_worker_image == "" || can(regex("@sha256:[0-9a-f]{64}$", var.developer_connect_worker_image))
-    error_message = "developer_connect_worker_image must be empty or an immutable @sha256 digest reference."
+    condition     = var.connector_worker_image == "" || can(regex("@sha256:[0-9a-f]{64}$", var.connector_worker_image))
+    error_message = "connector_worker_image must be empty or an immutable @sha256 digest reference."
   }
 }
 

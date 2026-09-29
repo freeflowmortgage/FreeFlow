@@ -10,7 +10,7 @@ This document serves as the official pre-flight audit and quality assurance play
 To pass rigid institutional bank CISO reviews, regional credit union audits, and independent mortgage banker (IMB) compliance checks, this point-solution enforces a strict **Zero-Data-Retention (ZDR)** transit topology [cite: 33, 72]:
 *   Incoming PDF file streams are processed **exclusively in-memory (RAM)** within volatile, containerized execution frames [cite: 1, 31, 33].
 *   At no point do the document pre-processing services write unencrypted consumer Non-Public Personal Information (NPI) to persistent physical disks [cite: 33, 41].
-*   All calculated coordinates and qualifying financial values are returned directly to the browser or synchronized securely to the lender's ICE Encompass eFolder before the container's local environment is hard-purged [cite: 30, 31, 148].
+*   All calculated coordinates and qualifying financial values are returned directly to the browser or synchronized securely to the lender's Encompass eFolder before the container's local environment is hard-purged [cite: 30, 31, 148].
 
 ---
 

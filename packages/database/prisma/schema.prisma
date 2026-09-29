@@ -173,9 +173,7 @@ model TenantConfiguration {
   enableAppraisalReview       Boolean                  @default(true) // URAR 1004 coordinate QA workspace
   encompassIntegrationMode    EncompassIntegrationMode @default(NONE)
 
-  // Encrypted API Keys for Ellie Mae Developer Connect and Stripe
-  encompassClientId   String? @db.VarChar(255)
-  encompassInstanceId String? @db.VarChar(255)
+  // Stripe webhook configuration; LOS credentials never belong in core storage.
   stripeWebhookSecret String? @db.VarChar(255)
 
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -185,7 +183,7 @@ model TenantConfiguration {
 
 enum EncompassIntegrationMode {
   ENCOMPASS_HOSTED
-  DEVELOPER_CONNECT
+  CUSTOM_CONNECTOR
   NONE
 }
 

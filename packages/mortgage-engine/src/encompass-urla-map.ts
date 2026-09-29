@@ -1,7 +1,7 @@
 /**
  * AI 1003 / URLA → Encompass mapping.
  *
- * Two write shapes (Developer Connect):
+ * Two write shapes (direct Encompass connector):
  * 1. Loan PATCH  /encompass/v1/loans/{id}
  *    customFields MUST be [{ fieldName, value }], income lives on the application.
  * 2. Field Writer  POST /encompass/v1/loans/{id}/fieldWriter

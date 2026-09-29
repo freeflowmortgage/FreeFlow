@@ -150,17 +150,3 @@ resource "aws_secretsmanager_secret_version" "connector_service_signing_key" {
   secret_id     = aws_secretsmanager_secret.connector_service_signing_key[0].id
   secret_string = random_password.connector_service_signing_key[0].result
 }
-
-# This container is connector-only. Terraform never writes LOS values into
-# state; populate clientId/clientSecret/instanceId through the approved secret
-# workflow before selecting real-encompass mode.
-resource "aws_secretsmanager_secret" "connector_encompass_credentials" {
-  count = var.enable_encompass_connector ? 1 : 0
-
-  name                    = "${local.name_prefix}/encompass-connector-los-credentials"
-  description             = "Connector-only Encompass OAuth credentials for one lender deployment"
-  recovery_window_in_days = 7
-  tags = {
-    DataClassification = "Confidential"
-  }
-}

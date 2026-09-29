@@ -3,7 +3,7 @@
  *
  * Mapped onto the landed interface: listActiveAttachments + downloadOriginalAttachment.
  * Tenant isolation is enforced by the separate connector service (this suite uses an
- * in-memory fake). Custom is primary. Developer Connect stays OFF. No LIVE ECS / ICE calls.
+ * in-memory fake). The custom connector is the only service adapter. No live LOS calls.
  *
  * Deferred — methods not on EncompassConnector yet:
  *   ECC-07 getAttachmentMetadata
@@ -40,7 +40,7 @@ const ATT_BAD = 'att-bad';
 const ATT_OVERSIZE = 'att-oversize';
 const ATT_UNKNOWN = 'att-unknown';
 const BORROWER_NAME = 'Jane Borrower';
-const PROVIDER_SECRET = 'ice-provider-secret-must-not-leak';
+const PROVIDER_SECRET = 'los-provider-secret-must-not-leak';
 
 const BINDING_A = createLenderConnectorBinding({
   lenderId: 'lender-a',
@@ -85,10 +85,10 @@ const LEAK_TOKENS = [
 
 function leakyProviderBody(): string {
   return JSON.stringify({
-    message: 'ICE provider dump',
+    message: 'LOS provider dump',
     borrowerName: BORROWER_NAME,
     clientSecret: PROVIDER_SECRET,
-    instanceId: 'not-a-real-ice-instance',
+    instanceId: 'not-a-real-los-instance',
     attachments: [{ id: ATT_1, title: `W-2 ${BORROWER_NAME}` }],
   });
 }
@@ -449,31 +449,7 @@ test('ECC-05/ECC-19: digest mismatch is non-retryable and does not leak provider
   );
 });
 
-test('ECC-20: factory developer-connect OFF makes no live ICE calls and needs no ICE credentials', () => {
-  let called = false;
-  assert.throws(
-    () => createEncompassConnector({
-      binding: { kind: 'developer-connect', deploymentId: 'unused', lenderId: 'unused' },
-      developerConnectClient: {
-        listActiveAttachments: async () => {
-          called = true;
-          throw new Error('live ICE list must not run');
-        },
-        downloadOriginalAttachment: async () => {
-          called = true;
-          throw new Error('live ICE download must not run');
-        },
-      },
-    }),
-    (error: unknown) => {
-      assertSafeError(error, { safeCode: 'DEVELOPER_CONNECT_DISABLED', retryable: false });
-      return true;
-    },
-  );
-  assert.equal(called, false);
-});
-
-test('ECC-21: custom factory path does not require DC client/secret/instance', () => {
+test('custom factory path does not require LOS client credentials', () => {
   const connector = createEncompassConnector({
     binding: BINDING_A,
     connectorServiceAuth: { authorizationHeader: AUTH_A },
