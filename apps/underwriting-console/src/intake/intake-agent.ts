@@ -6,6 +6,26 @@ export interface IntakeChoice {
   label: string;
 }
 
+/** URLA Section 1b–1d for one borrower. The primary borrower's copy lives on IntakeAnswers itself. */
+export interface BorrowerEmploymentAnswers {
+  employmentType?: 'W2' | 'SELF_EMPLOYED';
+  employerName?: string;
+  jobTitle?: string;
+  yearsAtJob?: string;
+  yearsInBusiness?: string;
+  sameBusinessFiveYears?: boolean;
+  monthlyIncome?: string;
+  hasSecondJob?: boolean;
+  secondEmployer?: string;
+  secondMonthlyIncome?: string;
+  previousEmployer?: string;
+  previousEmployerYears?: string;
+}
+
+export interface CoborrowerAnswers extends BorrowerEmploymentAnswers {
+  name?: string;
+}
+
 export interface IntakeAnswers {
   // 1a Personal information
   borrowerName?: string;
@@ -25,7 +45,12 @@ export interface IntakeAnswers {
   housingStatus?: 'OWN' | 'RENT' | 'RENT_FREE';
   monthlyHousing?: string;
   hasCoborrower?: boolean;
+  /** First co-borrower's name, kept for older drafts. `coborrowers[0].name` is the same person. */
   coborrowerName?: string;
+  /** Every co-borrower with their own employment and income, in 1003 order. */
+  coborrowers?: CoborrowerAnswers[];
+  /** Set once the borrower says there are no more co-borrowers to add. */
+  coborrowersDone?: boolean;
 
   // 4a Loan & property
   loanPurpose?: 'PURCHASE' | 'REFINANCE';
@@ -127,7 +152,36 @@ export function firstName(answers: IntakeAnswers) {
   return answers.borrowerName?.trim().split(/\s+/)[0] ?? 'there';
 }
 
-function yearsInBusiness(answers: IntakeAnswers) {
+/** Co-borrowers in 1003 order. A draft saved before per-borrower employment has only `coborrowerName`. */
+export function coborrowersOf(answers: Pick<IntakeAnswers, 'hasCoborrower' | 'coborrowerName' | 'coborrowers'>): CoborrowerAnswers[] {
+  if (answers.hasCoborrower === false) return [];
+  if (answers.coborrowers?.length) return answers.coborrowers;
+  if (answers.hasCoborrower && answers.coborrowerName?.trim()) return [{ name: answers.coborrowerName.trim() }];
+  return [];
+}
+
+function givenName(name: string | undefined): string {
+  return name?.trim().split(/\s+/)[0] || 'the co-borrower';
+}
+
+/** Checklist lines for each co-borrower's own income documents. */
+export function coborrowerDocumentLines(answers: IntakeAnswers): string[] {
+  return coborrowersOf(answers)
+    .filter((coborrower) => coborrower.name?.trim())
+    .map((coborrower) => {
+      const name = givenName(coborrower.name);
+      const employer = coborrower.employerName?.trim();
+      if (coborrower.employmentType === 'SELF_EMPLOYED') {
+        return `${name} (co-borrower) is self-employed${employer ? ` through ${employer}` : ''}: two years of personal and matching business returns, and a YTD P&L if the current year is not filed. ${name} gets a separate Form 1084.`;
+      }
+      if (coborrower.employmentType === 'W2') {
+        return `${name} (co-borrower): the most recent pay stubs covering 30 days and two years of W-2s${employer ? ` from ${employer}` : ''}.`;
+      }
+      return `${name} (co-borrower): income documents once we know how ${name} is paid.`;
+    });
+}
+
+function yearsInBusiness(answers: BorrowerEmploymentAnswers) {
   const parsed = Number(answers.yearsInBusiness);
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -176,6 +230,7 @@ export function buildDocumentPlan(answers: IntakeAnswers): string {
       'As a W-2 borrower we will collect your most recent paystubs covering 30 days and two years of W-2s. A written VOE or payroll connect can replace some of the paper.',
     );
   }
+  lines.push(...coborrowerDocumentLines(answers));
 
   if (purchase) {
     lines.push(
@@ -205,9 +260,195 @@ function blank(value: unknown) {
   return value === undefined || value === null || value === '';
 }
 
-function yearsAtCurrentJob(answers: IntakeAnswers) {
+function yearsAtCurrentJob(answers: BorrowerEmploymentAnswers) {
   const parsed = Number(answers.yearsAtJob);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+type EmploymentSubject = { self: true } | { name: string };
+
+/**
+ * The next unanswered employment question for one borrower, or null when their
+ * section is complete. `prefix` scopes the turn id to that borrower ('' for the
+ * primary borrower, `cob0.` for the first co-borrower).
+ */
+function employmentTurn(
+  employment: BorrowerEmploymentAnswers,
+  prefix: string,
+  subject: EmploymentSubject,
+): AgentTurn | null {
+  const self = 'self' in subject;
+  const who = self ? '' : givenName(subject.name);
+  const say = (mine: string, theirs: string) => (self ? mine : theirs);
+  const selfEmployed = employment.employmentType === 'SELF_EMPLOYED';
+  if (!employment.employmentType) {
+    return {
+      id: `${prefix}employmentType`,
+      prompt: say('How are you paid today?', `How is ${who} paid today?`),
+      kind: 'choice',
+      choices: [
+        { id: 'W2', label: 'W-2 employee' },
+        { id: 'SELF_EMPLOYED', label: 'Self-employed' },
+      ],
+    };
+  }
+  if (blank(employment.employerName)) {
+    return {
+      id: `${prefix}employerName`,
+      prompt: selfEmployed
+        ? say('What is the legal name of the business?', `What is the legal name of ${who}’s business?`)
+        : say('Who is your current employer?', `Who is ${who}’s current employer?`),
+      kind: 'text',
+      placeholder: selfEmployed ? 'Morgan Consulting LLC' : 'Apex Technology Partners',
+    };
+  }
+  if (blank(employment.jobTitle)) {
+    return {
+      id: `${prefix}jobTitle`,
+      prompt: say('What is your title or position?', `What is ${who}’s title or position?`),
+      kind: 'text',
+      placeholder: 'Operations manager',
+    };
+  }
+  if (employment.employmentType === 'W2' && blank(employment.yearsAtJob)) {
+    return {
+      id: `${prefix}yearsAtJob`,
+      prompt: say(
+        'How many years have you been in this job (or line of work)?',
+        `How many years has ${who} been in this job (or line of work)?`,
+      ),
+      kind: 'number',
+      placeholder: '3',
+      helper: 'GSE files need a two-year work history. If this job is newer, we will ask about the prior employer.',
+    };
+  }
+  if (selfEmployed && blank(employment.yearsInBusiness)) {
+    return {
+      id: `${prefix}yearsInBusiness`,
+      prompt: say(
+        'How many years have you been self-employed in this same business?',
+        `How many years has ${who} been self-employed in this same business?`,
+      ),
+      kind: 'number',
+      placeholder: '5',
+      helper: 'Count years of ownership in this company, not total years working.',
+    };
+  }
+  if (selfEmployed && yearsInBusiness(employment) >= 5 && employment.sameBusinessFiveYears == null) {
+    return {
+      id: `${prefix}sameBusinessFiveYears`,
+      prompt:
+        'Just to confirm: has that been the same business (same ownership) for five years or more, not a recent restart or new entity?',
+      kind: 'choice',
+      choices: yesNo(),
+    };
+  }
+  if (blank(employment.monthlyIncome)) {
+    return {
+      id: `${prefix}monthlyIncome`,
+      prompt: selfEmployed
+        ? say(
+            'What is your typical monthly take-home from the business, before the 1084 audit?',
+            `What is ${who}’s typical monthly take-home from the business, before the 1084 audit?`,
+          )
+        : say('What is your gross monthly income from this job?', `What is ${who}’s gross monthly income from this job?`),
+      kind: 'number',
+      placeholder: '7500',
+    };
+  }
+  if (employment.hasSecondJob == null) {
+    return {
+      id: `${prefix}hasSecondJob`,
+      prompt: say(
+        'Do you have a second job or additional employment we should count?',
+        `Does ${who} have a second job or additional employment we should count?`,
+      ),
+      kind: 'choice',
+      choices: yesNo(),
+    };
+  }
+  if (employment.hasSecondJob && blank(employment.secondEmployer)) {
+    return {
+      id: `${prefix}secondEmployer`,
+      prompt: 'Second employer or business name?',
+      kind: 'text',
+      placeholder: 'Evening retail',
+    };
+  }
+  if (employment.hasSecondJob && blank(employment.secondMonthlyIncome)) {
+    return {
+      id: `${prefix}secondMonthlyIncome`,
+      prompt: 'Gross monthly income from that second job?',
+      kind: 'number',
+      placeholder: '1200',
+    };
+  }
+  // Two-year employment history applies to W-2 (time on the job) AND
+  // self-employed borrowers (time owning the business).
+  const underTwoYears =
+    employment.employmentType === 'W2'
+      ? yearsAtCurrentJob(employment) < 2
+      : selfEmployed && yearsInBusiness(employment) < 2;
+  if (underTwoYears && blank(employment.previousEmployer)) {
+    return {
+      id: `${prefix}previousEmployer`,
+      prompt: selfEmployed
+        ? say(
+            'The business is under two years old, so we need the rest of your two-year work history. Who was your employer before this business?',
+            `${who}’s business is under two years old, so we need the rest of ${who}’s two-year work history. Who was ${who}’s employer before this business?`,
+          )
+        : say(
+            'You have under two years at this job. Who was the previous employer?',
+            `${who} has under two years at this job. Who was the previous employer?`,
+          ),
+      kind: 'text',
+      placeholder: 'Prior employer name',
+    };
+  }
+  if (underTwoYears && !blank(employment.previousEmployer) && blank(employment.previousEmployerYears)) {
+    return {
+      id: `${prefix}previousEmployerYears`,
+      prompt: say(
+        'How many years were you with that previous employer?',
+        `How many years was ${who} with that previous employer?`,
+      ),
+      kind: 'number',
+      placeholder: '3',
+    };
+  }
+  return null;
+}
+
+const EMPLOYMENT_TEXT_KEYS = [
+  'employerName',
+  'jobTitle',
+  'yearsAtJob',
+  'yearsInBusiness',
+  'monthlyIncome',
+  'secondEmployer',
+  'secondMonthlyIncome',
+  'previousEmployer',
+  'previousEmployerYears',
+] as const;
+
+function applyCoborrowerAnswer(answers: IntakeAnswers, index: number, key: string, value: string): IntakeAnswers {
+  const coborrowers = [...coborrowersOf(answers)];
+  while (coborrowers.length <= index) coborrowers.push({});
+  const current: CoborrowerAnswers = { ...coborrowers[index] };
+  const yes = value === 'yes' || value === 'true';
+  if (key === 'name') current.name = value;
+  else if (key === 'employmentType') current.employmentType = value === 'SELF_EMPLOYED' ? 'SELF_EMPLOYED' : 'W2';
+  else if (key === 'hasSecondJob') current.hasSecondJob = yes;
+  else if (key === 'sameBusinessFiveYears') current.sameBusinessFiveYears = yes;
+  else if ((EMPLOYMENT_TEXT_KEYS as readonly string[]).includes(key)) {
+    (current as Record<string, unknown>)[key] = value || '0';
+  } else {
+    return answers;
+  }
+  coborrowers[index] = current;
+  const next: IntakeAnswers = { ...answers, coborrowers };
+  if (index === 0 && key === 'name') next.coborrowerName = value;
+  return next;
 }
 
 function yesNo(): IntakeChoice[] {
@@ -437,126 +678,31 @@ export function getNextTurn(answers: IntakeAnswers): AgentTurn | { done: true } 
       placeholder: '400000',
     };
   }
-  if (!answers.employmentType) {
-    return {
-      id: 'employmentType',
-      prompt: 'How are you paid today?',
-      kind: 'choice',
-      choices: [
-        { id: 'W2', label: 'W-2 employee' },
-        { id: 'SELF_EMPLOYED', label: 'Self-employed' },
-      ],
-    };
-  }
-  if (blank(answers.employerName)) {
-    return {
-      id: 'employerName',
-      prompt:
-        answers.employmentType === 'SELF_EMPLOYED'
-          ? 'What is the legal name of the business?'
-          : 'Who is your current employer?',
-      kind: 'text',
-      placeholder: answers.employmentType === 'SELF_EMPLOYED' ? 'Morgan Consulting LLC' : 'Apex Technology Partners',
-    };
-  }
-  if (blank(answers.jobTitle)) {
-    return {
-      id: 'jobTitle',
-      prompt: 'What is your title or position?',
-      kind: 'text',
-      placeholder: 'Operations manager',
-    };
-  }
-  if (answers.employmentType === 'W2' && blank(answers.yearsAtJob)) {
-    return {
-      id: 'yearsAtJob',
-      prompt: 'How many years have you been in this job (or line of work)?',
-      kind: 'number',
-      placeholder: '3',
-      helper: 'GSE files need a two-year work history. If this job is newer, we will ask about the prior employer.',
-    };
-  }
-  if (answers.employmentType === 'SELF_EMPLOYED' && blank(answers.yearsInBusiness)) {
-    return {
-      id: 'yearsInBusiness',
-      prompt: 'How many years have you been self-employed in this same business?',
-      kind: 'number',
-      placeholder: '5',
-      helper: 'Count years of ownership in this company, not total years working.',
-    };
-  }
-  if (
-    answers.employmentType === 'SELF_EMPLOYED' &&
-    yearsInBusiness(answers) >= 5 &&
-    answers.sameBusinessFiveYears == null
-  ) {
-    return {
-      id: 'sameBusinessFiveYears',
-      prompt:
-        'Just to confirm: has that been the same business (same ownership) for five years or more, not a recent restart or new entity?',
-      kind: 'choice',
-      choices: yesNo(),
-    };
-  }
-  if (blank(answers.monthlyIncome)) {
-    return {
-      id: 'monthlyIncome',
-      prompt:
-        answers.employmentType === 'SELF_EMPLOYED'
-          ? 'What is your typical monthly take-home from the business, before the 1084 audit?'
-          : 'What is your gross monthly income from this job?',
-      kind: 'number',
-      placeholder: '7500',
-    };
-  }
-  if (answers.hasSecondJob == null) {
-    return {
-      id: 'hasSecondJob',
-      prompt: 'Do you have a second job or additional employment we should count?',
-      kind: 'choice',
-      choices: yesNo(),
-    };
-  }
-  if (answers.hasSecondJob && blank(answers.secondEmployer)) {
-    return {
-      id: 'secondEmployer',
-      prompt: 'Second employer or business name?',
-      kind: 'text',
-      placeholder: 'Evening retail',
-    };
-  }
-  if (answers.hasSecondJob && blank(answers.secondMonthlyIncome)) {
-    return {
-      id: 'secondMonthlyIncome',
-      prompt: 'Gross monthly income from that second job?',
-      kind: 'number',
-      placeholder: '1200',
-    };
-  }
-  {
-    // Two-year employment history applies to W-2 (time on the job) AND
-    // self-employed borrowers (time owning the business).
-    const underTwoYears =
-      answers.employmentType === 'W2'
-        ? yearsAtCurrentJob(answers) < 2
-        : answers.employmentType === 'SELF_EMPLOYED' && yearsInBusiness(answers) < 2;
-    if (underTwoYears && blank(answers.previousEmployer)) {
-      return {
-        id: 'previousEmployer',
-        prompt:
-          answers.employmentType === 'SELF_EMPLOYED'
-            ? 'The business is under two years old, so we need the rest of your two-year work history. Who was your employer before this business?'
-            : 'You have under two years at this job. Who was the previous employer?',
-        kind: 'text',
-        placeholder: 'Prior employer name',
-      };
+  const primaryEmployment = employmentTurn(answers, '', { self: true });
+  if (primaryEmployment) return primaryEmployment;
+  if (answers.hasCoborrower) {
+    const coborrowers = coborrowersOf(answers);
+    for (let index = 0; index < coborrowers.length; index += 1) {
+      const coborrower = coborrowers[index];
+      const prefix = `cob${index}.`;
+      if (blank(coborrower.name)) {
+        return {
+          id: `${prefix}name`,
+          prompt: 'What is the next co-borrower’s full legal name?',
+          kind: 'text',
+          placeholder: 'Jordan Morgan',
+        };
+      }
+      const turn = employmentTurn(coborrower, prefix, { name: coborrower.name! });
+      if (turn) return turn;
     }
-    if (underTwoYears && !blank(answers.previousEmployer) && blank(answers.previousEmployerYears)) {
+    if (!answers.coborrowersDone) {
       return {
-        id: 'previousEmployerYears',
-        prompt: 'How many years were you with that previous employer?',
-        kind: 'number',
-        placeholder: '3',
+        id: 'addCoborrower',
+        prompt: 'Is anyone else applying as a co-borrower on this loan?',
+        kind: 'choice',
+        choices: yesNo(),
+        helper: 'Each co-borrower’s employment and income goes on their own section of the 1003.',
       };
     }
   }
@@ -961,8 +1107,31 @@ export function getNextTurn(answers: IntakeAnswers): AgentTurn | { done: true } 
 
 export function applyAnswer(answers: IntakeAnswers, turnId: string, raw: string): IntakeAnswers {
   const value = raw.trim();
+  const coborrowerTurn = turnId.match(/^cob(\d+)\.(\w+)$/);
+  if (coborrowerTurn) return applyCoborrowerAnswer(answers, Number(coborrowerTurn[1]), coborrowerTurn[2], value);
   const next: IntakeAnswers = { ...answers };
   const yes = value === 'yes' || value === 'true' || value === 'got_it';
+
+  if (turnId === 'coborrowerName') {
+    const [first, ...rest] = coborrowersOf(answers);
+    next.coborrowerName = value;
+    next.coborrowers = [{ ...first, name: value }, ...rest];
+    return next;
+  }
+  if (turnId === 'hasCoborrower') {
+    next.hasCoborrower = yes;
+    if (!yes) {
+      next.coborrowerName = undefined;
+      next.coborrowers = [];
+      next.coborrowersDone = true;
+    }
+    return next;
+  }
+  if (turnId === 'addCoborrower') {
+    if (yes) next.coborrowers = [...coborrowersOf(answers), {}];
+    else next.coborrowersDone = true;
+    return next;
+  }
 
   const textKeys: Array<keyof IntakeAnswers> = [
     'borrowerName',

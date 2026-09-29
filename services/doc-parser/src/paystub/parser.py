@@ -136,7 +136,7 @@ def _parse_identity(
         if not matched:
             continue
         setattr(identity, field, tidy_text(" ".join(v.text for v in matched)))
-        if field in {"employer", "period_end"}:
+        if field in {"employer", "employee", "period_end"}:
             spans = [to_overlay(v, page_width, page_height) for v in matched]
             box = union([s for s in spans if s])
             setattr(identity, f"{field}_box", box)

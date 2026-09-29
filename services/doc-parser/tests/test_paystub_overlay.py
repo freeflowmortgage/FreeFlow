@@ -131,9 +131,24 @@ def test_a_value_with_no_located_cell_is_not_reported() -> None:
         line.rate_box = None
         line.hours_box = None
     result.identity.employer_box = None
+    result.identity.employee_box = None
     result.identity.period_end_box = None
 
     assert income_fields(result) == []
+
+
+def test_the_employee_name_is_reported_with_its_cell(fields: list[dict]) -> None:
+    employee = next(f for f in fields if f["sourceFieldId"] == "ps-employee-name")
+    assert employee["value"] == "Dana Rivera"
+    assert employee["category"] == "identity"
+    assert usable(employee["box"])
+
+
+def test_half_a_name_is_not_reported() -> None:
+    """A column split mid-name would tie the stub to the wrong person."""
+    result = parse_paystub(build_paystub_pdf())
+    result.identity.employee = "Dana"
+    assert not [f for f in income_fields(result) if f["sourceFieldId"] == "ps-employee-name"]
 
 
 def test_scanned_and_digital_agree_on_field_geometry() -> None:
