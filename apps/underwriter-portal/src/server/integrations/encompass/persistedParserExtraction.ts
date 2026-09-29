@@ -6,11 +6,19 @@ const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Obje
   'Schedule C': new Set(['ent1-name', 'ent1-ein', 'ent1-net', 'ent1-dep', 'ent1-depletion', 'ent1-meals', 'ent1-home', 'ent1-other-income', 'ent1-amort']),
   'Schedule F': new Set(['schedule-f-name', 'schedule-f-ein', 'schedule-f-net', 'schedule-f-coop-ccc', 'schedule-f-other', 'schedule-f-depreciation', 'schedule-f-other-expense', 'schedule-f-home', 'schedule-f-amort']),
   'Form 1120-S': new Set(['scorp-name', 'scorp-ein', 'scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist', 'scorp-own-pct', 'scorp-depletion', 'scorp-meals']),
-  'Form 1065': new Set(['pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals']),
+  'Form 1065': new Set([
+    'pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals',
+    'pt-return-name', 'pt-return-ein', 'pt-return-gross', 'pt-return-wages', 'pt-return-ord', 'pt-return-gp',
+    'pt-return-4797', 'pt-return-other', 'pt-return-dep', 'pt-return-depletion', 'pt-return-meals',
+  ]),
   'Form 1120': new Set(['c1120-name', 'c1120-ein', 'c1120-taxable', 'c1120-tax', 'c1120-dep', 'c1120-depletion', 'c1120-amort', 'c1120-meals', 'c1120-nol']),
   'Form 1040': new Set(['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']),
   'Schedule B': new Set(['schedule-b-interest', 'schedule-b-dividends']),
   'Schedule D': new Set(['schedule-d-capital-gain-loss']),
+  'Paystub': new Set([
+    'ps-employee-name', 'ps-employer-name', 'ps-hourly-rate', 'ps-hours-week', 'ps-current-base', 'ps-base-ytd',
+    'ps-bonus-ytd', 'ps-ot-ytd', 'ps-tips-ytd', 'ps-commission-ytd', 'ps-rsu-ytd', 'ps-other-ytd', 'ps-pay-frequency',
+  ]),
 });
 
 type JsonObject = Record<string, unknown>;

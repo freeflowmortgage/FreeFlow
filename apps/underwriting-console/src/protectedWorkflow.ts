@@ -13,7 +13,7 @@ export type ProtectedWorkflowState =
 export type MetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation';
   form: string;
 }>;
 

@@ -43,3 +43,31 @@ test('persists only allowlisted parser form fields and marks missing tax year', 
   assert.ok(result.warnings.includes('AUTHORITATIVE_TAX_YEAR_REQUIRED'));
   assert.equal(JSON.stringify(result).includes('never-persist'), false);
 });
+
+test('accepts the parser fields emitted by the controlled-pilot paystub and Form 1065 fixtures', () => {
+  const result = selectPersistableParserExtraction({ formExtracts: [
+    { form: 'Paystub', pageIndex: 0, entityId: 'paystub-p0', sourceFieldId: 'ps-employer-name', value: 'Synthetic Employer' },
+    { form: 'Paystub', pageIndex: 0, entityId: 'paystub-p0', sourceFieldId: 'ps-base-ytd', value: '54000.00', numericValue: 54000 },
+    { form: 'Paystub', pageIndex: 0, entityId: 'paystub-p0', sourceFieldId: 'borrower-ssn', value: '000-00-0000' },
+    { form: 'Form 1065', pageIndex: 0, entityId: 'partnership-p0', sourceFieldId: 'pt-return-name', value: 'Synthetic Partnership' },
+    { form: 'Form 1065', pageIndex: 0, entityId: 'partnership-p0', sourceFieldId: 'pt-return-ord', value: '12000.00', numericValue: 12000 },
+  ] });
+
+  assert.deepEqual(result.normalizedInput, { formRecords: [
+    {
+      entityId: 'Form 1065:partnership-p0', form: 'Form 1065', pageIndex: 0,
+      fields: [
+        { sourceFieldId: 'pt-return-name', value: 'Synthetic Partnership' },
+        { sourceFieldId: 'pt-return-ord', value: '12000.00', numericValue: 12000 },
+      ],
+    },
+    {
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: [
+        { sourceFieldId: 'ps-base-ytd', value: '54000.00', numericValue: 54000 },
+        { sourceFieldId: 'ps-employer-name', value: 'Synthetic Employer' },
+      ],
+    },
+  ] });
+  assert.equal(JSON.stringify(result).includes('000-00-0000'), false);
+});

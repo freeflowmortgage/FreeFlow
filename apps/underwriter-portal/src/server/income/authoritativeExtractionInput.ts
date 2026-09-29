@@ -81,7 +81,7 @@ const persistedField = z.object({
   sourceFieldId: z.string().trim().min(1).max(100), value: z.string().max(255).optional(), numericValue: money.optional(),
 }).strict();
 const persistedFormRecord = z.object({
-  entityId, form: z.enum(['Schedule C', 'Schedule F', 'Form 1120-S', 'Form 1065', 'Form 1120', 'Form 1040', 'Schedule B', 'Schedule D']),
+  entityId, form: z.enum(['Schedule C', 'Schedule F', 'Form 1120-S', 'Form 1065', 'Form 1120', 'Form 1040', 'Schedule B', 'Schedule D', 'Paystub']),
   pageIndex: z.number().int().min(0).max(10_000), fields: z.array(persistedField).min(1).max(100),
 }).strict();
 const persistedExtractionInput = z.object({
@@ -100,7 +100,7 @@ export type ExtractionMetadataAssignment = Readonly<{
 export type ExtractionMetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation';
   form: string;
 }>;
 
@@ -166,6 +166,14 @@ function projectPersistedInput(
     push(projected, 'w2Employers', { ...row, role });
   }
   for (const record of persisted.formRecords ?? []) {
+    // Paystub evidence is safe to persist and review, but the authoritative
+    // calculator does not yet have a defensible annualization contract for it.
+    // Keep calculation fail-closed instead of treating YTD or period pay as
+    // annual income.
+    if (record.form === 'Paystub') {
+      requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
+      continue;
+    }
     const meta = metadata.get(record.entityId);
     if (!meta?.taxYear) {
       requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
