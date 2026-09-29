@@ -449,7 +449,7 @@ resource "aws_ecs_task_definition" "console" {
         { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
         { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
         { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },
-        { name = "ENCOMPASS_TEST_HOST_LOAN_GUID", value = "00000000-0000-4000-8000-00000000d001" },
+        { name = "ENCOMPASS_TEST_HOST_LOAN_GUID", value = var.encompass_test_host_loan_guid },
       ]
       command = ["node", "/app/serve-production.mjs"]
       portMappings = [{

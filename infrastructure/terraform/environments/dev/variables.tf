@@ -248,6 +248,17 @@ variable "enable_encompass_test_host" {
   }
 }
 
+variable "encompass_test_host_loan_guid" {
+  type        = string
+  description = "Synthetic active Encompass loan GUID exposed by the deterministic dev qualification host. Rotate between qualification loans through reviewed Terraform configuration."
+  default     = "00000000-0000-4000-8000-00000000d001"
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.encompass_test_host_loan_guid))
+    error_message = "encompass_test_host_loan_guid must be a valid UUIDv4 loan identifier."
+  }
+}
+
 variable "encompass_frame_ancestors" {
   type        = string
   description = "Space-separated HTTPS CSP frame-ancestor sources for the lender-approved Encompass hosts."
