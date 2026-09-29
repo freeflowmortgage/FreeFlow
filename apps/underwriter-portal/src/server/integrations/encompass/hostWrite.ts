@@ -6,6 +6,7 @@ import { resolveIdempotencyKey, storeIdempotencyResult } from '../../audit/idemp
 import { hashCanonical } from '../../http/canonical';
 import { ApiError } from '../../http/apiError';
 import { hasCurrentCalculationExtractions } from '../../income/extractionFreshness';
+import { borrowerIncomeFields, readBorrowerIncome } from '../../income/loanBorrowerRoster';
 
 export const HOST_WRITE_OPERATION = 'encompass-host-writes';
 export const HOST_WRITE_COMPLETION_OPERATION = 'encompass-host-write-completions';
@@ -116,7 +117,7 @@ async function loadApprovedFieldMap(transaction: Prisma.TransactionClient, conte
     select: {
       qualifyingMonthlyIncome: true, trendingResult: true, yearsAnalyzed: true, scheduleCMonthlyTotal: true,
       form1120SMonthlyTotal: true, form1065MonthlyTotal: true, form1120MonthlyTotal: true, w2BaseMonthly: true,
-      rentalMonthly: true,
+      rentalMonthly: true, borrowerIncome: true,
       extractionBindings: { select: {
         extractionId: true, extractionHash: true, sourceDocumentId: true, sourceDocumentVersion: true,
         sourceContentHash: true, metadataReviewId: true, metadataReviewVersion: true, metadataReviewHash: true,
@@ -129,17 +130,60 @@ async function loadApprovedFieldMap(transaction: Prisma.TransactionClient, conte
   });
   if (!calculation) throw new ApiError(422, 'APPROVED_CALCULATION_UNAVAILABLE', 'The approved calculation is unavailable.');
   if (!hasCurrentCalculationExtractions(calculation.extractionBindings)) throw new ApiError(409, 'STALE_APPROVAL_EXTRACTION', 'The approved calculation is based on superseded evidence.');
-  const mapped = buildEncompassFieldUpdatePayload(input.loanId, {
-    qualifyingMonthlyIncome: calculation.qualifyingMonthlyIncome.toNumber(), trendingAnalysis: calculation.trendingResult,
-    yearsAnalyzed: calculation.yearsAnalyzed, scheduleC_MonthlyTotal: numberOrUndefined(calculation.scheduleCMonthlyTotal),
-    form1120S_MonthlyTotal: numberOrUndefined(calculation.form1120SMonthlyTotal), form1065_MonthlyTotal: numberOrUndefined(calculation.form1065MonthlyTotal),
-    form1120_MonthlyTotal: numberOrUndefined(calculation.form1120MonthlyTotal), w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
+  const fields = approvedHostFields({
+    loanId: input.loanId,
+    approvalId: approval.id,
+    qualifyingMonthlyIncome: calculation.qualifyingMonthlyIncome.toNumber(),
+    trendingAnalysis: calculation.trendingResult,
+    yearsAnalyzed: calculation.yearsAnalyzed,
+    scheduleCMonthlyTotal: numberOrUndefined(calculation.scheduleCMonthlyTotal),
+    form1120SMonthlyTotal: numberOrUndefined(calculation.form1120SMonthlyTotal),
+    form1065MonthlyTotal: numberOrUndefined(calculation.form1065MonthlyTotal),
+    form1120MonthlyTotal: numberOrUndefined(calculation.form1120MonthlyTotal),
+    w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
     rentalMonthly: numberOrUndefined(calculation.rentalMonthly),
+    borrowerIncome: calculation.borrowerIncome,
     auditUrl: `${input.appOrigin.replace(/\/$/, '')}/audit/${approval.id}`,
   });
-  const fields = Object.fromEntries([...mapped.customFields.filter((field) => field.fieldName !== 'CX.FREEFLOW.SYNCED.AT'), { fieldName: APPROVAL_FIELD, value: approval.id }].map((field) => [field.fieldName, field.value]));
   const fieldMapHash = hashCanonical({ loanId: loan.id, encompassLoanGuid: loan.encompassGuid, approvalEventId: approval.id, expectedLoanVersion: input.expectedLoanVersion, fields });
   return { loanId: loan.id, encompassLoanGuid: loan.encompassGuid, approvalEventId: approval.id, expectedLoanVersion: input.expectedLoanVersion, fields, fieldMapHash };
+}
+
+export function approvedHostFields(input: Readonly<{
+  loanId: string;
+  approvalId: string;
+  qualifyingMonthlyIncome: number;
+  trendingAnalysis: string;
+  yearsAnalyzed: number[];
+  scheduleCMonthlyTotal?: number;
+  form1120SMonthlyTotal?: number;
+  form1065MonthlyTotal?: number;
+  form1120MonthlyTotal?: number;
+  w2BaseMonthly?: number;
+  rentalMonthly?: number;
+  borrowerIncome: unknown;
+  auditUrl: string;
+}>): Record<string, string> {
+  const lines = readBorrowerIncome(input.borrowerIncome);
+  const mapped = buildEncompassFieldUpdatePayload(input.loanId, {
+    qualifyingMonthlyIncome: input.qualifyingMonthlyIncome,
+    trendingAnalysis: input.trendingAnalysis,
+    yearsAnalyzed: input.yearsAnalyzed,
+    scheduleC_MonthlyTotal: input.scheduleCMonthlyTotal,
+    form1120S_MonthlyTotal: input.form1120SMonthlyTotal,
+    form1065_MonthlyTotal: input.form1065MonthlyTotal,
+    form1120_MonthlyTotal: input.form1120MonthlyTotal,
+    w2BaseMonthly: input.w2BaseMonthly,
+    rentalMonthly: input.rentalMonthly,
+    borrowerMonthlyIncome: lines.map((line) => ({ ordinal: line.ordinal, qualifyingMonthlyIncome: Number(line.qualifyingMonthlyIncome) })),
+    auditUrl: input.auditUrl,
+  });
+  const borrowerFields = borrowerIncomeFields(lines);
+  return Object.fromEntries([
+    ...mapped.customFields.filter((field) => field.fieldName !== 'CX.FREEFLOW.SYNCED.AT'),
+    ...Object.entries(borrowerFields).map(([fieldName, value]) => ({ fieldName, value })),
+    { fieldName: APPROVAL_FIELD, value: input.approvalId },
+  ].map((field) => [field.fieldName, field.value]));
 }
 
 function numberOrUndefined(value: Prisma.Decimal | null): number | undefined { return value?.toNumber(); }

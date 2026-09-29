@@ -13,9 +13,12 @@ export type ProtectedWorkflowState =
 export type MetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod';
   form: string;
 }>;
+
+export type ProtectedBorrower = Readonly<{ borrowerKey: string; ordinal: number; role: 'PRIMARY' | 'CO_BORROWER' }>;
+export type BorrowerIncomeLine = Readonly<{ borrowerKey: string; ordinal: number; role: 'PRIMARY' | 'CO_BORROWER'; qualifyingMonthlyIncome: string }>;
 
 export type EvidenceField = Readonly<{
   collection: string;
@@ -28,13 +31,14 @@ export type EvidenceField = Readonly<{
 
 export type ConsoleContext = Readonly<{
   loan: Readonly<{ id: string; version: number; status: string; program: string; borrowerName: string | null }>;
+  borrowers?: readonly ProtectedBorrower[];
   attachments: readonly Readonly<{ attachmentId: string; category: string; version: number; pageCount: number | null; parserVersion: string | null }>[];
   extractions: readonly Readonly<{
     id: string; attachmentId: string; sourceDocumentVersion: number; parserVersion: string; schemaVersion: string;
     status: string; warnings: readonly string[]; confidence: string | number | null; normalizedInput: unknown; evidence: unknown;
     metadataReview: Readonly<{ id: string; metadataVersion: number; assignments: unknown; current: boolean }> | null;
   }>[];
-  calculation: Readonly<{ id: string; calculatedLoanVersion: number; qualifyingMonthlyIncome: string | number; trendingResult: string; yearsAnalyzed: readonly number[]; current: boolean }> | null;
+  calculation: Readonly<{ id: string; calculatedLoanVersion: number; qualifyingMonthlyIncome: string | number; trendingResult: string; yearsAnalyzed: readonly number[]; current: boolean; borrowerIncome?: readonly BorrowerIncomeLine[] }> | null;
   approval: Readonly<{ id: string; entityId: string; expectedLoanVersion: number; current: boolean }> | null;
   hostWrite: Readonly<{ id: string; status: 'AUTHORIZED' | 'SUCCEEDED' | 'FAILED'; approvalEventId: string; fieldMapHash: string; safeErrorCode: string | null }> | null;
 }>;
@@ -72,6 +76,18 @@ export function readEvidenceFields(value: unknown): EvidenceField[] {
       box: [box[0] as number, box[1] as number, box[2] as number, box[3] as number],
     }];
   });
+}
+
+export function applyRequirementValue(
+  assignment: Record<string, string | number | boolean>,
+  field: MetadataRequirement['field'],
+  raw: string,
+): void {
+  if (field === 'requiredParserField' || field === 'unsupportedCalculation') return;
+  if (field === 'borrowerAssignment') assignment.borrowerKey = raw;
+  else if (field === 'assetElection') assignment.includeInQualifyingIncome = raw === 'INCLUDE';
+  else if (field === 'employmentRole' || field === 'payFrequency' || field === 'baseIncomeMethod') assignment[field] = raw;
+  else assignment[field] = Number(raw);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

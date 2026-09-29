@@ -8,6 +8,7 @@ import { EncompassHostError, type EncompassHostBridge } from './encompass-host/b
 import { loadConsoleRuntimeConfiguration, resolveEncompassHostBridge } from './encompass-host/runtimeHost';
 import { consoleRuntime } from './runtimeMode';
 import {
+  applyRequirementValue,
   deriveProtectedWorkflowState,
   readEvidenceFields,
   type ConsoleContext,
@@ -16,6 +17,8 @@ import {
 
 const MAX_DOCUMENT_BYTES = 40 * 1024 * 1024;
 const EMPLOYMENT_ROLES = ['CURRENT', 'CONCURRENT', 'PRIOR', 'PRIMARY', 'SECONDARY'] as const;
+const PAY_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY'] as const;
+const BASE_METHODS = ['hourly', 'period', 'ytd', 'prior'] as const;
 const WORKFLOW_STEPS = ['NO_LOAN_CONTEXT', 'BOUND', 'DOCUMENT_UPLOADED', 'EXTRACTED', 'REVIEW_REQUIRED', 'READY_TO_CALCULATE', 'CALCULATED', 'APPROVED', 'READY_TO_WRITE', 'WRITTEN'] as const;
 
 type LocalDocument = Readonly<{ file: File; url: string; attachmentId: string | null }>;
@@ -32,7 +35,8 @@ export default function ProtectedApp() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
   const [zoomScale, setZoomScale] = useState(1);
-  const [busy, setBusy] = useState<'UPLOAD' | 'REVIEW' | 'CALCULATE' | 'APPROVE' | 'WRITE' | null>(null);
+  const [busy, setBusy] = useState<'UPLOAD' | 'PULL' | 'REVIEW' | 'CALCULATE' | 'APPROVE' | 'WRITE' | null>(null);
+  const [calculationWarnings, setCalculationWarnings] = useState<string[]>([]);
   const [contextError, setContextError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -50,7 +54,7 @@ export default function ProtectedApp() {
           const configuration = await loadConsoleRuntimeConfiguration();
           const bridge = resolveEncompassHostBridge(configuration);
           const host = await bridge.activeLoan();
-          const launch = await portalClient.launchEncompassHost(host.loanGuid);
+          const launch = await portalClient.launchEncompassHost(host.loanGuid, configuration.testHost.borrowers);
           if (cancelled) return;
           setHostBridge(bridge);
           setHostLoanGuid(host.loanGuid);
@@ -104,6 +108,17 @@ export default function ProtectedApp() {
     setCurrentPage(1); setPageCount(1); setSelectedEvidence(0);
   };
 
+  const pullHostedDocuments = async () => {
+    if (!contextState) return;
+    await runAction('PULL', async () => {
+      const listing = await portalClient.getEncompassAttachments(contextState.loan.id);
+      const attachmentIds = listing.attachments.filter((item) => item.status === 'SELECTABLE').map((item) => item.id);
+      if (!attachmentIds.length) throw new Error('No hosted documents are available to pull.');
+      await portalClient.createDocumentPull(contextState.loan.id, { expectedLoanVersion: contextState.loan.version, attachmentIds }, crypto.randomUUID());
+      await refreshContext(contextState.loan.id);
+    }, 'The hosted documents could not be pulled.');
+  };
+
   const uploadDocument = async () => {
     if (!contextState || !localDocument) return;
     await runAction('UPLOAD', async () => {
@@ -117,12 +132,12 @@ export default function ProtectedApp() {
     if (!contextState || !requirements) return;
     const requested = requirements.filter((item) => item.extractionId === extractionId);
     if (!requested.length || requested.some((item) => item.field === 'requiredParserField' || item.field === 'unsupportedCalculation')) return;
-    const byEntity = new Map<string, Record<string, string | number>>();
+    const byEntity = new Map<string, Record<string, string | number | boolean>>();
     for (const requirement of requested) {
       const value = reviewValues[requirementKey(requirement)]?.trim();
       if (!value) { setActionError(`Review ${requirement.form} ${requirement.field} before continuing.`); return; }
       const assignment = byEntity.get(requirement.entityId) ?? { entityId: requirement.entityId };
-      assignment[requirement.field] = requirement.field === 'employmentRole' ? value : Number(value);
+      applyRequirementValue(assignment, requirement.field, value);
       byEntity.set(requirement.entityId, assignment);
     }
     const extraction = contextState.extractions.find((item) => item.id === extractionId);
@@ -141,7 +156,8 @@ export default function ProtectedApp() {
     if (!contextState) return;
     const extractionIds = contextState.extractions.filter((item) => item.status === 'ACTIVE').map((item) => item.id);
     await runAction('CALCULATE', async () => {
-      await portalClient.calculateIncome({ loanId: contextState.loan.id, extractionIds });
+      const calculated = await portalClient.calculateIncome({ loanId: contextState.loan.id, extractionIds }) as { extractionWarnings?: string[] };
+      setCalculationWarnings(calculated.extractionWarnings ?? []);
       await refreshContext(contextState.loan.id);
     }, 'The authoritative calculation could not be completed.');
   };
@@ -227,8 +243,12 @@ export default function ProtectedApp() {
             <div className="rounded-lg border border-slate-200 p-4">
               <h2 className="text-sm font-bold text-slate-900">1. Source document</h2>
               <input data-testid="protected-pdf-input" className="mt-3 block w-full text-xs" type="file" accept="application/pdf" onChange={(event) => selectDocument(event.target.files?.[0])} />
-              <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocument || busy !== null || localDocument.attachmentId !== null} onClick={() => void uploadDocument()} className="mt-3 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading...' : localDocument?.attachmentId ? 'Uploaded' : 'Upload and extract'}</button>
-              <p className="mt-2 text-xs text-slate-500">PDF only, up to 40 MiB. Processing uses the protected production upload endpoint.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocument || busy !== null || localDocument.attachmentId !== null} onClick={() => void uploadDocument()} className="rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading...' : localDocument?.attachmentId ? 'Uploaded' : 'Upload and extract'}</button>
+                {consoleRuntime.hosted ? <button data-testid="pull-documents" type="button" disabled={!contextState || busy !== null} onClick={() => void pullHostedDocuments()} className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 disabled:opacity-40">{busy === 'PULL' ? 'Pulling...' : 'Pull hosted documents'}</button> : null}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">PDF only, up to 40 MiB. Hosted pull sends attachment ids only. Raw document bytes are not placed on the queue.</p>
+              {(contextState?.borrowers?.length ?? 0) > 0 ? <ol data-testid="borrower-roster" className="mt-3 space-y-1 text-xs text-slate-700">{contextState!.borrowers!.map((borrower) => <li key={borrower.borrowerKey}>{borrower.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {borrower.borrowerKey}</li>)}</ol> : null}
             </div>
 
             <div className="rounded-lg border border-slate-200 p-4">
@@ -244,14 +264,14 @@ export default function ProtectedApp() {
               {Array.from(new Set((requirements ?? []).map((item) => item.extractionId))).map((extractionId) => {
                 const items = requirements!.filter((item) => item.extractionId === extractionId);
                 const calculationBlocked = items.some((item) => item.field === 'requiredParserField' || item.field === 'unsupportedCalculation');
-                return <div key={extractionId} className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">{items.map((item) => <label key={requirementKey(item)} className="mb-2 block text-xs font-medium text-slate-700">{item.form} / {item.entityId} / {item.field}{item.field === 'employmentRole' ? <select value={reviewValues[requirementKey(item)] ?? ''} onChange={(event) => setReviewValues((values) => ({ ...values, [requirementKey(item)]: event.target.value }))} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2"><option value="">Select reviewed role</option>{EMPLOYMENT_ROLES.map((role) => <option key={role}>{role}</option>)}</select> : item.field === 'requiredParserField' ? <span className="mt-1 block rounded bg-red-50 p-2 text-red-700">The persisted extraction lacks a required parser field and cannot be repaired in the browser.</span> : item.field === 'unsupportedCalculation' ? <span className="mt-1 block rounded bg-amber-50 p-2 text-amber-800">This document was extracted for review, but it is not yet an authoritative calculation input. The controlled-pilot calculation remains blocked for this extraction.</span> : <input type="number" min={item.field === 'taxYear' ? 1990 : 0} max={item.field === 'taxYear' ? 2100 : 100} value={reviewValues[requirementKey(item)] ?? ''} onChange={(event) => setReviewValues((values) => ({ ...values, [requirementKey(item)]: event.target.value }))} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2" />}</label>)}<button type="button" disabled={calculationBlocked || busy !== null} onClick={() => void submitReview(extractionId)} className="mt-1 rounded bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'REVIEW' ? 'Saving...' : 'Confirm reviewed metadata'}</button></div>;
+                return <div key={extractionId} className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">{items.map((item) => <ReviewField key={requirementKey(item)} item={item} borrowers={contextState?.borrowers ?? []} value={reviewValues[requirementKey(item)] ?? ''} onChange={(value) => setReviewValues((values) => ({ ...values, [requirementKey(item)]: value }))} />)}<button type="button" disabled={calculationBlocked || busy !== null} onClick={() => void submitReview(extractionId)} className="mt-1 rounded bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'REVIEW' ? 'Saving...' : 'Confirm reviewed metadata'}</button></div>;
               })}
             </div>
 
             <div className="rounded-lg border border-slate-200 p-4">
               <h2 className="text-sm font-bold text-slate-900">4. Calculation and approval</h2>
               <div className="mt-3 flex flex-wrap gap-2"><button data-testid="calculate-income" type="button" disabled={!canCalculate || busy !== null || Boolean(contextState?.calculation?.current)} onClick={() => void calculate()} className="rounded bg-indigo-700 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'CALCULATE' ? 'Calculating...' : 'Calculate'}</button><button data-testid="approve-income" type="button" disabled={!canApprove || busy !== null} onClick={() => void approve()} className="rounded bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'APPROVE' ? 'Approving...' : contextState?.approval?.current ? 'Approved' : 'Approve'}</button></div>
-              {contextState?.calculation ? <div className="mt-3 rounded bg-slate-50 p-3 text-xs text-slate-700"><p><strong>Qualifying monthly income:</strong> {formatCurrency(contextState.calculation.qualifyingMonthlyIncome)}</p><p><strong>Trend:</strong> {contextState.calculation.trendingResult}</p><p><strong>Years:</strong> {contextState.calculation.yearsAnalyzed.join(', ')}</p>{!contextState.calculation.current && !contextState.approval?.current ? <p className="mt-1 font-medium text-red-700">This calculation is stale. Recalculate before approval.</p> : null}</div> : null}
+              {contextState?.calculation ? <div className="mt-3 rounded bg-slate-50 p-3 text-xs text-slate-700"><p data-testid="combined-income"><strong>Qualifying monthly income:</strong> {formatCurrency(contextState.calculation.qualifyingMonthlyIncome)}</p>{(contextState.calculation.borrowerIncome ?? []).map((line) => <p key={line.borrowerKey} data-testid={`borrower-income-${line.borrowerKey}`}><strong>{line.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {line.borrowerKey}:</strong> {formatCurrency(line.qualifyingMonthlyIncome)}</p>)}<p><strong>Trend:</strong> {contextState.calculation.trendingResult}</p><p><strong>Years:</strong> {contextState.calculation.yearsAnalyzed.join(', ')}</p>{calculationWarnings.length ? <ul className="mt-2 list-disc pl-4 text-amber-800">{calculationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}{!contextState.calculation.current && !contextState.approval?.current ? <p className="mt-1 font-medium text-red-700">This calculation is stale. Recalculate before approval.</p> : null}</div> : null}
             </div>
 
             {consoleRuntime.hosted ? <div className="rounded-lg border border-slate-200 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-slate-500">Explicitly writes only the backend-approved field map, then calculates, commits, and reads back the approval marker.</p><button data-testid="write-host" type="button" disabled={!canWrite || busy !== null || contextState?.hostWrite?.status === 'SUCCEEDED'} onClick={() => void writeApprovedResult()} className="mt-3 rounded bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'WRITE' ? 'Writing...' : contextState?.hostWrite?.status === 'SUCCEEDED' ? 'Durably written' : 'Write approved result'}</button>{failedCurrentWrite ? <p className="mt-2 text-xs font-medium text-red-700">The prior host write failed. A new approval is required before retrying.</p> : null}</div> : null}
@@ -262,6 +282,11 @@ export default function ProtectedApp() {
       </div>
     </main>
   );
+}
+
+function ReviewField({ item, borrowers, value, onChange }: { item: MetadataRequirement; borrowers: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[]; value: string; onChange: (value: string) => void }) {
+  const selectClass = 'mt-1 block w-full rounded border border-slate-300 bg-white p-2';
+  return <label className="mb-2 block text-xs font-medium text-slate-700">{item.form} / {item.entityId} / {item.field}{item.field === 'employmentRole' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Select reviewed role</option>{EMPLOYMENT_ROLES.map((role) => <option key={role}>{role}</option>)}</select> : item.field === 'borrowerAssignment' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Assign borrower</option>{borrowers.map((borrower) => <option key={borrower.borrowerKey} value={borrower.borrowerKey}>{borrower.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {borrower.borrowerKey}</option>)}</select> : item.field === 'assetElection' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Asset election</option><option value="INCLUDE">Include in qualifying income</option><option value="EXCLUDE">Exclude from qualifying income</option></select> : item.field === 'payFrequency' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Pay frequency</option>{PAY_FREQUENCIES.map((frequency) => <option key={frequency}>{frequency}</option>)}</select> : item.field === 'baseIncomeMethod' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Base method</option>{BASE_METHODS.map((method) => <option key={method}>{method}</option>)}</select> : item.field === 'requiredParserField' ? <span className="mt-1 block rounded bg-red-50 p-2 text-red-700">The persisted extraction lacks a required parser field and cannot be repaired in the browser.</span> : item.field === 'unsupportedCalculation' ? <span className="mt-1 block rounded bg-amber-50 p-2 text-amber-800">This document was extracted for review, but it is not yet an authoritative calculation input. The controlled-pilot calculation remains blocked for this extraction.</span> : <input type="number" step={item.field === 'elapsedMonths' ? '0.1' : '1'} min={item.field === 'taxYear' ? 1990 : 0} max={item.field === 'taxYear' ? 2100 : item.field === 'elapsedMonths' ? 12 : 100} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass} />}</label>;
 }
 
 function requirementKey(value: MetadataRequirement): string { return `${value.extractionId}:${value.entityId}:${value.field}`; }

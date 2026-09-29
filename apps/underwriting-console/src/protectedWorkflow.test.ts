@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deriveProtectedWorkflowState, readEvidenceFields, type ConsoleContext } from './protectedWorkflow';
+import { applyRequirementValue, deriveProtectedWorkflowState, readEvidenceFields, type ConsoleContext } from './protectedWorkflow';
 
 const base = {
   loan: { id: 'loan', version: 1, status: 'DRAFT', program: 'CONVENTIONAL', borrowerName: null },
@@ -23,6 +23,18 @@ test('derives the protected workflow only from authoritative context and review 
   assert.equal(deriveProtectedWorkflowState(approved, [], true), 'READY_TO_WRITE');
   const written = { ...approved, hostWrite: { status: 'SUCCEEDED' } } as unknown as ConsoleContext;
   assert.equal(deriveProtectedWorkflowState(written, [], true), 'WRITTEN');
+});
+
+test('maps reviewed requirement fields onto borrower-scoped assignment keys', () => {
+  const assignment: Record<string, string | number | boolean> = { entityId: 'paystub-1' };
+  applyRequirementValue(assignment, 'borrowerAssignment', 'borrower-2');
+  applyRequirementValue(assignment, 'assetElection', 'INCLUDE');
+  applyRequirementValue(assignment, 'employmentRole', 'CURRENT');
+  applyRequirementValue(assignment, 'elapsedMonths', '7.5');
+  applyRequirementValue(assignment, 'unsupportedCalculation', 'ignored');
+  assert.deepEqual(assignment, {
+    entityId: 'paystub-1', borrowerKey: 'borrower-2', includeInQualifyingIncome: true, employmentRole: 'CURRENT', elapsedMonths: 7.5,
+  });
 });
 
 test('accepts only bounded persisted coordinate evidence', () => {

@@ -70,7 +70,8 @@ BEGIN
     'public.encompass_host_writes'::regclass,
     'public.income_extractions'::regclass,
     'public.income_extraction_metadata_reviews'::regclass,
-    'public.income_calculation_extractions'::regclass
+    'public.income_calculation_extractions'::regclass,
+    'public.loan_borrowers'::regclass
   ) AND (NOT relrowsecurity OR NOT relforcerowsecurity);
   IF unprotected_tables <> 0 THEN
     RAISE EXCEPTION 'One or more tenant tables do not force row-level security';
@@ -126,6 +127,18 @@ BEGIN
     OR has_table_privilege('freeflow_worker', 'income_extraction_metadata_reviews', 'UPDATE')
     OR has_table_privilege('freeflow_worker', 'income_extraction_metadata_reviews', 'DELETE') THEN
     RAISE EXCEPTION 'freeflow_worker can mutate reviewer metadata';
+  END IF;
+  IF NOT has_table_privilege('freeflow_app', 'loan_borrowers', 'SELECT')
+    OR NOT has_table_privilege('freeflow_app', 'loan_borrowers', 'INSERT')
+    OR has_table_privilege('freeflow_app', 'loan_borrowers', 'UPDATE')
+    OR has_table_privilege('freeflow_app', 'loan_borrowers', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_app borrower roster grants are not insert-only';
+  END IF;
+  IF NOT has_table_privilege('freeflow_worker', 'loan_borrowers', 'SELECT')
+    OR has_table_privilege('freeflow_worker', 'loan_borrowers', 'INSERT')
+    OR has_table_privilege('freeflow_worker', 'loan_borrowers', 'UPDATE')
+    OR has_table_privilege('freeflow_worker', 'loan_borrowers', 'DELETE') THEN
+    RAISE EXCEPTION 'freeflow_worker borrower roster grants are not read-only';
   END IF;
 END
 $role_assertions$;
