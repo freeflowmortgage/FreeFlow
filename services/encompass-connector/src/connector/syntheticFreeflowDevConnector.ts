@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   EncompassConnectorError,
   type DownloadedEncompassAttachment,
@@ -11,12 +13,63 @@ export const SYNTHETIC_FREEFLOW_DEV_MODE = 'synthetic-freeflow-dev' as const;
 export const SYNTHETIC_FREEFLOW_DEV_TENANT_ID = '00000000-0000-4000-8000-000000000100';
 export const SYNTHETIC_FREEFLOW_DEV_LOAN_GUID = '00000000-0000-4000-8000-000000000200';
 export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID = 'synthetic-income-document-1';
+export const SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID = 'synthetic-pack-form-1065-2025';
+export const SYNTHETIC_PACK_SCHEDULE_K1_1065_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-k1-1065-2025';
+export const SYNTHETIC_PACK_PAYSTUB_USB_NATES_ATTACHMENT_ID = 'synthetic-pack-paystub-usb-nates';
+export const SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID = 'synthetic-pack-w2-2021-nates';
+export const SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-e-2025';
+
+const MORNING_PACK_DIRECTORY = 'morning-pack-2026-09-29';
+
+/** Read-only freeflow-dev fixture catalog. sha256 is the expected content hash. */
+export const SYNTHETIC_FREEFLOW_DEV_MORNING_PACK = [
+  {
+    id: SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+    filename: 'form-1065-2025.pdf',
+    sha256: '4f7b1ea6d86cfc087de9c6657afefb774830cec93f2fc37b68866cbe927e32ee',
+  },
+  {
+    id: SYNTHETIC_PACK_SCHEDULE_K1_1065_2025_ATTACHMENT_ID,
+    filename: 'schedule-k1-1065-2025.pdf',
+    sha256: 'c7a0cb7ac7aecd75fd262afbbc8bcd363790653bb8a6616fbddcdc230cadfe90',
+  },
+  {
+    id: SYNTHETIC_PACK_PAYSTUB_USB_NATES_ATTACHMENT_ID,
+    filename: 'paystub.pdf',
+    sha256: 'cb1e8465f79cd24e4d323ceec58d51016d37f8dc79bbdd50483b866c6f5995fd',
+  },
+  {
+    id: SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
+    filename: 'w2-2021.pdf',
+    sha256: '0678ea430c4716a478e5367f1df565223dc3a64d15f0e4c3f0c6a03e0862b18e',
+  },
+  {
+    id: SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID,
+    filename: 'schedule-e-2025.pdf',
+    sha256: 'ff14337f558406d5c5a8c533c4693be380de5d611d53d825fc4b5ccdbf5029f1',
+  },
+] as const;
+
+export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS: readonly [
+  typeof SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_SCHEDULE_K1_1065_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_PAYSTUB_USB_NATES_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID,
+] = [
+  SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_K1_1065_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_PAYSTUB_USB_NATES_ATTACHMENT_ID,
+  SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID,
+];
 
 /**
- * Non-production-only deterministic LOS stand-in. It creates the PDF bytes in
- * memory for each request and never receives LOS credentials or persists data.
- * The PDF is a one-page synthetic W-2 so the income parser can return a
- * persistable w2Extracts row.
+ * Non-production-only deterministic LOS stand-in. The HP-01 W-2 is created in
+ * memory for each request. Morning-pack attachments are read from baked
+ * fixtures and never written back. This connector never receives LOS credentials.
  */
 export class SyntheticFreeflowDevConnector implements EncompassConnector {
   readonly kind = 'custom' as const;
@@ -26,7 +79,7 @@ export class SyntheticFreeflowDevConnector implements EncompassConnector {
     loanGuid: string,
   ): Promise<ReadonlyArray<EncompassAttachmentRef>> {
     assertSyntheticRequest(context, loanGuid);
-    return [{ id: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID }];
+    return SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id }));
   }
 
   async downloadOriginalAttachment(
@@ -35,7 +88,13 @@ export class SyntheticFreeflowDevConnector implements EncompassConnector {
     attachmentId: string,
   ): Promise<DownloadedEncompassAttachment> {
     assertSyntheticRequest(context, loanGuid);
-    if (attachmentId !== SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID) {
+    if (attachmentId === SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID) {
+      const bytes = createSyntheticPdf();
+      return { bytes, sha256: sha256Hex(bytes) };
+    }
+
+    const pack = SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.find((attachment) => attachment.id === attachmentId);
+    if (!pack) {
       throw new EncompassConnectorError(
         'SYNTHETIC_ATTACHMENT_NOT_FOUND',
         'Synthetic attachment was not found.',
@@ -43,11 +102,8 @@ export class SyntheticFreeflowDevConnector implements EncompassConnector {
       );
     }
 
-    const bytes = createSyntheticPdf();
-    return {
-      bytes,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-    };
+    const bytes = readMorningPackFixture(pack.filename);
+    return { bytes, sha256: sha256Hex(bytes) };
   }
 
   async applyApprovedIncomeUpdate(): Promise<Readonly<{ providerRevision?: string }>> {
@@ -56,6 +112,49 @@ export class SyntheticFreeflowDevConnector implements EncompassConnector {
 
   async readFields(): Promise<Readonly<Record<string, string>>> {
     return {};
+  }
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function resolveMorningPackDirectory(): string {
+  const candidates = [
+    path.resolve(__dirname, '..', '..', 'fixtures', MORNING_PACK_DIRECTORY),
+    path.resolve(__dirname, '..', 'fixtures', MORNING_PACK_DIRECTORY),
+    path.resolve(process.cwd(), 'fixtures', MORNING_PACK_DIRECTORY),
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new EncompassConnectorError(
+      'SYNTHETIC_FIXTURE_UNAVAILABLE',
+      'Synthetic pack fixture is unavailable.',
+      false,
+    );
+  }
+  return found;
+}
+
+function readMorningPackFixture(filename: string): Uint8Array {
+  const root = resolveMorningPackDirectory();
+  const filePath = path.resolve(root, filename);
+  const relative = path.relative(root, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new EncompassConnectorError(
+      'SYNTHETIC_FIXTURE_UNAVAILABLE',
+      'Synthetic pack fixture is unavailable.',
+      false,
+    );
+  }
+  try {
+    return new Uint8Array(readFileSync(filePath));
+  } catch {
+    throw new EncompassConnectorError(
+      'SYNTHETIC_FIXTURE_UNAVAILABLE',
+      'Synthetic pack fixture is unavailable.',
+      false,
+    );
   }
 }
 

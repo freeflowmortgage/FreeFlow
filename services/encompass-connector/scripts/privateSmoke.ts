@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import { CONNECTOR_SERVICE_CONTRACT } from '@mortgage-pos/encompass-connector-contract';
 import {
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS,
   SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
 } from '../src/connector/syntheticFreeflowDevConnector';
 
@@ -33,22 +35,21 @@ async function main(): Promise<void> {
   const listResponse = await post(CONNECTOR_SERVICE_CONTRACT.listPath, bearer(), baseBody);
   if (!listResponse.ok) throw new Error(`Synthetic list failed with HTTP ${listResponse.status}.`);
   const list = await listResponse.json() as { attachments?: Array<{ id?: string }> };
-  if (list.attachments?.length !== 1 || list.attachments[0]?.id !== SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID) {
+  const ids = list.attachments?.map((attachment) => attachment.id);
+  const expectedIds = [...SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS];
+  if (!ids || ids.length !== expectedIds.length || ids.some((id, index) => id !== expectedIds[index])) {
+    throw new Error('Synthetic attachment list was not deterministic.');
+  }
+  if (ids[0] !== SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID) {
     throw new Error('Synthetic attachment list was not deterministic.');
   }
 
-  const downloadResponse = await post(CONNECTOR_SERVICE_CONTRACT.downloadPath, bearer(), {
-    ...baseBody,
-    attachmentId: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
-  });
-  if (!downloadResponse.ok) throw new Error(`Synthetic download failed with HTTP ${downloadResponse.status}.`);
-  const bytes = new Uint8Array(await downloadResponse.arrayBuffer());
-  const actualHash = createHash('sha256').update(bytes).digest('hex');
-  if (downloadResponse.headers.get('x-content-sha256') !== actualHash) {
-    throw new Error('Synthetic attachment hash did not match response bytes.');
-  }
-  if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
-    throw new Error('Synthetic attachment was not a PDF.');
+  await expectPdfDownload(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID);
+  for (const pack of SYNTHETIC_FREEFLOW_DEV_MORNING_PACK) {
+    const actualHash = await expectPdfDownload(pack.id);
+    if (actualHash !== pack.sha256) {
+      throw new Error('Synthetic pack attachment hash did not match.');
+    }
   }
 
   console.log('SYNTHETIC_CONNECTOR_PRIVATE_SMOKE=passed');
@@ -69,6 +70,23 @@ async function expectError(
   if (response.status !== status || body.safeCode !== safeCode) {
     throw new Error(`Synthetic smoke check failed: ${name}.`);
   }
+}
+
+async function expectPdfDownload(attachmentId: string): Promise<string> {
+  const downloadResponse = await post(CONNECTOR_SERVICE_CONTRACT.downloadPath, bearer(), {
+    ...baseBody,
+    attachmentId,
+  });
+  if (!downloadResponse.ok) throw new Error(`Synthetic download failed with HTTP ${downloadResponse.status}.`);
+  const bytes = new Uint8Array(await downloadResponse.arrayBuffer());
+  const actualHash = createHash('sha256').update(bytes).digest('hex');
+  if (downloadResponse.headers.get('x-content-sha256') !== actualHash) {
+    throw new Error('Synthetic attachment hash did not match response bytes.');
+  }
+  if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
+    throw new Error('Synthetic attachment was not a PDF.');
+  }
+  return actualHash;
 }
 
 function post(path: string, authorization: string, body: unknown): Promise<Response> {

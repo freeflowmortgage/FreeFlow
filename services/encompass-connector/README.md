@@ -13,8 +13,10 @@ the lender-scoped LOS credential secret.
 - Non-production Bearer S2S stub. `NODE_ENV=production` refuses to boot it.
 - Real mode uses ICE client credentials inside this service and does not expose
   credentials to portal or worker request bodies.
-- Explicit `synthetic-freeflow-dev` mode returns one deterministic attachment
-  and constructs a deterministic PDF in memory.
+- Explicit `synthetic-freeflow-dev` mode returns the deterministic in-memory
+  W-2 attachment `synthetic-income-document-1` and five read-only morning-pack
+  fixture attachments. Fixture bytes are baked into the image and are not
+  written back to disk.
 - Compiled Node runtime, UID 1001, read-only-root compatibility, and health.
 
 The synthetic implementation is selected only when `NODE_ENV`,
@@ -47,6 +49,7 @@ The compiled image contains:
 - `dist/index.js` — service runtime
 - `dist/bootstrapSyntheticBinding.js` — idempotent migrator-only dev bootstrap
 - `dist/privateSmoke.js` — private-boundary smoke caller
+- `fixtures/morning-pack-2026-09-29/` — read-only synthetic pack PDFs
 
 After an authorized freeflow-dev Terraform apply, run the binding bootstrap
 task once, then run `dist/privateSmoke.js` as a one-off task with the application

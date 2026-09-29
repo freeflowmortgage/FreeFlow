@@ -50,6 +50,8 @@ RUN apk add --no-cache openssl \
 WORKDIR /app
 
 COPY --from=build /runtime ./
+# Read-only synthetic freeflow-dev morning-pack fixtures. Real LOS mode never reads them.
+COPY --from=build /app/services/encompass-connector/fixtures/morning-pack-2026-09-29 ./fixtures/morning-pack-2026-09-29
 
 ENV NODE_ENV=production
 ENV PORT=8080
