@@ -4,8 +4,11 @@ import test from 'node:test';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
 import {
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS,
   SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
   SyntheticFreeflowDevConnector,
 } from '../src/connector/syntheticFreeflowDevConnector';
 
@@ -15,11 +18,18 @@ const CONTEXT = {
   correlationId: 'synthetic-unit-test',
 };
 
-test('synthetic freeflow-dev connector returns deterministic metadata and in-memory PDF bytes', async () => {
+test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pack fixtures', async () => {
   const connector = new SyntheticFreeflowDevConnector();
-  assert.deepEqual(await connector.listActiveAttachments(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID), [
-    { id: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID },
-  ]);
+  assert.deepEqual(
+    await connector.listActiveAttachments(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID),
+    SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id })),
+  );
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS[0], SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID);
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 6);
+  assert.deepEqual(
+    SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => attachment.id),
+    SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.slice(1),
+  );
 
   const first = await connector.downloadOriginalAttachment(
     CONTEXT,
@@ -43,6 +53,24 @@ test('synthetic freeflow-dev connector returns deterministic metadata and in-mem
   assert.match(pdf, /1 0 0 1 340 710 Tm \(120000\.00\) Tj/);
   assert.match(pdf, /1 0 0 1 340 664 Tm \(120000\.00\) Tj/);
   assert.match(pdf, /1 0 0 1 462 664 Tm \(1740\.00\) Tj/);
+
+  for (const pack of SYNTHETIC_FREEFLOW_DEV_MORNING_PACK) {
+    const downloaded = await connector.downloadOriginalAttachment(
+      CONTEXT,
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      pack.id,
+    );
+    const repeated = await connector.downloadOriginalAttachment(
+      CONTEXT,
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      pack.id,
+    );
+    assert.equal(new TextDecoder().decode(downloaded.bytes.subarray(0, 5)), '%PDF-');
+    assert.equal(downloaded.sha256, pack.sha256);
+    assert.equal(downloaded.sha256, createHash('sha256').update(downloaded.bytes).digest('hex'));
+    assert.deepEqual(downloaded.bytes, repeated.bytes);
+    assert.equal(downloaded.sha256, repeated.sha256);
+  }
 });
 
 test('synthetic freeflow-dev connector rejects every other tenant, loan, and attachment', async () => {
@@ -58,5 +86,13 @@ test('synthetic freeflow-dev connector rejects every other tenant, loan, and att
   await assert.rejects(
     () => connector.downloadOriginalAttachment(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, 'wrong-attachment'),
     (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'SYNTHETIC_ATTACHMENT_NOT_FOUND',
+  );
+  await assert.rejects(
+    () => connector.downloadOriginalAttachment(
+      { ...CONTEXT, tenantId: crypto.randomUUID() },
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+    ),
+    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'SYNTHETIC_LOAN_NOT_FOUND',
   );
 });
