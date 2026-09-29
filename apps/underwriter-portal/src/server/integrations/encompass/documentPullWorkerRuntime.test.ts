@@ -23,7 +23,7 @@ test('repeated parser persistence is idempotent for the same document version an
   let created = false;
   let loanUpdated = false;
   const transaction = {
-    $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+    $executeRaw: async () => 1,
     loanDocument: {
       findUnique: async () => ({ sourceContentHash: result.sha256 }),
       upsert: async () => ({ id: 'document', version: 1, sourceContentHash: result.sha256, sourceAttachmentId: result.attachmentId }),
@@ -45,7 +45,7 @@ test('a new source hash creates provenance, supersedes the old extraction, and a
   let createdData: Record<string, unknown> | undefined;
   let loanUpdate: unknown;
   const transaction = {
-    $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+    $executeRaw: async () => 1,
     loanDocument: {
       findUnique: async () => ({ sourceContentHash: 'c'.repeat(64) }),
       upsert: async () => ({ id: 'document', version: 2, sourceContentHash: result.sha256, sourceAttachmentId: result.attachmentId }),
@@ -67,7 +67,7 @@ test('a new source hash creates provenance, supersedes the old extraction, and a
 
 test('same parser version producing a different canonical result fails closed', async () => {
   const transaction = {
-    $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+    $executeRaw: async () => 1,
     loanDocument: {
       findUnique: async () => ({ sourceContentHash: result.sha256 }),
       upsert: async () => ({ id: 'document', version: 1, sourceContentHash: result.sha256, sourceAttachmentId: result.attachmentId }),
@@ -82,13 +82,12 @@ test('same parser version producing a different canonical result fails closed', 
 
 test('authenticated upload uses only the constrained database writer for authoritative extraction rows', async () => {
   let rawCalls = 0;
+  let lockCalls = 0;
   let directMutation = false;
   let loanUpdated = false;
   const transaction = {
-    $queryRaw: async () => {
-      rawCalls += 1;
-      return rawCalls === 1 ? [{ pg_advisory_xact_lock: null }] : [{ created: true }];
-    },
+    $executeRaw: async () => { lockCalls += 1; return 1; },
+    $queryRaw: async () => { rawCalls += 1; return [{ created: true }]; },
     loanDocument: {
       findUnique: async () => null,
       upsert: async () => ({ id: 'document', version: 1, sourceContentHash: result.sha256, sourceAttachmentId: result.attachmentId }),
@@ -101,7 +100,8 @@ test('authenticated upload uses only the constrained database writer for authori
     loanApplication: { updateMany: async () => { loanUpdated = true; return { count: 1 }; } },
   };
   await persistParsedExtraction(transaction as never, job, result as never, 'AUTHENTICATED_UPLOAD');
-  assert.equal(rawCalls, 2);
+  assert.equal(lockCalls, 1);
+  assert.equal(rawCalls, 1);
   assert.equal(directMutation, false);
   assert.equal(loanUpdated, true);
 });
