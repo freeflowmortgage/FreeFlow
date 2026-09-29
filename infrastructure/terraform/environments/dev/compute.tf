@@ -204,20 +204,16 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
       { name = "PORT", value = "8080" },
       { name = "LOG_LEVEL", value = "info" },
-      { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
+      { name = "CONNECTOR_MODE", value = "synthetic-freeflow-dev" },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
       { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_service_auth_kind },
       { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
-    secrets = concat([
+    secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
       { name = "CONNECTOR_SERVICE_TOKEN", valueFrom = aws_secretsmanager_secret.connector_service_token[0].arn },
       { name = "CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
-      ], local.connector_real_encompass ? [
-      { name = "ENCOMPASS_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:clientId::" },
-      { name = "ENCOMPASS_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:clientSecret::" },
-      { name = "ENCOMPASS_INSTANCE_ID", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:instanceId::" },
-    ] : [])
+    ]
     portMappings = [{
       name          = "http"
       containerPort = 8080
@@ -313,7 +309,7 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
 
   container_definitions = jsonencode([{
     name                   = "document-pull-worker"
-    image                  = var.developer_connect_worker_image != "" ? var.developer_connect_worker_image : var.portal_image
+    image                  = var.connector_worker_image != "" ? var.connector_worker_image : var.portal_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
@@ -362,7 +358,7 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
 
   container_definitions = jsonencode([{
     name                   = "encompass-sync-worker"
-    image                  = var.developer_connect_worker_image != "" ? var.developer_connect_worker_image : var.portal_image
+    image                  = var.connector_worker_image != "" ? var.connector_worker_image : var.portal_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"

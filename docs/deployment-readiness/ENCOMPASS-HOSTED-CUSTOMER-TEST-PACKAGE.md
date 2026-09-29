@@ -1,7 +1,7 @@
 # FreeFlow Encompass Hosted Customer Test Package
 
 This package is for synthetic customer testing of FreeFlow hosted mode. It is
-not evidence of qualification against a live ICE/Encompass tenant.
+not evidence of qualification against a live Encompass tenant.
 
 ## Customer configuration
 
@@ -14,9 +14,8 @@ not evidence of qualification against a live ICE/Encompass tenant.
 - The tool must be launched with an active synthetic loan. The user must have
   write permission when testing write-back.
 
-Hosted mode does not require a FreeFlow ICE Developer Connect license or
-customer Developer Connect credentials. Developer Connect remains an optional
-fallback integration and is not required by this test path.
+Hosted mode uses the Encompass-hosted bridge and FreeFlow APIs. It does not
+require an external API license or customer OAuth credentials.
 
 ## Required custom fields
 

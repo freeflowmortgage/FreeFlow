@@ -1,11 +1,11 @@
 # FreeFlow Technical Readiness and Go-Live Burndown
 
 > Progress update — September 15, 2026: the tenant-scoped Encompass eFolder
-> pull API, durable SQS job, V3 provider client, bounded metadata-only worker,
+> pull API, durable SQS job, connector contract, bounded metadata-only worker,
 > database migration, least-privilege AWS task definition, and automated tests
 > are implemented. The worker remains feature-gated. It is not production-ready
-> until ICE sandbox credentials are supplied, the supported OAuth flow is
-> confirmed, ICE's live response is captured in a contract test, and an
+> until a lender-scoped custom connector is supplied, the direct operation
+> contract is captured in a test, and an
 > end-to-end synthetic-loan run passes in AWS dev.
 
 Assessment date: 2026-09-15  
@@ -52,7 +52,7 @@ The weighted technical-maturity estimate is **54%**:
 | Deterministic calculations and mappings | 10 | 8 | 91 mortgage-engine tests and MISMO/paystub mapping; approved-result binding and broader domain sign-off remain. |
 | Production portal and workflow | 15 | 5 | Authenticated APIs and approval events exist; the public portal UI is not a real end-to-end production workflow. |
 | Security, tenancy, and ZDR | 15 | 7 | OIDC verification, tenant transactions, RLS, audit events, and retention migrations exist; route matrix, canaries, dependency risk, and independent testing remain. |
-| External integrations and billing | 10 | 2 | Encompass pull now has a feature-gated worker and deployment path, but lacks ICE sandbox qualification; Encompass writeback and Stripe remain disabled. |
+| External integrations and billing | 10 | 2 | Encompass pull now has a feature-gated worker and deployment path, but lacks direct custom-connector qualification; Encompass writeback and Stripe remain disabled. |
 | Infrastructure and release engineering | 10 | 5 | Good dev Terraform and digest-pinned dev evidence; staging has state only, and production IaC/promotion is absent. |
 | QA, reliability, and operations | 10 | 4 | Useful unit coverage and runbooks; incomplete CI, browser E2E, load, restore, rollback, and on-call evidence. |
 | **Total** | **100** | **54** | Overall engineering maturity, not production authorization. |
@@ -214,8 +214,8 @@ not by team preference.
 
 | ID | Work | Acceptance evidence | Estimate |
 | --- | --- | --- | ---: |
-| I-01 | Encompass eFolder pull worker | **Code complete / external qualification blocked:** tenant binding, V3 client, 40 MiB bound, byte discard, replay state, SQS/DLQ, and AWS task are implemented; obtain ICE sandbox access, confirm OAuth entitlement, capture the live response contract, and pass a synthetic end-to-end run | 1-3 days after ICE access |
-| I-02 | Encompass approval sync worker | Durable `sync_jobs`, outbox/SQS state machine, stale-version check, idempotent PATCH, reconciliation/DLQ | 5-10 days plus ICE access |
+| I-01 | Encompass eFolder pull worker | **Code complete / external qualification blocked:** tenant binding, connector contract, 40 MiB bound, byte discard, replay state, SQS/DLQ, and AWS task are implemented; install the direct custom connector, capture its live contract, and pass a synthetic end-to-end run | 1-3 days after connector access |
+| I-02 | Encompass approval sync worker | Durable `sync_jobs`, outbox/SQS state machine, stale-version check, idempotent write, reconciliation/DLQ | 5-10 days plus connector access |
 | I-03 | Stripe billing ledger | Signature, server-side price/tenant reconciliation, unique events, duplicate/tamper tests | 2-4 days |
 | I-04 | Secure shared links | Hashed scoped tokens, expiry, revocation, rate limits, cross-tenant tests, audit | 2-4 days |
 | I-05 | Production appraisal | Strict PDF-only input, scan policy/OCR, source coordinates, isolated service deployment, qualification corpus | 5-10 days |
@@ -232,7 +232,7 @@ Minimum parallel staffing for the narrow September 30 pilot:
 2. Backend/security/data: W-03-04, W-10-11, P-02, P-04, P-09.
 3. Platform/QA: W-02, W-09, W-12-14, P-06-08, P-10, P-13-15.
 4. Parser/domain support: W-07 and P-11-12.
-5. External: independent security reviewer and, only if required, ICE Encompass
+5. External: independent security reviewer and, only if required, Encompass
    tenant administrator.
 
 Estimated remaining effort is **35-55 engineer-days** for a narrow borrower-data

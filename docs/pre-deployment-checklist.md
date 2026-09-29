@@ -78,7 +78,7 @@ The gateway separates public marketing zones from secure underwriter APIs.
     - High-compute endpoint `/api/underwrite/process` is capped at **10 requests per minute** per IP to shield against botnets and script-DDoS attacks.
 - [ ] **Verify Clickjacking Frame Protection (CSP Headers)**
   - Open `next.config.js` or Next.js middleware and verify `frame-ancestors` is active.
-  - *Required Whitelist:* `'self'`, `https://*.elliemae.net`, `https://*.encompassloanofficer.com`, `https://*.encompasssolutions.com`, and `https://*.ice.com`.
+  - *Required Whitelist:* `'self'` plus only the exact Encompass origins approved for the lender deployment.
   - *Result:* Encompass SmartClient or web controls can safely embed your split-screen view while blocking public iframe spoofing.
 - [ ] **Run Let's Encrypt Certbot Certificate Generator**
   - *Command:* `certbot --nginx -d freeflowmortgage.com -d app.freeflowmortgage.com`
@@ -87,11 +87,12 @@ The gateway separates public marketing zones from secure underwriter APIs.
 
 ## 🤝 PHASE 5: Encompass Integration & Day 1 Certainty (D1C) Auth
 
-To clear files automatically without audit risk, credentials must be mapped perfectly under ICE Dev Connect.
+To clear files automatically without audit risk, the hosted tool and custom
+connector must use authoritative tenant bindings.
 
-- [ ] **Configure Ellie Mae Developer Connect Admin Console**
-  - Log in and verify your authorized Redirect URIs are registered as:
-    - `https://app.freeflowmortgage.com/api/auth/callback/encompass`
+- [ ] **Configure the Encompass hosted tool and custom connector**
+  - Approve the exact hosted origin and bind the connector deployment to one lender.
+  - Keep LOS credentials outside FreeFlow core services and databases.
 - [ ] **Verify Dynamic Audit Links & transactional Email Senders**
   - Open `encompass-fallback-queue.ts` and confirm custom fields map to the correct production routes:
     - `CX.FREEFLOW.AUDIT.URL` -> `https://app.freeflowmortgage.com/audit/{loanId}`

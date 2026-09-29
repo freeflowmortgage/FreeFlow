@@ -929,7 +929,7 @@ export const UnderwriterSplitViewDemo: React.FC = () => {
                   <Lock className="h-5 w-5 text-indigo-600" />
                   Authorize & Commit Encompass REST Sync
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">Locks and writes-back processed values to standard Ellie Mae/ICE field registries</p>
+                <p className="text-xs text-slate-400 mt-1">Locks and writes back processed values to configured Encompass fields</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">

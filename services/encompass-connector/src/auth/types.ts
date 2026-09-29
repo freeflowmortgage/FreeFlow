@@ -2,7 +2,7 @@
  * Portal → connector service-to-service authentication.
  *
  * Service tokens are a distinct type/store from LOS credentials. This module
- * must not import, store, or type Encompass / ICE credentials.
+ * must not import, store, or type lender LOS credentials.
  *
  * Production MUST replace Bearer with mTLS and/or signed+replay-protected
  * tokens (live-wiring gate: S2S > Bearer). The Bearer stub is NON-PROD and

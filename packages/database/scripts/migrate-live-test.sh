@@ -51,7 +51,7 @@ case "$SEED_TENANT_ID" in
     ;;
 esac
 case "$SEED_ENCOMPASS_INTEGRATION_MODE" in
-  ""|NONE|ENCOMPASS_HOSTED|DEVELOPER_CONNECT) ;;
+  ""|NONE|ENCOMPASS_HOSTED|CUSTOM_CONNECTOR) ;;
   *)
     echo "SEED_ENCOMPASS_INTEGRATION_MODE is not an allowed integration mode." >&2
     exit 1

@@ -8,7 +8,7 @@ export type EncompassConnectorContext = Readonly<{
   correlationId: string;
 }>;
 
-export type ConnectorKind = 'custom' | 'developer-connect';
+export type ConnectorKind = 'custom';
 
 /**
  * Prod: one ECS connector deployment per lender.
@@ -55,33 +55,10 @@ export type SignedConnectorServiceAuth = Readonly<{
 
 export type ConnectorServiceAuth = BearerConnectorServiceAuth | SignedConnectorServiceAuth;
 
-/**
- * Port implemented by the existing portal `EncompassApiClient`.
- * The adapter wraps this client; it does not take secrets itself.
- */
-export type DeveloperConnectClient = {
-  listActiveAttachments(loanGuid: string): Promise<ReadonlyArray<EncompassAttachmentRef>>;
-  downloadOriginalAttachment(
-    loanGuid: string,
-    attachmentId: string,
-  ): Promise<DownloadedEncompassAttachment>;
-  applyApprovedIncomeUpdate?(
-    loanGuid: string,
-    update: EncompassApprovedIncomeUpdate,
-  ): Promise<EncompassWriteResult>;
-  readFields?(loanGuid: string, fieldNames: ReadonlyArray<string>): Promise<Readonly<Record<string, string>>>;
-};
-
 export type CreateEncompassConnectorOptions = Readonly<{
   binding: ConnectorDeploymentBinding;
   connectorServiceAuth?: ConnectorServiceAuth;
   fetch?: typeof fetch;
-  /**
-   * Developer Connect stays opt-in and default OFF.
-   * When false, a developer-connect binding fails closed without calling the wrapped client.
-   */
-  developerConnectEnabled?: boolean;
-  developerConnectClient?: DeveloperConnectClient;
 }>;
 
 type ForbiddenLosCredentialKeys =

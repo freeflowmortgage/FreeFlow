@@ -10,7 +10,7 @@
 | Income parser | PDF/OCR path with byte/page limits | Vulnerable dependencies, expensive synchronous OCR, full OCR word output, incomplete admission controls |
 | Appraisal parser | Structured rule/audit prototype | Text-fixture acceptance in production path, no dependable scanned-document OCR, non-source coordinate boxes |
 | Calculations | Deterministic engine plus persisted, source-bound extraction-to-calculation-to-approval flow | Immutable parser output without authoritative tax year is rejected; live end-to-end environment evidence remains |
-| Encompass | Tenant-bound document-pull and approval-sync jobs, workers, idempotency, and reconciliation | Real ICE sandbox retrieval/write/reconciliation qualification remains |
+| Encompass | Tenant-bound document-pull and approval-sync jobs, workers, idempotency, and reconciliation | Direct custom-connector retrieval/write/reconciliation qualification remains |
 | Billing | Stripe signature concept and fee model | Route wiring failure, metadata trust, duplicate-event risk, no authoritative reconciliation |
 | Database | Ordered migrations, restricted roles, FORCE RLS, immutable audit/extraction provenance, and zero-drift local PostgreSQL qualification | Live RDS migration/restore and complete route/object isolation matrix remain |
 

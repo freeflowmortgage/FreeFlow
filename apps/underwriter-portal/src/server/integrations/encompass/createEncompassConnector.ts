@@ -1,6 +1,5 @@
 import {
   createEncompassConnector,
-  EncompassConnectorError,
   FREEFLOW_DEV_CONNECTOR_BINDING,
   type EncompassConnector,
 } from '@mortgage-pos/encompass-connector-contract';
@@ -13,14 +12,6 @@ export function createPortalEncompassConnector(
   environment: NodeJS.ProcessEnv = process.env,
   fetchImpl?: typeof fetch,
 ): EncompassConnector {
-  if (environment.ENCOMPASS_CONNECTOR_KIND === 'developer-connect') {
-    throw new EncompassConnectorError(
-      'DEVELOPER_CONNECT_DISABLED',
-      'Developer Connect cannot run inside the portal process.',
-      false,
-    );
-  }
-
   const serviceToken = environment.ENCOMPASS_CONNECTOR_SERVICE_TOKEN?.trim();
   return createEncompassConnector({
     binding: {

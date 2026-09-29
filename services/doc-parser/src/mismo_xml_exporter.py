@@ -9,7 +9,7 @@ def generate_mismo_34_xml(loan_id, borrower_name, qualifying_income, business_en
     """
     Generates a highly compliant, standardized MISMO v3.4 XML payload [cite: 32].
     This translates our structured underwriting audit ledger and Form 1084 cash flow calculations 
-    into standard MISMO XML nodes compatible with major legacy LOS platforms like ICE Encompass [cite: 28, 32].
+    into standard MISMO XML nodes compatible with Encompass and other major LOS platforms [cite: 28, 32].
     """
     # Define XML Namespaces matching the official MISMO 2009 / 3.4.0 standard schemas [cite: 43]
     mismo_ns = "http://www.mismo.org/residential/2009/schemas"

@@ -16,7 +16,7 @@ export function createHostLaunchHandler(dependencies = { withTenantTransaction }
         if (config?.encompassIntegrationMode !== 'ENCOMPASS_HOSTED') throw new ApiError(409, 'ENCOMPASS_HOSTED_NOT_ENABLED', 'Hosted Encompass integration is not enabled for this tenant.');
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${context.tenantId}:${encompassLoanGuid}`}, 2))`;
         const existing = await tx.loanApplication.findFirst({ where: { tenantId: context.tenantId, encompassGuid: encompassLoanGuid }, select: { id: true, version: true, encompassIntegrationMode: true } });
-        if (existing?.encompassIntegrationMode === 'DEVELOPER_CONNECT') throw new ApiError(409, 'ENCOMPASS_BINDING_MODE_CONFLICT', 'The loan is already bound through a different Encompass integration mode.');
+        if (existing?.encompassIntegrationMode === 'CUSTOM_CONNECTOR') throw new ApiError(409, 'ENCOMPASS_BINDING_MODE_CONFLICT', 'The loan is already bound through a different Encompass integration mode.');
         if (existing) {
           if (existing.encompassIntegrationMode === 'NONE') await tx.loanApplication.updateMany({
             where: { id: existing.id, tenantId: context.tenantId, encompassIntegrationMode: 'NONE' },

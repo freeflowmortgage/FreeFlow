@@ -95,7 +95,7 @@ describe('Encompass custom field setup', () => {
 });
 
 describe('AI 1003 / URLA Encompass mapping', () => {
-  test('uses Developer Connect customFields array, not a dictionary or root otherIncome', () => {
+  test('uses the direct connector customFields array, not a dictionary or root otherIncome', () => {
     const update = buildEncompassLoanUpdate({ urla: fullUrla, income1084 });
     expect(Array.isArray(update.loan.customFields)).toBe(true);
     expect(update.loan.customFields[0]).toEqual(

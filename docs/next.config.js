@@ -9,7 +9,7 @@ const nextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: "frame-ancestors 'self' https://*.elliemae.net https://*.encompassloanofficer.com https://*.encompasssolutions.com;",
+            value: "frame-ancestors 'self' https://*.encompassloanofficer.com https://*.encompasssolutions.com;",
           },
           {
             key: 'X-Frame-Options',

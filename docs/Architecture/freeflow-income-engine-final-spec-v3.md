@@ -6,7 +6,7 @@ This specification consolidates the complete, finalized technical and business a
 
 ## 1. System Philosophy: The Standalone Point-Solution Wedge
 
-To maximize market adoption in low-volume cycles, this engine operates strictly as a **back-office operational utility** rather than a consumer-facing POS platform. It plugs directly into existing lender infrastructure via a native **ICE Encompass Web Control Iframe**, targeting the highest-overhead task in mortgage processing: manual self-employed, government, and complex income calculations [cite: 32, 104].
+To maximize market adoption in low-volume cycles, this engine operates strictly as a **back-office operational utility** rather than a consumer-facing POS platform. It plugs directly into existing lender infrastructure via an **Encompass-hosted custom tool**, targeting the highest-overhead task in mortgage processing: manual self-employed, government, and complex income calculations [cite: 32, 104].
 
 ```
        [ Underwriter Workspace ]

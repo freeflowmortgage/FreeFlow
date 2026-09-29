@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
+import { EncompassConnectorError, type EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
 import { PrismaBindingStore } from '../src/binding';
 import {
   SYNTHETIC_FREEFLOW_DEV_MODE,
@@ -13,6 +13,13 @@ import {
 } from '../src/boot';
 
 const SECRET_TOKEN = 'must-not-appear-in-errors';
+const directConnector: EncompassConnector = {
+  kind: 'custom',
+  listActiveAttachments: async () => [],
+  downloadOriginalAttachment: async () => { throw new Error('unused'); },
+  applyApprovedIncomeUpdate: async () => ({}),
+  readFields: async () => ({}),
+};
 
 function assertSafeProductionRefusal(error: unknown): boolean {
   assert.ok(error instanceof EncompassConnectorError);
@@ -51,10 +58,7 @@ test('non-production still boots the NON-PROD Bearer stub', () => {
       CONNECTOR_BOUND_TENANT_ID: 'tenant-a',
       CONNECTOR_BOUND_LENDER_ID: 'lender-a',
       CONNECTOR_BOUND_DEPLOYMENT_ID: 'deploy-a',
-      ENCOMPASS_CLIENT_ID: 'client-id',
-      ENCOMPASS_CLIENT_SECRET: 'client-secret',
-      ENCOMPASS_INSTANCE_ID: 'instance-id',
-    });
+    }, directConnector);
     assert.equal(runtime.deps.authVerifier instanceof Object, true);
     assert.equal(
       'kind' in runtime.deps.authVerifier && runtime.deps.authVerifier.kind,
@@ -63,6 +67,16 @@ test('non-production still boots the NON-PROD Bearer stub', () => {
     assert.equal(runtime.port, 18080);
     assert.equal(runtime.deps.bindingStore instanceof PrismaBindingStore, true);
   }
+});
+
+test('non-synthetic runtime requires an injected direct Encompass connector', () => {
+  assert.throws(
+    () => createConnectorRuntime({ NODE_ENV: 'test' }),
+    (error: unknown) => (
+      error instanceof EncompassConnectorError
+      && error.safeCode === 'DIRECT_ENCOMPASS_CONNECTOR_REQUIRED'
+    ),
+  );
 });
 
 test('synthetic connector mode is selectable only in the development runtime', () => {

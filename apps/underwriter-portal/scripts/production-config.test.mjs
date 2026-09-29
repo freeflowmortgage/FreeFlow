@@ -19,9 +19,6 @@ function validProductionEnv() {
     OIDC_AUDIENCE: '4exampleclientid9',
     ALB_OIDC_SIGNER_ARN:
       'arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/freeflow/abc123',
-    ENCOMPASS_BASE_URL: 'https://api.elliemae.com',
-    ENCOMPASS_CLIENT_ID: 'production-client-id',
-    ENCOMPASS_CLIENT_SECRET: 'a-real-secret-with-sufficient-length',
     STRIPE_SECRET_KEY: 'sk_live_validproductionkey',
     STRIPE_WEBHOOK_SECRET: 'whsec_validproductionsecret',
     FIELD_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef',
@@ -46,9 +43,6 @@ test('staging accepts disabled integrations without placeholder credentials', ()
   const env = validProductionEnv();
   env.FREEFLOW_RUNTIME_ENV = 'staging';
   delete env.REDIS_URL;
-  delete env.ENCOMPASS_BASE_URL;
-  delete env.ENCOMPASS_CLIENT_ID;
-  delete env.ENCOMPASS_CLIENT_SECRET;
   delete env.STRIPE_SECRET_KEY;
   delete env.STRIPE_WEBHOOK_SECRET;
 
@@ -67,11 +61,11 @@ test('production continues to require integration credentials', () => {
 test('missing values and placeholders fail closed without exposing values', () => {
   const env = validProductionEnv();
   delete env.OIDC_AUDIENCE;
-  env.ENCOMPASS_CLIENT_SECRET = 'replace-with-secret';
+  env.STRIPE_WEBHOOK_SECRET = 'replace-with-secret';
 
   const errors = validateProductionConfig(env);
   assert.ok(errors.includes('OIDC_AUDIENCE is required.'));
-  assert.ok(errors.includes('ENCOMPASS_CLIENT_SECRET contains a placeholder or mock value.'));
+  assert.ok(errors.includes('STRIPE_WEBHOOK_SECRET contains a placeholder or mock value.'));
   assert.ok(errors.every((error) => !error.includes('replace-with-secret')));
 });
 
