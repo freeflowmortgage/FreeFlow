@@ -15,6 +15,8 @@ export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID = 'synthetic-income-document-1
 /**
  * Non-production-only deterministic LOS stand-in. It creates the PDF bytes in
  * memory for each request and never receives LOS credentials or persists data.
+ * The PDF is a one-page synthetic W-2 so the income parser can return a
+ * persistable w2Extracts row.
  */
 export class SyntheticFreeflowDevConnector implements EncompassConnector {
   readonly kind = 'custom' as const;
@@ -70,8 +72,32 @@ function assertSyntheticRequest(context: EncompassConnectorContext, loanGuid: st
   }
 }
 
+/**
+ * IRS Copy B boxes from services/doc-parser/templates/w2_map.json (612×792,
+ * top-left origin). Content-stream text uses a bottom-left origin, so
+ * pdfY = 792 - baseline. Box 6 is 1.45% of Box 5 so the W-2 medicare check
+ * passes, and Box 1 is filled because persistence prefers Box 1 when present.
+ */
+const SYNTHETIC_W2_LINES: ReadonlyArray<readonly [number, number, string]> = [
+  [72, 756, 'Form W-2 Wage and Tax Statement 2025'],
+  [42, 710, '00-0000000'],
+  [42, 680, 'FreeFlow Synthetic Payroll LLC'],
+  [340, 710, '120000.00'],
+  [340, 664, '120000.00'],
+  [462, 664, '1740.00'],
+];
+
+function pdfLiteral(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+}
+
 function createSyntheticPdf(): Uint8Array {
-  const content = 'BT /F1 12 Tf 72 720 Td (FreeFlow synthetic connector document) Tj ET\n';
+  const content = [
+    'BT /F1 9 Tf',
+    ...SYNTHETIC_W2_LINES.map(([x, y, text]) => `1 0 0 1 ${x} ${y} Tm (${pdfLiteral(text)}) Tj`),
+    'ET',
+    '',
+  ].join('\n');
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
