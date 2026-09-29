@@ -35,6 +35,14 @@ test('synthetic freeflow-dev connector returns deterministic metadata and in-mem
   assert.deepEqual(first.bytes, second.bytes);
   assert.equal(first.sha256, createHash('sha256').update(first.bytes).digest('hex'));
   assert.equal(first.sha256, second.sha256);
+
+  const pdf = new TextDecoder().decode(first.bytes);
+  assert.match(pdf, /1 0 0 1 72 756 Tm \(Form W-2 Wage and Tax Statement 2025\) Tj/);
+  assert.match(pdf, /1 0 0 1 42 710 Tm \(00-0000000\) Tj/);
+  assert.match(pdf, /1 0 0 1 42 680 Tm \(FreeFlow Synthetic Payroll LLC\) Tj/);
+  assert.match(pdf, /1 0 0 1 340 710 Tm \(120000\.00\) Tj/);
+  assert.match(pdf, /1 0 0 1 340 664 Tm \(120000\.00\) Tj/);
+  assert.match(pdf, /1 0 0 1 462 664 Tm \(1740\.00\) Tj/);
 });
 
 test('synthetic freeflow-dev connector rejects every other tenant, loan, and attachment', async () => {
