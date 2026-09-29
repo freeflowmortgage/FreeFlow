@@ -56,7 +56,7 @@ function line(result: ReturnType<typeof authorize>['result'], borrowerKey: strin
   return result.borrowerIncome.find((item) => item.borrowerKey === borrowerKey)!;
 }
 
-test('AC-01 W-2 persists, assigns, calculates, and reviews per borrower', () => {
+test('AC-01 two-borrower W-2 assignment, calculation, and review', () => {
   const records: RecordInput[] = [1, 2].map((ordinal) => ({
     extractionId: `00000000-0000-4000-8000-00000000010${ordinal}`,
     normalizedInput: { w2Records: [{ entityId: `w2-${ordinal}`, employerName: ordinal === 1 ? 'Northwind Labs' : 'Other Co', year: 2025, annualWages: ordinal === 1 ? 96000 : 72000 }] },
@@ -70,7 +70,7 @@ test('AC-01 W-2 persists, assigns, calculates, and reviews per borrower', () => 
   parseMetadataReviewBody({ expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null, assignments: records[0].metadataAssignments });
 });
 
-test('AC-02 same employer does not cross-assign and AC-03 paystub components are not year-to-date-as-annual', () => {
+test('AC-02 same employer on the other borrower is not cross-assigned', () => {
   const paystub = {
     extractionId: '00000000-0000-4000-8000-000000000201',
     normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [
@@ -95,21 +95,40 @@ test('AC-02 same employer does not cross-assign and AC-03 paystub components are
     normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Northwind Labs', year: 2025, annualWages: 72000 }] },
     metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-2' }],
   };
-  const { reconciliation, calculationInput, result } = authorize([paystub, matchingW2, otherBorrowerSameEmployer]);
-  assert.equal(reconciliation.gaps.includes('PAYSTUB_W2_RECONCILED'), true);
+  const { reconciliation, result } = authorize([paystub, matchingW2, otherBorrowerSameEmployer]);
   assert.equal(reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000202:w2-match'), true);
+  assert.equal(reconciliation.gaps.includes('PAYSTUB_W2_RECONCILED'), true);
   assert.equal(reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000203:w2-other'), false);
-  const projected = calculationInput.w2Employers ?? [];
-  const stub = projected.find((row) => row.entityId.endsWith('paystub-1'));
+  assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '6000.00');
+});
+
+test('AC-03 paystub base and variable components follow the cited console formulas', () => {
+  // Harness observation only. Ben's 10 paystub rules are not in this repository,
+  // so this test is not a Paystub source PASS.
+  const paystub = {
+    extractionId: '00000000-0000-4000-8000-000000000221',
+    normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [
+      { sourceFieldId: 'ps-employer-name', value: 'Northwind Labs' },
+      { sourceFieldId: 'ps-base-ytd', numericValue: 30000 },
+      { sourceFieldId: 'ps-ot-ytd', numericValue: 7500 },
+      { sourceFieldId: 'ps-bonus-ytd', numericValue: 1500 },
+      { sourceFieldId: 'ps-commission-ytd', numericValue: 750 },
+      { sourceFieldId: 'ps-tips-ytd', numericValue: 300 },
+      { sourceFieldId: 'ps-rsu-ytd', numericValue: 1500 },
+      { sourceFieldId: 'ps-other-ytd', numericValue: 450 },
+    ])] },
+    metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT' as const, taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const }],
+  };
+  const { calculationInput, result } = authorize([paystub]);
+  const stub = calculationInput.w2Employers?.find((row) => row.entityId.endsWith('paystub-1'));
   assert.equal(stub?.annualWages, undefined);
   assert.equal(stub?.annualBaseIncome, 48000);
   assert.equal(stub?.annualVariableIncome, 19200);
   assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '5600.00');
-  assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '6000.00');
   parseMetadataReviewBody({ expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null, assignments: paystub.metadataAssignments });
 });
 
-test('AC-10 unmatched paystub employer is surfaced and both jobs still calculate', () => {
+test('AC-11 unmatched paystub employer is surfaced and both jobs still calculate', () => {
   const { reconciliation, result } = authorize([
     {
       extractionId: '00000000-0000-4000-8000-000000000211',
@@ -142,7 +161,7 @@ test('AC-05 Schedule F assigns and calculates on the protected path', () => {
   assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '4000.00');
 });
 
-test('AC-06 1120-S plus K-1 calculates when distributions equal ordinary income', () => {
+test('AC-06 Form 1120-S record calculates K-1 ordinary capped at equal distributions', () => {
   const { result } = authorize([business('00000000-0000-4000-8000-000000000303', 'Form 1120-S', 'scorp-1', [
     { sourceFieldId: 'scorp-name', value: 'Synthetic S Corp' },
     { sourceFieldId: 'scorp-ord', numericValue: 120000 },
@@ -152,7 +171,7 @@ test('AC-06 1120-S plus K-1 calculates when distributions equal ordinary income'
   assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '10000.00');
 });
 
-test('AC-07 1065 plus K-1 calculates on the protected path', () => {
+test('AC-07 Form 1065 record calculates K-1 ordinary capped at equal distributions', () => {
   const { result } = authorize([business('00000000-0000-4000-8000-000000000304', 'Form 1065', 'pt-1', [
     { sourceFieldId: 'pt-name', value: 'Synthetic Partnership' },
     { sourceFieldId: 'pt-ord', numericValue: 60000 },
@@ -176,7 +195,7 @@ test('AC-08 Form 1120 stays liquidity-locked until reviewed balance-sheet facts 
   assert.equal(line(opened.result, 'borrower-2').qualifyingMonthlyIncome, '10000.00');
 });
 
-test('AC-09 Schedule B/D asset income is blocked until an explicit include election', () => {
+test('AC-09 Schedule B interest is blocked until an explicit include election', () => {
   const record = business('00000000-0000-4000-8000-000000000306', 'Schedule B', 'asset-1', [
     { sourceFieldId: 'schedule-b-interest', numericValue: 12000 },
   ], { entityId: 'asset-1', taxYear: 2025, borrowerKey: 'borrower-2' });
@@ -192,7 +211,25 @@ test('AC-09 Schedule B/D asset income is blocked until an explicit include elect
   });
 });
 
-test('AC-09 multi Schedule E properties stay with the assigned borrower', () => {
+test('AC-09 Schedule D capital gain is blocked until an explicit include election', () => {
+  const record = business('00000000-0000-4000-8000-000000000316', 'Schedule D', 'asset-d', [
+    { sourceFieldId: 'schedule-d-capital-gain-loss', numericValue: 12000 },
+  ], { entityId: 'asset-d', taxYear: 2025, borrowerKey: 'borrower-2' });
+  assert.throws(() => authorize([record]), (error: unknown) => error instanceof ExtractionMetadataRequiredError && error.requirements.some((item) => item.field === 'assetElection' && item.form === 'Schedule D'));
+  const elected = authorize([{
+    ...record,
+    metadataAssignments: [{ ...record.metadataAssignments![0], includeInQualifyingIncome: true, hasThreeYearAssetSupport: true }],
+  }]);
+  assert.equal(elected.result.slices[0].assetIncomeBreakdown[0].capitalGainsNetLoss, 12000);
+  assert.equal(elected.result.slices[0].assetIncomeBreakdown[0].interestIncome, 0);
+  assert.equal(line(elected.result, 'borrower-2').qualifyingMonthlyIncome, '1000.00');
+  parseMetadataReviewBody({
+    expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null,
+    assignments: [{ entityId: 'asset-d', taxYear: 2025, borrowerKey: 'borrower-2', includeInQualifyingIncome: true, hasThreeYearAssetSupport: true }],
+  });
+});
+
+test('AC-10 multi Schedule E properties stay with the assigned borrower', () => {
   const property = (extractionId: string, addressIncome: number, borrowerKey: string) => ({
     extractionId,
     normalizedInput: { scheduleEProperties: [{ year: 2025, propertyAddress: '100 Synthetic Lane', propertyType: 'RENTAL' as const, netIncomeLoss: addressIncome }] },
@@ -207,7 +244,7 @@ test('AC-09 multi Schedule E properties stay with the assigned borrower', () => 
   assert.equal(result.qualifyingMonthlyIncome, 3000);
 });
 
-test('demo gate fixture assigns paystub, W-2, self-employment, Schedule E, and asset income', () => {
+test('demo gate fixture assigns W-2, Schedule C, Schedule E, and Schedule B; paystub figures are not a source PASS', () => {
   const authorized = authorize([
     {
       extractionId: '00000000-0000-4000-8000-000000000401',
@@ -246,7 +283,31 @@ test('demo gate fixture assigns paystub, W-2, self-employment, Schedule E, and a
   assert.equal(authorized.result.qualifyingMonthlyIncome, 16600);
 });
 
-test('AC-11 unknown borrower and AC-12 cross-loan assignment fail closed', async () => {
+test('AC-11 K-1 ordinary is not added again when a return line is present', () => {
+  // Existing engine rule in calculateForm1084Income: K-1 boxes count at 100%.
+  // Ownership applies only to entity return lines such as meals. A doubled
+  // ordinary figure would be 200000, not 98000.
+  const scorp = authorize([business('00000000-0000-4000-8000-000000000321', 'Form 1120-S', 'scorp-k1', [
+    { sourceFieldId: 'scorp-name', value: 'Synthetic S Corp' },
+    { sourceFieldId: 'scorp-ord', numericValue: 100000 },
+    { sourceFieldId: 'scorp-meals', numericValue: 4000 },
+    { sourceFieldId: 'scorp-own-pct', numericValue: 50 },
+  ], { entityId: 'scorp-k1', taxYear: 2025, borrowerKey: 'borrower-2', hasStableDistributions: true })]);
+  assert.equal(scorp.result.slices[0].form1120SBreakdown?.[0].k1EligibleIncome, 98000);
+  assert.notEqual(scorp.result.slices[0].form1120SBreakdown?.[0].k1EligibleIncome, 200000);
+  assert.equal(line(scorp.result, 'borrower-2').qualifyingMonthlyIncome, '8166.67');
+  const partnership = authorize([business('00000000-0000-4000-8000-000000000322', 'Form 1065', 'pt-k1', [
+    { sourceFieldId: 'pt-name', value: 'Synthetic Partnership' },
+    { sourceFieldId: 'pt-ord', numericValue: 100000 },
+    { sourceFieldId: 'pt-meals', numericValue: 4000 },
+    { sourceFieldId: 'pt-profit-pct', numericValue: 50 },
+  ], { entityId: 'pt-k1', taxYear: 2025, borrowerKey: 'borrower-2', hasStableDistributions: true })]);
+  assert.equal(partnership.result.slices[0].form1065Breakdown?.[0].k1EligibleIncome, 98000);
+  assert.notEqual(partnership.result.slices[0].form1065Breakdown?.[0].k1EligibleIncome, 200000);
+  assert.equal(line(partnership.result, 'borrower-2').qualifyingMonthlyIncome, '8166.67');
+});
+
+test('AC-12 unknown borrower blocks review', async () => {
   assert.throws(() => readLaunchBorrowers({ borrowers: [{ borrowerKey: 'borrower-1', role: 'PRIMARY', name: 'Hidden' }, { borrowerKey: 'borrower-2', role: 'CO_BORROWER' }] }), (error: unknown) => error instanceof ApiError && error.code === 'INVALID_BORROWER_ROSTER');
   let where: { tenantId?: string; loanId?: string } | undefined;
   await assert.rejects(reviewExtractionMetadata(reviewTransaction(() => [], (captured) => { where = captured; }) as never, reviewContext(), reviewInput('borrower-9')), (error: unknown) => error instanceof ApiError && error.code === 'UNKNOWN_BORROWER');
@@ -254,7 +315,26 @@ test('AC-11 unknown borrower and AC-12 cross-loan assignment fail closed', async
   assert.equal(where?.loanId, '00000000-0000-4000-8000-000000000200');
 });
 
-test('AC-13 reassignment changes the review hash and invalidates calculation provenance', async () => {
+test('AC-13 a borrower key on another tenant or loan is denied', async () => {
+  const tenantId = reviewContext().tenantId;
+  const loanId = '00000000-0000-4000-8000-000000000200';
+  const otherTenant = '00000000-0000-4000-8000-000000000199';
+  const otherLoan = '00000000-0000-4000-8000-000000000299';
+  const rows = [
+    { tenantId: otherTenant, loanId, borrowerKey: 'borrower-1' },
+    { tenantId, loanId: otherLoan, borrowerKey: 'borrower-1' },
+  ];
+  let where: { tenantId?: string; loanId?: string } | undefined;
+  await assert.rejects(reviewExtractionMetadata(reviewTransaction(
+    () => rows.filter((row) => row.tenantId === where?.tenantId && row.loanId === where?.loanId).map((row) => ({ borrowerKey: row.borrowerKey })),
+    (captured) => { where = captured; },
+  ) as never, reviewContext(), { ...reviewInput('borrower-1'), idempotencyKey: 'cross-tenant-key-0001' }), (error: unknown) => error instanceof ApiError && error.code === 'UNKNOWN_BORROWER');
+  assert.equal(where?.tenantId, tenantId);
+  assert.equal(where?.loanId, loanId);
+  assert.equal(rows.filter((row) => row.tenantId === where?.tenantId && row.loanId === where?.loanId).length, 0);
+});
+
+test('AC-14 reassignment changes the review hash and invalidates calculation provenance', async () => {
   const reviews: Array<{ id: string; metadataVersion: number; canonicalHash: string; assignments: unknown }> = [];
   let loanVersion = 1;
   const transaction = {
@@ -281,7 +361,7 @@ test('AC-13 reassignment changes the review hash and invalidates calculation pro
   }]), false);
 });
 
-test('AC-14 borrower lines sum to the combined total and AC-16 writes each borrower field once', () => {
+test('AC-15 borrower lines sum to the combined total', () => {
   const borrowerIncome = [
     { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' as const, qualifyingMonthlyIncome: '5600.00', name: 'Must Not Persist' },
     { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER' as const, qualifyingMonthlyIncome: '11000.00' },
@@ -290,6 +370,13 @@ test('AC-14 borrower lines sum to the combined total and AC-16 writes each borro
   assert.equal(sanitized.reduce((total, item) => total + Number(item.qualifyingMonthlyIncome), 0).toFixed(2), '16600.00');
   assert.equal(JSON.stringify(sanitized).includes('Must Not Persist'), false);
   assert.deepEqual(Object.keys(sanitized[0]).sort(), ['borrowerKey', 'ordinal', 'qualifyingMonthlyIncome', 'role']);
+});
+
+test('AC-16 approved host fields are written once and omit borrower names', () => {
+  const borrowerIncome = [
+    { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' as const, qualifyingMonthlyIncome: '5600.00', name: 'Must Not Persist' },
+    { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER' as const, qualifyingMonthlyIncome: '11000.00' },
+  ];
   const fields = approvedHostFields({
     loanId: '00000000-0000-4000-8000-000000000200', approvalId: 'approval-1', qualifyingMonthlyIncome: 16600,
     trendingAnalysis: 'SINGLE_YEAR', yearsAnalyzed: [2025], borrowerIncome, auditUrl: 'https://console.example/audit/approval-1',
@@ -303,7 +390,7 @@ test('AC-14 borrower lines sum to the combined total and AC-16 writes each borro
   assert.equal(JSON.stringify(fields).includes('Must Not Persist'), false);
 });
 
-test('AC-15 a roster change after calculation blocks approval', async () => {
+test('AC-14 a roster change after calculation blocks approval', async () => {
   await assert.rejects(approveIncomeCalculation(approvalTransaction([{ borrowerKey: 'borrower-9' }, { borrowerKey: 'borrower-2' }]) as never, reviewContext(), {
     loanId: '00000000-0000-4000-8000-000000000200', calculationId: '00000000-0000-4000-8000-000000000501', expectedLoanVersion: 1,
     action: 'INCOME_APPROVED', reasonCode: 'UNDERWRITER_CONFIRMED', reasonNarrative: null, overrideQualifyingMonthlyIncome: null, idempotencyKey: 'approve-key-00000001',

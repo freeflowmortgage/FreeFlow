@@ -1,9 +1,31 @@
 import { Decimal } from 'decimal.js';
 
 /**
- * Paystub base and variable monthly income using the console's existing
- * four-way reconciliation. Year-to-date dollars are divided by elapsed months.
- * They are never treated as a full-year wage.
+ * Port of the console four-way base reconciliation in
+ * `apps/underwriting-console/src/components/UnderwriterSplitViewDemo.tsx`:
+ * `payPeriodsPerYear`, `baseWageReconciliation`, and `w2BaseMonthlyOf`
+ * (around the "4-Way Base Wage Reconciliation" block).
+ *
+ * Hourly monthly = (hourlyRate * weeklyHours * 52) / 12
+ * Period monthly = (currentPeriodBasePay * periodsPerYear) / 12
+ *   WEEKLY 52, BIWEEKLY 26, MONTHLY 12, otherwise 24
+ * YTD monthly = amount / elapsedMonths
+ *   The demo divides by a hardcoded 7.5 for an August 15 stub. This module
+ *   uses the reviewed elapsedMonths argument instead of that constant.
+ *   YTD dollars are never used as the annual wage.
+ * Prior monthly = priorYearW2Wages / 12
+ * When no base method is selected, `w2BaseMonthlyOf` recommends the lower of
+ * hourly and YTD when |hourly - ytd| / hourly * 100 is greater than 10,
+ * otherwise the period method.
+ *
+ * Bonus, overtime, tips, and commission follow `w2VariableMonthlyOf` and
+ * `variableContinuityCalculations`: each year-to-date amount divided by
+ * elapsed months. RSU and other use that same division on parser fields
+ * `ps-rsu-ytd` and `ps-other-ytd`. The demo variable total does not include
+ * RSU or other, so those two components are not a cited console total.
+ *
+ * Ben's 10 paystub rules are not in this file. A gap leaves status GAPS, and
+ * the protected path keeps `unsupportedCalculation`.
  */
 
 export type PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';

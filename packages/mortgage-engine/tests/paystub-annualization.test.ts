@@ -1,6 +1,6 @@
 import { annualizePaystub, parsePayFrequency, payPeriodsPerYear } from '../src/paystubAnnualization';
 
-describe('existing paystub annualization', () => {
+describe('paystub annualization ported from UnderwriterSplitViewDemo', () => {
   test('uses the console pay-period counts', () => {
     expect(payPeriodsPerYear('WEEKLY')).toBe(52);
     expect(payPeriodsPerYear('BIWEEKLY')).toBe(26);
