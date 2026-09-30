@@ -9,7 +9,13 @@ import {
   SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
   SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
   SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
   SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
   SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
   SyntheticFreeflowDevConnector,
@@ -28,10 +34,10 @@ test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pac
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id })),
   );
   assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS[0], SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID);
-  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 8);
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 14);
   assert.equal(
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.at(-1),
-    SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
   );
   assert.deepEqual(
     SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => attachment.id),
@@ -85,12 +91,37 @@ test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pac
     assert.equal(downloaded.sha256, createHash('sha256').update(downloaded.bytes).digest('hex'));
     assert.deepEqual(downloaded.bytes, repeated.bytes);
     assert.equal(downloaded.sha256, repeated.sha256);
+    const packText = new TextDecoder().decode(downloaded.bytes);
     if (pack.id === SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID) {
       assert.ok(listedIds.includes(SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID));
-      const packText = new TextDecoder().decode(downloaded.bytes);
       assert.match(packText, /Schedule B \\\(Form 1040\\\) Interest and Ordinary Dividends/);
       assert.match(packText, /1 0 0 1 72 602 Tm \(Total interest\) Tj/);
       assert.match(packText, /1 0 0 1 200 602 Tm \(12000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule C \\\(Form 1040\\\) Profit or Loss From Business/);
+      assert.match(packText, /Net profit or \\\(loss\\\)  96000\.00/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule F \\\(Form 1040\\\) Profit or Loss From Farming/);
+      assert.match(packText, /Net farm profit or \\\(loss\\\)  48000\.00/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule D \\\(Form 1040\\\) Capital Gains and Losses/);
+      assert.match(packText, /Combine lines 7 and 15  12000\.00/);
+    }
+    if (pack.id === SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID) {
+      assert.match(packText, /U\.S\. Income Tax Return for an S Corporation/);
+      assert.match(packText, /Ordinary business income \\\(loss\\\)  120000\.00/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule K-1 \\\(Form 1120-S\\\) Shareholder's Share/);
+      assert.match(packText, /Distributions  120000\.00/);
+      assert.match(packText, /Percentage of stock ownership  100\.00%/);
+    }
+    if (pack.id === SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID) {
+      assert.match(packText, /U\.S\. Corporation Income Tax Return/);
+      assert.match(packText, /Taxable income  120000\.00/);
     }
   }
 });
