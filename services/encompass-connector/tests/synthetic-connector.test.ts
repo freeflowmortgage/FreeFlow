@@ -48,7 +48,7 @@ test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pac
     SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
     SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
   ]) {
-    assert.ok(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.includes(id));
+    assert.ok(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.some((candidate) => candidate === id));
   }
   assert.deepEqual(
     SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => attachment.id),
