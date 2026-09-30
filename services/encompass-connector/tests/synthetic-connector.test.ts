@@ -9,7 +9,13 @@ import {
   SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
   SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
   SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
   SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
   SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
   SyntheticFreeflowDevConnector,
@@ -28,11 +34,22 @@ test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pac
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id })),
   );
   assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS[0], SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID);
-  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 8);
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 14);
   assert.equal(
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.at(-1),
-    SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
   );
+  for (const id of [
+    SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+  ]) {
+    assert.ok(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.some((candidate) => candidate === id));
+  }
   assert.deepEqual(
     SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => attachment.id),
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.slice(1),
@@ -85,12 +102,64 @@ test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pac
     assert.equal(downloaded.sha256, createHash('sha256').update(downloaded.bytes).digest('hex'));
     assert.deepEqual(downloaded.bytes, repeated.bytes);
     assert.equal(downloaded.sha256, repeated.sha256);
+    const packText = new TextDecoder().decode(downloaded.bytes);
     if (pack.id === SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID) {
       assert.ok(listedIds.includes(SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID));
-      const packText = new TextDecoder().decode(downloaded.bytes);
       assert.match(packText, /Schedule B \\\(Form 1040\\\) Interest and Ordinary Dividends/);
       assert.match(packText, /1 0 0 1 72 602 Tm \(Total interest\) Tj/);
       assert.match(packText, /1 0 0 1 200 602 Tm \(12000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule C \\\(Form 1040\\\) Profit or Loss From Business/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Business name\) Tj/);
+      assert.match(packText, /1 0 0 1 150 660 Tm \(Synthetic Consulting\) Tj/);
+      assert.match(packText, /1 0 0 1 72 630 Tm \(Net profit or loss\) Tj/);
+      assert.match(packText, /1 0 0 1 154 630 Tm \(96000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(13 Depreciation\) Tj/);
+      assert.match(packText, /1 0 0 1 151 600 Tm \(8500\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule F \\\(Form 1040\\\) Profit or Loss From Farming/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Farm name\) Tj/);
+      assert.match(packText, /1 0 0 1 134 660 Tm \(Synthetic Farm\) Tj/);
+      assert.match(packText, /1 0 0 1 72 630 Tm \(Net farm profit or loss\) Tj/);
+      assert.match(packText, /1 0 0 1 174 630 Tm \(48000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(14 Depreciation\) Tj/);
+      assert.match(packText, /1 0 0 1 151 600 Tm \(3200\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule D \\\(Form 1040\\\) Capital Gains and Losses/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Combine lines 7 and 15\) Tj/);
+      assert.match(packText, /1 0 0 1 183 660 Tm \(12000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID) {
+      assert.match(packText, /U\.S\. Income Tax Return for an S Corporation/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Name of corporation\) Tj/);
+      assert.match(packText, /1 0 0 1 170 660 Tm \(Synthetic S Corp Return\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(Ordinary business income \\\(loss\\\)\) Tj/);
+      assert.match(packText, /1 0 0 1 217 600 Tm \(142000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 570 Tm \(Depreciation not claimed\) Tj/);
+      assert.match(packText, /1 0 0 1 187 570 Tm \(18000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule K-1 \\\(Form 1120-S\\\)/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Corporation's name\) Tj/);
+      assert.match(packText, /1 0 0 1 167 660 Tm \(Synthetic S Corp\) Tj/);
+      assert.match(packText, /1 0 0 1 72 630 Tm \(Ordinary business income\) Tj/);
+      assert.match(packText, /1 0 0 1 192 630 Tm \(100000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(Percentage of stock ownership\) Tj/);
+      assert.match(packText, /1 0 0 1 211 600 Tm \(100%\) Tj/);
+      assert.match(packText, /1 0 0 1 72 570 Tm \(Distributions\) Tj/);
+      assert.match(packText, /1 0 0 1 138 570 Tm \(100000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID) {
+      assert.match(packText, /U\.S\. Corporation Income Tax Return/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Name of corporation\) Tj/);
+      assert.match(packText, /1 0 0 1 170 660 Tm \(Synthetic C Corp\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(Taxable income\) Tj/);
+      assert.match(packText, /1 0 0 1 152 600 Tm \(120000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 570 Tm \(20 Depreciation\) Tj/);
+      assert.match(packText, /1 0 0 1 151 570 Tm \(15000\.00\) Tj/);
     }
   }
 });

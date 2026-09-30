@@ -20,6 +20,12 @@ export const SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID = 'synthetic-pack-w2-202
 export const SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID = 'synthetic-pack-w2-2021-coborrower';
 export const SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-e-2025';
 export const SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-b-2025';
+export const SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-c-2025';
+export const SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-f-2025';
+export const SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-d-2025';
+export const SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID = 'synthetic-pack-form-1120s-2025';
+export const SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID = 'synthetic-pack-schedule-k1-1120s-2025';
+export const SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID = 'synthetic-pack-form-1120-2025';
 
 const MORNING_PACK_DIRECTORY = 'morning-pack-2026-09-29';
 
@@ -62,6 +68,42 @@ export const SYNTHETIC_FREEFLOW_DEV_MORNING_PACK = [
     filename: 'schedule-b-2025.pdf',
     sha256: 'cd1af5599d84c66ea13adf2f6227811acfd83164391d0673274e5cb98c249dd7',
   },
+  {
+    // Live parser keeps this page as Schedule C and reads ent1-name, ent1-net 96000.00, and ent1-dep 8500.00.
+    id: SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+    filename: 'schedule-c-2025.pdf',
+    sha256: '2fdb9af27e95e41b2ad283bb62c1940abe95a2118aba0d1c06e23bd17bcf72a7',
+  },
+  {
+    // Live parser keeps this page as Schedule F and reads schedule-f-name, schedule-f-net 48000.00, and schedule-f-depreciation 3200.00.
+    id: SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+    filename: 'schedule-f-2025.pdf',
+    sha256: '18b25453cef9d37c54e653fa2fd344f1d9b82194f396a80b57b1c863816047d9',
+  },
+  {
+    // Live parser keeps this page as Schedule D and reads schedule-d-capital-gain-loss from "Combine lines 7 and 15" 12000.00.
+    id: SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+    filename: 'schedule-d-2025.pdf',
+    sha256: '5a642705c53137707c5b098caec4a67a111544f031380da5336c7a85935c4194',
+  },
+  {
+    // Return face. Live parser reads scorp-return-name, scorp-return-ein, scorp-return-ord 142000.00, and scorp-return-dep 18000.00.
+    id: SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
+    filename: 'form-1120s-2025.pdf',
+    sha256: '59fbd49915f2a5ea455e0a3b3bf284ba31ed422303a45e09ae36b72084b71be2',
+  },
+  {
+    // K-1. Live parser reads scorp-name, scorp-ord 100000.00, scorp-own-pct 100%, and scorp-dist 100000.00.
+    id: SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
+    filename: 'schedule-k1-1120s-2025.pdf',
+    sha256: 'b4ef854471dcdba0d2cab631b9f0f5ee80db6965d924735d0d79e4058b2c79b6',
+  },
+  {
+    // Live parser keeps this page as Form 1120 and reads c1120-name, c1120-ein, c1120-taxable 120000.00, and c1120-dep 15000.00.
+    id: SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+    filename: 'form-1120-2025.pdf',
+    sha256: 'e9999553c366ae583a0c239df80cdd1eb841e065fe3d214d7db460e48e8863aa',
+  },
 ] as const;
 
 export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS: readonly [
@@ -73,6 +115,12 @@ export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS: readonly [
   typeof SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
   typeof SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID,
   typeof SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
+  typeof SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
 ] = [
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
   SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
@@ -82,6 +130,12 @@ export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS: readonly [
   SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
   SYNTHETIC_PACK_SCHEDULE_E_2025_ATTACHMENT_ID,
   SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
 ];
 
 /**

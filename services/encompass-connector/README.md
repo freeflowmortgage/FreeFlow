@@ -13,10 +13,15 @@ into the separately deployed connector.
   `PrismaBindingStore` with forced RLS.
 - Non-production Bearer S2S stub. `NODE_ENV=production` refuses to boot it.
 - Explicit `synthetic-freeflow-dev` mode returns the deterministic in-memory
-  W-2 attachment `synthetic-income-document-1` and seven read-only morning-pack
+  W-2 attachment `synthetic-income-document-1` and thirteen read-only morning-pack
   fixture attachments, including two `synthetic-pack-w2-*` W-2s
-  (`synthetic-pack-w2-2021-nates` and `synthetic-pack-w2-2021-coborrower`)
-  and Schedule B interest `synthetic-pack-schedule-b-2025`.
+  (`synthetic-pack-w2-2021-nates` and `synthetic-pack-w2-2021-coborrower`),
+  Schedule B interest `synthetic-pack-schedule-b-2025`, Schedule C
+  `synthetic-pack-schedule-c-2025`, Schedule F `synthetic-pack-schedule-f-2025`,
+  Schedule D `synthetic-pack-schedule-d-2025`, Form 1120-S
+  `synthetic-pack-form-1120s-2025`, K-1 (1120-S)
+  `synthetic-pack-schedule-k1-1120s-2025`, and Form 1120
+  `synthetic-pack-form-1120-2025`. 1003 employment is not a morning-pack PDF.
   Fixture bytes are baked into the image and are not written back to disk.
 - Compiled Node runtime, UID 1001, read-only-root compatibility, and health.
 
