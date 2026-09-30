@@ -33,6 +33,42 @@ test('returns exact reviewed metadata requirements and projects supported non-W2
   assert.equal(projected.scheduleC?.[0].year, 2025);
 });
 
+test('skips return-only Form 1065 records and calculates from the reviewed K-1 record', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000106';
+  const returnEntityId = 'Form 1065:partnership-return-p0';
+  const k1EntityId = 'Form 1065:partnership-k1-p1';
+  const result = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [
+      {
+        entityId: returnEntityId,
+        form: 'Form 1065',
+        pageIndex: 0,
+        fields: [
+          { sourceFieldId: 'pt-return-name', value: 'Synthetic Partnership' },
+          { sourceFieldId: 'pt-return-ord', numericValue: 12000 },
+        ],
+      },
+      {
+        entityId: k1EntityId,
+        form: 'Form 1065',
+        pageIndex: 1,
+        fields: [
+          { sourceFieldId: 'pt-name', value: 'Synthetic Partnership' },
+          { sourceFieldId: 'pt-ord', numericValue: 96000 },
+          { sourceFieldId: 'pt-profit-pct', numericValue: 50 },
+          { sourceFieldId: 'pt-dist', numericValue: 60000 },
+        ],
+      },
+    ] },
+    metadataAssignments: [{ entityId: k1EntityId, taxYear: 2025, ownershipPercentage: 50 }],
+  }]);
+
+  assert.equal(result.form1065?.length, 1);
+  assert.equal(result.form1065?.[0].entityId, `${extractionId}:${k1EntityId}`);
+  assert.equal(result.form1065?.[0].k1OrdinaryIncome, 96000);
+});
+
 test('rejects unknown or malformed persisted calculation fields', () => {
   assert.throws(() => mergeAuthoritativeExtractionInputs([{
     extractionId: '00000000-0000-4000-8000-000000000101',

@@ -224,6 +224,7 @@ function projectPersistedInput(
       projectPaystub(extractionId, record, metadata, requirements, requireBorrower, roster, priorW2Wages, projected);
       continue;
     }
+    if (isReturnOnlyForm1065(record)) continue;
     const meta = metadata.get(record.entityId);
     const borrowerBlocked = requireBorrower && (!meta?.borrowerKey || !roster.has(meta.borrowerKey));
     let blocked = false;
@@ -289,6 +290,9 @@ function compact(value: Record<string, unknown>): Record<string, unknown> {
 }
 function hasAny(fields: ReadonlyMap<string, unknown>, ids: readonly string[]): boolean {
   return ids.some((id) => fields.has(id));
+}
+function isReturnOnlyForm1065(record: z.infer<typeof persistedFormRecord>): boolean {
+  return record.form === 'Form 1065' && record.fields.every((field) => field.sourceFieldId.startsWith('pt-return-'));
 }
 function requireParserField(target: ExtractionMetadataRequirement[], extractionId: string, record: z.infer<typeof persistedFormRecord>): void {
   target.push({ extractionId, entityId: record.entityId, field: 'requiredParserField', form: record.form });
