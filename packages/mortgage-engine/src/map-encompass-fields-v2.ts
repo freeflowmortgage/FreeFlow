@@ -19,6 +19,7 @@ export interface Form1084CalculationPayload {
   w2BaseMonthly?: number;
   /** Net rental income from Schedule E. */
   rentalMonthly?: number;
+  borrowerMonthlyIncome?: ReadonlyArray<{ ordinal: number; qualifyingMonthlyIncome: number }>;
   auditUrl: string;
 }
 
@@ -71,6 +72,9 @@ export function buildEncompassFieldUpdatePayload(
   push(ENCOMPASS_FIELD_MAP.FREEFLOW_FORM_1120_TOTAL, money(payload.form1120_MonthlyTotal));
   push(ENCOMPASS_FIELD_MAP.FREEFLOW_W2_BASE, money(payload.w2BaseMonthly));
   push(ENCOMPASS_FIELD_MAP.FREEFLOW_RENTAL_TOTAL, money(payload.rentalMonthly));
+  for (const borrower of payload.borrowerMonthlyIncome ?? []) {
+    if (borrower.ordinal >= 0 && borrower.ordinal < 4) push(`CX.FREEFLOW.BORROWER.${borrower.ordinal + 1}.INCOME`, money(borrower.qualifyingMonthlyIncome));
+  }
   push(ENCOMPASS_FIELD_MAP.FREEFLOW_SYNCED_TIMESTAMP, new Date().toISOString());
 
   return { loanId, customFields };

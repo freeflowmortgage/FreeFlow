@@ -12,14 +12,20 @@ export function createMetadataRequirementsHandler(dependencies = { withTenantTra
       const loanId = typeof req.query.loanId === 'string' && isUuid(req.query.loanId) ? req.query.loanId : null;
       const extractionId = typeof req.query.extractionId === 'string' && isUuid(req.query.extractionId) ? req.query.extractionId : null;
       if (!loanId || !extractionId) throw new ApiError(400, 'INVALID_IDENTIFIER', 'The requested identifier is invalid.');
-      const extraction = await dependencies.withTenantTransaction({ tenantId: context.tenantId, principalId: context.membershipId }, (transaction) => transaction.incomeExtraction.findFirst({
-        where: { id: extractionId, loanId, tenantId: context.tenantId },
-        select: { id: true, normalizedInput: true, canonicalHash: true, status: true, metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { metadataVersion: true, assignments: true, extractionHash: true } } },
-      }));
-      if (!extraction) throw new ApiError(404, 'EXTRACTION_NOT_FOUND', 'The requested extraction was not found for this loan.');
+      const loaded = await dependencies.withTenantTransaction({ tenantId: context.tenantId, principalId: context.membershipId }, async (transaction) => {
+        const extraction = await transaction.incomeExtraction.findFirst({
+          where: { id: extractionId, loanId, tenantId: context.tenantId },
+          select: { id: true, normalizedInput: true, canonicalHash: true, status: true, metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { metadataVersion: true, assignments: true, extractionHash: true } } },
+        });
+        if (!extraction) return null;
+        const roster = await transaction.loanBorrower.findMany({ where: { tenantId: context.tenantId, loanId }, orderBy: { ordinal: 'asc' }, select: { borrowerKey: true } });
+        return { extraction, roster };
+      });
+      if (!loaded) throw new ApiError(404, 'EXTRACTION_NOT_FOUND', 'The requested extraction was not found for this loan.');
+      const { extraction } = loaded;
       const review = extraction.metadataReviews[0] ?? null;
       let requirements: readonly unknown[] = [];
-      try { mergeAuthoritativeExtractionInputs([{ extractionId, normalizedInput: extraction.normalizedInput, metadataAssignments: review?.assignments as never }]); }
+      try { mergeAuthoritativeExtractionInputs([{ extractionId, normalizedInput: extraction.normalizedInput, metadataAssignments: review?.assignments as never }], { borrowerRoster: loaded.roster.map((borrower) => borrower.borrowerKey) }); }
       catch (error) { if (error instanceof ExtractionMetadataRequiredError) requirements = error.requirements.filter((item) => item.extractionId === extractionId); else throw error; }
       return res.status(200).json({ extractionId, status: extraction.status, review: review ? { metadataVersion: review.metadataVersion, assignments: review.assignments, current: review.extractionHash === extraction.canonicalHash } : null, requirements, requestId: context.requestId });
     } catch (error) { if (error instanceof ApiError) return sendApiError(res, context.requestId, error); throw error; }

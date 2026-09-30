@@ -2,7 +2,11 @@ import { browserEncompassHostBridge, type EncompassHostBridge } from './bridge';
 import { createDeterministicTestHost, type TestHostScenario } from './testHost';
 
 export type ConsoleRuntimeConfiguration = Readonly<{
-  testHost: Readonly<{ enabled: boolean; loanGuid: string | null }>;
+  testHost: Readonly<{
+    enabled: boolean;
+    loanGuid: string | null;
+    borrowers?: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[];
+  }>;
 }>;
 
 const SCENARIOS = new Set<TestHostScenario>(['normal', 'read-only', 'changed-loan', 'commit-failure']);

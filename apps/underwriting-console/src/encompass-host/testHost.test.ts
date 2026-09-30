@@ -4,7 +4,12 @@ import { EncompassHostError } from './bridge';
 import { createDeterministicTestHost } from './testHost';
 
 const GUID = '00000000-0000-4000-8000-00000000d001';
-const FIELDS = { 'CX.FREEFLOW.INCOME': '8000.00', 'CX.FREEFLOW.APPROVAL.ID': 'approval-1' };
+const FIELDS = {
+  'CX.FREEFLOW.INCOME': '8000.00',
+  'CX.FREEFLOW.BORROWER.1.INCOME': '5000.00',
+  'CX.FREEFLOW.BORROWER.2.INCOME': '3000.00',
+  'CX.FREEFLOW.APPROVAL.ID': 'approval-1',
+};
 
 test('deterministic host writes, calculates, commits, and reads back the approval marker', async () => {
   const host = createDeterministicTestHost(GUID);
@@ -12,6 +17,11 @@ test('deterministic host writes, calculates, commits, and reads back the approva
   await host.bridge.writeApprovedResult(GUID, FIELDS);
   assert.deepEqual(host.snapshot().calls, ['setFields', 'calculate', 'commit']);
   assert.equal(host.snapshot().fields['CX.FREEFLOW.APPROVAL.ID'], 'approval-1');
+  const readback = await host.bridge.activeLoan(['CX.FREEFLOW.APPROVAL.ID', 'CX.FREEFLOW.BORROWER.1.INCOME', 'CX.FREEFLOW.BORROWER.2.INCOME']);
+  assert.equal(readback.fields['CX.FREEFLOW.APPROVAL.ID'], 'approval-1');
+  assert.equal(readback.fields['CX.FREEFLOW.BORROWER.1.INCOME'], '5000.00');
+  assert.equal(readback.fields['CX.FREEFLOW.BORROWER.2.INCOME'], '3000.00');
+  assert.equal(host.snapshot().calls.filter((call) => call === 'commit').length, 1);
 });
 
 test('deterministic host preserves read-only, changed-loan, malformed-map, and commit failures', async () => {

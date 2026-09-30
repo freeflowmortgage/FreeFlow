@@ -35,6 +35,7 @@ test('cross-tenant or wrong-loan extraction ids are not disclosed', async () => 
   const handler = createIncomeCalculationHandler({
     withTenantTransaction: (async (_scope, operation) => operation({
       loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+      loanBorrower: { findMany: async () => [] },
       incomeExtraction: { findMany: async () => [] },
     } as never)) as never,
   });
@@ -51,6 +52,7 @@ test('calculation loads persisted extraction and writes cryptographic provenance
   const extraction = currentExtraction();
   const transaction = {
     loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+    loanBorrower: { findMany: async () => [] },
     incomeExtraction: { findMany: async () => [extraction] },
     $queryRaw: async () => {
       queryCount += 1;
@@ -98,6 +100,7 @@ test('superseded and source-version-stale extractions fail before calculation', 
     const handler = createIncomeCalculationHandler({
       withTenantTransaction: (async (_scope, operation) => operation({
         loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+        loanBorrower: { findMany: async () => [] },
         incomeExtraction: { findMany: async () => [record] },
       } as never)) as never,
     });

@@ -99,6 +99,12 @@ enum IncomeMetadataReviewSource {
   WORKFLOW_VERIFIED_METADATA
 }
 
+// Stable loan roster roles. Identity is the borrower key, never a name.
+enum LoanBorrowerRole {
+  PRIMARY
+  CO_BORROWER
+}
+
 enum MortgageLoanProgram {
   CONVENTIONAL
   FHA
@@ -135,6 +141,7 @@ model Tenant {
   incomeExtractions         IncomeExtraction[]
   calculationExtractions    IncomeCalculationExtraction[]
   incomeMetadataReviews     IncomeExtractionMetadataReview[]
+  loanBorrowers             LoanBorrower[]
   encompassConnectorBinding EncompassConnectorBinding?
 
   createdAt DateTime @default(now()) @db.Timestamptz
@@ -251,6 +258,7 @@ model LoanApplication {
   incomeExtractions         IncomeExtraction[]
   calculationExtractions    IncomeCalculationExtraction[]
   incomeMetadataReviews     IncomeExtractionMetadataReview[]
+  loanBorrowers             LoanBorrower[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -259,6 +267,25 @@ model LoanApplication {
   @@unique([tenantId, encompassGuid])
   @@index([tenantId])
   @@map("loan_applications")
+}
+
+// Ordered primary + co-borrower roster. Keys are stable (`borrower-1`), not names.
+// Rows are insert-only and tenant/loan scoped.
+model LoanBorrower {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String           @db.Uuid
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "loan_borrowers_tenant_fkey")
+  loanId          String           @db.Uuid
+  loanApplication LoanApplication  @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "loan_borrowers_loan_fkey")
+  borrowerKey     String           @db.VarChar(32)
+  ordinal         Int
+  role            LoanBorrowerRole
+  createdAt       DateTime         @default(now()) @db.Timestamptz
+
+  @@unique([tenantId, loanId, borrowerKey], map: "loan_borrowers_tenant_loan_key")
+  @@unique([tenantId, loanId, ordinal], map: "loan_borrowers_tenant_loan_ordinal")
+  @@index([tenantId, loanId, ordinal], map: "loan_borrowers_tenant_loan_ordinal_idx")
+  @@map("loan_borrowers")
 }
 
 // 5. LOAN DOCUMENTS (Tax Returns, W-2s, Paystubs in secure storage)
@@ -348,6 +375,9 @@ model Form1084Audit {
   rentalMonthly            Decimal? @db.Decimal(12, 2)
   rentalLiabilityMonthly   Decimal? @db.Decimal(12, 2)
   housingExpenseAdjustment Decimal? @db.Decimal(12, 2)
+
+  // Per-borrower qualifying income keyed by stable borrower id. No names.
+  borrowerIncome Json?
 
   // Liquidity and Risk Parameters (Schedule L check for Corporations)
   quickRatioComputed  Decimal? @db.Decimal(6, 2)

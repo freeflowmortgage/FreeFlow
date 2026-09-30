@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
+import { type PayFrequency, type PaystubBaseMethod, type UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
 
 const money = z.number().finite().min(-1_000_000_000).max(1_000_000_000);
 const year = z.number().int().min(1990).max(2100);
@@ -39,6 +39,15 @@ const form1120S = z.object({
   depreciation: money.optional(), depletion: money.optional(), amortization: money.optional(), mealsExclusion: money.optional(),
   k1Distributions: money.optional(), hasStableDistributions: z.boolean().optional(), scheduleL: scheduleL.optional(),
 }).strict();
+const form1120 = z.object({
+  entityId: entityId.optional(), businessName: text.optional(), ein: z.string().max(20).optional(), year,
+  monthsInBusiness: z.number().int().min(1).max(12).optional(), ownershipPercentage: money,
+  w2WagesFromCorporate: money.optional(), taxableIncome: money, totalTaxPaid: money.optional(),
+  depreciation: money.optional(), depletion: money.optional(), amortization: money.optional(),
+  mealsExclusion: money.optional(), nolAndSpecialDeductions: money.optional(),
+  cash: money.optional(), securities: money.optional(), accountsReceivable: money.optional(),
+  currentLiabilities: money.optional(), borrowerDividendsReceived: money.optional(),
+}).strict();
 const form1065 = z.object({
   entityId: entityId.optional(), businessName: text.optional(), ein: z.string().max(20).optional(), year,
   monthsInBusiness: z.number().int().min(1).max(12).optional(), ownershipPercentage: money,
@@ -54,12 +63,12 @@ const benefits = z.object({
   taxablePensionsAndAnnuities: money.optional(), isNonGovernmentPension: z.boolean().optional(), vaDisabilityMonthly: money.optional(),
 }).strict();
 const assets = z.object({
-  year, interestIncome: money.optional(), dividendIncome: money.optional(), capitalGainsNetLoss: money.optional(),
+  entityId: entityId.optional(), year, interestIncome: money.optional(), dividendIncome: money.optional(), capitalGainsNetLoss: money.optional(),
   includeInQualifyingIncome: z.boolean().optional(), hasThreeYearAssetSupport: z.boolean().optional(),
 }).strict();
 const trusts = z.object({ year, trustIncome: money.optional(), hasThreeYearTrustContinuance: z.boolean().optional() }).strict();
 const scheduleE = z.object({
-  year, propertyAddress: text, propertyType: z.enum(['RENTAL', 'ROYALTY']), rentsReceived: money.optional(),
+  entityId: entityId.optional(), year, propertyAddress: text, propertyType: z.enum(['RENTAL', 'ROYALTY']), rentsReceived: money.optional(),
   royaltiesReceived: money.optional(), insurance: money.optional(), mortgageInterest: money.optional(), taxes: money.optional(),
   depreciation: money.optional(), depletion: money.optional(), hoaDues: money.optional(), totalExpenses: money.optional(),
   netIncomeLoss: money.optional(), extraordinaryAddBack: money.optional(), hasThreeYearRoyaltyContinuance: z.boolean().optional(),
@@ -70,7 +79,7 @@ const scheduleE = z.object({
 const extractionInput = z.object({
   gseInvestor: z.enum(['FNMA', 'FREDDIE']).optional(),
   w2Employers: z.array(w2).max(100).optional(), scheduleC: z.array(scheduleC).max(100).optional(),
-  scheduleF: z.array(scheduleF).max(100).optional(), form1120S: z.array(form1120S).max(100).optional(),
+  scheduleF: z.array(scheduleF).max(100).optional(),   form1120S: z.array(form1120S).max(100).optional(), form1120: z.array(form1120).max(100).optional(),
   form1065: z.array(form1065).max(100).optional(), benefits: z.array(benefits).max(100).optional(),
   assets: z.array(assets).max(100).optional(), trusts: z.array(trusts).max(100).optional(),
   scheduleEProperties: z.array(scheduleE).max(300).optional(),
@@ -96,11 +105,20 @@ export type ExtractionMetadataAssignment = Readonly<{
   taxYear?: number;
   employmentRole?: z.infer<typeof employmentRole>;
   ownershipPercentage?: number;
+  borrowerKey?: string;
+  elapsedMonths?: number;
+  payFrequency?: PayFrequency;
+  baseIncomeMethod?: PaystubBaseMethod;
+  includeInQualifyingIncome?: boolean;
+  hasThreeYearAssetSupport?: boolean;
+  hasStableDistributions?: boolean;
+  cash?: number;
+  currentLiabilities?: number;
 }>;
 export type ExtractionMetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection';
   form: string;
 }>;
 
@@ -112,12 +130,15 @@ export class ExtractionMetadataRequiredError extends Error {
 
 type ExtractionInput = z.infer<typeof extractionInput>;
 
+const BORROWER_KEY = /^borrower-[1-9][0-9]{0,2}$/;
+
 export function mergeAuthoritativeExtractionInputs(
   records: ReadonlyArray<Readonly<{
     extractionId: string;
     normalizedInput: unknown;
     metadataAssignments?: readonly ExtractionMetadataAssignment[];
   }>>,
+  options: Readonly<{ borrowerRoster?: readonly string[] }> = {},
 ): Omit<UnifiedIncomeCalculationPayload, 'loanProgram'> {
   const merged: Record<string, unknown[]> = {};
   const requirements: ExtractionMetadataRequirement[] = [];
@@ -125,7 +146,7 @@ export function mergeAuthoritativeExtractionInputs(
   for (const record of records) {
     const persisted = persistedExtractionInput.safeParse(record.normalizedInput);
     const input = persisted.success
-      ? projectPersistedInput(record.extractionId, persisted.data, record.metadataAssignments ?? [], requirements)
+      ? projectPersistedInput(record.extractionId, persisted.data, record.metadataAssignments ?? [], requirements, options.borrowerRoster ?? [])
       : extractionInput.parse(record.normalizedInput) as ExtractionInput;
     if (input.gseInvestor) {
       if (gseInvestor && gseInvestor !== input.gseInvestor) throw new Error('Conflicting persisted GSE investor values.');
@@ -147,38 +168,76 @@ export function mergeAuthoritativeExtractionInputs(
   } as Omit<UnifiedIncomeCalculationPayload, 'loanProgram'>;
 }
 
+export function namespacedBorrowerKeys(
+  records: ReadonlyArray<Readonly<{
+    extractionId: string;
+    metadataAssignments?: readonly ExtractionMetadataAssignment[];
+  }>>,
+): Map<string, string> {
+  const keys = new Map<string, string>();
+  for (const record of records) {
+    for (const assignment of record.metadataAssignments ?? []) {
+      if (assignment.borrowerKey && BORROWER_KEY.test(assignment.borrowerKey)) {
+        keys.set(`${record.extractionId}:${assignment.entityId}`, assignment.borrowerKey);
+      }
+    }
+  }
+  return keys;
+}
+
 function projectPersistedInput(
   extractionId: string,
   persisted: z.infer<typeof persistedExtractionInput>,
   assignments: readonly ExtractionMetadataAssignment[],
   requirements: ExtractionMetadataRequirement[],
+  borrowerRoster: readonly string[],
 ): ExtractionInput {
   const metadata = new Map(assignments.map((item) => [item.entityId, item]));
   const projected: Record<string, unknown> = {};
   if (persisted.gseInvestor) projected.gseInvestor = persisted.gseInvestor;
-  if (persisted.scheduleEProperties?.length) projected.scheduleEProperties = persisted.scheduleEProperties;
+  const requireBorrower = borrowerRoster.length >= 2;
+  const roster = new Set(borrowerRoster);
+  if (persisted.scheduleEProperties?.length) {
+    projected.scheduleEProperties = persisted.scheduleEProperties.map((property, index) => {
+      const propertyEntityId = `schedule-e-${index}`;
+      if (requireBorrower && !roster.has(metadata.get(propertyEntityId)?.borrowerKey ?? '')) {
+        requirements.push({ extractionId, entityId: propertyEntityId, field: 'borrowerAssignment', form: 'Schedule E' });
+      }
+      return { ...property, entityId: propertyEntityId };
+    });
+  }
   for (const row of persisted.w2Records ?? []) {
-    const role = metadata.get(row.entityId)?.employmentRole;
-    if (!role) {
-      requirements.push({ extractionId, entityId: row.entityId, field: 'employmentRole', form: 'W-2' });
-      continue;
+    const assignment = metadata.get(row.entityId);
+    const role = assignment?.employmentRole;
+    if (!role) requirements.push({ extractionId, entityId: row.entityId, field: 'employmentRole', form: 'W-2' });
+    if (requireBorrower && (!assignment?.borrowerKey || !roster.has(assignment.borrowerKey))) {
+      requirements.push({ extractionId, entityId: row.entityId, field: 'borrowerAssignment', form: 'W-2' });
     }
+    if (!role || (requireBorrower && (!assignment?.borrowerKey || !roster.has(assignment.borrowerKey)))) continue;
     push(projected, 'w2Employers', { ...row, role });
   }
   for (const record of persisted.formRecords ?? []) {
-    // Paystub evidence is safe to persist and review, but the authoritative
-    // calculator does not yet have a defensible annualization contract for it.
-    // Keep calculation fail-closed instead of treating YTD or period pay as
-    // annual income.
+    // Paystub evidence is safe to persist and review. Ben's 10 paystub rules
+    // are not in this repository, so the protected calculator does not call
+    // annualizePaystub. A READY annualization result must not authorize
+    // calculation or approval. Every Paystub stays unsupportedCalculation,
+    // including a stub that has employer, YTD, elapsed months, and a base method.
     if (record.form === 'Paystub') {
       requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
       continue;
     }
     const meta = metadata.get(record.entityId);
+    const borrowerBlocked = requireBorrower && (!meta?.borrowerKey || !roster.has(meta.borrowerKey));
+    let blocked = false;
+    if (borrowerBlocked) {
+      requirements.push({ extractionId, entityId: record.entityId, field: 'borrowerAssignment', form: record.form });
+      blocked = true;
+    }
     if (!meta?.taxYear) {
       requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
-      continue;
+      blocked = true;
     }
+    if (blocked || !meta?.taxYear) continue;
     const fields = new Map(record.fields.map((field) => [field.sourceFieldId, field]));
     const n = (id: string) => fields.get(id)?.numericValue;
     const t = (id: string) => fields.get(id)?.value;
@@ -193,23 +252,31 @@ function projectPersistedInput(
       if (!hasAny(fields, ['scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist'])) { requireParserField(requirements, extractionId, record); continue; }
       const ownership = n('scorp-own-pct') ?? meta.ownershipPercentage;
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
-      push(projected, 'form1120S', compact({ ...base, businessName: t('scorp-name'), ein: t('scorp-ein'), ownershipPercentage: ownership, k1OrdinaryIncome: n('scorp-ord'), k1NetRentalRealEstate: n('scorp-rre'), k1OtherNetRentalIncome: n('scorp-onr'), k1Distributions: n('scorp-dist'), depletion: n('scorp-depletion'), mealsExclusion: n('scorp-meals') }));
+      push(projected, 'form1120S', compact({ ...base, businessName: t('scorp-name'), ein: t('scorp-ein'), ownershipPercentage: ownership, k1OrdinaryIncome: n('scorp-ord'), k1NetRentalRealEstate: n('scorp-rre'), k1OtherNetRentalIncome: n('scorp-onr'), k1Distributions: n('scorp-dist'), depletion: n('scorp-depletion'), mealsExclusion: n('scorp-meals'), hasStableDistributions: meta.hasStableDistributions }));
     } else if (record.form === 'Form 1065') {
       if (!hasAny(fields, ['pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist'])) { requireParserField(requirements, extractionId, record); continue; }
       const profit = n('pt-profit-pct'); const capital = n('pt-capital-pct');
       const ownership = meta.ownershipPercentage ?? profit ?? capital;
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
-      push(projected, 'form1065', compact({ ...base, businessName: t('pt-name'), ein: t('pt-ein'), ownershipPercentage: ownership, profitPercentageEnd: profit, capitalPercentageEnd: capital, k1OrdinaryIncome: n('pt-ord'), k1NetRentalRealEstate: n('pt-rre'), k1OtherNetRentalIncome: n('pt-onr'), k1GuaranteedPayments: n('pt-gp'), k1Distributions: n('pt-dist'), depletion: n('pt-depletion'), mealsExclusion: n('pt-meals') }));
+      push(projected, 'form1065', compact({ ...base, businessName: t('pt-name'), ein: t('pt-ein'), ownershipPercentage: ownership, profitPercentageEnd: profit, capitalPercentageEnd: capital, k1OrdinaryIncome: n('pt-ord'), k1NetRentalRealEstate: n('pt-rre'), k1OtherNetRentalIncome: n('pt-onr'), k1GuaranteedPayments: n('pt-gp'), k1Distributions: n('pt-dist'), depletion: n('pt-depletion'), mealsExclusion: n('pt-meals'), hasStableDistributions: meta.hasStableDistributions }));
     } else if (record.form === 'Form 1120') {
       if (n('c1120-taxable') === undefined) { requireParserField(requirements, extractionId, record); continue; }
       if (meta.ownershipPercentage === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
-      push(projected, 'form1120', compact({ ...base, businessName: t('c1120-name'), ein: t('c1120-ein'), ownershipPercentage: meta.ownershipPercentage, taxableIncome: n('c1120-taxable'), totalTaxPaid: n('c1120-tax'), depreciation: n('c1120-dep'), depletion: n('c1120-depletion'), amortization: n('c1120-amort'), mealsExclusion: n('c1120-meals'), nolAndSpecialDeductions: n('c1120-nol') }));
+      push(projected, 'form1120', compact({ ...base, businessName: t('c1120-name'), ein: t('c1120-ein'), ownershipPercentage: meta.ownershipPercentage, taxableIncome: n('c1120-taxable'), totalTaxPaid: n('c1120-tax'), depreciation: n('c1120-dep'), depletion: n('c1120-depletion'), amortization: n('c1120-amort'), mealsExclusion: n('c1120-meals'), nolAndSpecialDeductions: n('c1120-nol'), cash: meta.cash, currentLiabilities: meta.currentLiabilities }));
     } else if (record.form === 'Form 1040') {
       if (!hasAny(fields, ['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable'])) { requireParserField(requirements, extractionId, record); continue; }
       push(projected, 'benefits', compact({ year: meta.taxYear, totalSocialSecurity: n('f1040-ss-total'), taxableSocialSecurity: n('f1040-ss-taxable'), totalPensionsAndAnnuities: n('f1040-pensions-total'), taxablePensionsAndAnnuities: n('f1040-pensions-taxable') }));
     } else {
       if (!hasAny(fields, ['schedule-b-interest', 'schedule-b-dividends', 'schedule-d-capital-gain-loss'])) { requireParserField(requirements, extractionId, record); continue; }
-      push(projected, 'assets', compact({ year: meta.taxYear, interestIncome: n('schedule-b-interest'), dividendIncome: n('schedule-b-dividends'), capitalGainsNetLoss: n('schedule-d-capital-gain-loss') }));
+      if (meta.includeInQualifyingIncome === undefined) {
+        requirements.push({ extractionId, entityId: record.entityId, field: 'assetElection', form: record.form });
+        continue;
+      }
+      push(projected, 'assets', compact({
+        entityId: record.entityId, year: meta.taxYear, interestIncome: n('schedule-b-interest'), dividendIncome: n('schedule-b-dividends'),
+        capitalGainsNetLoss: n('schedule-d-capital-gain-loss'), includeInQualifyingIncome: meta.includeInQualifyingIncome,
+        hasThreeYearAssetSupport: meta.hasThreeYearAssetSupport,
+      }));
     }
   }
   return extractionInput.parse(projected) as ExtractionInput;
@@ -240,6 +307,44 @@ function sortEntries(values: unknown[]): unknown[] {
     const b = isRecord(right) ? `${right.year ?? ''}:${right.entityId ?? ''}:${right.propertyAddress ?? ''}` : '';
     return a.localeCompare(b);
   });
+}
+
+export function employerIdentityKey(value: string | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+export function reconcileDuplicateWages(
+  records: ReadonlyArray<Readonly<{
+    extractionId: string;
+    normalizedInput: unknown;
+    metadataAssignments?: readonly ExtractionMetadataAssignment[];
+  }>>,
+): Readonly<{ dropEntityIds: ReadonlySet<string>; gaps: readonly string[] }> {
+  type Wage = { id: string; borrowerKey?: string; employer: string; kind: 'w2' | 'paystub' };
+  const wages: Wage[] = [];
+  for (const record of records) {
+    const assignments = new Map((record.metadataAssignments ?? []).map((item) => [item.entityId, item.borrowerKey]));
+    const input = isRecord(record.normalizedInput) ? record.normalizedInput : {};
+    for (const row of Array.isArray(input.w2Records) ? input.w2Records : []) {
+      if (!isRecord(row) || typeof row.entityId !== 'string') continue;
+      wages.push({ id: `${record.extractionId}:${row.entityId}`, borrowerKey: assignments.get(row.entityId), employer: employerIdentityKey(typeof row.employerName === 'string' ? row.employerName : ''), kind: 'w2' });
+    }
+    for (const row of Array.isArray(input.formRecords) ? input.formRecords : []) {
+      if (!isRecord(row) || row.form !== 'Paystub' || typeof row.entityId !== 'string' || !Array.isArray(row.fields)) continue;
+      const employer = row.fields.find((field) => isRecord(field) && field.sourceFieldId === 'ps-employer-name' && typeof field.value === 'string') as { value?: string } | undefined;
+      wages.push({ id: `${record.extractionId}:${row.entityId}`, borrowerKey: assignments.get(row.entityId), employer: employerIdentityKey(employer?.value), kind: 'paystub' });
+    }
+  }
+  const drop = new Set<string>();
+  const gaps = new Set<string>();
+  for (const stub of wages.filter((item) => item.kind === 'paystub' && item.borrowerKey)) {
+    const sameBorrower = wages.filter((item) => item.kind === 'w2' && item.borrowerKey === stub.borrowerKey);
+    const matched = sameBorrower.filter((item) => item.employer && item.employer === stub.employer);
+    for (const item of matched) drop.add(item.id);
+    if (sameBorrower.length && matched.length === 0) gaps.add('PAYSTUB_EMPLOYER_UNMATCHED');
+    if (matched.length) gaps.add('PAYSTUB_W2_RECONCILED');
+  }
+  return { dropEntityIds: drop, gaps: [...gaps].sort() };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

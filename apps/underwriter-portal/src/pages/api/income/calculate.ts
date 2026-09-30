@@ -6,7 +6,8 @@ import { withTenantTransaction } from '../../../server/database/client';
 import { appendAuditEvent, hashAuditResult } from '../../../server/audit/appendEvent';
 import { hashCanonical } from '../../../server/http/canonical';
 import { isUuid } from '../../../server/http/identifiers';
-import { ExtractionMetadataRequiredError, mergeAuthoritativeExtractionInputs } from '../../../server/income/authoritativeExtractionInput';
+import { ExtractionMetadataRequiredError, mergeAuthoritativeExtractionInputs, namespacedBorrowerKeys, reconcileDuplicateWages } from '../../../server/income/authoritativeExtractionInput';
+import { calculateProtectedBorrowerIncome } from '../../../server/income/borrowerIncomeCalculation';
 import { INCOME_EXTRACTION_SCHEMA_VERSION } from '../../../server/integrations/encompass/persistedParserExtraction';
 
 const MAX_EXTRACTIONS = 20;
@@ -50,6 +51,11 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
           select: { id: true, version: true, loanProgram: true },
         });
         if (!loan) return null;
+        const roster = await transaction.loanBorrower.findMany({
+          where: { tenantId: context.tenantId, loanId },
+          orderBy: { ordinal: 'asc' },
+          select: { borrowerKey: true, ordinal: true, role: true },
+        });
         const extractions = await transaction.incomeExtraction.findMany({
           where: { id: { in: extractionIds }, tenantId: context.tenantId, loanId },
           select: {
@@ -61,7 +67,7 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
           },
           orderBy: { id: 'asc' },
         });
-        return { loan, extractions };
+        return { loan, extractions, roster };
       },
     );
     if (!authority) {
@@ -96,13 +102,25 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
       });
     }
 
+    const projectionRecords = authority.extractions.map((item) => ({
+      extractionId: item.id,
+      normalizedInput: item.normalizedInput,
+      metadataAssignments: item.metadataReviews[0]?.assignments as never,
+    }));
     let calculationInput;
+    let wageGaps: string[] = [];
     try {
-      calculationInput = mergeAuthoritativeExtractionInputs(authority.extractions.map((item) => ({
-        extractionId: item.id,
-        normalizedInput: item.normalizedInput,
-        metadataAssignments: item.metadataReviews[0]?.assignments as never,
-      })));
+      calculationInput = mergeAuthoritativeExtractionInputs(projectionRecords, {
+        borrowerRoster: authority.roster.map((borrower) => borrower.borrowerKey),
+      });
+      const reconciliation = reconcileDuplicateWages(projectionRecords);
+      wageGaps = [...reconciliation.gaps];
+      if (reconciliation.dropEntityIds.size && calculationInput.w2Employers) {
+        calculationInput = {
+          ...calculationInput,
+          w2Employers: calculationInput.w2Employers.filter((row) => !reconciliation.dropEntityIds.has(row.entityId)),
+        };
+      }
     } catch (error) {
       if (error instanceof ExtractionMetadataRequiredError) {
         return res.status(422).json({
@@ -130,14 +148,35 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
       loanId: authority.loan.id,
       loanVersion: authority.loan.version,
       loanProgram,
+      borrowerRoster: authority.roster.map((borrower) => ({ borrowerKey: borrower.borrowerKey, ordinal: borrower.ordinal, role: borrower.role })),
       extractionProvenance,
       calculationInput,
     });
     const mortgageRuleVersion = 'form-1084-v9';
-    const dispatched = dispatchIncomeCalculation({ loanProgram, form1084Input: calculationInput });
-    const result = dispatched.result;
-    const qualifyingMonthlyIncome = result.summary.qualifyingMonthlyIncome;
-    const mapperOutputs = deriveMapperOutputs(result);
+    let borrowerSplit = null;
+    try {
+      borrowerSplit = authority.roster.length >= 2
+        ? calculateProtectedBorrowerIncome(loanProgram, authority.roster, calculationInput, namespacedBorrowerKeys(projectionRecords))
+        : null;
+    } catch (error) {
+      if (error instanceof Error && (error.message === 'UNASSIGNED_INCOME_ENTITY' || error.message === 'BORROWER_INCOME_SUM_MISMATCH')) {
+        return res.status(422).json({
+          error: safeError(error.message, 'Borrower-scoped income could not be authorized.', context),
+        });
+      }
+      throw error;
+    }
+    const dispatched = borrowerSplit
+      ? { engine: 'FORM_1084' as const, result: borrowerSplit.slices[0] ?? dispatchIncomeCalculation({ loanProgram, form1084Input: calculationInput }).result }
+      : dispatchIncomeCalculation({ loanProgram, form1084Input: calculationInput });
+    const result = borrowerSplit?.slices[0] ?? dispatched.result;
+    const qualifyingMonthlyIncome = borrowerSplit?.qualifyingMonthlyIncome ?? result.summary.qualifyingMonthlyIncome;
+    const trendingResult = borrowerSplit?.trendingResult ?? result.summary.trendingResult;
+    const yearsAnalyzed = borrowerSplit?.yearsAnalyzed ?? result.summary.yearsAnalyzed;
+    const mapperOutputs = borrowerSplit
+      ? sumMapperOutputs(borrowerSplit.slices.map((slice) => deriveMapperOutputs(slice)))
+      : deriveMapperOutputs(result);
+    const borrowerIncome = borrowerSplit?.borrowerIncome;
 
     const persisted = await dependencies.withTenantTransaction(
       { tenantId: context.tenantId, principalId: context.membershipId },
@@ -199,8 +238,9 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
             canonicalInputHash,
             sourceDocumentHashes: extractionProvenance.map((item) => item.sourceContentHash),
             mortgageRuleVersion,
-            trendingResult: normalizeTrendingResult(result.summary.trendingResult),
-            yearsAnalyzed: result.summary.yearsAnalyzed,
+            trendingResult: normalizeTrendingResult(trendingResult),
+            yearsAnalyzed: [...yearsAnalyzed],
+            ...(borrowerIncome?.length ? { borrowerIncome } : {}),
             ...mapperOutputs,
           },
           select: { id: true },
@@ -233,8 +273,9 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
             calculationEngine: dispatched.engine,
             loanProgram,
             qualifyingMonthlyIncome,
-            trendingResult: result.summary.trendingResult,
-            yearsAnalyzed: result.summary.yearsAnalyzed,
+            trendingResult,
+            yearsAnalyzed,
+            borrowers: borrowerIncome ?? [],
             canonicalInputHash,
             extractions: extractionProvenance.map(({ extractionId, extractionHash }) => ({ extractionId, extractionHash })),
           }),
@@ -248,10 +289,11 @@ export function createIncomeCalculationHandler(dependencies: Dependencies = { wi
       loanId,
       calculationId: persisted.calculationId,
       calculatedMonthlyIncome: qualifyingMonthlyIncome,
-      trendingResult: result.summary.trendingResult,
+      trendingResult,
+      borrowers: borrowerIncome ?? [],
       calculationEngine: dispatched.engine,
       calculationDetails: result,
-      extractionWarnings: Array.from(new Set(authority.extractions.flatMap((item) => item.warnings)
+      extractionWarnings: Array.from(new Set([...authority.extractions.flatMap((item) => item.warnings), ...wageGaps]
         .filter((warning) => warning !== 'AUTHORITATIVE_TAX_YEAR_REQUIRED' && warning !== 'W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED'))).sort(),
       auditEventId: persisted.auditEventId,
       timestamp: new Date().toISOString(),
@@ -277,6 +319,11 @@ function readExtractionIds(value: unknown): string[] | null {
     || value.some((id) => typeof id !== 'string' || !isUuid(id))
     || new Set(value).size !== value.length) return null;
   return [...value].sort() as string[];
+}
+
+function sumMapperOutputs(rows: Array<ReturnType<typeof deriveMapperOutputs>>) {
+  const keys = ['w2BaseMonthly', 'w2VariableMonthly', 'scheduleCMonthlyTotal', 'scheduleFMonthlyTotal', 'form1120SMonthlyTotal', 'form1065MonthlyTotal', 'form1120MonthlyTotal', 'assetIncomeMonthly', 'rentalMonthly', 'rentalLiabilityMonthly', 'housingExpenseAdjustment'] as const;
+  return Object.fromEntries(keys.map((key) => [key, rows.reduce((total, row) => total + (row[key] ?? 0), 0)]));
 }
 
 function deriveMapperOutputs(result: ReturnType<typeof dispatchNonUsda>) {

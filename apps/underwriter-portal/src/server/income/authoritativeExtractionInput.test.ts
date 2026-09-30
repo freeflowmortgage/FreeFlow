@@ -39,9 +39,9 @@ test('rejects unknown or malformed persisted calculation fields', () => {
   }]));
 });
 
-test('keeps persisted paystub evidence fail-closed until authoritative annualization exists', () => {
+test('keeps persisted paystub evidence fail-closed until Ben paystub rules exist', () => {
   const extractionId = '00000000-0000-4000-8000-000000000101';
-  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+  const incomplete = {
     extractionId,
     normalizedInput: { formRecords: [{
       entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
@@ -50,13 +50,21 @@ test('keeps persisted paystub evidence fail-closed until authoritative annualiza
         { sourceFieldId: 'ps-base-ytd', numericValue: 54000 },
       ],
     }] },
-  }]), (error) => {
-    assert.ok(error instanceof ExtractionMetadataRequiredError);
-    assert.deepEqual(error.requirements, [{
-      extractionId, entityId: 'Paystub:paystub-p0', field: 'unsupportedCalculation', form: 'Paystub',
-    }]);
-    return true;
-  });
+  };
+  const reviewed = {
+    extractionId,
+    normalizedInput: incomplete.normalizedInput,
+    metadataAssignments: [{ entityId: 'Paystub:paystub-p0', employmentRole: 'CURRENT' as const, taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const }],
+  };
+  for (const record of [incomplete, reviewed]) {
+    assert.throws(() => mergeAuthoritativeExtractionInputs([record], { borrowerRoster: ['borrower-1', 'borrower-2'] }), (error) => {
+      assert.ok(error instanceof ExtractionMetadataRequiredError);
+      assert.deepEqual(error.requirements, [{
+        extractionId, entityId: 'Paystub:paystub-p0', field: 'unsupportedCalculation', form: 'Paystub',
+      }]);
+      return true;
+    });
+  }
 });
 
 test('calculation extraction freshness binds active hash and source document version', () => {
