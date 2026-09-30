@@ -9,6 +9,8 @@ import {
   SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
   SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
+  SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
   SyntheticFreeflowDevConnector,
 } from '../src/connector/syntheticFreeflowDevConnector';
 
@@ -25,11 +27,19 @@ test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pac
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id })),
   );
   assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS[0], SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID);
-  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 6);
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 7);
   assert.deepEqual(
     SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => attachment.id),
     SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.slice(1),
   );
+  const listedIds = (await connector.listActiveAttachments(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID))
+    .map((attachment) => attachment.id);
+  const packW2Ids = listedIds.filter((id) => id.startsWith('synthetic-pack-w2-'));
+  assert.ok(packW2Ids.length >= 2);
+  assert.deepEqual(packW2Ids, [
+    SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
+    SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
+  ]);
 
   const first = await connector.downloadOriginalAttachment(
     CONTEXT,

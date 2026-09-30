@@ -13,9 +13,10 @@ into the separately deployed connector.
   `PrismaBindingStore` with forced RLS.
 - Non-production Bearer S2S stub. `NODE_ENV=production` refuses to boot it.
 - Explicit `synthetic-freeflow-dev` mode returns the deterministic in-memory
-  W-2 attachment `synthetic-income-document-1` and five read-only morning-pack
-  fixture attachments. Fixture bytes are baked into the image and are not
-  written back to disk.
+  W-2 attachment `synthetic-income-document-1` and six read-only morning-pack
+  fixture attachments, including two `synthetic-pack-w2-*` W-2s
+  (`synthetic-pack-w2-2021-nates` and `synthetic-pack-w2-2021-coborrower`).
+  Fixture bytes are baked into the image and are not written back to disk.
 - Compiled Node runtime, UID 1001, read-only-root compatibility, and health.
 
 The synthetic implementation is selected only when `NODE_ENV`,
