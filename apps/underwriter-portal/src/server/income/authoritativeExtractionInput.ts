@@ -300,7 +300,7 @@ function hasAny(fields: ReadonlyMap<string, unknown>, ids: readonly string[]): b
 }
 
 /** True when every captured field is a partnership return id (pt-return-*) and none are K-1 income boxes. */
-function isPartnershipReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId: string }>): boolean {
+function isPartnershipReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?: string }>): boolean {
   if (fields.length === 0) return false;
   const k1Income = new Set<string>(PARTNERSHIP_K1_INCOME_FIELD_IDS);
   let returnField = false;
