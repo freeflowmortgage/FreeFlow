@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { type PayFrequency, type PaystubBaseMethod, type UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
+import { annualizePaystub, parsePayFrequency, type PayFrequency, type PaystubBaseMethod, type UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
 
 const money = z.number().finite().min(-1_000_000_000).max(1_000_000_000);
 const year = z.number().int().min(1990).max(2100);
@@ -12,6 +12,8 @@ const w2 = z.object({
   role: employmentRole, year,
   monthsWorked: z.number().int().min(1).max(12).optional(), annualIncome: money.optional(),
   annualWages: money.optional(), annualBaseIncome: money.optional(), annualVariableIncome: money.optional(),
+  annualOvertimeIncome: money.optional(), annualBonusIncome: money.optional(), annualCommissionIncome: money.optional(),
+  annualTipsIncome: money.optional(), annualRsuIncome: money.optional(), annualOtherIncome: money.optional(),
   baseIncome: money.optional(), variableIncome: money.optional(),
 }).strict();
 const scheduleC = z.object({
@@ -118,7 +120,7 @@ export type ExtractionMetadataAssignment = Readonly<{
 export type ExtractionMetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod';
   form: string;
 }>;
 
@@ -146,7 +148,7 @@ export function mergeAuthoritativeExtractionInputs(
   for (const record of records) {
     const persisted = persistedExtractionInput.safeParse(record.normalizedInput);
     const input = persisted.success
-      ? projectPersistedInput(record.extractionId, persisted.data, record.metadataAssignments ?? [], requirements, options.borrowerRoster ?? [])
+      ? projectPersistedInput(record.extractionId, persisted.data, record.metadataAssignments ?? [], requirements, options.borrowerRoster ?? [], priorW2WageLookup(records))
       : extractionInput.parse(record.normalizedInput) as ExtractionInput;
     if (input.gseInvestor) {
       if (gseInvestor && gseInvestor !== input.gseInvestor) throw new Error('Conflicting persisted GSE investor values.');
@@ -191,6 +193,7 @@ function projectPersistedInput(
   assignments: readonly ExtractionMetadataAssignment[],
   requirements: ExtractionMetadataRequirement[],
   borrowerRoster: readonly string[],
+  priorW2Wages: (borrowerKey: string | undefined, employerKey: string) => number | undefined,
 ): ExtractionInput {
   const metadata = new Map(assignments.map((item) => [item.entityId, item]));
   const projected: Record<string, unknown> = {};
@@ -217,13 +220,8 @@ function projectPersistedInput(
     push(projected, 'w2Employers', { ...row, role });
   }
   for (const record of persisted.formRecords ?? []) {
-    // Paystub evidence is safe to persist and review. Ben's 10 paystub rules
-    // are not in this repository, so the protected calculator does not call
-    // annualizePaystub. A READY annualization result must not authorize
-    // calculation or approval. Every Paystub stays unsupportedCalculation,
-    // including a stub that has employer, YTD, elapsed months, and a base method.
     if (record.form === 'Paystub') {
-      requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
+      projectPaystub(extractionId, record, metadata, requirements, requireBorrower, roster, priorW2Wages, projected);
       continue;
     }
     const meta = metadata.get(record.entityId);
@@ -309,6 +307,111 @@ function sortEntries(values: unknown[]): unknown[] {
   });
 }
 
+function projectPaystub(
+  extractionId: string,
+  record: z.infer<typeof persistedFormRecord>,
+  metadata: ReadonlyMap<string, ExtractionMetadataAssignment>,
+  requirements: ExtractionMetadataRequirement[],
+  requireBorrower: boolean,
+  roster: ReadonlySet<string>,
+  priorW2Wages: (borrowerKey: string | undefined, employerKey: string) => number | undefined,
+  projected: Record<string, unknown>,
+): void {
+  const meta = metadata.get(record.entityId);
+  const fields = new Map(record.fields.map((field) => [field.sourceFieldId, field]));
+  const n = (id: string) => fields.get(id)?.numericValue;
+  const t = (id: string) => {
+    const value = fields.get(id)?.value;
+    return typeof value === 'string' ? value.trim() : undefined;
+  };
+  const employerName = t('ps-employer-name');
+  const employerKey = employerIdentityKey(employerName);
+  const role = meta?.employmentRole;
+  const year = meta?.taxYear;
+  const borrowerKey = meta?.borrowerKey;
+  const borrowerBlocked = requireBorrower && (!borrowerKey || !roster.has(borrowerKey));
+  if (!employerName || !employerKey) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'requiredParserField', form: record.form });
+  }
+  if (borrowerBlocked) requirements.push({ extractionId, entityId: record.entityId, field: 'borrowerAssignment', form: record.form });
+  if (!role) requirements.push({ extractionId, entityId: record.entityId, field: 'employmentRole', form: record.form });
+  if (typeof year !== 'number' || !Number.isInteger(year)) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
+  }
+  const payFrequency = meta?.payFrequency ?? parsePayFrequency(t('ps-pay-frequency'));
+  const elapsedMonths = meta?.elapsedMonths;
+  const baseYtd = n('ps-base-ytd');
+  const method = meta?.baseIncomeMethod;
+  const annualized = annualizePaystub({
+    hourlyRate: n('ps-hourly-rate'),
+    weeklyHours: n('ps-hours-week'),
+    currentPeriodBasePay: n('ps-current-base'),
+    payFrequency,
+    baseYtd,
+    overtimeYtd: n('ps-ot-ytd'),
+    bonusYtd: n('ps-bonus-ytd'),
+    commissionYtd: n('ps-commission-ytd'),
+    tipsYtd: n('ps-tips-ytd'),
+    rsuYtd: n('ps-rsu-ytd'),
+    otherYtd: n('ps-other-ytd'),
+    elapsedMonths,
+    priorYearW2Wages: method === 'prior' ? priorW2Wages(borrowerKey, employerKey) : undefined,
+    baseMethod: method,
+  });
+  const gaps = new Set(annualized.gaps);
+  if (gaps.has('ELAPSED_MONTHS_REQUIRED')) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'elapsedMonths', form: record.form });
+    gaps.delete('ELAPSED_MONTHS_REQUIRED');
+    if (gaps.has('NO_BASE_METHOD') && typeof baseYtd === 'number') gaps.delete('NO_BASE_METHOD');
+  }
+  if (gaps.has('BASE_METHOD_UNAVAILABLE') && method === 'period' && !payFrequency) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'payFrequency', form: record.form });
+    gaps.delete('BASE_METHOD_UNAVAILABLE');
+  }
+  if (gaps.size) requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
+  if (!employerName || !employerKey || borrowerBlocked || !role || typeof year !== 'number' || !Number.isInteger(year) || annualized.status !== 'READY') return;
+  const parts = annualized.annualComponents;
+  push(projected, 'w2Employers', {
+    entityId: record.entityId,
+    employerName,
+    role,
+    year,
+    annualBaseIncome: annualized.annualBase,
+    annualVariableIncome: annualized.annualVariable,
+    annualOvertimeIncome: parts.overtime,
+    annualBonusIncome: parts.bonus,
+    annualCommissionIncome: parts.commission,
+    annualTipsIncome: parts.tips,
+    annualRsuIncome: parts.rsu,
+    annualOtherIncome: parts.other,
+  });
+}
+
+function priorW2WageLookup(
+  records: ReadonlyArray<Readonly<{ normalizedInput: unknown; metadataAssignments?: readonly ExtractionMetadataAssignment[] }>>,
+): (borrowerKey: string | undefined, employerKey: string) => number | undefined {
+  const keyed = new Map<string, number>();
+  const unkeyed = new Map<string, number>();
+  for (const record of records) {
+    const assignments = new Map((record.metadataAssignments ?? []).map((item) => [item.entityId, item.borrowerKey]));
+    const input = isRecord(record.normalizedInput) ? record.normalizedInput : {};
+    for (const row of Array.isArray(input.w2Records) ? input.w2Records : []) {
+      if (!isRecord(row) || typeof row.entityId !== 'string') continue;
+      const employer = employerIdentityKey(typeof row.employerName === 'string' ? row.employerName : '');
+      const wages = [row.annualWages, row.annualIncome, row.annualBaseIncome].find((amount) => typeof amount === 'number');
+      if (!employer || typeof wages !== 'number') continue;
+      const borrowerKey = assignments.get(row.entityId);
+      if (borrowerKey) keyed.set(`${borrowerKey}:${employer}`, wages);
+      else unkeyed.set(employer, wages);
+    }
+  }
+  return (borrowerKey, employerKey) => {
+    if (!employerKey) return undefined;
+    if (borrowerKey) return keyed.get(`${borrowerKey}:${employerKey}`);
+    return unkeyed.get(employerKey);
+  };
+}
+
 export function employerIdentityKey(value: string | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -337,14 +440,21 @@ export function reconcileDuplicateWages(
   }
   const drop = new Set<string>();
   const gaps = new Set<string>();
-  for (const stub of wages.filter((item) => item.kind === 'paystub' && item.borrowerKey)) {
-    const sameBorrower = wages.filter((item) => item.kind === 'w2' && item.borrowerKey === stub.borrowerKey);
-    const matched = sameBorrower.filter((item) => item.employer && item.employer === stub.employer);
+  // Same borrower is a shared roster key. When neither side has a key, this is
+  // a single-borrower packet. 1003 stated wages are not an input here.
+  for (const stub of wages.filter((item) => item.kind === 'paystub' && item.employer)) {
+    const sameBorrower = wages.filter((item) => item.kind === 'w2' && sameWageBorrower(item, stub));
+    const matched = sameBorrower.filter((item) => item.employer === stub.employer);
     for (const item of matched) drop.add(item.id);
     if (sameBorrower.length && matched.length === 0) gaps.add('PAYSTUB_EMPLOYER_UNMATCHED');
     if (matched.length) gaps.add('PAYSTUB_W2_RECONCILED');
   }
   return { dropEntityIds: drop, gaps: [...gaps].sort() };
+}
+
+function sameWageBorrower(left: { borrowerKey?: string }, right: { borrowerKey?: string }): boolean {
+  if (left.borrowerKey && right.borrowerKey) return left.borrowerKey === right.borrowerKey;
+  return !left.borrowerKey && !right.borrowerKey;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

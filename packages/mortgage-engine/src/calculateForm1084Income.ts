@@ -54,6 +54,16 @@ export interface W2EmployerEntry {
   /** Annualized base and variable components when no annual total is supplied. */
   annualBaseIncome?: number;
   annualVariableIncome?: number;
+  /**
+   * Paystub component annuals. Qualifying income uses annualBaseIncome +
+   * annualVariableIncome and does not read these fields.
+   */
+  annualOvertimeIncome?: number;
+  annualBonusIncome?: number;
+  annualCommissionIncome?: number;
+  annualTipsIncome?: number;
+  annualRsuIncome?: number;
+  annualOtherIncome?: number;
   /** Backward-friendly aliases; these values are also treated as annual amounts. */
   baseIncome?: number;
   variableIncome?: number;

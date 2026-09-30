@@ -24,12 +24,16 @@ import { Decimal } from 'decimal.js';
  * `ps-rsu-ytd` and `ps-other-ytd`. The demo variable total does not include
  * RSU or other, so those two components are not a cited console total.
  *
- * Ben's 10 paystub rules are not in this file. A gap leaves status GAPS.
+ * Ben's 10 protected paystub rules are enforced by the portal projector in
+ * `apps/underwriter-portal/src/server/income/authoritativeExtractionInput.ts`,
+ * which is the only authorize caller. This module still owns the math.
+ * `status: 'GAPS'` must not be projected. `status: 'READY'` is an annualization
+ * result, not an approval: borrower assignment, employer identity, W-2
+ * reconciliation, stale checks, and hosted write-back stay on the portal path.
  *
- * This module is not on the protected authorize or calculate path. The portal
- * does not import `annualizePaystub`. `status: 'READY'` does not authorize
- * qualifying income, calculation, or approval. Every persisted Paystub stays
- * `unsupportedCalculation` until Ben's 10 rules exist and are tested.
+ * `annualComponents` is each ready monthly component times 12, using the same
+ * Decimal step as `annualBase` / `annualVariable`. Variable components are not
+ * annualized by pay frequency.
  */
 
 export type PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
@@ -62,6 +66,16 @@ export type PaystubComponentMonthly = Readonly<{
   other: number;
 }>;
 
+export type PaystubComponentAnnual = Readonly<{
+  base: number;
+  overtime: number;
+  bonus: number;
+  commission: number;
+  tips: number;
+  rsu: number;
+  other: number;
+}>;
+
 export type PaystubAnnualization = Readonly<{
   status: 'READY' | 'GAPS';
   gaps: readonly string[];
@@ -71,6 +85,7 @@ export type PaystubAnnualization = Readonly<{
   annualBase: number;
   annualVariable: number;
   components: PaystubComponentMonthly;
+  annualComponents: PaystubComponentAnnual;
   methods: Readonly<{ hourly: number | null; period: number | null; ytd: number | null; prior: number | null }>;
 }>;
 
@@ -145,15 +160,27 @@ export function annualizePaystub(input: PaystubAnnualizationInput): PaystubAnnua
     .add(components.tips).add(components.rsu).add(components.other).toDecimalPlaces(2).toNumber();
   const ready = gaps.length === 0 && selected != null;
   const monthlyBase = ready ? components.base : 0;
+  const annualOf = (monthly: number) => new Decimal(monthly).mul(12).toDecimalPlaces(2).toNumber();
+  const annualBase = annualOf(monthlyBase);
+  const readyVariable = ready ? monthlyVariable : 0;
   return {
     status: ready ? 'READY' : 'GAPS',
     gaps,
     selectedBaseMethod: ready ? selected : null,
     monthlyBase,
-    monthlyVariable: ready ? monthlyVariable : 0,
-    annualBase: new Decimal(monthlyBase).mul(12).toDecimalPlaces(2).toNumber(),
-    annualVariable: new Decimal(ready ? monthlyVariable : 0).mul(12).toDecimalPlaces(2).toNumber(),
+    monthlyVariable: readyVariable,
+    annualBase,
+    annualVariable: annualOf(readyVariable),
     components,
+    annualComponents: {
+      base: annualBase,
+      overtime: annualOf(ready ? components.overtime : 0),
+      bonus: annualOf(ready ? components.bonus : 0),
+      commission: annualOf(ready ? components.commission : 0),
+      tips: annualOf(ready ? components.tips : 0),
+      rsu: annualOf(ready ? components.rsu : 0),
+      other: annualOf(ready ? components.other : 0),
+    },
     methods,
   };
 }
