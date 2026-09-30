@@ -108,7 +108,7 @@ test('TB-01 through TB-12 two-borrower hosted path assigns both documents and wr
     if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: twoBorrowerContext(stage) });
     if (path.endsWith('/metadata-requirements')) return route.fulfill({ json: { extractionId: EXTRACTION, status: 'ACTIVE', review: null, requirements: stage === 'pulled' ? twoBorrowerRequirements() : [] } });
     if (path.endsWith('/metadata-reviews')) { stage = 'reviewed'; return route.fulfill({ status: 201, json: { reviewId: 'review-1', extractionId: EXTRACTION, metadataVersion: 1, loanVersion: 3 } }); }
-    if (path === '/api/income/calculate') { stage = 'calculated'; return route.fulfill({ json: { success: true, loanId: LOAN, calculationId: CALCULATION, calculatedMonthlyIncome: 14000, trendingResult: 'SINGLE_YEAR', borrowers: [{ borrowerKey: 'borrower-1', qualifyingMonthlyIncome: '8000.00' }, { borrowerKey: 'borrower-2', qualifyingMonthlyIncome: '6000.00' }], extractionWarnings: ['PAYSTUB_W2_RECONCILED'] } }); }
+    if (path === '/api/income/calculate') { stage = 'calculated'; return route.fulfill({ json: { success: true, loanId: LOAN, calculationId: CALCULATION, calculatedMonthlyIncome: 14000, trendingResult: 'SINGLE_YEAR', borrowers: [{ borrowerKey: 'borrower-1', qualifyingMonthlyIncome: '8000.00' }, { borrowerKey: 'borrower-2', qualifyingMonthlyIncome: '6000.00' }], extractionWarnings: [] } }); }
     if (path.endsWith('/income-approvals')) { stage = 'approved'; return route.fulfill({ status: 201, json: { auditEventId: APPROVAL, loanVersion: 4, calculationId: CALCULATION, action: 'INCOME_APPROVED' } }); }
     if (path.endsWith('/encompass-host-approval-field-map')) { fieldMapRequests += 1; return route.fulfill({ status: 201, json: { writeId: WRITE, encompassLoanGuid: '00000000-0000-4000-8000-00000000d001', fieldMapHash: 'a'.repeat(64), fields: { 'CX.FREEFLOW.INCOME': '14000.00', 'CX.FREEFLOW.BORROWER.1.INCOME': '8000.00', 'CX.FREEFLOW.BORROWER.2.INCOME': '6000.00', 'CX.FREEFLOW.APPROVAL.ID': APPROVAL }, status: 'AUTHORIZED' } }); }
     if (path === `/api/v1/encompass-host-writes/${WRITE}/complete`) { stage = 'written'; return route.fulfill({ json: { writeId: WRITE, status: 'SUCCEEDED' } }); }
@@ -136,7 +136,7 @@ test('TB-01 through TB-12 two-borrower hosted path assigns both documents and wr
   await expect(page.getByTestId('borrower-income-borrower-1')).toContainText('8,000.00');
   await expect(page.getByTestId('borrower-income-borrower-2')).toContainText('6,000.00');
   await expect(page.getByTestId('combined-income')).toContainText('14,000.00');
-  await expect(page.getByText('PAYSTUB_W2_RECONCILED')).toBeVisible();
+  await expect(page.getByText('PAYSTUB_W2_RECONCILED')).toHaveCount(0);
   await page.getByTestId('approve-income').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('READY TO WRITE');
   await page.getByTestId('write-host').click();

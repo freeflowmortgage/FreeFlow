@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { annualizePaystub, parsePayFrequency, type PayFrequency, type PaystubBaseMethod, type UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
+import { type PayFrequency, type PaystubBaseMethod, type UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
 
 const money = z.number().finite().min(-1_000_000_000).max(1_000_000_000);
 const year = z.number().int().min(1990).max(2100);
@@ -217,8 +217,13 @@ function projectPersistedInput(
     push(projected, 'w2Employers', { ...row, role });
   }
   for (const record of persisted.formRecords ?? []) {
+    // Paystub evidence is safe to persist and review. Ben's 10 paystub rules
+    // are not in this repository, so the protected calculator does not call
+    // annualizePaystub. A READY annualization result must not authorize
+    // calculation or approval. Every Paystub stays unsupportedCalculation,
+    // including a stub that has employer, YTD, elapsed months, and a base method.
     if (record.form === 'Paystub') {
-      projectPaystub(extractionId, record, metadata.get(record.entityId), requireBorrower, roster, requirements, projected);
+      requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
       continue;
     }
     const meta = metadata.get(record.entityId);
@@ -275,54 +280,6 @@ function projectPersistedInput(
     }
   }
   return extractionInput.parse(projected) as ExtractionInput;
-}
-
-function projectPaystub(
-  extractionId: string,
-  record: z.infer<typeof persistedFormRecord>,
-  meta: ExtractionMetadataAssignment | undefined,
-  requireBorrower: boolean,
-  roster: ReadonlySet<string>,
-  requirements: ExtractionMetadataRequirement[],
-  projected: Record<string, unknown>,
-): void {
-  const fields = new Map(record.fields.map((field) => [field.sourceFieldId, field]));
-  const numeric = (id: string) => fields.get(id)?.numericValue;
-  const textValue = (id: string) => fields.get(id)?.value;
-  const annualized = annualizePaystub({
-    hourlyRate: numeric('ps-hourly-rate'), weeklyHours: numeric('ps-hours-week'), currentPeriodBasePay: numeric('ps-current-base'),
-    payFrequency: meta?.payFrequency ?? parsePayFrequency(textValue('ps-pay-frequency')),
-    baseYtd: numeric('ps-base-ytd'), overtimeYtd: numeric('ps-ot-ytd'), bonusYtd: numeric('ps-bonus-ytd'),
-    commissionYtd: numeric('ps-commission-ytd'), tipsYtd: numeric('ps-tips-ytd'), rsuYtd: numeric('ps-rsu-ytd'), otherYtd: numeric('ps-other-ytd'),
-    elapsedMonths: meta?.elapsedMonths, baseMethod: meta?.baseIncomeMethod,
-  });
-  if (annualized.status !== 'READY') {
-    requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: 'Paystub' });
-    return;
-  }
-  let blocked = false;
-  if (!meta?.employmentRole) {
-    requirements.push({ extractionId, entityId: record.entityId, field: 'employmentRole', form: 'Paystub' });
-    blocked = true;
-  }
-  if (!meta?.taxYear) {
-    requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: 'Paystub' });
-    blocked = true;
-  }
-  if (requireBorrower && (!meta?.borrowerKey || !roster.has(meta.borrowerKey))) {
-    requirements.push({ extractionId, entityId: record.entityId, field: 'borrowerAssignment', form: 'Paystub' });
-    blocked = true;
-  }
-  if (blocked || !meta?.employmentRole || !meta.taxYear) return;
-  const employerName = textValue('ps-employer-name');
-  if (!employerName) {
-    requirements.push({ extractionId, entityId: record.entityId, field: 'requiredParserField', form: 'Paystub' });
-    return;
-  }
-  push(projected, 'w2Employers', {
-    entityId: record.entityId, employerName, role: meta.employmentRole, year: meta.taxYear,
-    annualBaseIncome: annualized.annualBase, annualVariableIncome: annualized.annualVariable,
-  });
 }
 
 function push(target: Record<string, unknown>, key: string, value: unknown): void {

@@ -24,8 +24,12 @@ import { Decimal } from 'decimal.js';
  * `ps-rsu-ytd` and `ps-other-ytd`. The demo variable total does not include
  * RSU or other, so those two components are not a cited console total.
  *
- * Ben's 10 paystub rules are not in this file. A gap leaves status GAPS, and
- * the protected path keeps `unsupportedCalculation`.
+ * Ben's 10 paystub rules are not in this file. A gap leaves status GAPS.
+ *
+ * This module is not on the protected authorize or calculate path. The portal
+ * does not import `annualizePaystub`. `status: 'READY'` does not authorize
+ * qualifying income, calculation, or approval. Every persisted Paystub stays
+ * `unsupportedCalculation` until Ben's 10 rules exist and are tested.
  */
 
 export type PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';

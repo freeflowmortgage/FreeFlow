@@ -71,21 +71,7 @@ test('AC-01 two-borrower W-2 assignment, calculation, and review', () => {
 });
 
 test('AC-02 same employer on the other borrower is not cross-assigned', () => {
-  const paystub = {
-    extractionId: '00000000-0000-4000-8000-000000000201',
-    normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [
-      { sourceFieldId: 'ps-employer-name', value: 'Northwind Labs' },
-      { sourceFieldId: 'ps-base-ytd', numericValue: 30000 },
-      { sourceFieldId: 'ps-ot-ytd', numericValue: 7500 },
-      { sourceFieldId: 'ps-bonus-ytd', numericValue: 1500 },
-      { sourceFieldId: 'ps-commission-ytd', numericValue: 750 },
-      { sourceFieldId: 'ps-tips-ytd', numericValue: 300 },
-      { sourceFieldId: 'ps-rsu-ytd', numericValue: 1500 },
-      { sourceFieldId: 'ps-other-ytd', numericValue: 450 },
-    ])] },
-    metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT' as const, taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const }],
-  };
-  const matchingW2 = {
+  const borrowerOne = {
     extractionId: '00000000-0000-4000-8000-000000000202',
     normalizedInput: { w2Records: [{ entityId: 'w2-match', employerName: 'Northwind Labs', year: 2025, annualWages: 96000 }] },
     metadataAssignments: [{ entityId: 'w2-match', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-1' }],
@@ -95,55 +81,33 @@ test('AC-02 same employer on the other borrower is not cross-assigned', () => {
     normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Northwind Labs', year: 2025, annualWages: 72000 }] },
     metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-2' }],
   };
-  const { reconciliation, result } = authorize([paystub, matchingW2, otherBorrowerSameEmployer]);
-  assert.equal(reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000202:w2-match'), true);
-  assert.equal(reconciliation.gaps.includes('PAYSTUB_W2_RECONCILED'), true);
-  assert.equal(reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000203:w2-other'), false);
+  const { reconciliation, result } = authorize([borrowerOne, otherBorrowerSameEmployer]);
+  assert.equal(reconciliation.dropEntityIds.size, 0);
+  assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '8000.00');
   assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '6000.00');
+  assertPaystubBlocksCalculation([reviewedPaystub('00000000-0000-4000-8000-000000000201'), borrowerOne, otherBorrowerSameEmployer]);
 });
 
-test('AC-03 paystub base and variable components follow the cited console formulas', () => {
-  // Harness observation only. Ben's 10 paystub rules are not in this repository,
-  // so this test is not a Paystub source PASS.
-  const paystub = {
-    extractionId: '00000000-0000-4000-8000-000000000221',
-    normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [
-      { sourceFieldId: 'ps-employer-name', value: 'Northwind Labs' },
-      { sourceFieldId: 'ps-base-ytd', numericValue: 30000 },
-      { sourceFieldId: 'ps-ot-ytd', numericValue: 7500 },
-      { sourceFieldId: 'ps-bonus-ytd', numericValue: 1500 },
-      { sourceFieldId: 'ps-commission-ytd', numericValue: 750 },
-      { sourceFieldId: 'ps-tips-ytd', numericValue: 300 },
-      { sourceFieldId: 'ps-rsu-ytd', numericValue: 1500 },
-      { sourceFieldId: 'ps-other-ytd', numericValue: 450 },
-    ])] },
-    metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT' as const, taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const }],
-  };
-  const { calculationInput, result } = authorize([paystub]);
-  const stub = calculationInput.w2Employers?.find((row) => row.entityId.endsWith('paystub-1'));
-  assert.equal(stub?.annualWages, undefined);
-  assert.equal(stub?.annualBaseIncome, 48000);
-  assert.equal(stub?.annualVariableIncome, 19200);
-  assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '5600.00');
+test('AC-03 a reviewed paystub cannot authorize base or variable income', () => {
+  // Ben's 10 paystub rules are not in this repository. A stub with YTD components,
+  // elapsed months, and a base method is still unsupportedCalculation. It is not a source PASS.
+  const paystub = reviewedPaystub('00000000-0000-4000-8000-000000000221');
+  assertPaystubBlocksCalculation([paystub]);
   parseMetadataReviewBody({ expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null, assignments: paystub.metadataAssignments });
 });
 
-test('AC-11 unmatched paystub employer is surfaced and both jobs still calculate', () => {
-  const { reconciliation, result } = authorize([
-    {
-      extractionId: '00000000-0000-4000-8000-000000000211',
-      normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [{ sourceFieldId: 'ps-employer-name', value: 'Northwind Labs' }, { sourceFieldId: 'ps-base-ytd', numericValue: 30000 }])] },
-      metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT', taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' }],
-    },
+test('AC-11 a paystub beside another employer W-2 cannot authorize either wage', () => {
+  const packet = [
+    reviewedPaystub('00000000-0000-4000-8000-000000000211'),
     {
       extractionId: '00000000-0000-4000-8000-000000000212',
       normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Other Co', year: 2025, annualWages: 12000 }] },
-      metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CONCURRENT', borrowerKey: 'borrower-1' }],
+      metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CONCURRENT' as const, borrowerKey: 'borrower-1' }],
     },
-  ]);
-  assert.deepEqual(reconciliation.gaps, ['PAYSTUB_EMPLOYER_UNMATCHED']);
-  assert.equal(reconciliation.dropEntityIds.size, 0);
-  assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '5000.00');
+  ];
+  assertPaystubBlocksCalculation(packet);
+  const wagesOnly = authorize([packet[1]]);
+  assert.equal(line(wagesOnly.result, 'borrower-1').qualifyingMonthlyIncome, '1000.00');
 });
 
 test('AC-04 Schedule C assigns and calculates on the protected path', () => {
@@ -244,43 +208,31 @@ test('AC-10 multi Schedule E properties stay with the assigned borrower', () => 
   assert.equal(result.qualifyingMonthlyIncome, 3000);
 });
 
-test('demo gate fixture assigns W-2, Schedule C, Schedule E, and Schedule B; paystub figures are not a source PASS', () => {
-  const authorized = authorize([
-    {
-      extractionId: '00000000-0000-4000-8000-000000000401',
-      normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [
-        { sourceFieldId: 'ps-employer-name', value: 'Northwind Labs' },
-        { sourceFieldId: 'ps-base-ytd', numericValue: 30000 },
-        { sourceFieldId: 'ps-ot-ytd', numericValue: 7500 },
-        { sourceFieldId: 'ps-bonus-ytd', numericValue: 1500 },
-        { sourceFieldId: 'ps-commission-ytd', numericValue: 750 },
-        { sourceFieldId: 'ps-tips-ytd', numericValue: 300 },
-        { sourceFieldId: 'ps-rsu-ytd', numericValue: 1500 },
-        { sourceFieldId: 'ps-other-ytd', numericValue: 450 },
-      ])] },
-      metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT', taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' }],
-    },
+test('demo gate fixture calculates W-2, Schedule C, Schedule E, and Schedule B; a paystub blocks the packet', () => {
+  const withoutPaystub = [
     {
       extractionId: '00000000-0000-4000-8000-000000000402',
       normalizedInput: { w2Records: [{ entityId: 'w2-b1', employerName: 'Northwind Labs', year: 2025, annualWages: 96000 }] },
-      metadataAssignments: [{ entityId: 'w2-b1', employmentRole: 'CURRENT', borrowerKey: 'borrower-1' }],
+      metadataAssignments: [{ entityId: 'w2-b1', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-1' }],
     },
     business('00000000-0000-4000-8000-000000000403', 'Schedule C', 'sch-c', [
       { sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' }, { sourceFieldId: 'ent1-net', numericValue: 96000 },
     ], { entityId: 'sch-c', taxYear: 2025, borrowerKey: 'borrower-2' }),
     {
       extractionId: '00000000-0000-4000-8000-000000000404',
-      normalizedInput: { scheduleEProperties: [{ year: 2025, propertyAddress: '200 Rental Road', propertyType: 'RENTAL', netIncomeLoss: 24000 }] },
+      normalizedInput: { scheduleEProperties: [{ year: 2025, propertyAddress: '200 Rental Road', propertyType: 'RENTAL' as const, netIncomeLoss: 24000 }] },
       metadataAssignments: [{ entityId: 'schedule-e-0', borrowerKey: 'borrower-2' }],
     },
     business('00000000-0000-4000-8000-000000000405', 'Schedule B', 'asset-1', [
       { sourceFieldId: 'schedule-b-interest', numericValue: 12000 },
     ], { entityId: 'asset-1', taxYear: 2025, borrowerKey: 'borrower-2', includeInQualifyingIncome: true, hasThreeYearAssetSupport: true }),
-  ]);
-  assert.equal(authorized.reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000402:w2-b1'), true);
-  assert.equal(line(authorized.result, 'borrower-1').qualifyingMonthlyIncome, '5600.00');
+  ];
+  assertPaystubBlocksCalculation([reviewedPaystub('00000000-0000-4000-8000-000000000401'), ...withoutPaystub]);
+  const authorized = authorize(withoutPaystub);
+  assert.equal(authorized.reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000402:w2-b1'), false);
+  assert.equal(line(authorized.result, 'borrower-1').qualifyingMonthlyIncome, '8000.00');
   assert.equal(line(authorized.result, 'borrower-2').qualifyingMonthlyIncome, '11000.00');
-  assert.equal(authorized.result.qualifyingMonthlyIncome, 16600);
+  assert.equal(authorized.result.qualifyingMonthlyIncome, 19000);
 });
 
 test('AC-11 K-1 ordinary is not added again when a return line is present', () => {
@@ -363,27 +315,27 @@ test('AC-14 reassignment changes the review hash and invalidates calculation pro
 
 test('AC-15 borrower lines sum to the combined total', () => {
   const borrowerIncome = [
-    { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' as const, qualifyingMonthlyIncome: '5600.00', name: 'Must Not Persist' },
+    { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' as const, qualifyingMonthlyIncome: '8000.00', name: 'Must Not Persist' },
     { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER' as const, qualifyingMonthlyIncome: '11000.00' },
   ];
   const sanitized = readBorrowerIncome(borrowerIncome);
-  assert.equal(sanitized.reduce((total, item) => total + Number(item.qualifyingMonthlyIncome), 0).toFixed(2), '16600.00');
+  assert.equal(sanitized.reduce((total, item) => total + Number(item.qualifyingMonthlyIncome), 0).toFixed(2), '19000.00');
   assert.equal(JSON.stringify(sanitized).includes('Must Not Persist'), false);
   assert.deepEqual(Object.keys(sanitized[0]).sort(), ['borrowerKey', 'ordinal', 'qualifyingMonthlyIncome', 'role']);
 });
 
 test('AC-16 approved host fields are written once and omit borrower names', () => {
   const borrowerIncome = [
-    { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' as const, qualifyingMonthlyIncome: '5600.00', name: 'Must Not Persist' },
+    { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' as const, qualifyingMonthlyIncome: '8000.00', name: 'Must Not Persist' },
     { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER' as const, qualifyingMonthlyIncome: '11000.00' },
   ];
   const fields = approvedHostFields({
-    loanId: '00000000-0000-4000-8000-000000000200', approvalId: 'approval-1', qualifyingMonthlyIncome: 16600,
+    loanId: '00000000-0000-4000-8000-000000000200', approvalId: 'approval-1', qualifyingMonthlyIncome: 19000,
     trendingAnalysis: 'SINGLE_YEAR', yearsAnalyzed: [2025], borrowerIncome, auditUrl: 'https://console.example/audit/approval-1',
   });
-  assert.equal(fields['CX.FREEFLOW.BORROWER.1.INCOME'], '5600.00');
+  assert.equal(fields['CX.FREEFLOW.BORROWER.1.INCOME'], '8000.00');
   assert.equal(fields['CX.FREEFLOW.BORROWER.2.INCOME'], '11000.00');
-  assert.equal(fields['CX.FREEFLOW.INCOME'], '16600.00');
+  assert.equal(fields['CX.FREEFLOW.INCOME'], '19000.00');
   assert.equal(fields['CX.FREEFLOW.APPROVAL.ID'], 'approval-1');
   assert.equal(fields['CX.FREEFLOW.SYNCED.AT'], undefined);
   assert.equal(Object.keys(fields).filter((key) => key === 'CX.FREEFLOW.BORROWER.1.INCOME').length, 1);
@@ -396,6 +348,32 @@ test('AC-14 a roster change after calculation blocks approval', async () => {
     action: 'INCOME_APPROVED', reasonCode: 'UNDERWRITER_CONFIRMED', reasonNarrative: null, overrideQualifyingMonthlyIncome: null, idempotencyKey: 'approve-key-00000001',
   }), (error: unknown) => error instanceof ApiError && error.code === 'STALE_BORROWER_ROSTER');
 });
+
+function reviewedPaystub(extractionId: string): RecordInput {
+  return {
+    extractionId,
+    normalizedInput: { formRecords: [form('paystub-1', 'Paystub', [
+      { sourceFieldId: 'ps-employer-name', value: 'Northwind Labs' },
+      { sourceFieldId: 'ps-base-ytd', numericValue: 30000 },
+      { sourceFieldId: 'ps-ot-ytd', numericValue: 7500 },
+      { sourceFieldId: 'ps-bonus-ytd', numericValue: 1500 },
+      { sourceFieldId: 'ps-commission-ytd', numericValue: 750 },
+      { sourceFieldId: 'ps-tips-ytd', numericValue: 300 },
+      { sourceFieldId: 'ps-rsu-ytd', numericValue: 1500 },
+      { sourceFieldId: 'ps-other-ytd', numericValue: 450 },
+    ])] },
+    metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT', taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' }],
+  };
+}
+
+function assertPaystubBlocksCalculation(records: readonly RecordInput[]): void {
+  assert.throws(() => authorize(records), (error: unknown) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.equal(error.requirements.some((item) => item.field === 'unsupportedCalculation' && item.form === 'Paystub'), true);
+    assert.equal(error.requirements.some((item) => item.field !== 'unsupportedCalculation' && item.form === 'Paystub'), false);
+    return true;
+  });
+}
 
 function business(
   extractionId: string,
@@ -442,10 +420,10 @@ function approvalTransaction(roster: ReadonlyArray<{ borrowerKey: string }>) {
     apiIdempotencyKey: { findFirst: async () => null },
     loanApplication: { findFirst: async () => ({ id: '00000000-0000-4000-8000-000000000200', tenantId: reviewContext().tenantId, version: 1, status: 'DOCS_UPLOADED' }) },
     form1084Audit: { findFirst: async () => ({
-      id: '00000000-0000-4000-8000-000000000501', qualifyingMonthlyIncome: { toString: () => '15600.00' }, totalAnnualCashFlow: { toString: () => '187200.00' },
+      id: '00000000-0000-4000-8000-000000000501', qualifyingMonthlyIncome: { toString: () => '19000.00' }, totalAnnualCashFlow: { toString: () => '228000.00' },
       yearsAnalyzed: [2025], calculationSchemaVersion: 'authoritative-extractions-v1', calculationSource: 'persisted-parser-extractions', calculatedLoanVersion: 1,
       canonicalInputHash: hash, sourceDocumentHashes: [hash], mortgageRuleVersion: 'form-1084-v9', trendingResult: 'SINGLE_YEAR', borrowerIncome: [
-        { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY', qualifyingMonthlyIncome: '5600.00' },
+        { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY', qualifyingMonthlyIncome: '8000.00' },
         { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER', qualifyingMonthlyIncome: '11000.00' },
       ], extractionBindings: [{
         extractionId: '00000000-0000-4000-8000-000000000300', extractionHash: hash, sourceDocumentId: '00000000-0000-4000-8000-000000000301',
