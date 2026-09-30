@@ -85,6 +85,106 @@ test('calculation extraction freshness binds active hash and source document ver
   assert.equal(hasCurrentCalculationExtractions([{ ...current[0], extraction: { ...current[0].extraction, sourceDocument: { version: 3, sourceContentHash: 'b'.repeat(64) } } }]), false);
 });
 
+test('Form 1065 return-only pages are skipped and do not fail-close beside a K-1', () => {
+  const returnId = '00000000-0000-4000-8000-000000000201';
+  const k1Id = '00000000-0000-4000-8000-000000000202';
+  const returnExtraction = {
+    extractionId: returnId,
+    normalizedInput: { formRecords: [
+      { entityId: 'form-1065-p0', form: 'Form 1065', pageIndex: 0, fields: [
+        { sourceFieldId: 'pt-return-name', value: 'Riverbend Holdings LLC' },
+        { sourceFieldId: 'pt-return-ein', value: '86-1234567' },
+        { sourceFieldId: 'pt-return-ord', value: '4570.00', numericValue: 4570 },
+      ] },
+      { entityId: 'form-1065-p5', form: 'Form 1065', pageIndex: 5, fields: [
+        { sourceFieldId: 'pt-return-dep', numericValue: 21750 },
+        { sourceFieldId: 'pt-return-meals', numericValue: 800 },
+      ] },
+    ] },
+    metadataAssignments: [
+      { entityId: 'form-1065-p0', taxYear: 2024, ownershipPercentage: 100 },
+      { entityId: 'form-1065-p5', taxYear: 2024, ownershipPercentage: 100 },
+    ],
+  };
+  const returnsOnly = mergeAuthoritativeExtractionInputs([returnExtraction]);
+  assert.equal(returnsOnly.form1065, undefined);
+  const projected = mergeAuthoritativeExtractionInputs([
+    returnExtraction,
+    {
+      extractionId: k1Id,
+      normalizedInput: { formRecords: [{ entityId: 'form-1065-p6', form: 'Form 1065', pageIndex: 6, fields: [
+        { sourceFieldId: 'pt-name', value: 'Riverbend Holdings LLC' },
+        { sourceFieldId: 'pt-ein', value: '86-1234567' },
+        { sourceFieldId: 'pt-ord', numericValue: 42000 },
+        { sourceFieldId: 'pt-rre', numericValue: 3000 },
+        { sourceFieldId: 'pt-gp', numericValue: 12000 },
+        { sourceFieldId: 'pt-dist', numericValue: 42000 },
+        { sourceFieldId: 'pt-profit-pct', numericValue: 25 },
+        { sourceFieldId: 'pt-return-ord', numericValue: 4570 },
+      ] }] },
+      metadataAssignments: [{ entityId: 'form-1065-p6', taxYear: 2024 }],
+    },
+  ]);
+  assert.equal(projected.form1065?.length, 1);
+  const row = projected.form1065?.[0];
+  assert.equal(row?.entityId, `${k1Id}:form-1065-p6`);
+  assert.equal(row?.k1OrdinaryIncome, 42000);
+  assert.equal(row?.k1NetRentalRealEstate, 3000);
+  assert.equal(row?.k1GuaranteedPayments, 12000);
+  assert.equal(row?.k1Distributions, 42000);
+  assert.equal(row?.ownershipPercentage, 25);
+  assert.equal(row?.businessName, 'Riverbend Holdings LLC');
+});
+
+test('Form 1065 K-1 pt-* still projects without a return page', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000203';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{ entityId: 'form-1065-k1', form: 'Form 1065', pageIndex: 3, fields: [
+      { sourceFieldId: 'pt-name', value: 'Synthetic Partnership' },
+      { sourceFieldId: 'pt-ord', numericValue: 60000 },
+      { sourceFieldId: 'pt-onr', numericValue: 1500 },
+      { sourceFieldId: 'pt-capital-pct', numericValue: 40 },
+    ] }] },
+    metadataAssignments: [{ entityId: 'form-1065-k1', taxYear: 2025 }],
+  }]);
+  assert.equal(projected.form1065?.length, 1);
+  assert.equal(projected.form1065?.[0].entityId, `${extractionId}:form-1065-k1`);
+  assert.equal(projected.form1065?.[0].k1OrdinaryIncome, 60000);
+  assert.equal(projected.form1065?.[0].k1OtherNetRentalIncome, 1500);
+  assert.equal(projected.form1065?.[0].ownershipPercentage, 40);
+  assert.equal(projected.form1065?.[0].capitalPercentageEnd, 40);
+});
+
+test('Form 1065 missing K-1 income still fail-closes when the record is not return-only', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000204';
+  const empty = {
+    extractionId,
+    normalizedInput: { formRecords: [{ entityId: 'form-1065-p3', form: 'Form 1065', pageIndex: 3, fields: [
+      { sourceFieldId: 'pt-name', value: 'Empty Partnership' },
+    ] }] },
+    metadataAssignments: [{ entityId: 'form-1065-p3', taxYear: 2024, ownershipPercentage: 50 }],
+  };
+  assert.throws(() => mergeAuthoritativeExtractionInputs([empty]), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{ extractionId, entityId: 'form-1065-p3', field: 'requiredParserField', form: 'Form 1065' }]);
+    return true;
+  });
+  const mixed = {
+    extractionId,
+    normalizedInput: { formRecords: [{ entityId: 'form-1065-p4', form: 'Form 1065', pageIndex: 4, fields: [
+      { sourceFieldId: 'pt-return-ord', numericValue: 4570 },
+      { sourceFieldId: 'pt-profit-pct', numericValue: 25 },
+    ] }] },
+    metadataAssignments: [{ entityId: 'form-1065-p4', taxYear: 2024 }],
+  };
+  assert.throws(() => mergeAuthoritativeExtractionInputs([mixed]), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{ extractionId, entityId: 'form-1065-p4', field: 'requiredParserField', form: 'Form 1065' }]);
+    return true;
+  });
+});
+
 test('a newer reviewed metadata version invalidates calculation provenance', () => {
   const binding = {
     extractionId: 'extraction', extractionHash: 'a'.repeat(64), sourceDocumentId: 'document', sourceDocumentVersion: 2,
