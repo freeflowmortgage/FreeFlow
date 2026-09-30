@@ -252,7 +252,13 @@ function projectPersistedInput(
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
       push(projected, 'form1120S', compact({ ...base, businessName: t('scorp-name'), ein: t('scorp-ein'), ownershipPercentage: ownership, k1OrdinaryIncome: n('scorp-ord'), k1NetRentalRealEstate: n('scorp-rre'), k1OtherNetRentalIncome: n('scorp-onr'), k1Distributions: n('scorp-dist'), depletion: n('scorp-depletion'), mealsExclusion: n('scorp-meals'), hasStableDistributions: meta.hasStableDistributions }));
     } else if (record.form === 'Form 1065') {
-      if (!hasAny(fields, ['pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist'])) { requireParserField(requirements, extractionId, record); continue; }
+      if (!hasAny(fields, PARTNERSHIP_K1_INCOME_FIELD_IDS)) {
+        // Return pages persist entity-level pt-return-* lines on their own formRecord.
+        // They are evidence for the K-1 extraction, not a calc row, and must not fail-close.
+        if (isPartnershipReturnEvidenceOnly(record.fields)) continue;
+        requireParserField(requirements, extractionId, record);
+        continue;
+      }
       const profit = n('pt-profit-pct'); const capital = n('pt-capital-pct');
       const ownership = meta.ownershipPercentage ?? profit ?? capital;
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
@@ -287,8 +293,23 @@ function push(target: Record<string, unknown>, key: string, value: unknown): voi
 function compact(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
+const PARTNERSHIP_K1_INCOME_FIELD_IDS = ['pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist'] as const;
+
 function hasAny(fields: ReadonlyMap<string, unknown>, ids: readonly string[]): boolean {
   return ids.some((id) => fields.has(id));
+}
+
+/** True when every captured field is a partnership return id (pt-return-*) and none are K-1 income boxes. */
+function isPartnershipReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId: string }>): boolean {
+  if (fields.length === 0) return false;
+  const k1Income = new Set<string>(PARTNERSHIP_K1_INCOME_FIELD_IDS);
+  let returnField = false;
+  for (const field of fields) {
+    if (k1Income.has(field.sourceFieldId)) return false;
+    if (!field.sourceFieldId.startsWith('pt-return-')) return false;
+    returnField = true;
+  }
+  return returnField;
 }
 function requireParserField(target: ExtractionMetadataRequirement[], extractionId: string, record: z.infer<typeof persistedFormRecord>): void {
   target.push({ extractionId, entityId: record.entityId, field: 'requiredParserField', form: record.form });
