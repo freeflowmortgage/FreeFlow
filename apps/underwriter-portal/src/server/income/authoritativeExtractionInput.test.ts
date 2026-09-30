@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { annualizePaystub } from '@mortgage-pos/mortgage-engine';
 import { ExtractionMetadataRequiredError, mergeAuthoritativeExtractionInputs } from './authoritativeExtractionInput';
 import { hasCurrentCalculationExtractions } from './extractionFreshness';
 
@@ -39,32 +40,35 @@ test('rejects unknown or malformed persisted calculation fields', () => {
   }]));
 });
 
-test('keeps persisted paystub evidence fail-closed until Ben paystub rules exist', () => {
+test('incomplete paystub stays GAPS and a reviewed stub projects annualizePaystub', () => {
   const extractionId = '00000000-0000-4000-8000-000000000101';
-  const incomplete = {
+  const normalizedInput = { formRecords: [{
+    entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+    fields: [
+      { sourceFieldId: 'ps-employer-name', value: 'Synthetic Employer' },
+      { sourceFieldId: 'ps-base-ytd', numericValue: 54000 },
+    ],
+  }] };
+  const gapped = annualizePaystub({ baseYtd: 54000 });
+  assert.equal(gapped.status, 'GAPS');
+  assert.ok(gapped.gaps.includes('ELAPSED_MONTHS_REQUIRED'));
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{ extractionId, normalizedInput }], { borrowerRoster: ['borrower-1', 'borrower-2'] }), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements.map((item) => item.field), ['borrowerAssignment', 'elapsedMonths', 'employmentRole', 'taxYear']);
+    return true;
+  });
+  const cited = annualizePaystub({ baseYtd: 54000, elapsedMonths: 7.5, baseMethod: 'ytd' });
+  const projected = mergeAuthoritativeExtractionInputs([{
     extractionId,
-    normalizedInput: { formRecords: [{
-      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
-      fields: [
-        { sourceFieldId: 'ps-employer-name', value: 'Synthetic Employer' },
-        { sourceFieldId: 'ps-base-ytd', numericValue: 54000 },
-      ],
-    }] },
-  };
-  const reviewed = {
-    extractionId,
-    normalizedInput: incomplete.normalizedInput,
+    normalizedInput,
     metadataAssignments: [{ entityId: 'Paystub:paystub-p0', employmentRole: 'CURRENT' as const, taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const }],
-  };
-  for (const record of [incomplete, reviewed]) {
-    assert.throws(() => mergeAuthoritativeExtractionInputs([record], { borrowerRoster: ['borrower-1', 'borrower-2'] }), (error) => {
-      assert.ok(error instanceof ExtractionMetadataRequiredError);
-      assert.deepEqual(error.requirements, [{
-        extractionId, entityId: 'Paystub:paystub-p0', field: 'unsupportedCalculation', form: 'Paystub',
-      }]);
-      return true;
-    });
-  }
+  }], { borrowerRoster: ['borrower-1', 'borrower-2'] });
+  const row = projected.w2Employers?.[0];
+  assert.equal(row?.annualBaseIncome, cited.annualBase);
+  assert.equal(row?.annualVariableIncome, cited.annualVariable);
+  assert.equal(row?.annualWages, undefined);
+  assert.notEqual(row?.annualBaseIncome, 54000);
+  assert.equal(row?.entityId, `${extractionId}:Paystub:paystub-p0`);
 });
 
 test('calculation extraction freshness binds active hash and source document version', () => {

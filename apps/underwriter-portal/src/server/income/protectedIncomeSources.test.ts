@@ -85,18 +85,28 @@ test('AC-02 same employer on the other borrower is not cross-assigned', () => {
   assert.equal(reconciliation.dropEntityIds.size, 0);
   assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '8000.00');
   assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '6000.00');
-  assertPaystubBlocksCalculation([reviewedPaystub('00000000-0000-4000-8000-000000000201'), borrowerOne, otherBorrowerSameEmployer]);
+  const withPaystub = authorize([reviewedPaystub('00000000-0000-4000-8000-000000000201'), borrowerOne, otherBorrowerSameEmployer]);
+  assert.equal(withPaystub.reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000202:w2-match'), true);
+  assert.equal(withPaystub.reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000203:w2-other'), false);
+  assert.equal(withPaystub.reconciliation.gaps.includes('PAYSTUB_W2_RECONCILED'), true);
+  assert.equal(line(withPaystub.result, 'borrower-1').qualifyingMonthlyIncome, '5600.00');
+  assert.equal(line(withPaystub.result, 'borrower-2').qualifyingMonthlyIncome, '6000.00');
 });
 
-test('AC-03 a reviewed paystub cannot authorize base or variable income', () => {
-  // Ben's 10 paystub rules are not in this repository. A stub with YTD components,
-  // elapsed months, and a base method is still unsupportedCalculation. It is not a source PASS.
+test('AC-03 a reviewed paystub authorizes base and variable from annualizePaystub', () => {
   const paystub = reviewedPaystub('00000000-0000-4000-8000-000000000221');
-  assertPaystubBlocksCalculation([paystub]);
+  const { calculationInput, result } = authorize([paystub]);
+  const wage = calculationInput.w2Employers?.[0];
+  assert.equal(wage?.annualBaseIncome, 48000);
+  assert.equal(wage?.annualVariableIncome, 19200);
+  assert.equal(wage?.annualWages, undefined);
+  assert.notEqual(wage?.annualBaseIncome, 30000);
+  assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '5600.00');
+  assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '0.00');
   parseMetadataReviewBody({ expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null, assignments: paystub.metadataAssignments });
 });
 
-test('AC-11 a paystub beside another employer W-2 cannot authorize either wage', () => {
+test('AC-11 a paystub beside another employer W-2 keeps both wages and records the gap', () => {
   const packet = [
     reviewedPaystub('00000000-0000-4000-8000-000000000211'),
     {
@@ -105,9 +115,10 @@ test('AC-11 a paystub beside another employer W-2 cannot authorize either wage',
       metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CONCURRENT' as const, borrowerKey: 'borrower-1' }],
     },
   ];
-  assertPaystubBlocksCalculation(packet);
-  const wagesOnly = authorize([packet[1]]);
-  assert.equal(line(wagesOnly.result, 'borrower-1').qualifyingMonthlyIncome, '1000.00');
+  const { reconciliation, result } = authorize(packet);
+  assert.equal(reconciliation.dropEntityIds.size, 0);
+  assert.deepEqual(reconciliation.gaps, ['PAYSTUB_EMPLOYER_UNMATCHED']);
+  assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '6600.00');
 });
 
 test('AC-04 Schedule C assigns and calculates on the protected path', () => {
@@ -208,8 +219,9 @@ test('AC-10 multi Schedule E properties stay with the assigned borrower', () => 
   assert.equal(result.qualifyingMonthlyIncome, 3000);
 });
 
-test('demo gate fixture calculates W-2, Schedule C, Schedule E, and Schedule B; a paystub blocks the packet', () => {
-  const withoutPaystub = [
+test('demo gate fixture calculates paystub plus matching W-2, self-employed stack, Schedule E, and an asset', () => {
+  const packet = [
+    reviewedPaystub('00000000-0000-4000-8000-000000000401'),
     {
       extractionId: '00000000-0000-4000-8000-000000000402',
       normalizedInput: { w2Records: [{ entityId: 'w2-b1', employerName: 'Northwind Labs', year: 2025, annualWages: 96000 }] },
@@ -218,6 +230,12 @@ test('demo gate fixture calculates W-2, Schedule C, Schedule E, and Schedule B; 
     business('00000000-0000-4000-8000-000000000403', 'Schedule C', 'sch-c', [
       { sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' }, { sourceFieldId: 'ent1-net', numericValue: 96000 },
     ], { entityId: 'sch-c', taxYear: 2025, borrowerKey: 'borrower-2' }),
+    business('00000000-0000-4000-8000-000000000406', 'Form 1065', 'pt-1', [
+      { sourceFieldId: 'pt-name', value: 'Synthetic Partnership' },
+      { sourceFieldId: 'pt-ord', numericValue: 60000 },
+      { sourceFieldId: 'pt-dist', numericValue: 60000 },
+      { sourceFieldId: 'pt-profit-pct', numericValue: 100 },
+    ], { entityId: 'pt-1', taxYear: 2025, borrowerKey: 'borrower-2', hasStableDistributions: false }),
     {
       extractionId: '00000000-0000-4000-8000-000000000404',
       normalizedInput: { scheduleEProperties: [{ year: 2025, propertyAddress: '200 Rental Road', propertyType: 'RENTAL' as const, netIncomeLoss: 24000 }] },
@@ -227,12 +245,24 @@ test('demo gate fixture calculates W-2, Schedule C, Schedule E, and Schedule B; 
       { sourceFieldId: 'schedule-b-interest', numericValue: 12000 },
     ], { entityId: 'asset-1', taxYear: 2025, borrowerKey: 'borrower-2', includeInQualifyingIncome: true, hasThreeYearAssetSupport: true }),
   ];
-  assertPaystubBlocksCalculation([reviewedPaystub('00000000-0000-4000-8000-000000000401'), ...withoutPaystub]);
-  const authorized = authorize(withoutPaystub);
-  assert.equal(authorized.reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000402:w2-b1'), false);
-  assert.equal(line(authorized.result, 'borrower-1').qualifyingMonthlyIncome, '8000.00');
-  assert.equal(line(authorized.result, 'borrower-2').qualifyingMonthlyIncome, '11000.00');
-  assert.equal(authorized.result.qualifyingMonthlyIncome, 19000);
+  const authorized = authorize(packet);
+  assert.equal(authorized.reconciliation.dropEntityIds.has('00000000-0000-4000-8000-000000000402:w2-b1'), true);
+  assert.equal(authorized.reconciliation.gaps.includes('PAYSTUB_W2_RECONCILED'), true);
+  assert.equal(authorized.calculationInput.w2Employers?.some((row) => row.annualWages === 96000), false);
+  assert.equal(line(authorized.result, 'borrower-1').qualifyingMonthlyIncome, '5600.00');
+  assert.equal(line(authorized.result, 'borrower-2').qualifyingMonthlyIncome, '16000.00');
+  assert.equal(authorized.result.qualifyingMonthlyIncome, 21600);
+  const fields = approvedHostFields({
+    loanId: '00000000-0000-4000-8000-000000000200', approvalId: 'approval-1', qualifyingMonthlyIncome: authorized.result.qualifyingMonthlyIncome,
+    trendingAnalysis: authorized.result.trendingResult, yearsAnalyzed: [...authorized.result.yearsAnalyzed], borrowerIncome: authorized.result.borrowerIncome,
+    auditUrl: 'https://console.example/audit/approval-1',
+  });
+  assert.equal(fields['CX.FREEFLOW.BORROWER.1.INCOME'], '5600.00');
+  assert.equal(fields['CX.FREEFLOW.BORROWER.2.INCOME'], '16000.00');
+  assert.equal(fields['CX.FREEFLOW.INCOME'], '21600.00');
+  assert.equal(fields['CX.FREEFLOW.APPROVAL.ID'], 'approval-1');
+  assert.equal(JSON.stringify(fields).includes('Northwind'), false);
+  assert.equal(JSON.stringify(fields).includes('30000'), false);
 });
 
 test('AC-11 K-1 ordinary is not added again when a return line is present', () => {
@@ -364,15 +394,6 @@ function reviewedPaystub(extractionId: string): RecordInput {
     ])] },
     metadataAssignments: [{ entityId: 'paystub-1', employmentRole: 'CURRENT', taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' }],
   };
-}
-
-function assertPaystubBlocksCalculation(records: readonly RecordInput[]): void {
-  assert.throws(() => authorize(records), (error: unknown) => {
-    assert.ok(error instanceof ExtractionMetadataRequiredError);
-    assert.equal(error.requirements.some((item) => item.field === 'unsupportedCalculation' && item.form === 'Paystub'), true);
-    assert.equal(error.requirements.some((item) => item.field !== 'unsupportedCalculation' && item.form === 'Paystub'), false);
-    return true;
-  });
 }
 
 function business(

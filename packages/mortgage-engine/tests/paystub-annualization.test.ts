@@ -1,6 +1,6 @@
 import { annualizePaystub, parsePayFrequency, payPeriodsPerYear } from '../src/paystubAnnualization';
 
-describe('paystub annualization ported from UnderwriterSplitViewDemo (not an authorize path)', () => {
+describe('paystub annualization ported from UnderwriterSplitViewDemo', () => {
   test('uses the console pay-period counts', () => {
     expect(payPeriodsPerYear('WEEKLY')).toBe(52);
     expect(payPeriodsPerYear('BIWEEKLY')).toBe(26);
@@ -26,6 +26,35 @@ describe('paystub annualization ported from UnderwriterSplitViewDemo (not an aut
     expect(result.monthlyBase).not.toBeCloseTo(30000 / 12, 2);
     expect(result.annualBase).toBe(48000);
     expect(result.annualBase).not.toBe(30000);
+    expect(result.annualComponents.base).toBe(48000);
+    expect(result.annualComponents.overtime).toBe(12000);
+    expect(result.annualComponents.bonus).toBe(2400);
+    expect(result.annualComponents.commission).toBe(1200);
+    expect(result.annualComponents.tips).toBe(480);
+    expect(result.annualComponents.rsu).toBe(2400);
+    expect(result.annualComponents.other).toBe(720);
+    expect(result.annualComponents.base).not.toBe(result.annualComponents.overtime);
+    expect(result.annualVariable).toBe(19200);
+    expect(result.annualVariable).not.toBe(30000);
+  });
+
+  test('variable continuity divides each YTD component by elapsed months', () => {
+    const result = annualizePaystub({
+      currentPeriodBasePay: 1000,
+      payFrequency: 'WEEKLY',
+      baseMethod: 'period',
+      overtimeYtd: 2600,
+      bonusYtd: 500,
+      elapsedMonths: 2,
+    });
+    expect(result.status).toBe('READY');
+    expect(result.monthlyBase).toBeCloseTo((1000 * 52) / 12, 2);
+    expect(result.components.overtime).toBe(1300);
+    expect(result.components.bonus).toBe(250);
+    expect(result.annualComponents.overtime).toBe(15600);
+    expect(result.annualComponents.overtime).not.toBe(2600);
+    expect(result.annualComponents.overtime).not.toBe(2600 * 52);
+    expect(result.components.overtime).not.toBeCloseTo((2600 * 52) / 12, 2);
   });
 
   test('keeps hourly, period, and prior-year W-2 methods distinct', () => {
