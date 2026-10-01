@@ -58,8 +58,13 @@ try {
     testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
     syntheticProductDemos: { enabled: true },
   });
-  assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.pdf`)).status, 200);
-  assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.meta.json`)).status, 200);
+  const fixture = await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.pdf`);
+  assert.equal(fixture.status, 200);
+  assert.equal(fixture.headers.get('content-type'), 'application/pdf');
+  assert.ok((await fixture.arrayBuffer()).byteLength > 1_000);
+  const fixtureMeta = await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.meta.json`);
+  assert.equal(fixtureMeta.status, 200);
+  assert.deepEqual(await fixtureMeta.json(), { custom: false });
 } finally {
   qualification.kill();
   await once(qualification, 'exit');

@@ -6,6 +6,7 @@ import { parseMiddleware } from './src/server/parseMiddleware';
 import { summaryPdfMiddleware } from './src/server/summaryPdfMiddleware';
 import { intakeDeliverMiddleware } from './src/server/intakeDeliverMiddleware';
 import { appraisalAuditMiddleware } from './src/server/appraisalAuditMiddleware';
+import { generateUrarPdf } from './src/server/generateUrarPdf';
 
 const revision = (() => {
   try {
@@ -31,6 +32,21 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    ...(!demoRuntime ? [{
+      name: 'freeflow-synthetic-urar-fixture',
+      async generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'fixtures/urar-1004.pdf',
+          source: await generateUrarPdf(),
+        });
+        this.emitFile({
+          type: 'asset',
+          fileName: 'fixtures/urar-1004.meta.json',
+          source: JSON.stringify({ custom: false }),
+        });
+      },
+    }] : []),
     ...(demoRuntime ? [{
       name: 'freeflow-appraisal-audit',
       configureServer(server) {
