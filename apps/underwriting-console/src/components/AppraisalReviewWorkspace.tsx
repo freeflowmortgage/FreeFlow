@@ -350,7 +350,7 @@ const CONDITIONS: Condition[] = [
   },
 ];
 
-export default function AppraisalReviewWorkspace() {
+export default function AppraisalReviewWorkspace({ syntheticDemo = false }: { syntheticDemo?: boolean }) {
   const [program, setProgram] = useState<Program>('FHA');
   const [useBlankForm, setUseBlankForm] = useState(false);
   const [customPdfUrl, setCustomPdfUrl] = useState<string | null>(null);
@@ -582,8 +582,13 @@ export default function AppraisalReviewWorkspace() {
   return (
     <div
       data-testid="appraisal-workspace"
-      className="flex h-[calc(100vh-8.5rem)] min-h-[780px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900"
+      className="relative flex h-[calc(100vh-8.5rem)] min-h-[780px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900"
     >
+      {syntheticDemo ? (
+        <div data-testid="appraisal-synthetic-banner" className="absolute inset-x-0 top-0 z-20 bg-amber-100 px-4 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-amber-900">
+          Synthetic URAR fixture · upload, parser, and LOS sync disabled
+        </div>
+      ) : null}
       {/* Unmounted while the canvas lives in its own window (dual-monitor mode) */}
       {!docPopout && (
         <div className="flex h-full w-[46%] min-w-0 flex-col border-r border-slate-200 bg-slate-50">
@@ -635,7 +640,7 @@ export default function AppraisalReviewWorkspace() {
                   Bring back
                 </button>
               )}
-              <label className="mr-2 flex cursor-pointer items-center rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-600 hover:text-emerald-800">
+              {!syntheticDemo ? <label className="mr-2 flex cursor-pointer items-center rounded-md px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-600 hover:text-emerald-800">
                 Upload PDF
                 <input
                   type="file"
@@ -646,7 +651,7 @@ export default function AppraisalReviewWorkspace() {
                     if (file) void handleUploadedPdf(file);
                   }}
                 />
-              </label>
+              </label> : null}
               {uploadFillNote && (
                 <span className="mr-2 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                   {uploadFillNote}
@@ -665,7 +670,7 @@ export default function AppraisalReviewWorkspace() {
                   Custom 1004 from fixtures
                 </span>
               )}
-              <button
+              {!syntheticDemo ? <button
                 type="button"
                 onClick={() => {
                   setUseBlankForm(!useBlankForm);
@@ -684,7 +689,7 @@ export default function AppraisalReviewWorkspace() {
                 }`}
               >
                 {useBlankForm && !customPdfUrl ? 'Using Blank Form' : 'Use Blank Form'}
-              </button>
+              </button> : null}
               {(['CONV', 'FHA', 'VA', 'USDA'] as Program[]).map((item) => (
                 <button
                   key={item}
@@ -756,6 +761,7 @@ export default function AppraisalReviewWorkspace() {
               title="Writes to HUD-92800.5B (CCDE)"
               intro="Each mapped finding below becomes a Conditional Commitment item the DE underwriter would lock."
               conditions={useBlankForm ? [] : conditions}
+              syntheticDemo={syntheticDemo}
             />
           ) : program === 'VA' ? (
             <ConditionsPanel
@@ -763,18 +769,21 @@ export default function AppraisalReviewWorkspace() {
               intro="Failed MPR items and commentary keywords prefill the Notice of Value. Clear the checklist before lock & sync."
               conditions={useBlankForm ? [] : conditions}
               nov
+              syntheticDemo={syntheticDemo}
             />
           ) : program === 'USDA' ? (
             <ConditionsPanel
               title="USDA property conditions"
               intro="Deterministic USDA appraisal conditions extracted from the uploaded document."
               conditions={conditions}
+              syntheticDemo={syntheticDemo}
             />
           ) : (
             <ConditionsPanel
               title="Conditions this file would write"
               intro="GSE CU / 1004MC and commentary flags for the underwriter."
               conditions={useBlankForm ? [] : conditions}
+              syntheticDemo={syntheticDemo}
             />
           )}
 
@@ -951,11 +960,13 @@ function ConditionsPanel({
   intro,
   conditions,
   nov = false,
+  syntheticDemo = false,
 }: {
   title: string;
   intro: string;
   conditions: Condition[];
   nov?: boolean;
+  syntheticDemo?: boolean;
 }) {
   return (
     <section className={`rounded-xl border p-4 ${nov ? 'border-indigo-200 bg-indigo-50/50' : 'border-rose-200 bg-rose-50/70'}`}>
@@ -975,7 +986,7 @@ function ConditionsPanel({
           </li>
         ))}
       </ul>
-      {nov ? (
+      {nov && !syntheticDemo ? (
         <p className="mt-3 text-[11px] font-semibold text-indigo-900">Lock, release & sync final NOV to Encompass eFolder —  {conditions.length} outstanding items.</p>
       ) : null}
     </section>

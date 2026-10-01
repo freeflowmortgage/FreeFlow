@@ -30,7 +30,10 @@ try {
   const response = await fetch(`http://127.0.0.1:${hostedPort}/health`);
   assert.match(response.headers.get('content-security-policy') || '', /frame-ancestors https:\/\/dev\.freeflowmortgage\.com/);
   assert.equal(response.headers.has('x-frame-options'), false);
-  assert.deepEqual(await (await fetch(`http://127.0.0.1:${hostedPort}/runtime-config.json`)).json(), { testHost: { enabled: false, loanGuid: null } });
+  assert.deepEqual(await (await fetch(`http://127.0.0.1:${hostedPort}/runtime-config.json`)).json(), {
+    testHost: { enabled: false, loanGuid: null }, syntheticProductDemos: { enabled: false },
+  });
+  assert.equal((await fetch(`http://127.0.0.1:${hostedPort}/fixtures/urar-1004.pdf`)).status, 404);
 } finally {
   hosted.kill();
   await once(hosted, 'exit');
@@ -44,6 +47,7 @@ const qualification = spawn(process.execPath, ['scripts/serve-production.mjs'], 
     FREEFLOW_RUNTIME_MODE: 'encompass-hosted', FREEFLOW_RUNTIME_ENV: 'development',
     ENCOMPASS_FRAME_ANCESTORS: 'https://dev.freeflowmortgage.com',
     ENCOMPASS_TEST_HOST_ENABLED: 'true', ENCOMPASS_TEST_HOST_QUALIFICATION: 'true',
+    FREEFLOW_SYNTHETIC_PRODUCT_DEMOS: 'true',
     ENCOMPASS_TEST_HOST_LOAN_GUID: '00000000-0000-4000-8000-00000000d001', PORT: String(qualificationPort),
   },
   stdio: 'ignore',
@@ -52,10 +56,34 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.deepEqual(await (await fetch(`http://127.0.0.1:${qualificationPort}/runtime-config.json`)).json(), {
     testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
+    syntheticProductDemos: { enabled: true },
   });
+  assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.pdf`)).status, 200);
+  assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.meta.json`)).status, 200);
 } finally {
   qualification.kill();
   await once(qualification, 'exit');
+}
+
+const productionFlagPort = 3113;
+const productionFlag = spawn(process.execPath, ['scripts/serve-production.mjs'], {
+  cwd: new URL('..', import.meta.url),
+  env: {
+    ...process.env,
+    FREEFLOW_RUNTIME_MODE: 'protected-web', FREEFLOW_RUNTIME_ENV: 'production',
+    FREEFLOW_SYNTHETIC_PRODUCT_DEMOS: 'true', PORT: String(productionFlagPort),
+  },
+  stdio: 'ignore',
+});
+try {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(await (await fetch(`http://127.0.0.1:${productionFlagPort}/runtime-config.json`)).json(), {
+    testHost: { enabled: false, loanGuid: null }, syntheticProductDemos: { enabled: false },
+  });
+  assert.equal((await fetch(`http://127.0.0.1:${productionFlagPort}/fixtures/urar-1004.pdf`)).status, 404);
+} finally {
+  productionFlag.kill();
+  await once(productionFlag, 'exit');
 }
 
 const forbidden = spawn(process.execPath, ['scripts/serve-production.mjs'], {

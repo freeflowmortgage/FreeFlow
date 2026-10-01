@@ -7,6 +7,7 @@ export type ConsoleRuntimeConfiguration = Readonly<{
     loanGuid: string | null;
     borrowers?: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[];
   }>;
+  syntheticProductDemos?: Readonly<{ enabled: boolean }>;
 }>;
 
 const SCENARIOS = new Set<TestHostScenario>(['normal', 'read-only', 'changed-loan', 'commit-failure']);

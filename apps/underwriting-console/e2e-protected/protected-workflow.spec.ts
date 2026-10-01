@@ -7,6 +7,52 @@ const CALCULATION = '00000000-0000-4000-8000-000000000400';
 const APPROVAL = '00000000-0000-4000-8000-000000000500';
 const WRITE = '00000000-0000-4000-8000-000000000600';
 
+test('protected product cards expose only explicitly enabled synthetic demos', async ({ page }) => {
+  const productCalls: string[] = [];
+  await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
+    testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
+    syntheticProductDemos: { enabled: true },
+  } }));
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.startsWith('/api/intake/') || path.startsWith('/api/appraisal/')) productCalls.push(path);
+    if (path === '/api/v1/encompass-host/launch') return route.fulfill({ json: { loanId: LOAN, loanVersion: 1, integrationMode: 'ENCOMPASS_HOSTED', created: true } });
+    if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: context('bound') });
+    return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/');
+  await page.getByTestId('service-1003').click();
+  await expect(page.getByTestId('ai-1003-workspace')).toBeVisible();
+  await expect(page.getByTestId('ai-1003-synthetic-banner')).toContainText('no lead or LOS delivery');
+  expect(productCalls).toEqual([]);
+
+  await page.getByRole('button', { name: 'Back to products' }).click();
+  await page.getByTestId('service-appraisal').click();
+  await expect(page.getByTestId('appraisal-workspace')).toBeVisible();
+  await expect(page.getByTestId('appraisal-synthetic-banner')).toContainText('upload, parser, and LOS sync disabled');
+  await expect(page.getByText('Upload PDF')).toHaveCount(0);
+  expect(productCalls).toEqual([]);
+});
+
+test('protected product cards fail closed when synthetic demos are disabled', async ({ page }) => {
+  await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
+    testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
+    syntheticProductDemos: { enabled: false },
+  } }));
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v1/encompass-host/launch') return route.fulfill({ json: { loanId: LOAN, loanVersion: 1, integrationMode: 'ENCOMPASS_HOSTED', created: true } });
+    if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: context('bound') });
+    return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/');
+  await page.getByTestId('service-1003').click();
+  await expect(page.getByTestId('protected-product-unavailable')).toBeVisible();
+  await expect(page.getByTestId('protected-workflow')).toHaveCount(0);
+});
+
 test('protected white workflow binds, uploads, reviews, calculates, approves, and durably writes', async ({ page }) => {
   let stage: 'bound' | 'uploaded' | 'reviewed' | 'calculated' | 'approved' | 'written' = 'bound';
   let fieldMapRequests = 0;

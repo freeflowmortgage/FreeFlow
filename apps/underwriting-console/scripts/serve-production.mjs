@@ -18,6 +18,8 @@ const testHostLoanGuid = testHostRequested ? process.env.ENCOMPASS_TEST_HOST_LOA
 if (testHostRequested && (!testHostLoanGuid || !/^[A-Za-z0-9-]{1,255}$/.test(testHostLoanGuid))) {
   throw new Error('ENCOMPASS_TEST_HOST_LOAN_GUID_INVALID');
 }
+const syntheticProductDemos = process.env.FREEFLOW_RUNTIME_ENV === 'development'
+  && process.env.FREEFLOW_SYNTHETIC_PRODUCT_DEMOS === 'true';
 
 const frameAncestors = runtimeMode === 'encompass-hosted'
   ? parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS)
@@ -55,10 +57,11 @@ createServer(async (req, res) => {
   }
   if (pathname === '/runtime-config.json') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ testHost: { enabled: testHostRequested, loanGuid: testHostLoanGuid } }));
+    res.end(JSON.stringify({ testHost: { enabled: testHostRequested, loanGuid: testHostLoanGuid }, syntheticProductDemos: { enabled: syntheticProductDemos } }));
     return;
   }
-  if (pathname.startsWith('/fixtures/') || pathname === '/parse' || pathname === '/api/underwrite/process') {
+  const syntheticFixture = pathname === '/fixtures/urar-1004.pdf' || pathname === '/fixtures/urar-1004.meta.json';
+  if ((pathname.startsWith('/fixtures/') && !(syntheticProductDemos && syntheticFixture)) || pathname === '/parse' || pathname === '/api/underwrite/process') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end('{"error":{"code":"CONSOLE_ROUTE_DISABLED"}}');
     return;
