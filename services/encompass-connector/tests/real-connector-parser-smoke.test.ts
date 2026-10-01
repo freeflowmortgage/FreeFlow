@@ -22,7 +22,7 @@ test('real smoke signs, forwards selected PDF bytes, reports only safe results, 
     if (String(url).includes('/attachments/list')) return Response.json({ attachments: [{ id: 'selected-attachment' }] });
     if (String(url).includes('/attachments/download')) return new Response(pdf, { headers: { 'x-content-sha256': sha256 } });
     forwarded = new Uint8Array(init?.body as Uint8Array);
-    return Response.json({ page_count: 1, ocr_page_count: 1, classifications: { document_type: 'income' } });
+    return Response.json({ total_pages_scanned: 1, ocr_page_count: 1, classifications: { document_type: 'income' } });
   }) as typeof fetch;
   await runRealConnectorParserSmoke({ env, fetch: fetchImpl, report: (value) => reports.push(value) });
   assert.match(new Headers(calls[0].init?.headers).get('x-freeflow-signature') ?? '', /^[a-f0-9]{64}$/);

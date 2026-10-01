@@ -5,7 +5,11 @@ export const INCOME_EXTRACTION_SCHEMA_VERSION = 'income-extraction-v2';
 const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   'Schedule C': new Set(['ent1-name', 'ent1-ein', 'ent1-net', 'ent1-dep', 'ent1-depletion', 'ent1-meals', 'ent1-home', 'ent1-other-income', 'ent1-amort']),
   'Schedule F': new Set(['schedule-f-name', 'schedule-f-ein', 'schedule-f-net', 'schedule-f-coop-ccc', 'schedule-f-other', 'schedule-f-depreciation', 'schedule-f-other-expense', 'schedule-f-home', 'schedule-f-amort']),
-  'Form 1120-S': new Set(['scorp-name', 'scorp-ein', 'scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist', 'scorp-own-pct', 'scorp-depletion', 'scorp-meals']),
+  'Form 1120-S': new Set([
+    'scorp-name', 'scorp-ein', 'scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist', 'scorp-own-pct', 'scorp-depletion', 'scorp-meals',
+    'scorp-return-name', 'scorp-return-ein', 'scorp-return-gross', 'scorp-return-wages', 'scorp-return-ord',
+    'scorp-return-4797', 'scorp-return-other', 'scorp-return-dep', 'scorp-return-depletion', 'scorp-return-meals',
+  ]),
   'Form 1065': new Set([
     'pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals',
     'pt-return-name', 'pt-return-ein', 'pt-return-gross', 'pt-return-wages', 'pt-return-ord', 'pt-return-gp',

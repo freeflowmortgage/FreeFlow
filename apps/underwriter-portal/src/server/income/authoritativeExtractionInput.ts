@@ -247,7 +247,13 @@ function projectPersistedInput(
       if (!t('schedule-f-name') || n('schedule-f-net') === undefined) { requireParserField(requirements, extractionId, record); continue; }
       push(projected, 'scheduleF', compact({ ...base, businessName: t('schedule-f-name'), ein: t('schedule-f-ein'), netFarmProfitLoss: n('schedule-f-net'), nonTaxPortionOngoingCoopAndCccPayments: n('schedule-f-coop-ccc'), nonrecurringOtherIncomeLoss: n('schedule-f-other'), depreciation: n('schedule-f-depreciation'), amortizationCasualtyLossDepletion: n('schedule-f-amort'), businessUseOfHome: n('schedule-f-home') }));
     } else if (record.form === 'Form 1120-S') {
-      if (!hasAny(fields, ['scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist'])) { requireParserField(requirements, extractionId, record); continue; }
+      if (!hasAny(fields, S_CORP_K1_INCOME_FIELD_IDS)) {
+        // Return pages persist scorp-return-* lines as evidence for the K-1.
+        // They are not an independent borrower income calculation row.
+        if (isSCorpReturnEvidenceOnly(record.fields)) continue;
+        requireParserField(requirements, extractionId, record);
+        continue;
+      }
       const ownership = n('scorp-own-pct') ?? meta.ownershipPercentage;
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
       push(projected, 'form1120S', compact({ ...base, businessName: t('scorp-name'), ein: t('scorp-ein'), ownershipPercentage: ownership, k1OrdinaryIncome: n('scorp-ord'), k1NetRentalRealEstate: n('scorp-rre'), k1OtherNetRentalIncome: n('scorp-onr'), k1Distributions: n('scorp-dist'), depletion: n('scorp-depletion'), mealsExclusion: n('scorp-meals'), hasStableDistributions: meta.hasStableDistributions }));
@@ -294,6 +300,7 @@ function compact(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 const PARTNERSHIP_K1_INCOME_FIELD_IDS = ['pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist'] as const;
+const S_CORP_K1_INCOME_FIELD_IDS = ['scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist'] as const;
 
 function hasAny(fields: ReadonlyMap<string, unknown>, ids: readonly string[]): boolean {
   return ids.some((id) => fields.has(id));
@@ -307,6 +314,18 @@ function isPartnershipReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?:
   for (const field of fields) {
     if (k1Income.has(field.sourceFieldId)) return false;
     if (!field.sourceFieldId.startsWith('pt-return-')) return false;
+    returnField = true;
+  }
+  return returnField;
+}
+/** True when every captured field is an S-corporation return id and none are K-1 income boxes. */
+function isSCorpReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?: string }>): boolean {
+  if (fields.length === 0) return false;
+  const k1Income = new Set<string>(S_CORP_K1_INCOME_FIELD_IDS);
+  let returnField = false;
+  for (const field of fields) {
+    if (k1Income.has(field.sourceFieldId)) return false;
+    if (!field.sourceFieldId?.startsWith('scorp-return-')) return false;
     returnField = true;
   }
   return returnField;
