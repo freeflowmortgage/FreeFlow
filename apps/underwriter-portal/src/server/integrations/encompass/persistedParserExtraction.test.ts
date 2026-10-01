@@ -71,3 +71,20 @@ test('accepts the parser fields emitted by the controlled-pilot paystub and Form
   ] });
   assert.equal(JSON.stringify(result).includes('000-00-0000'), false);
 });
+
+test('accepts allowlisted Form 1120-S return evidence without persisting unrelated fields', () => {
+  const result = selectPersistableParserExtraction({ formExtracts: [
+    { form: 'Form 1120-S', pageIndex: 0, entityId: 'scorp-return-p0', sourceFieldId: 'scorp-return-name', value: 'Synthetic S Corporation' },
+    { form: 'Form 1120-S', pageIndex: 0, entityId: 'scorp-return-p0', sourceFieldId: 'scorp-return-ord', value: '32000.00', numericValue: 32000 },
+    { form: 'Form 1120-S', pageIndex: 0, entityId: 'scorp-return-p0', sourceFieldId: 'borrower-ssn', value: '000-00-0000' },
+  ] });
+
+  assert.deepEqual(result.normalizedInput, { formRecords: [{
+    entityId: 'Form 1120-S:scorp-return-p0', form: 'Form 1120-S', pageIndex: 0,
+    fields: [
+      { sourceFieldId: 'scorp-return-name', value: 'Synthetic S Corporation' },
+      { sourceFieldId: 'scorp-return-ord', value: '32000.00', numericValue: 32000 },
+    ],
+  }] });
+  assert.equal(JSON.stringify(result).includes('000-00-0000'), false);
+});

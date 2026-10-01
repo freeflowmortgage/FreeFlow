@@ -33,11 +33,11 @@ export async function runRealConnectorParserSmoke(dependencies: SmokeDependencie
       signal: AbortSignal.timeout(120_000),
     });
     if (!response.ok) throw new Error(`Parser returned HTTP ${response.status}.`);
-    const parsed = await response.json() as { page_count?: unknown; ocr_page_count?: unknown; classifications?: unknown };
-    if (typeof parsed.page_count !== 'number' || typeof parsed.ocr_page_count !== 'number' || !parsed.classifications) {
+    const parsed = await response.json() as { total_pages_scanned?: unknown; ocr_page_count?: unknown; classifications?: unknown };
+    if (typeof parsed.total_pages_scanned !== 'number' || typeof parsed.ocr_page_count !== 'number' || !parsed.classifications) {
       throw new Error('Parser response was not structured as expected.');
     }
-    report({ marker: 'REAL_CONNECTOR_PARSER_SMOKE=passed', sha256: downloaded.sha256, pageCount: parsed.page_count, ocrPageCount: parsed.ocr_page_count, classifications: parsed.classifications });
+    report({ marker: 'REAL_CONNECTOR_PARSER_SMOKE=passed', sha256: downloaded.sha256, pageCount: parsed.total_pages_scanned, ocrPageCount: parsed.ocr_page_count, classifications: parsed.classifications });
   } finally {
     downloaded.bytes.fill(0);
   }

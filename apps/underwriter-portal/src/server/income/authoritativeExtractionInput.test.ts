@@ -185,6 +185,57 @@ test('Form 1065 missing K-1 income still fail-closes when the record is not retu
   });
 });
 
+test('Form 1120-S return-only pages are skipped while K-1 income remains authoritative', () => {
+  const returnId = '00000000-0000-4000-8000-000000000205';
+  const k1Id = '00000000-0000-4000-8000-000000000206';
+  const returnExtraction = {
+    extractionId: returnId,
+    normalizedInput: { formRecords: [{ entityId: 'form-1120s-p0', form: 'Form 1120-S', pageIndex: 0, fields: [
+      { sourceFieldId: 'scorp-return-name', value: 'Synthetic S Corporation' },
+      { sourceFieldId: 'scorp-return-ein', value: '00-0000000' },
+      { sourceFieldId: 'scorp-return-ord', numericValue: 32000 },
+    ] }] },
+    metadataAssignments: [{ entityId: 'form-1120s-p0', taxYear: 2024, ownershipPercentage: 100 }],
+  };
+  assert.equal(mergeAuthoritativeExtractionInputs([returnExtraction]).form1120S, undefined);
+
+  const projected = mergeAuthoritativeExtractionInputs([
+    returnExtraction,
+    {
+      extractionId: k1Id,
+      normalizedInput: { formRecords: [{ entityId: 'form-1120s-k1', form: 'Form 1120-S', pageIndex: 4, fields: [
+        { sourceFieldId: 'scorp-name', value: 'Synthetic S Corporation' },
+        { sourceFieldId: 'scorp-ord', numericValue: 48000 },
+        { sourceFieldId: 'scorp-dist', numericValue: 36000 },
+        { sourceFieldId: 'scorp-own-pct', numericValue: 40 },
+      ] }] },
+      metadataAssignments: [{ entityId: 'form-1120s-k1', taxYear: 2024 }],
+    },
+  ]);
+  assert.equal(projected.form1120S?.length, 1);
+  assert.equal(projected.form1120S?.[0].entityId, `${k1Id}:form-1120s-k1`);
+  assert.equal(projected.form1120S?.[0].k1OrdinaryIncome, 48000);
+  assert.equal(projected.form1120S?.[0].k1Distributions, 36000);
+  assert.equal(projected.form1120S?.[0].ownershipPercentage, 40);
+});
+
+test('Form 1120-S non-return records without K-1 income still fail closed', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000207';
+  const mixed = {
+    extractionId,
+    normalizedInput: { formRecords: [{ entityId: 'form-1120s-mixed', form: 'Form 1120-S', pageIndex: 3, fields: [
+      { sourceFieldId: 'scorp-return-ord', numericValue: 32000 },
+      { sourceFieldId: 'scorp-own-pct', numericValue: 25 },
+    ] }] },
+    metadataAssignments: [{ entityId: 'form-1120s-mixed', taxYear: 2024 }],
+  };
+  assert.throws(() => mergeAuthoritativeExtractionInputs([mixed]), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{ extractionId, entityId: 'form-1120s-mixed', field: 'requiredParserField', form: 'Form 1120-S' }]);
+    return true;
+  });
+});
+
 test('a newer reviewed metadata version invalidates calculation provenance', () => {
   const binding = {
     extractionId: 'extraction', extractionHash: 'a'.repeat(64), sourceDocumentId: 'document', sourceDocumentVersion: 2,
