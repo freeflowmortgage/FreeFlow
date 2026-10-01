@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+execFileSync(process.execPath, [resolve(appRoot, 'node_modules/vite/bin/vite.js'), 'build'], {
+  cwd: appRoot,
+  env: { ...process.env, VITE_FREEFLOW_RUNTIME_MODE: 'encompass-hosted' },
+  stdio: 'ignore',
+});
 
 const port = 3109;
 const child = spawn(process.execPath, ['scripts/serve-production.mjs'], {
-  cwd: new URL('..', import.meta.url), env: { ...process.env, FREEFLOW_RUNTIME_MODE: 'protected-web', PORT: String(port) }, stdio: 'ignore',
+  cwd: appRoot, env: { ...process.env, FREEFLOW_RUNTIME_MODE: 'protected-web', PORT: String(port) }, stdio: 'ignore',
 });
 try {
   await new Promise((resolve) => setTimeout(resolve, 300));
