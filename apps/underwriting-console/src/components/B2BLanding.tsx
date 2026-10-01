@@ -13,6 +13,7 @@ import {
 import BrandLogo from './BrandLogo';
 import FreeFlowMascot from './FreeFlowMascot';
 import type { ConsoleView } from '../appTypes';
+import LogoutButton from './LogoutButton';
 
 const PRODUCTS: {
   id: string;
@@ -109,6 +110,7 @@ export default function B2BLanding({
             </a>
           </nav>
           <div className="flex items-center gap-2">
+            {protectedMode ? <LogoutButton /> : null}
             <a
               href="mailto:sales@freeflowmortgage.com?subject=FreeFlow%20walkthrough"
               className="hidden rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 md:inline-block"

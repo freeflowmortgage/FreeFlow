@@ -42,3 +42,19 @@ test('upload intake uses only the same-origin protected portal route', async () 
     assert.equal(new Headers(received?.init?.headers).has('x-tenant-id'), false);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('logout uses a same-origin POST and returns the server-validated destination', async () => {
+  const originalFetch = globalThis.fetch;
+  let received: { path: string; init: RequestInit | undefined } | undefined;
+  globalThis.fetch = async (input, init) => {
+    received = { path: String(input), init };
+    return Response.json({ logoutUrl: 'https://freeflow-dev.auth.us-west-2.amazoncognito.com/logout?client_id=client' });
+  };
+  try {
+    const result = await portalClient.logout();
+    assert.equal(received?.path, '/api/auth/logout');
+    assert.equal(received?.init?.method, 'POST');
+    assert.equal(received?.init?.credentials, 'same-origin');
+    assert.match(result.logoutUrl, /^https:\/\/freeflow-dev\.auth\.us-west-2\.amazoncognito\.com\/logout/);
+  } finally { globalThis.fetch = originalFetch; }
+});

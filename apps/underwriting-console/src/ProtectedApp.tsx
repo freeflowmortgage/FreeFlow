@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ConsoleView } from './appTypes';
 import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
+import LogoutButton from './components/LogoutButton';
 import PdfCoordinateCanvas, { type SpatialCoordinates } from './components/PdfCoordinateCanvas';
 import { PortalApiError, portalClient } from './api/portalClient';
 import { EncompassHostError, type EncompassHostBridge } from './encompass-host/bridge';
@@ -213,7 +214,7 @@ export default function ProtectedApp() {
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
           <div className="flex items-center gap-3"><BrandLogo compact /><div><span className="text-sm font-bold text-slate-900">Income</span><p className="text-[11px] text-slate-500">Authoritative protected workflow</p></div></div>
-          <div className="flex items-center gap-2"><span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Protected</span><span data-testid="workflow-state" className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">{workflowState.replace(/_/g, ' ')}</span></div>
+          <div className="flex items-center gap-2"><span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Protected</span><span data-testid="workflow-state" className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">{workflowState.replace(/_/g, ' ')}</span><LogoutButton /></div>
         </header>
 
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-3">
