@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ConsoleView } from './appTypes';
 import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
+import Conversational1003 from './components/Conversational1003';
+import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
 import PdfCoordinateCanvas, { type SpatialCoordinates } from './components/PdfCoordinateCanvas';
 import { PortalApiError, portalClient } from './api/portalClient';
 import { EncompassHostError, type EncompassHostBridge } from './encompass-host/bridge';
@@ -25,6 +27,7 @@ type LocalDocument = Readonly<{ file: File; url: string; attachmentId: string | 
 
 export default function ProtectedApp() {
   const [requestedView, setRequestedView] = useState<ConsoleView | null>(null);
+  const [syntheticProductDemosEnabled, setSyntheticProductDemosEnabled] = useState(false);
   const [contextState, setContextState] = useState<ConsoleContext | null>(null);
   const [hostBridge, setHostBridge] = useState<EncompassHostBridge | null>(null);
   const [hostLoanGuid, setHostLoanGuid] = useState<string | null>(null);
@@ -52,6 +55,7 @@ export default function ProtectedApp() {
       try {
         if (consoleRuntime.hosted) {
           const configuration = await loadConsoleRuntimeConfiguration();
+          setSyntheticProductDemosEnabled(configuration.syntheticProductDemos?.enabled === true);
           const bridge = resolveEncompassHostBridge(configuration);
           const host = await bridge.activeLoan();
           const launch = await portalClient.launchEncompassHost(host.loanGuid, configuration.testHost.borrowers);
@@ -203,6 +207,16 @@ export default function ProtectedApp() {
   };
 
   if (!requestedView) return <B2BLanding onOpenService={setRequestedView} protectedMode />;
+  if (requestedView === 'intake' || requestedView === 'appraisal') {
+    return (
+      <ProtectedProductDemo
+        view={requestedView}
+        enabled={syntheticProductDemosEnabled}
+        onBack={() => setRequestedView(null)}
+      />
+    );
+  }
+  if (requestedView !== 'split') return <ProtectedProductUnavailable onBack={() => setRequestedView(null)} />;
   const canCalculate = Boolean(contextState && requirements?.length === 0 && contextState.extractions.some((item) => item.status === 'ACTIVE'));
   const canApprove = Boolean(contextState?.calculation?.current && !contextState.approval?.current);
   const failedCurrentWrite = contextState?.hostWrite?.status === 'FAILED' && contextState.hostWrite.approvalEventId === contextState.approval?.id;
@@ -279,6 +293,35 @@ export default function ProtectedApp() {
         </div>
 
         <footer className="border-t border-slate-200 px-6 py-4 text-xs text-slate-500">{contextState ? `Loan ${contextState.loan.id} / version ${contextState.loan.version} / ${contextState.loan.program}${contextState.loan.borrowerName ? ` / ${contextState.loan.borrowerName}` : ''}` : contextError ?? 'Loading authoritative context...'}</footer>
+      </div>
+    </main>
+  );
+}
+
+function ProtectedProductDemo({ view, enabled, onBack }: { view: 'intake' | 'appraisal'; enabled: boolean; onBack: () => void }) {
+  if (!enabled) return <ProtectedProductUnavailable onBack={onBack} />;
+  const title = view === 'intake' ? 'AI 1003' : 'Appraisal Review';
+  return (
+    <main className="mx-auto max-w-[1500px] px-4 py-5 md:px-6" data-testid="protected-product-demo">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <div>
+          <p className="text-sm font-bold text-amber-950">{title} · synthetic freeflow-dev demonstration</p>
+          <p className="text-xs text-amber-800">Use synthetic data only. No lender, CRM, ICE, or Encompass delivery occurs from this surface.</p>
+        </div>
+        <button type="button" onClick={onBack} className="rounded border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900">Back to products</button>
+      </div>
+      {view === 'intake' ? <Conversational1003 syntheticDemo /> : <AppraisalReviewWorkspace syntheticDemo />}
+    </main>
+  );
+}
+
+function ProtectedProductUnavailable({ onBack }: { onBack: () => void }) {
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-16" data-testid="protected-product-unavailable">
+      <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
+        <h1 className="text-lg font-bold">This protected product demo is not enabled.</h1>
+        <p className="mt-2 text-sm">The environment must explicitly enable the synthetic freeflow-dev demo. No fallback workflow or external delivery was attempted.</p>
+        <button type="button" onClick={onBack} className="mt-4 rounded bg-amber-900 px-4 py-2 text-xs font-bold text-white">Back to products</button>
       </div>
     </main>
   );
