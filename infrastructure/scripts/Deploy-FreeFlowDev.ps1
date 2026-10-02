@@ -396,6 +396,12 @@ foreach ($name in $selectedServices) {
         [void]$allowedAddresses.Add($target)
     }
 }
+if ($selectedServices -contains "portal") {
+    # The document-pull and sync workers are built into the portal image. Keep
+    # an explicitly configured connector_worker_image from pinning those
+    # workers to an older portal digest during a scoped portal deployment.
+    $planArguments.Add("-var=connector_worker_image=$($images["portal"].Reference)")
+}
 
 if ($PSCmdlet.ShouldProcess($PlanPath, "Create and validate saved Terraform deployment plan")) {
     Invoke-Terraform -ArgumentList $planArguments
