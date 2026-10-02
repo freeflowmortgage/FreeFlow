@@ -4,6 +4,7 @@ import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
 import Conversational1003 from './components/Conversational1003';
 import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
+import SplitDocPane from './components/SplitDocPane';
 import UnderwriterSplitViewDemo from './components/UnderwriterSplitViewDemo';
 import PdfCoordinateCanvas, { type SpatialCoordinates } from './components/PdfCoordinateCanvas';
 import { PortalApiError, portalClient } from './api/portalClient';
@@ -40,6 +41,12 @@ async function sha256File(file: File): Promise<string> {
 }
 
 export default function ProtectedApp() {
+  if (window.location.hash === '#split-doc') return <SplitDocPane />;
+
+  return <ProtectedWorkflowApp />;
+}
+
+function ProtectedWorkflowApp() {
   const initialParams = new URLSearchParams(window.location.search);
   const initialWorkspace = window.location.pathname.startsWith('/workspace');
   const initialIncomeDemo = initialWorkspace && initialParams.get('demo') === 'income';

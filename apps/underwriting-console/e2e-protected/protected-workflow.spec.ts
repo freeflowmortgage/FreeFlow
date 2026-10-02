@@ -163,6 +163,31 @@ test('protected Income appends multiple uploaded PDFs to Nate\'s document worksp
   await expect(page.getByTitle('schedule-c.pdf')).toBeVisible();
 });
 
+test('protected Income dual monitor opens only the synchronized source document pane', async ({ page, context: browserContext }) => {
+  await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
+    testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
+  } }));
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v1/encompass-host/launch') {
+      return route.fulfill({ json: { loanId: LOAN, loanVersion: 1, integrationMode: 'ENCOMPASS_HOSTED', created: true } });
+    }
+    if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: context('bound') });
+    return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/workspace?product=split');
+  await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
+
+  const popupPromise = browserContext.waitForEvent('page');
+  await page.getByRole('button', { name: 'Dual monitor' }).click();
+  const documentPane = await popupPromise;
+
+  await expect(documentPane.getByText('Document Canvas · Dual-Monitor Pane')).toBeVisible();
+  await expect(documentPane.getByTestId('protected-workflow')).toHaveCount(0);
+  await expect(page.getByTestId('protected-workflow')).toBeVisible();
+});
+
 test('protected white workflow binds, uploads, reviews, calculates, approves, and durably writes', async ({ page }) => {
   let stage: 'bound' | 'uploaded' | 'reviewed' | 'calculated' | 'approved' | 'written' = 'bound';
   let fieldMapRequests = 0;
