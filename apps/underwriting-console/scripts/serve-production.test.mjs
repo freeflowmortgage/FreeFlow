@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -11,11 +11,19 @@ execFileSync(process.execPath, [resolve(appRoot, 'node_modules/vite/bin/vite.js'
   env: { ...process.env, VITE_FREEFLOW_RUNTIME_MODE: 'encompass-hosted' },
   stdio: 'ignore',
 });
-execFileSync(process.execPath, [
-  resolve(appRoot, '../../services/encompass-connector/node_modules/esbuild/bin/esbuild'),
-  resolve(appRoot, 'src/server/demoFixtureDocuments.ts'), '--bundle', '--platform=node', '--target=node22', '--format=cjs',
-  `--outfile=${resolve(appRoot, 'dist/server/demo-fixtures.cjs')}`,
-], { cwd: appRoot, stdio: 'ignore' });
+const { buildSync } = await import(pathToFileURL(resolve(
+  appRoot,
+  '../../services/encompass-connector/node_modules/esbuild/lib/main.js',
+)).href);
+buildSync({
+  entryPoints: [resolve(appRoot, 'src/server/demoFixtureDocuments.ts')],
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'cjs',
+  outfile: resolve(appRoot, 'dist/server/demo-fixtures.cjs'),
+  logLevel: 'silent',
+});
 cpSync(resolve(appRoot, 'node_modules/pdfkit/js/data'), resolve(appRoot, 'dist/server/data'), { recursive: true });
 
 const port = 3109;
