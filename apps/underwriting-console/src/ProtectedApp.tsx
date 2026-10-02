@@ -22,6 +22,8 @@ import {
   protectedWorkspaceDocuments,
   type ProtectedLocalDocument,
 } from './protectedWorkspace';
+import { findDuplicate } from './livePacket';
+import type { LiveDocument, ParseResponse } from './parseTypes';
 
 const MAX_DOCUMENT_BYTES = 40 * 1024 * 1024;
 const EMPLOYMENT_ROLES = ['CURRENT', 'CONCURRENT', 'PRIOR', 'PRIMARY', 'SECONDARY'] as const;
@@ -31,6 +33,11 @@ const WORKFLOW_STEPS = ['NO_LOAN_CONTEXT', 'BOUND', 'DOCUMENT_UPLOADED', 'EXTRAC
 
 type LocalDocument = ProtectedLocalDocument & Readonly<{ id: string; url: string }>;
 type IncomeSurface = 'WORKSPACE' | 'AUTHORITATIVE';
+
+async function sha256File(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 export default function ProtectedApp() {
   const initialIncomeDemo = new URLSearchParams(window.location.search).get('demo') === 'income';
@@ -274,7 +281,7 @@ export default function ProtectedApp() {
   if (requestedView !== 'split') return <ProtectedProductUnavailable onBack={() => setRequestedView(null)} />;
   const canCalculate = Boolean(contextState && requirements?.length === 0 && contextState.extractions.some((item) => item.status === 'ACTIVE'));
   const canApprove = Boolean(contextState?.calculation?.current && !contextState.approval?.current);
-  const failedCurrentWrite = contextState?.hostWrite?.status === 'FAILED' && contextState.hostWrite.approvalEventId === contextState.approval?.id;
+  const failedCurrentWrite = contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'FAILED';
   const canWrite = Boolean(consoleRuntime.hosted && contextState?.approval?.current && hostBridge && hostLoanGuid && !failedCurrentWrite);
 
   return (
@@ -385,7 +392,7 @@ export default function ProtectedApp() {
               {contextState?.calculation ? <div className="mt-3 rounded bg-slate-50 p-3 text-xs text-slate-700"><p data-testid="combined-income"><strong>Qualifying monthly income:</strong> {formatCurrency(contextState.calculation.qualifyingMonthlyIncome)}</p>{(contextState.calculation.borrowerIncome ?? []).map((line) => <p key={line.borrowerKey} data-testid={`borrower-income-${line.borrowerKey}`}><strong>{line.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {line.borrowerKey}:</strong> {formatCurrency(line.qualifyingMonthlyIncome)}</p>)}<p><strong>Trend:</strong> {contextState.calculation.trendingResult}</p><p><strong>Years:</strong> {contextState.calculation.yearsAnalyzed.join(', ')}</p>{calculationWarnings.length ? <ul className="mt-2 list-disc pl-4 text-amber-800">{calculationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}{!contextState.calculation.current && !contextState.approval?.current ? <p className="mt-1 font-medium text-red-700">This calculation is stale. Recalculate before approval.</p> : null}</div> : null}
             </div>
 
-            {consoleRuntime.hosted ? <div className="rounded-lg border border-slate-200 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-slate-500">Explicitly writes only the backend-approved field map, then calculates, commits, and reads back the approval marker.</p><button data-testid="write-host" type="button" disabled={!canWrite || busy !== null || contextState?.hostWrite?.status === 'SUCCEEDED'} onClick={() => void writeApprovedResult()} className="mt-3 rounded bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'WRITE' ? 'Writing...' : contextState?.hostWrite?.status === 'SUCCEEDED' ? 'Durably written' : 'Write approved result'}</button>{failedCurrentWrite ? <p className="mt-2 text-xs font-medium text-red-700">The prior host write failed. A new approval is required before retrying.</p> : null}</div> : null}
+            {consoleRuntime.hosted ? <div className="rounded-lg border border-slate-200 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-slate-500">Explicitly writes only the backend-approved field map, then calculates, commits, and reads back the approval marker.</p><button data-testid="write-host" type="button" disabled={!canWrite || busy !== null || (contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'SUCCEEDED')} onClick={() => void writeApprovedResult()} className="mt-3 rounded bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'WRITE' ? 'Writing...' : contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'SUCCEEDED' ? 'Durably written' : 'Write approved result'}</button>{failedCurrentWrite ? <p className="mt-2 text-xs font-medium text-red-700">The prior host write failed. A new approval is required before retrying.</p> : null}</div> : null}
           </section>
         </div>
         )}
@@ -397,17 +404,70 @@ export default function ProtectedApp() {
 }
 
 function ProtectedIncomeDemo({ onBack }: { onBack: () => void }) {
+  const [documents, setDocuments] = useState<LiveDocument[]>([]);
+  const documentsRef = useRef<LiveDocument[]>([]);
+  const [showLive, setShowLive] = useState(false);
+  const [parseBusy, setParseBusy] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  const parsePdfs = async (files: File[]) => {
+    if (!files.length) return;
+    setParseBusy(true);
+    setParseError(null);
+    const errors: string[] = [];
+    try {
+      for (const file of files) {
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+          errors.push(`${file.name} is not a PDF.`);
+          continue;
+        }
+        if (file.size > MAX_DOCUMENT_BYTES) {
+          errors.push(`${file.name} exceeds the 40 MiB limit.`);
+          continue;
+        }
+        try {
+          const [sha256, result] = await Promise.all([
+            sha256File(file),
+            portalClient.previewIncomeDocument(file) as Promise<ParseResponse>,
+          ]);
+          const duplicate = findDuplicate(documentsRef.current, { sha256, fileName: file.name, result });
+          if (duplicate) {
+            errors.push(duplicate.reason);
+            continue;
+          }
+          const next: LiveDocument = { id: crypto.randomUUID(), sha256, file, fileName: file.name, result };
+          documentsRef.current = [...documentsRef.current, next];
+          setDocuments(documentsRef.current);
+          setShowLive(true);
+        } catch (error) {
+          errors.push(describeError(error, `Unable to process ${file.name}.`));
+        }
+      }
+    } finally {
+      setParseBusy(false);
+      if (errors.length) setParseError([...new Set(errors)].join(' Â· '));
+    }
+  };
+
   return (
     <main className="mx-auto max-w-[1500px] px-4 py-5 md:px-6" data-testid="protected-income-demo">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
         <div>
           <p className="text-sm font-bold text-indigo-950">Income Intelligence · original synthetic demonstration</p>
-          <p className="text-xs text-indigo-800">Comparison mode only. It does not persist documents, approve income, or call the connector or Encompass.</p>
+          <p className="text-xs text-indigo-800">Comparison mode only. Your PDFs are parsed in memory for page-and-box review; they are not persisted, assigned to a borrower, approved, or sent to the connector or Encompass.</p>
         </div>
         <button data-testid="demo-back-to-products" type="button" onClick={onBack} className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-900">Back to products</button>
       </div>
       <div className="h-[calc(100vh-8rem)] min-h-[780px]">
-        <UnderwriterSplitViewDemo source="demo" />
+        <UnderwriterSplitViewDemo
+          source={showLive && documents.length ? 'live' : 'demo'}
+          liveDocuments={documents}
+          parseBusy={parseBusy}
+          parseError={parseError}
+          onParseFiles={(files) => void parsePdfs(files)}
+          onUseDemo={() => setShowLive(false)}
+          onUseLive={() => setShowLive(true)}
+        />
       </div>
     </main>
   );

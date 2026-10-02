@@ -16,6 +16,7 @@ import { PDFDocument, StandardFonts, type PDFForm, type PDFPage } from 'pdf-lib'
 const FORM_DIRS = [
   path.resolve(process.cwd(), 'src/server/forms'),
   path.resolve(process.cwd(), '../../services/doc-parser/templates'),
+  path.resolve(process.cwd(), 'forms'),
 ];
 
 const blankCache = new Map<string, Promise<Uint8Array>>();

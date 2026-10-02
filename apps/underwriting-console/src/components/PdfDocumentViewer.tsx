@@ -378,7 +378,9 @@ export default function PdfDocumentViewer({
                 const box = padOverlayBox(highlight.box);
                 return (
                   <div
+                    data-testid="pdf-highlight"
                     data-box-id={selectedFieldId ?? 'inspect-overlay'}
+                    data-box={`${highlight.box.x},${highlight.box.y},${highlight.box.w},${highlight.box.h}`}
                     data-overlay-visible="true"
                     data-inspect-overlay="true"
                     className="pointer-events-none absolute z-20 box-border rounded-sm border-2 border-emerald-600 bg-emerald-400/10"

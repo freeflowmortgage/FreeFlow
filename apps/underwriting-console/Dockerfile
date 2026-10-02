@@ -33,6 +33,7 @@ COPY --from=deps /app/apps/underwriter-portal/node_modules ./apps/underwriter-po
 COPY --from=deps /app/packages/mortgage-engine/node_modules ./packages/mortgage-engine/node_modules
 COPY --from=deps /app/packages/database/node_modules ./packages/database/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
+COPY --from=deps /app/services/encompass-connector/node_modules ./services/encompass-connector/node_modules
 
 COPY . .
 
@@ -42,6 +43,12 @@ ENV VITE_FREEFLOW_RUNTIME_MODE=$FREEFLOW_CONSOLE_MODE
 
 RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
+RUN ./services/encompass-connector/node_modules/esbuild/bin/esbuild \
+        apps/underwriting-console/src/server/demoFixtureDocuments.ts \
+        --bundle --platform=node --target=node22 --format=cjs \
+        --outfile=apps/underwriting-console/dist/server/demo-fixtures.cjs
+RUN cp -R apps/underwriting-console/node_modules/pdfkit/js/data \
+        apps/underwriting-console/dist/server/data
 
 # 3. Static protected runtime. Parser and fixture middleware are demo/QA-only.
 # Reuse the scan-clean pinned Node Alpine runtime used by the portal rather
@@ -61,6 +68,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
     && chown node:node /tmp/freeflow
 
 COPY --from=builder --chown=node:node /app/apps/underwriting-console/dist ./dist
+COPY --from=builder --chown=node:node /app/services/doc-parser/templates ./forms
 COPY --from=builder --chown=node:node /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
 
 USER node

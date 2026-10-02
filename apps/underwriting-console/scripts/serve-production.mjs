@@ -2,6 +2,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const runtimeMode = process.env.FREEFLOW_RUNTIME_MODE || '';
 if (!['protected-web', 'encompass-hosted'].includes(runtimeMode)) {
@@ -44,7 +45,8 @@ function parseFrameAncestors(value) {
 }
 
 createServer(async (req, res) => {
-  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  const requestUrl = new URL(req.url || '/', 'http://localhost');
+  const pathname = requestUrl.pathname;
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Cache-Control', 'no-store');
@@ -58,6 +60,31 @@ createServer(async (req, res) => {
   if (pathname === '/runtime-config.json') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ testHost: { enabled: testHostRequested, loanGuid: testHostLoanGuid }, syntheticProductDemos: { enabled: syntheticProductDemos } }));
+    return;
+  }
+  if (pathname.startsWith('/fixtures/docs/')) {
+    if (!syntheticProductDemos || req.method !== 'GET') {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end('{"error":{"code":"CONSOLE_ROUTE_DISABLED"}}');
+      return;
+    }
+    try {
+      const { generateDemoFixtureDocument } = await import(pathToFileURL(join(root, 'server/demo-fixtures.cjs')).href);
+      const document = await generateDemoFixtureDocument(pathname, requestUrl.searchParams);
+      if (!document) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end('{"error":{"code":"DEMO_DOCUMENT_NOT_FOUND"}}');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${document.kind}-demo.pdf"`,
+      });
+      res.end(document.bytes);
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end('{"error":{"code":"DEMO_DOCUMENT_GENERATION_FAILED"}}');
+    }
     return;
   }
   const syntheticFixture = pathname === '/fixtures/urar-1004.pdf' || pathname === '/fixtures/urar-1004.meta.json';

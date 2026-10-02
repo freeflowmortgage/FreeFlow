@@ -63,6 +63,9 @@ test('Income demo is isolated from protected APIs and can return to the product 
   await page.goto('/?demo=income');
   await expect(page.getByTestId('protected-income-demo')).toBeVisible();
   await expect(page.getByText('Income Intelligence · original synthetic demonstration')).toBeVisible();
+  await expect(page.getByText(/Loading the Earnings statement source document failed/)).toHaveCount(0);
+  await page.locator('[data-qa-field="ps-hourly-rate"]').first().click();
+  await expect(page.getByTestId('pdf-highlight')).toBeVisible();
   await page.getByRole('button', { name: 'Reconcile' }).click();
   await expect(page.getByRole('button', { name: 'Sync' })).toBeVisible();
   expect(protectedApiCalls).toEqual([]);
@@ -75,6 +78,42 @@ test('Income demo is isolated from protected APIs and can return to the product 
   await expect(demoPage.getByTestId('protected-income-demo')).toBeVisible();
   expect(new URL(demoPage.url()).searchParams.get('demo')).toBe('income');
   await demoPage.close();
+});
+
+test('Income comparison accepts a private PDF preview and highlights its parser box', async ({ page }) => {
+  const previewCalls: Array<{ path: string; contentType: string | undefined }> = [];
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/v1/income-document-preview') {
+      previewCalls.push({ path, contentType: request.headers()['content-type'] });
+      return route.fulfill({ json: {
+        transaction_id: 'preview-w2', total_pages_scanned: 1, pages_extracted_count: 1,
+        extracted_page_indices: [0], ocr_page_count: 1, has_business_returns: false,
+        flags: [], classifications: { '0': ['W-2'] }, unresolved_statements: [],
+        pages: [{ index: 0, formIds: ['W-2'], isNativeText: false, meanConfidence: 99, skewDegrees: 0, words: [], flags: [] }],
+        w2Extracts: [{
+          pageIndex: 0, year: 2025, employerName: 'Synthetic Preview Employer', ein: '00-0000000',
+          box1: 95000, box2: 0, box3: 95000, box4: 0, box5: 96000, box6: 0,
+          boxes: { box5: { x: 0.11, y: 0.22, w: 0.33, h: 0.044 } },
+        }],
+      } });
+    }
+    return route.fulfill({ status: 500, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/?demo=income');
+  const pdf = await PDFDocument.create();
+  pdf.addPage([612, 792]);
+  await page.getByTestId('live-pdf-input').setInputFiles({
+    name: 'my-w2.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()),
+  });
+  await expect(page.getByTitle('my-w2.pdf')).toBeVisible();
+  await page.getByRole('button', { name: 'Wages', exact: true }).click();
+  await page.locator('[data-qa-field="w2-box5"]').first().click();
+  // W-2 grid boxes are narrowed to the right-aligned amount cell before display.
+  await expect(page.getByTestId('pdf-highlight')).toHaveAttribute('data-box', '0.36,0.22,0.08,0.018');
+  expect(previewCalls).toEqual([{ path: '/api/v1/income-document-preview', contentType: 'application/pdf' }]);
 });
 
 test('protected Income appends multiple uploaded PDFs to Nate\'s document workspace', async ({ page }) => {
@@ -377,7 +416,7 @@ function twoBorrowerContext(stage: string, income: { combined: string; first: st
     extractions: pulled ? [{ id: EXTRACTION, attachmentId: 'w2-b1', sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: [], confidence: 99, normalizedInput: {}, evidence: { fields: [] }, metadataReview: reviewed ? { id: 'review-1', metadataVersion: 1, assignments: [], current: true } : null }] : [],
     calculation: calculated ? { id: CALCULATION, calculatedLoanVersion: 3, qualifyingMonthlyIncome: income.combined, trendingResult: 'SINGLE_YEAR', yearsAnalyzed: [2025], current: !approved, borrowerIncome: [{ borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY', qualifyingMonthlyIncome: income.first }, { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER', qualifyingMonthlyIncome: income.second }] } : null,
     approval: approved ? { id: APPROVAL, entityId: CALCULATION, expectedLoanVersion: 3, current: true } : null,
-    hostWrite: stage === 'written' ? { id: WRITE, status: 'SUCCEEDED', approvalEventId: APPROVAL, fieldMapHash: 'a'.repeat(64), safeErrorCode: null } : null,
+    hostWrite: stage === 'written' ? { id: WRITE, status: 'SUCCEEDED', approvalEventId: APPROVAL, expectedLoanVersion: 4, fieldMapHash: 'a'.repeat(64), safeErrorCode: null, current: true } : null,
   };
 }
 
@@ -393,6 +432,6 @@ function context(stage: string) {
     extractions: hasUpload ? [{ id: EXTRACTION, attachmentId: 'upload-1', sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: reviewed ? [] : ['W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED'], confidence: 99, normalizedInput: { w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 96000 }] }, evidence: { fields: [{ collection: 'w2Extracts', index: 0, field: 'box1', pageIndex: 0, box: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 } }] }, metadataReview: reviewed ? { id: 'review-1', metadataVersion: 1, assignments: [{ entityId: 'w2-p0-0', employmentRole: 'CURRENT' }], current: true } : null }] : [],
     calculation: calculated ? { id: CALCULATION, calculatedLoanVersion: 3, qualifyingMonthlyIncome: '8000', trendingResult: 'CONVENTIONAL_STABLE_OR_INCREASING', yearsAnalyzed: [2025], current: !approved } : null,
     approval: approved ? { id: APPROVAL, entityId: CALCULATION, expectedLoanVersion: 3, current: true } : null,
-    hostWrite: stage === 'written' ? { id: WRITE, status: 'SUCCEEDED', approvalEventId: APPROVAL, expectedLoanVersion: 4, fieldMapHash: 'a'.repeat(64), safeErrorCode: null } : null,
+    hostWrite: stage === 'written' ? { id: WRITE, status: 'SUCCEEDED', approvalEventId: APPROVAL, expectedLoanVersion: 4, fieldMapHash: 'a'.repeat(64), safeErrorCode: null, current: true } : null,
   };
 }
