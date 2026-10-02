@@ -447,6 +447,7 @@ resource "aws_ecs_task_definition" "console" {
         { name = "PORT", value = "3000" },
         { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
         { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
+        { name = "FREEFLOW_SYNTHETIC_PRODUCT_DEMOS", value = "true" },
         { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
         { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
         { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },
