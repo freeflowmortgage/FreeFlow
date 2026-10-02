@@ -132,7 +132,7 @@ export default function B2BLanding({
               onClick={() => onOpenService('split')}
               className="rounded-full bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 hover:from-emerald-700 hover:to-emerald-600"
             >
-              Open workspace
+              Login
             </button>
           </div>
         </div>
@@ -166,7 +166,7 @@ export default function B2BLanding({
                 onClick={() => onOpenService('split')}
                 className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
               >
-                {protectedMode ? 'Open protected workflow' : 'Try the live demo'}
+                {protectedMode ? 'Login to workspace' : 'Try the live demo'}
               </button>
               {protectedMode && onOpenIncomeDemo ? (
                 <button
@@ -283,7 +283,7 @@ export default function B2BLanding({
                       onClick={() => onOpenService(product.view)}
                       className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
                     >
-                      Open in workspace
+                      {protectedMode ? 'Login to workspace' : 'Open in workspace'}
                     </button>
                     {protectedMode && product.id === 'income' && onOpenIncomeDemo ? (
                       <button

@@ -3199,7 +3199,7 @@ export default function UnderwriterSplitViewDemo({
       {protectedContext ? (
         <div data-testid="protected-workspace-banner" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-[11px] text-indigo-950">
           <span>
-            <strong>Authenticated review workspace.</strong> OCR fields, highlights, and worksheet math are shown here; approval and delivery use only the persisted authoritative calculation.
+            <strong>1. Upload &amp; review.</strong> Verify OCR fields, highlights, worksheet math, and borrower assignments here. Continue to submission only when the package looks right.
           </span>
           {protectedContext.authoritativeMonthlyIncome !== null ? (
             <span data-testid="workspace-authoritative-income" className="rounded bg-white px-2 py-1 font-black text-indigo-900">
@@ -4890,10 +4890,10 @@ export default function UnderwriterSplitViewDemo({
 
               <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">{protectedContext ? 'Authoritative approval and delivery' : 'Sync these selections'}</h4>
+                  <h4 className="text-sm font-bold text-slate-900">{protectedContext ? 'Ready to submit this reviewed package?' : 'Sync these selections'}</h4>
                   <p className="mt-1 text-xs text-slate-500">
                     {protectedContext
-                      ? 'The protected workflow persists borrower assignments, recalculates on the server, records approval, and writes only the approved field map.'
+                      ? 'Submission validates borrower assignments and required fields before creating the official server calculation. Approval and delivery happen in the next step.'
                       : 'Writes the amounts above to the eFolder. Nothing syncs until you click here.'}
                   </p>
                 </div>
@@ -4902,7 +4902,7 @@ export default function UnderwriterSplitViewDemo({
                   onClick={protectedContext ? onOpenAuthoritativeWorkflow : handleExportSync}
                   className="flex items-center gap-2 self-end rounded-lg bg-emerald-500 px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-950 shadow-sm transition hover:bg-emerald-600"
                 >
-                  {protectedContext ? 'Open authoritative workflow' : 'Sync'} <ArrowRight className="h-4 w-4" />
+                  {protectedContext ? 'Continue to submission' : 'Sync'} <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
             </div>

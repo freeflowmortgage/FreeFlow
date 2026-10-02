@@ -7,6 +7,21 @@ const CALCULATION = '00000000-0000-4000-8000-000000000400';
 const APPROVAL = '00000000-0000-4000-8000-000000000500';
 const WRITE = '00000000-0000-4000-8000-000000000600';
 
+test('public landing waits for Login before loading protected runtime or loan context', async ({ page }) => {
+  const protectedCalls: string[] = [];
+  await page.route((url) => url.pathname === '/runtime-config.json' || url.pathname.startsWith('/api/'), (route) => {
+    protectedCalls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 500, json: { error: { code: 'LOGIN_REQUIRED' } } });
+  });
+
+  await page.goto('/');
+  await expect(page.getByTestId('b2b-landing')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeVisible();
+  await expect(page.getByTestId('open-income-demo')).toHaveCount(0);
+  await page.waitForTimeout(100);
+  expect(protectedCalls).toEqual([]);
+});
+
 test('protected product cards expose only explicitly enabled synthetic demos', async ({ page }) => {
   const productCalls: string[] = [];
   await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
@@ -22,6 +37,9 @@ test('protected product cards expose only explicitly enabled synthetic demos', a
   });
 
   await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeVisible();
+  await expect(page.getByTestId('open-income-demo')).toHaveCount(0);
+  await expect(page.getByTestId('enter-income-demo')).toHaveCount(0);
   await page.getByTestId('service-1003').click();
   await expect(page.getByTestId('ai-1003-workspace')).toBeVisible();
   await expect(page.getByTestId('ai-1003-synthetic-banner')).toContainText('no lead or LOS delivery');
@@ -60,7 +78,7 @@ test('Income demo is isolated from protected APIs and can return to the product 
     return route.fulfill({ status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } } });
   });
 
-  await page.goto('/?demo=income');
+  await page.goto('/workspace?demo=income');
   await expect(page.getByTestId('protected-income-demo')).toBeVisible();
   await expect(page.getByText('Income Intelligence · original synthetic demonstration')).toBeVisible();
   await expect(page.getByText(/Loading the Earnings statement source document failed/)).toHaveCount(0);
@@ -71,13 +89,7 @@ test('Income demo is isolated from protected APIs and can return to the product 
   expect(protectedApiCalls).toEqual([]);
   await page.getByTestId('demo-back-to-products').click();
   await expect(page.getByTestId('b2b-landing')).toBeVisible();
-  await expect(page.getByTestId('enter-income-demo')).toBeVisible();
-  const popupPromise = page.waitForEvent('popup');
-  await page.getByTestId('enter-income-demo').click();
-  const demoPage = await popupPromise;
-  await expect(demoPage.getByTestId('protected-income-demo')).toBeVisible();
-  expect(new URL(demoPage.url()).searchParams.get('demo')).toBe('income');
-  await demoPage.close();
+  await expect(page.getByTestId('enter-income-demo')).toHaveCount(0);
 });
 
 test('Income comparison accepts a private PDF preview and highlights its parser box', async ({ page }) => {
@@ -102,7 +114,7 @@ test('Income comparison accepts a private PDF preview and highlights its parser 
     return route.fulfill({ status: 500, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
   });
 
-  await page.goto('/?demo=income');
+  await page.goto('/workspace?demo=income');
   const pdf = await PDFDocument.create();
   pdf.addPage([612, 792]);
   await page.getByTestId('live-pdf-input').setInputFiles({
@@ -133,7 +145,7 @@ test('protected Income appends multiple uploaded PDFs to Nate\'s document worksp
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open workspace' }).click();
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
   const first = await PDFDocument.create(); first.addPage([612, 792]);
   const second = await PDFDocument.create(); second.addPage([612, 792]);
   await page.getByTestId('protected-pdf-input').setInputFiles([
@@ -183,7 +195,7 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   const navigation = await page.goto('/');
   const renderedBody = await page.locator('body').innerText();
   await expect(page.getByTestId('b2b-landing'), `HTTP ${navigation?.status()}; body=${renderedBody}; render errors=${pageErrors.join('; ')}; failed requests=${failedRequests.join('; ')}`).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Open workspace' }).click();
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('BOUND');
 
   const pdf = await PDFDocument.create(); pdf.addPage([612, 792]);
@@ -191,7 +203,8 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   await page.getByTestId('upload-pdf').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
   await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
-  await expect(page.getByTestId('protected-workspace-banner')).toContainText('persisted authoritative calculation');
+  await expect(page.getByTestId('protected-workspace-banner')).toContainText('Upload & review');
+  await expect(page.getByTestId('authoritative-workflow-tab')).toContainText('Submit & approve');
   await page.getByTestId('authoritative-workflow-tab').click();
   await page.getByRole('combobox').selectOption('CURRENT');
   await page.getByRole('button', { name: 'Confirm reviewed metadata' }).click();
@@ -223,7 +236,7 @@ test('protected white workflow visibly preserves a backend launch failure', asyn
   }));
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open workspace' }).click();
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Hosted mode is temporarily unavailable. (HOSTED_MODE_UNAVAILABLE)');
   await expect(page.getByTestId('workflow-state')).toHaveText('NO LOAN CONTEXT');
   await page.getByTestId('authoritative-workflow-tab').click();
@@ -264,7 +277,7 @@ test('TB-01 through TB-12 two-borrower hosted path assigns both documents and wr
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open workspace' }).click();
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('BOUND');
   await page.getByTestId('authoritative-workflow-tab').click();
   await expect(page.getByTestId('borrower-roster')).toContainText('Primary borrower-1');
@@ -325,7 +338,7 @@ test('demo gate harness renders paystub and matching W-2 reconciliation, then ap
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open workspace' }).click();
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
   await page.getByTestId('authoritative-workflow-tab').click();
   await page.getByTestId('pull-documents').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
