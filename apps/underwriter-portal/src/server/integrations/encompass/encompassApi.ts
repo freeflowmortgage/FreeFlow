@@ -1,5 +1,10 @@
 import { selectPersistableParserExtraction, type PersistableIncomeExtraction } from './persistedParserExtraction';
 
+// This versions the bounded persistence projection as well as the private
+// parser response. Advance it whenever normalized fields or evidence change so
+// an older extraction is superseded instead of failing the determinism guard.
+const PERSISTED_PARSER_VERSION = 'income-parser-v6';
+
 export type EncompassAttachment = Readonly<{ id: string }>;
 export type ParsedAttachment = Readonly<{
   pageCount: number;
@@ -61,7 +66,7 @@ export async function parseWithIncomeService(
   return {
     pageCount,
     documentCategory: category.slice(0, 100),
-    parserVersion: 'income-parser-v5',
+    parserVersion: PERSISTED_PARSER_VERSION,
     confidence: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null,
     extraction,
   };
