@@ -28,7 +28,14 @@ cpSync(resolve(appRoot, 'node_modules/pdfkit/js/data'), resolve(appRoot, 'dist/s
 
 const port = 3109;
 const child = spawn(process.execPath, ['scripts/serve-production.mjs'], {
-  cwd: appRoot, env: { ...process.env, FREEFLOW_RUNTIME_MODE: 'protected-web', PORT: String(port) }, stdio: 'ignore',
+  cwd: appRoot,
+  env: {
+    ...process.env,
+    FREEFLOW_RUNTIME_MODE: 'protected-web',
+    COGNITO_LOGOUT_URL: 'https://auth.example.com/logout?client_id=test&logout_uri=https%3A%2F%2Fapp.example.com%2F',
+    PORT: String(port),
+  },
+  stdio: 'ignore',
 });
 try {
   await new Promise((resolve) => setTimeout(resolve, 300));
@@ -40,6 +47,10 @@ try {
   assert.match(health.headers.get('content-security-policy') || '', /connect-src 'self' blob:/);
   assert.match(health.headers.get('content-security-policy') || '', /worker-src 'self' blob:/);
   assert.equal(health.headers.get('x-frame-options'), 'DENY');
+  const logout = await fetch(`http://127.0.0.1:${port}/logout`, { redirect: 'manual' });
+  assert.equal(logout.status, 302);
+  assert.equal(logout.headers.get('location'), 'https://auth.example.com/logout?client_id=test&logout_uri=https%3A%2F%2Fapp.example.com%2F');
+  assert.match(logout.headers.get('set-cookie') || '', /AWSELBAuthSessionCookie/);
 } finally {
   child.kill();
   await once(child, 'exit');

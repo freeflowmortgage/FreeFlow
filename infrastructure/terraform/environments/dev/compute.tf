@@ -448,6 +448,7 @@ resource "aws_ecs_task_definition" "console" {
         { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
         { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
         { name = "FREEFLOW_SYNTHETIC_PRODUCT_DEMOS", value = "true" },
+        { name = "COGNITO_LOGOUT_URL", value = "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com/logout?client_id=${aws_cognito_user_pool_client.alb[0].id}&logout_uri=${urlencode("https://${var.portal_hostname}/")}" },
         { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
         { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
         { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },

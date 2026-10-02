@@ -21,6 +21,7 @@ if (testHostRequested && (!testHostLoanGuid || !/^[A-Za-z0-9-]{1,255}$/.test(tes
 }
 const syntheticProductDemos = process.env.FREEFLOW_RUNTIME_ENV === 'development'
   && process.env.FREEFLOW_SYNTHETIC_PRODUCT_DEMOS === 'true';
+const logoutUrl = parseLogoutUrl(process.env.COGNITO_LOGOUT_URL);
 
 const frameAncestors = runtimeMode === 'encompass-hosted'
   ? parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS)
@@ -44,6 +45,15 @@ function parseFrameAncestors(value) {
   return entries.join(' ');
 }
 
+function parseLogoutUrl(value) {
+  if (!value) return null;
+  const candidate = new URL(value);
+  if (candidate.protocol !== 'https:' || candidate.pathname !== '/logout') {
+    throw new Error('COGNITO_LOGOUT_URL_INVALID');
+  }
+  return candidate.toString();
+}
+
 createServer(async (req, res) => {
   const requestUrl = new URL(req.url || '/', 'http://localhost');
   const pathname = requestUrl.pathname;
@@ -60,6 +70,21 @@ createServer(async (req, res) => {
   if (pathname === '/runtime-config.json') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ testHost: { enabled: testHostRequested, loanGuid: testHostLoanGuid }, syntheticProductDemos: { enabled: syntheticProductDemos } }));
+    return;
+  }
+  if (pathname === '/logout') {
+    if (!logoutUrl || req.method !== 'GET') {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end('{"error":{"code":"LOGOUT_UNAVAILABLE"}}');
+      return;
+    }
+    const expired = 'deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=None';
+    res.setHeader('Set-Cookie', [
+      `AWSELBAuthSessionCookie=${expired}`,
+      ...Array.from({ length: 4 }, (_, index) => `AWSELBAuthSessionCookie-${index}=${expired}`),
+    ]);
+    res.writeHead(302, { Location: logoutUrl });
+    res.end();
     return;
   }
   if (pathname.startsWith('/fixtures/docs/')) {

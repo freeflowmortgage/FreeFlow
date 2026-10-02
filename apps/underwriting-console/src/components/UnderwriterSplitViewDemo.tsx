@@ -519,7 +519,9 @@ export default function UnderwriterSplitViewDemo({
     : liveSession
       ? [{ id: 'single', sha256: '', file: liveSession.file, fileName: liveSession.fileName, result: liveSession.result }]
       : [];
-  const isLive = source === 'live' && packet.length > 0;
+  // The protected workspace is live before its first document is selected.
+  // Keep its real empty state visible instead of falling back to demo values.
+  const isLive = source === 'live';
   const viewer = usePdfViewer(2);
   const [livePageIndex, setLivePageIndex] = useState(0);
   const [inspectOverlay, setInspectOverlay] = useState<InspectOverlay | null>(null);

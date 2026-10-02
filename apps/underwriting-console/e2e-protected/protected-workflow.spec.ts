@@ -146,14 +146,16 @@ test('protected Income appends multiple uploaded PDFs to Nate\'s document worksp
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Login', exact: true }).click();
+  await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
+  await expect(page.getByTestId('logout')).toBeVisible();
+  await expect(page.getByText('Load live PDF', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sarah K. Vance')).toHaveCount(0);
   const first = await PDFDocument.create(); first.addPage([612, 792]);
   const second = await PDFDocument.create(); second.addPage([612, 792]);
-  await page.getByTestId('protected-pdf-input').setInputFiles([
+  await page.getByTestId('live-pdf-input').setInputFiles([
     { name: 'w2.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await first.save()) },
     { name: 'schedule-c.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await second.save()) },
   ]);
-  await page.getByTestId('upload-pdf').click();
-  await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
   await expect.poll(() => attachmentIds.length).toBe(2);
   await page.getByRole('button', { name: 'Wages', exact: true }).click();
   await expect(page.getByTitle('w2.pdf')).toBeVisible();
@@ -197,10 +199,10 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   await expect(page.getByTestId('b2b-landing'), `HTTP ${navigation?.status()}; body=${renderedBody}; render errors=${pageErrors.join('; ')}; failed requests=${failedRequests.join('; ')}`).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('BOUND');
+  await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
 
   const pdf = await PDFDocument.create(); pdf.addPage([612, 792]);
-  await page.getByTestId('protected-pdf-input').setInputFiles({ name: 'synthetic-income.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) });
-  await page.getByTestId('upload-pdf').click();
+  await page.getByTestId('live-pdf-input').setInputFiles({ name: 'synthetic-income.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) });
   await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
   await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
   await expect(page.getByTestId('protected-workspace-banner')).toContainText('Upload & review');
