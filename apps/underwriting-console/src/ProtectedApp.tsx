@@ -40,9 +40,13 @@ async function sha256File(file: File): Promise<string> {
 }
 
 export default function ProtectedApp() {
-  const initialIncomeDemo = new URLSearchParams(window.location.search).get('demo') === 'income';
-  const [requestedView, setRequestedView] = useState<ConsoleView | null>(initialIncomeDemo ? 'split' : null);
-  const [incomeDemo, setIncomeDemo] = useState(initialIncomeDemo);
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialWorkspace = window.location.pathname.startsWith('/workspace');
+  const initialIncomeDemo = initialWorkspace && initialParams.get('demo') === 'income';
+  const requestedProduct = initialParams.get('product');
+  const initialView: ConsoleView = requestedProduct === 'intake' || requestedProduct === 'appraisal' ? requestedProduct : 'split';
+  const [requestedView, setRequestedView] = useState<ConsoleView | null>(initialIncomeDemo || initialWorkspace ? initialView : null);
+  const incomeDemo = initialIncomeDemo;
   const [syntheticProductDemosEnabled, setSyntheticProductDemosEnabled] = useState(false);
   const [contextState, setContextState] = useState<ConsoleContext | null>(null);
   const [hostBridge, setHostBridge] = useState<EncompassHostBridge | null>(null);
@@ -69,10 +73,15 @@ export default function ProtectedApp() {
   }, []);
 
   useEffect(() => {
-    if (incomeDemo) return;
+    if (incomeDemo || !requestedView) return;
     let cancelled = false;
     void (async () => {
       try {
+        if (requestedView !== 'split') {
+          const configuration = await loadConsoleRuntimeConfiguration();
+          if (!cancelled) setSyntheticProductDemosEnabled(configuration.syntheticProductDemos?.enabled === true);
+          return;
+        }
         if (consoleRuntime.hosted) {
           const configuration = await loadConsoleRuntimeConfiguration();
           setSyntheticProductDemosEnabled(configuration.syntheticProductDemos?.enabled === true);
@@ -93,7 +102,7 @@ export default function ProtectedApp() {
       }
     })();
     return () => { cancelled = true; };
-  }, [refreshContext, incomeDemo]);
+  }, [refreshContext, incomeDemo, requestedView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -253,19 +262,9 @@ export default function ProtectedApp() {
   };
 
   const backToProducts = () => {
-    setRequestedView(null);
-    setIncomeDemo(false);
-    const url = new URL(window.location.href);
-    url.searchParams.delete('demo');
-    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    window.location.assign('/');
   };
-  const openIncomeDemo = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('demo', 'income');
-    window.open(url.toString(), '_blank', 'noopener,noreferrer');
-  };
-
-  if (!requestedView) return <B2BLanding onOpenService={setRequestedView} onOpenIncomeDemo={openIncomeDemo} protectedMode />;
+  if (!requestedView) return <B2BLanding onOpenService={(view) => window.location.assign(`/workspace?product=${view}`)} protectedMode />;
   if (requestedView === 'split' && incomeDemo) {
     return <ProtectedIncomeDemo onBack={backToProducts} />;
   }
@@ -306,8 +305,8 @@ export default function ProtectedApp() {
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
           <div className="flex rounded-lg border border-slate-200 p-1" aria-label="Income view">
-            <button data-testid="income-workspace-tab" type="button" onClick={() => setIncomeSurface('WORKSPACE')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${incomeSurface === 'WORKSPACE' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>Review workspace</button>
-            <button data-testid="authoritative-workflow-tab" type="button" onClick={() => setIncomeSurface('AUTHORITATIVE')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${incomeSurface === 'AUTHORITATIVE' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>Authoritative workflow</button>
+            <button data-testid="income-workspace-tab" type="button" onClick={() => setIncomeSurface('WORKSPACE')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${incomeSurface === 'WORKSPACE' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>1. Upload &amp; review</button>
+            <button data-testid="authoritative-workflow-tab" type="button" onClick={() => setIncomeSurface('AUTHORITATIVE')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${incomeSurface === 'AUTHORITATIVE' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>2. Submit &amp; approve</button>
           </div>
           <p className="text-xs text-slate-500">Documents stay available in this browser session; persisted calculations and approvals remain server-authoritative.</p>
         </div>
@@ -328,8 +327,8 @@ export default function ProtectedApp() {
           ) : (
             <section className="grid min-h-[620px] place-items-center bg-slate-50 p-6" data-testid="workspace-empty-state">
               <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                <h2 className="text-lg font-extrabold text-slate-950">Load the complete income package</h2>
-                <p className="mt-2 text-sm text-slate-600">Select every PDF for the loan. Each document is processed through the protected parser, retained in browser memory for Nate’s page-and-box review, and appended to the workspace.</p>
+                <h2 className="text-lg font-extrabold text-slate-950">1. Upload and review the income package</h2>
+                <p className="mt-2 text-sm text-slate-600">Select every PDF for the loan. Review Nate’s page-and-box highlights, worksheets, and calculations before continuing to submission.</p>
                 <input data-testid="protected-pdf-input" className="mt-6 block w-full text-xs" type="file" accept="application/pdf" multiple onChange={(event) => { selectDocuments(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocuments.some((item) => item.attachmentId === null) || busy !== null} onClick={() => void uploadDocuments()} className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading and extracting...' : `Upload ${localDocuments.filter((item) => item.attachmentId === null).length || ''} document${localDocuments.filter((item) => item.attachmentId === null).length === 1 ? '' : 's'}`}</button>

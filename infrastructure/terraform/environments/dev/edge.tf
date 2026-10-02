@@ -349,6 +349,17 @@ resource "aws_lb_listener" "https" {
   certificate_arn   = var.dns_managed_externally ? aws_acm_certificate.portal[0].arn : aws_acm_certificate_validation.portal[0].certificate_arn
 
   default_action {
+    type             = "forward"
+    target_group_arn = var.enable_console ? aws_lb_target_group.console[0].arn : aws_lb_target_group.portal[0].arn
+  }
+}
+
+resource "aws_lb_listener_rule" "console_workspace_https" {
+  count        = var.enable_edge && var.enable_cognito_edge && var.enable_console ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 90
+
+  action {
     order = 1
     type  = "authenticate-cognito"
 
@@ -363,10 +374,16 @@ resource "aws_lb_listener" "https" {
     }
   }
 
-  default_action {
+  action {
     order            = 2
     type             = "forward"
-    target_group_arn = var.enable_console ? aws_lb_target_group.console[0].arn : aws_lb_target_group.portal[0].arn
+    target_group_arn = aws_lb_target_group.console[0].arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/workspace*", "/runtime-config.json", "/fixtures/*"]
+    }
   }
 }
 
