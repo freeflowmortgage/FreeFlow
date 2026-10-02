@@ -21,8 +21,10 @@ test('derives the protected workflow only from authoritative context and review 
   const approved = { ...calculated, approval: { id: 'p', current: true } } as unknown as ConsoleContext;
   assert.equal(deriveProtectedWorkflowState(approved, [], false), 'APPROVED');
   assert.equal(deriveProtectedWorkflowState(approved, [], true), 'READY_TO_WRITE');
-  const written = { ...approved, hostWrite: { status: 'SUCCEEDED' } } as unknown as ConsoleContext;
+  const written = { ...approved, hostWrite: { status: 'SUCCEEDED', current: true } } as unknown as ConsoleContext;
   assert.equal(deriveProtectedWorkflowState(written, [], true), 'WRITTEN');
+  const staleWrite = { ...approved, approval: { id: 'p', current: false }, hostWrite: { status: 'SUCCEEDED', current: false } } as unknown as ConsoleContext;
+  assert.equal(deriveProtectedWorkflowState(staleWrite, [], true), 'CALCULATED');
 });
 
 test('maps reviewed requirement fields onto borrower-scoped assignment keys', () => {

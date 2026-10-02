@@ -40,7 +40,7 @@ export type ConsoleContext = Readonly<{
   }>[];
   calculation: Readonly<{ id: string; calculatedLoanVersion: number; qualifyingMonthlyIncome: string | number; trendingResult: string; yearsAnalyzed: readonly number[]; current: boolean; borrowerIncome?: readonly BorrowerIncomeLine[] }> | null;
   approval: Readonly<{ id: string; entityId: string; expectedLoanVersion: number; current: boolean }> | null;
-  hostWrite: Readonly<{ id: string; status: 'AUTHORIZED' | 'SUCCEEDED' | 'FAILED'; approvalEventId: string; fieldMapHash: string; safeErrorCode: string | null }> | null;
+  hostWrite: Readonly<{ id: string; status: 'AUTHORIZED' | 'SUCCEEDED' | 'FAILED'; approvalEventId: string; expectedLoanVersion: number; fieldMapHash: string; safeErrorCode: string | null; current: boolean }> | null;
 }>;
 
 export function deriveProtectedWorkflowState(
@@ -49,7 +49,7 @@ export function deriveProtectedWorkflowState(
   hostReady: boolean,
 ): ProtectedWorkflowState {
   if (!context) return 'NO_LOAN_CONTEXT';
-  if (context.hostWrite?.status === 'SUCCEEDED') return 'WRITTEN';
+  if (context.hostWrite?.current && context.hostWrite.status === 'SUCCEEDED') return 'WRITTEN';
   if (context.approval?.current) return hostReady ? 'READY_TO_WRITE' : 'APPROVED';
   if (context.calculation?.current) return 'CALCULATED';
   if (!context.attachments.length) return 'BOUND';

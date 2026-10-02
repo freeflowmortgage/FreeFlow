@@ -28,6 +28,11 @@ export function createConsoleContextHandler(dependencies = { withTenantTransacti
       if (!loan) throw new ApiError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
       const calculation = loan.form1084Audits[0] ?? null;
       const approval = loan.auditEvents[0] ?? null;
+      const approvalCurrent = Boolean(approval && calculation
+        && approval.entityId === calculation.id
+        && calculation.calculatedLoanVersion === approval.expectedLoanVersion
+        && approval.expectedLoanVersion + 1 === loan.version);
+      const hostWrite = loan.encompassHostWrites[0] ?? null;
       return res.status(200).json({
         loan: { id: loan.id, version: loan.version, status: loan.status, program: loan.loanProgram, borrowerName: loan.primaryBorrowerName },
         borrowers: (loan.loanBorrowers ?? []).map((borrower) => ({ borrowerKey: borrower.borrowerKey, ordinal: borrower.ordinal, role: borrower.role })),
@@ -35,10 +40,12 @@ export function createConsoleContextHandler(dependencies = { withTenantTransacti
         providerAttachmentListing: { available: false, reason: 'PROVIDER_ATTACHMENT_LISTING_NOT_CONFIGURED' },
         extractions: loan.incomeExtractions.map((item) => ({ id: item.id, attachmentId: item.sourceAttachmentId, sourceDocumentVersion: item.sourceDocumentVersion, parserVersion: item.parserVersion, schemaVersion: item.schemaVersion, status: item.status, warnings: item.warnings, confidence: item.confidence, normalizedInput: item.normalizedInput, evidence: item.evidence, metadataReview: item.metadataReviews[0] ? { ...item.metadataReviews[0], current: item.metadataReviews[0].extractionHash === item.canonicalHash } : null })),
         calculation: calculation ? { ...calculation, borrowerIncome: readBorrowerIncome(calculation.borrowerIncome), current: calculation.calculatedLoanVersion === loan.version } : null,
-        approval: approval ? { ...approval, current: approval.expectedLoanVersion <= loan.version && approval.entityId === calculation?.id } : null,
+        approval: approval ? { ...approval, current: approvalCurrent } : null,
         documentPull: loan.encompassDocumentPullJobs[0] ?? null,
         sync: loan.encompassSyncJobs[0] ?? null,
-        hostWrite: loan.encompassHostWrites[0] ?? null,
+        hostWrite: hostWrite ? { ...hostWrite, current: approvalCurrent
+          && hostWrite.approvalEventId === approval?.id
+          && hostWrite.expectedLoanVersion === loan.version } : null,
         requestId: context.requestId,
       });
     } catch (error) { if (error instanceof ApiError) return sendApiError(res, context.requestId, error); throw error; }
