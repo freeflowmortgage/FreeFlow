@@ -290,6 +290,7 @@ export default function ProtectedApp() {
           <div className="flex items-center gap-3"><BrandLogo compact /><div><span className="text-sm font-bold text-slate-900">Income</span><p className="text-[11px] text-slate-500">Authoritative protected workflow</p></div></div>
           <div className="flex items-center gap-2">
             <button data-testid="back-to-products" type="button" onClick={backToProducts} className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-emerald-400 hover:text-emerald-700">Back to products</button>
+            <button data-testid="logout" type="button" onClick={() => window.location.assign('/logout')} className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-red-300 hover:text-red-700">Logout</button>
             <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Protected</span>
             <span data-testid="workflow-state" className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">{workflowState.replace(/_/g, ' ')}</span>
           </div>
@@ -312,7 +313,7 @@ export default function ProtectedApp() {
         </div>
 
         {incomeSurface === 'WORKSPACE' ? (
-          workspaceDocuments.length && workspaceContext ? (
+          workspaceContext ? (
             <section className="h-[calc(100vh-13rem)] min-h-[780px] p-4" data-testid="authenticated-income-workspace">
               <UnderwriterSplitViewDemo
                 source="live"
@@ -325,18 +326,8 @@ export default function ProtectedApp() {
               />
             </section>
           ) : (
-            <section className="grid min-h-[620px] place-items-center bg-slate-50 p-6" data-testid="workspace-empty-state">
-              <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                <h2 className="text-lg font-extrabold text-slate-950">1. Upload and review the income package</h2>
-                <p className="mt-2 text-sm text-slate-600">Select every PDF for the loan. Review Nate’s page-and-box highlights, worksheets, and calculations before continuing to submission.</p>
-                <input data-testid="protected-pdf-input" className="mt-6 block w-full text-xs" type="file" accept="application/pdf" multiple onChange={(event) => { selectDocuments(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocuments.some((item) => item.attachmentId === null) || busy !== null} onClick={() => void uploadDocuments()} className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading and extracting...' : `Upload ${localDocuments.filter((item) => item.attachmentId === null).length || ''} document${localDocuments.filter((item) => item.attachmentId === null).length === 1 ? '' : 's'}`}</button>
-                  {consoleRuntime.hosted ? <button data-testid="pull-documents" type="button" disabled={!contextState || busy !== null} onClick={() => void pullHostedDocuments()} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-800 disabled:opacity-40">{busy === 'PULL' ? 'Pulling...' : 'Pull hosted documents'}</button> : null}
-                </div>
-                {localDocuments.length ? <ul className="mt-4 space-y-1 text-left text-xs text-slate-600">{localDocuments.map((document) => <li key={document.id}>{document.attachmentId ? 'Processed' : 'Ready'} · {document.file.name}</li>)}</ul> : null}
-                <p className="mt-4 text-xs text-slate-500">PDF only, up to 40 MiB each. Raw bytes are not persisted or placed on queues.</p>
-              </div>
+            <section className="grid min-h-[620px] place-items-center bg-slate-50 p-6" data-testid="workspace-loading">
+              <p className="text-sm font-medium text-slate-600">{contextError ? 'An authorized loan context is required.' : 'Loading the authorized loan workspace…'}</p>
             </section>
           )
         ) : (
