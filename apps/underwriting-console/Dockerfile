@@ -44,7 +44,9 @@ RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
 
 # 3. Static protected runtime. Parser and fixture middleware are demo/QA-only.
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688 AS runner
+# Reuse the scan-clean pinned Node Alpine runtime used by the portal rather
+# than carrying an RPM package manager and unused curl/PCRE libraries.
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -52,25 +54,16 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV VITE_CACHE_DIR=/tmp/freeflow/vite
 
-RUN microdnf update -y \
-    && microdnf install -y tar xz shadow-utils libstdc++ \
-    && curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz \
-    && echo 'd60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307  node-v22.23.2-linux-x64.tar.xz' | sha256sum -c - \
-    && tar -xJf node-v22.23.2-linux-x64.tar.xz -C /usr/local --strip-components=1 \
-    && rm node-v22.23.2-linux-x64.tar.xz \
-    && microdnf clean all \
-    && rm -rf /var/cache/dnf \
-    && groupadd -g 1001 nodejs \
-    && useradd -u 1001 -g nodejs -s /sbin/nologin -M consoleuser \
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
     && mkdir -p /tmp/freeflow \
-    && chown consoleuser:nodejs /tmp/freeflow
+    && chown node:node /tmp/freeflow
 
-COPY --from=builder /app/apps/underwriting-console/dist ./dist
-COPY --from=builder /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
+COPY --from=builder --chown=node:node /app/apps/underwriting-console/dist ./dist
+COPY --from=builder --chown=node:node /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
 
-RUN chown -R consoleuser:nodejs /app
-
-USER consoleuser
+USER node
 
 EXPOSE 3000
 
