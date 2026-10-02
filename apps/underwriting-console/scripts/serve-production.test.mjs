@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { cpSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -10,6 +11,12 @@ execFileSync(process.execPath, [resolve(appRoot, 'node_modules/vite/bin/vite.js'
   env: { ...process.env, VITE_FREEFLOW_RUNTIME_MODE: 'encompass-hosted' },
   stdio: 'ignore',
 });
+execFileSync(process.execPath, [
+  resolve(appRoot, '../../services/encompass-connector/node_modules/esbuild/bin/esbuild'),
+  resolve(appRoot, 'src/server/demoFixtureDocuments.ts'), '--bundle', '--platform=node', '--target=node22', '--format=cjs',
+  `--outfile=${resolve(appRoot, 'dist/server/demo-fixtures.cjs')}`,
+], { cwd: appRoot, stdio: 'ignore' });
+cpSync(resolve(appRoot, 'node_modules/pdfkit/js/data'), resolve(appRoot, 'dist/server/data'), { recursive: true });
 
 const port = 3109;
 const child = spawn(process.execPath, ['scripts/serve-production.mjs'], {
@@ -74,6 +81,11 @@ try {
   const fixtureMeta = await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/urar-1004.meta.json`);
   assert.equal(fixtureMeta.status, 200);
   assert.deepEqual(await fixtureMeta.json(), { custom: false });
+  const paystub = await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/docs/paystub.pdf?hourly=52.5&ytdBase=61000`);
+  assert.equal(paystub.status, 200);
+  assert.equal(paystub.headers.get('content-type'), 'application/pdf');
+  assert.equal(Buffer.from(await paystub.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
+  assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/docs/not-allowlisted.pdf`)).status, 404);
 } finally {
   qualification.kill();
   await once(qualification, 'exit');

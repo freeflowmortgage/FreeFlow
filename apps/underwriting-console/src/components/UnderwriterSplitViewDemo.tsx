@@ -3168,6 +3168,7 @@ export default function UnderwriterSplitViewDemo({
             {parseBusy ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : <Upload className="h-4 w-4 text-emerald-600" />}
             {parseBusy ? 'Parsing…' : 'Load live PDF'}
             <input
+              data-testid="live-pdf-input"
               type="file"
               accept="application/pdf"
               multiple

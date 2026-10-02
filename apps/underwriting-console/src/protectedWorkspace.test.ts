@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { ConsoleContext } from './protectedWorkflow';
 import { mapIncomeFields } from './incomeFieldMap';
 import { liveSchCPatch, liveWagePatch } from './liveHydrate';
+import { fieldForInspection, inspectFieldIds, inspectOverlayFromField } from './livePacket';
 import {
   protectedWorkspaceContext,
   protectedWorkspaceDocuments,
@@ -101,4 +102,31 @@ test('maps authoritative loan identity and reviewed borrower assignments without
     'upload-1:0:W-2': 'borrower-1',
     'upload-1:1:Schedule C': 'borrower-2',
   });
+});
+
+test('preserves a live parser box through field mapping into the PDF highlight overlay', () => {
+  const mapped = mapIncomeFields({
+    transaction_id: 'preview-1', total_pages_scanned: 1, pages_extracted_count: 1,
+    extracted_page_indices: [0], ocr_page_count: 1, has_business_returns: false,
+    flags: [], classifications: { '0': ['Schedule C'] }, unresolved_statements: [],
+    pages: [{ index: 0, formIds: ['Schedule C'], isNativeText: false, meanConfidence: 99, skewDegrees: 0, words: [], flags: [] }],
+    formExtracts: [{
+      pageIndex: 0, form: 'Schedule C', sourceFieldId: 'ent1-net', boxLabel: '31',
+      fieldLabel: 'Net Profit or Loss', lineNum: '31', category: 'income', value: '120000',
+      numericValue: 120000, box: { x: 0.11, y: 0.22, w: 0.33, h: 0.044 },
+    }],
+  }).map((field) => ({ ...field, documentId: 'preview-document' }));
+  const field = fieldForInspection(mapped, 'schc-l31', 'preview-document', undefined, 0);
+  assert.deepEqual(inspectOverlayFromField(field), {
+    pageIndex: 0,
+    box: { x: 0.11, y: 0.22, w: 0.33, h: 0.044 },
+  });
+});
+
+test('maps worksheet highlight ids back to parser ids across supported income families', () => {
+  assert.equal(inspectFieldIds('schc-l31').includes('ent1-net'), true);
+  assert.equal(inspectFieldIds('ccorp-ti').includes('c1120-taxable'), true);
+  assert.equal(inspectFieldIds('farm-net').includes('schedule-f-net'), true);
+  assert.equal(inspectFieldIds('asset-capitalGainsNetLoss').includes('schedule-d-capital-gain-loss'), true);
+  assert.equal(inspectFieldIds('k1-oi-y1').includes('pt-return-other'), true);
 });

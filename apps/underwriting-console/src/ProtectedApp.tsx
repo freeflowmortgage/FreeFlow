@@ -22,6 +22,8 @@ import {
   protectedWorkspaceDocuments,
   type ProtectedLocalDocument,
 } from './protectedWorkspace';
+import { findDuplicate } from './livePacket';
+import type { LiveDocument, ParseResponse } from './parseTypes';
 
 const MAX_DOCUMENT_BYTES = 40 * 1024 * 1024;
 const EMPLOYMENT_ROLES = ['CURRENT', 'CONCURRENT', 'PRIOR', 'PRIMARY', 'SECONDARY'] as const;
@@ -31,6 +33,11 @@ const WORKFLOW_STEPS = ['NO_LOAN_CONTEXT', 'BOUND', 'DOCUMENT_UPLOADED', 'EXTRAC
 
 type LocalDocument = ProtectedLocalDocument & Readonly<{ id: string; url: string }>;
 type IncomeSurface = 'WORKSPACE' | 'AUTHORITATIVE';
+
+async function sha256File(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 export default function ProtectedApp() {
   const initialIncomeDemo = new URLSearchParams(window.location.search).get('demo') === 'income';
@@ -397,17 +404,70 @@ export default function ProtectedApp() {
 }
 
 function ProtectedIncomeDemo({ onBack }: { onBack: () => void }) {
+  const [documents, setDocuments] = useState<LiveDocument[]>([]);
+  const documentsRef = useRef<LiveDocument[]>([]);
+  const [showLive, setShowLive] = useState(false);
+  const [parseBusy, setParseBusy] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  const parsePdfs = async (files: File[]) => {
+    if (!files.length) return;
+    setParseBusy(true);
+    setParseError(null);
+    const errors: string[] = [];
+    try {
+      for (const file of files) {
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+          errors.push(`${file.name} is not a PDF.`);
+          continue;
+        }
+        if (file.size > MAX_DOCUMENT_BYTES) {
+          errors.push(`${file.name} exceeds the 40 MiB limit.`);
+          continue;
+        }
+        try {
+          const [sha256, result] = await Promise.all([
+            sha256File(file),
+            portalClient.previewIncomeDocument(file) as Promise<ParseResponse>,
+          ]);
+          const duplicate = findDuplicate(documentsRef.current, { sha256, fileName: file.name, result });
+          if (duplicate) {
+            errors.push(duplicate.reason);
+            continue;
+          }
+          const next: LiveDocument = { id: crypto.randomUUID(), sha256, file, fileName: file.name, result };
+          documentsRef.current = [...documentsRef.current, next];
+          setDocuments(documentsRef.current);
+          setShowLive(true);
+        } catch (error) {
+          errors.push(describeError(error, `Unable to process ${file.name}.`));
+        }
+      }
+    } finally {
+      setParseBusy(false);
+      if (errors.length) setParseError([...new Set(errors)].join(' Â· '));
+    }
+  };
+
   return (
     <main className="mx-auto max-w-[1500px] px-4 py-5 md:px-6" data-testid="protected-income-demo">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
         <div>
           <p className="text-sm font-bold text-indigo-950">Income Intelligence · original synthetic demonstration</p>
-          <p className="text-xs text-indigo-800">Comparison mode only. It does not persist documents, approve income, or call the connector or Encompass.</p>
+          <p className="text-xs text-indigo-800">Comparison mode only. Your PDFs are parsed in memory for page-and-box review; they are not persisted, assigned to a borrower, approved, or sent to the connector or Encompass.</p>
         </div>
         <button data-testid="demo-back-to-products" type="button" onClick={onBack} className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-900">Back to products</button>
       </div>
       <div className="h-[calc(100vh-8rem)] min-h-[780px]">
-        <UnderwriterSplitViewDemo source="demo" />
+        <UnderwriterSplitViewDemo
+          source={showLive && documents.length ? 'live' : 'demo'}
+          liveDocuments={documents}
+          parseBusy={parseBusy}
+          parseError={parseError}
+          onParseFiles={(files) => void parsePdfs(files)}
+          onUseDemo={() => setShowLive(false)}
+          onUseLive={() => setShowLive(true)}
+        />
       </div>
     </main>
   );

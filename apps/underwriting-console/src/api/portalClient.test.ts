@@ -42,3 +42,22 @@ test('upload intake uses only the same-origin protected portal route', async () 
     assert.equal(new Headers(received?.init?.headers).has('x-tenant-id'), false);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('comparison preview uses the authenticated memory-only route', async () => {
+  const originalFetch = globalThis.fetch;
+  let received: { path: string; init: RequestInit | undefined } | undefined;
+  globalThis.fetch = async (input, init) => {
+    received = { path: String(input), init };
+    return Response.json({ transaction_id: 'preview', total_pages_scanned: 1, pages: [] });
+  };
+  try {
+    const file = new File(['%PDF-preview'], 'income.pdf', { type: 'application/pdf' });
+    await portalClient.previewIncomeDocument(file);
+    assert.equal(received?.path, '/api/v1/income-document-preview');
+    assert.equal(received?.init?.credentials, 'same-origin');
+    assert.equal(received?.init?.body, file);
+    const headers = new Headers(received?.init?.headers);
+    assert.equal(headers.get('content-type'), 'application/pdf');
+    assert.equal(headers.has('x-tenant-id'), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
