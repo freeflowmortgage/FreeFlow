@@ -52,6 +52,7 @@ import {
 } from '../hydrateFromUrlA';
 import {
   locateIncomeEntities,
+  assignmentKey,
   pagesFromParsePages,
   discoveredSelectId,
   type LocateResult,
@@ -501,6 +502,7 @@ export default function UnderwriterSplitViewDemo({
   onUseLive,
   protectedContext = null,
   onOpenAuthoritativeWorkflow,
+  onBorrowerAssignment,
 }: {
   liveSession?: LiveParseSession | null;
   liveDocuments?: LiveDocument[];
@@ -513,6 +515,7 @@ export default function UnderwriterSplitViewDemo({
   onUseLive?: () => void;
   protectedContext?: ProtectedWorkspaceContext | null;
   onOpenAuthoritativeWorkflow?: () => void;
+  onBorrowerAssignment?: (assignmentKey: string, borrowerId: string, personName?: string) => void;
 } = {}) {
   const packet: LiveDocument[] = liveDocuments.length
     ? liveDocuments
@@ -539,9 +542,11 @@ export default function UnderwriterSplitViewDemo({
     () => (protectedContext ? [] : isLive ? employmentEntitiesFromUrlA(loadIntakeSession()?.answers) : DEMO_URLA_ENTITIES),
     [isLive, protectedContext],
   );
+  const [borrowerAliases, setBorrowerAliases] = useState<Record<string, string>>({});
   const loanBorrowers = useMemo<LoanBorrower[]>(
-    () => (protectedContext ? protectedContext.borrowers : isLive ? borrowersFromUrlA(loadIntakeSession()?.answers) : DEMO_BORROWERS),
-    [isLive, protectedContext],
+    () => (protectedContext ? protectedContext.borrowers : isLive ? borrowersFromUrlA(loadIntakeSession()?.answers) : DEMO_BORROWERS)
+      .map((borrower) => ({ ...borrower, name: borrowerAliases[borrower.id] ?? borrower.name })),
+    [isLive, protectedContext, borrowerAliases],
   );
   /** Underwriter's "assign to borrower" choices for documents that name nobody on the 1003. */
   const [borrowerAssignments, setBorrowerAssignments] = useState<Record<string, string>>(
@@ -627,6 +632,22 @@ export default function UnderwriterSplitViewDemo({
     });
   }, [isLive, urlARoster, loanBorrowers, borrowerAssignments, mappedFields, packet, scheduleEExtracts]);
   const borrowers = locateResult.borrowers?.length ? locateResult.borrowers : loanBorrowers;
+  const matchedAssignments = useMemo(
+    () => [...locateResult.roster.flatMap((row) => row.matches), ...locateResult.discovered]
+      .filter((match) => match.borrowerIds?.length === 1)
+      .map((match) => ({ key: assignmentKey(match), borrowerId: match.borrowerIds![0]!, personName: match.personName })),
+    [locateResult],
+  );
+  const reportedAssignments = useRef(new Set<string>());
+  useEffect(() => {
+    if (!protectedContext || !onBorrowerAssignment) return;
+    for (const assignment of matchedAssignments) {
+      const fingerprint = `${assignment.key}:${assignment.borrowerId}`;
+      if (reportedAssignments.current.has(fingerprint)) continue;
+      reportedAssignments.current.add(fingerprint);
+      onBorrowerAssignment(assignment.key, assignment.borrowerId, assignment.personName);
+    }
+  }, [protectedContext, onBorrowerAssignment, matchedAssignments]);
   const multipleBorrowers = borrowers.length > 1;
   const borrowerName = (id: string | undefined) =>
     borrowers.find((borrower) => borrower.id === (id ?? borrowers[0]?.id))?.name ?? '';
@@ -3215,8 +3236,10 @@ export default function UnderwriterSplitViewDemo({
       <BorrowerWarningsPanel
         borrowers={borrowers}
         warnings={locateResult.warnings ?? []}
-        onAssign={(key, borrowerId) => setBorrowerAssignments((current) => ({ ...current, [key]: borrowerId }))}
-        assignmentLockedMessage={protectedContext ? 'Review assignment' : undefined}
+        onAssign={(key, borrowerId, personName) => {
+          setBorrowerAssignments((current) => ({ ...current, [key]: borrowerId }));
+          if (personName) setBorrowerAliases((current) => ({ ...current, [borrowerId]: personName }));
+        }}
         onOpenAuthoritativeReview={onOpenAuthoritativeWorkflow}
       />
 

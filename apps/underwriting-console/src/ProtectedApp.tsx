@@ -148,6 +148,14 @@ function ProtectedWorkflowApp() {
     [contextState, localDocuments],
   );
   const workspaceContext = useMemo(() => protectedWorkspaceContext(contextState), [contextState]);
+  const stageWorkspaceBorrowerAssignment = useCallback((assignmentKey: string, borrowerId: string) => {
+    const target = workspaceContext?.borrowerAssignmentTargets[assignmentKey];
+    if (!target) return;
+    setReviewValues((values) => ({
+      ...values,
+      [`${target.extractionId}:${target.entityId}:borrowerAssignment`]: borrowerId,
+    }));
+  }, [workspaceContext]);
 
   const selectDocuments = (files: readonly File[]) => {
     setActionError(null);
@@ -330,6 +338,7 @@ function ProtectedWorkflowApp() {
                 onParseFiles={(files) => void uploadDocuments(files)}
                 protectedContext={workspaceContext}
                 onOpenAuthoritativeWorkflow={() => setIncomeSurface('AUTHORITATIVE')}
+                onBorrowerAssignment={stageWorkspaceBorrowerAssignment}
               />
             </section>
           ) : (

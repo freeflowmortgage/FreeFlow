@@ -21,6 +21,7 @@ export type ProtectedWorkspaceContext = Readonly<{
   loanProgram: 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA';
   borrowers: LoanBorrower[];
   borrowerAssignments: Record<string, string>;
+  borrowerAssignmentTargets: Record<string, Readonly<{ extractionId: string; entityId: string }>>;
   authoritativeMonthlyIncome: number | null;
 }>;
 
@@ -69,10 +70,25 @@ export function protectedWorkspaceContext(context: ConsoleContext | null): Prote
     loanProgram: loanProgram(context.loan.program),
     borrowers,
     borrowerAssignments: reviewedBorrowerAssignments(context),
+    borrowerAssignmentTargets: borrowerAssignmentTargets(context),
     authoritativeMonthlyIncome: context.calculation?.current
       ? finiteNumber(context.calculation.qualifyingMonthlyIncome)
       : null,
   };
+}
+
+function borrowerAssignmentTargets(context: ConsoleContext): ProtectedWorkspaceContext['borrowerAssignmentTargets'] {
+  const targets: ProtectedWorkspaceContext['borrowerAssignmentTargets'] = {};
+  for (const extraction of context.extractions) {
+    if (extraction.status !== 'ACTIVE') continue;
+    for (const [entityId, location] of entityLocations(extraction.normalizedInput, extraction.evidence)) {
+      targets[`${extraction.attachmentId}:${location.pageIndex}:${location.form}`] = {
+        extractionId: extraction.id,
+        entityId,
+      };
+    }
+  }
+  return targets;
 }
 
 export function rehydrateProtectedParseResponse(

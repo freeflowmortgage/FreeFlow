@@ -3,7 +3,9 @@ import test from 'node:test';
 import type { ConsoleContext } from './protectedWorkflow';
 import { mapIncomeFields } from './incomeFieldMap';
 import { liveSchCPatch, liveWagePatch } from './liveHydrate';
-import { fieldForInspection, inspectFieldIds, inspectOverlayFromField } from './livePacket';
+import { seedW2FromLocation } from './hydrateFromUrlA';
+import { locateIncomeEntities } from './locateIncomeEntities';
+import { fieldForInspection, fieldForInspectionWithin, inspectFieldIds, inspectOverlayFromField } from './livePacket';
 import {
   protectedWorkspaceContext,
   protectedWorkspaceDocuments,
@@ -102,6 +104,10 @@ test('maps authoritative loan identity and reviewed borrower assignments without
     'upload-1:0:W-2': 'borrower-1',
     'upload-1:1:Schedule C': 'borrower-2',
   });
+  assert.deepEqual(workspace?.borrowerAssignmentTargets, {
+    'upload-1:0:W-2': { extractionId: 'extraction-1', entityId: 'w2-p0-0' },
+    'upload-1:1:Schedule C': { extractionId: 'extraction-1', entityId: 'Schedule C:business-1' },
+  });
 });
 
 test('preserves a live parser box through field mapping into the PDF highlight overlay', () => {
@@ -129,4 +135,54 @@ test('maps worksheet highlight ids back to parser ids across supported income fa
   assert.equal(inspectFieldIds('farm-net').includes('schedule-f-net'), true);
   assert.equal(inspectFieldIds('asset-capitalGainsNetLoss').includes('schedule-d-capital-gain-loss'), true);
   assert.equal(inspectFieldIds('k1-oi-y1').includes('pt-return-other'), true);
+});
+
+test('keeps an unidentified W-2 visible and highlightable while borrower assignment is pending', () => {
+  const fields = mapIncomeFields({
+    transaction_id: 'unassigned-w2', total_pages_scanned: 1, pages_extracted_count: 1,
+    extracted_page_indices: [0], ocr_page_count: 1, has_business_returns: false,
+    flags: [], classifications: { '0': ['W-2'] }, unresolved_statements: [],
+    pages: [{ index: 0, formIds: ['W-2'], isNativeText: false, meanConfidence: 99, skewDegrees: 0, words: [], flags: [] }],
+    w2Extracts: [{
+      pageIndex: 0, year: 2025, employerName: 'Synthetic National Bank', ein: '00-0000000',
+      box1: 142800, box2: 0, box3: 142800, box4: 0, box5: 142800, box6: 0,
+      boxes: { box5: { x: 0.42, y: 0.31, w: 0.08, h: 0.02 } },
+    }],
+    formExtracts: [{
+      pageIndex: 0, form: 'W-2', entityId: 'w-2-p0', sourceFieldId: 'w2-employee-name',
+      boxLabel: 'Box e', fieldLabel: 'Employee Name', lineNum: 'Box e', category: 'identity',
+      value: 'Unlisted Synthetic Person', numericValue: 0, box: { x: 0.1, y: 0.5, w: 0.2, h: 0.02 },
+    }],
+  }).map((field) => ({ ...field, documentId: 'upload-w2' }));
+  const located = locateIncomeEntities({
+    roster: [], fields,
+    borrowers: [
+      { id: 'borrower-1', name: 'Synthetic Primary Borrower', role: 'Borrower' },
+      { id: 'borrower-2', name: 'Synthetic Co-Borrower', role: 'CoBorrower' },
+    ],
+  });
+  assert.equal(located.unidentified?.length, 1);
+  const seeded = seedW2FromLocation(located, fields);
+  assert.equal(seeded.current.length, 1);
+  assert.equal(seeded.current[0]?.patch?.w2Year1Box5, 142800);
+  assert.deepEqual(seeded.current[0]?.documentIds, ['upload-w2']);
+  const source = fieldForInspectionWithin(fields, 'w2-box5', seeded.current[0]?.documentIds, 0);
+  assert.deepEqual(inspectOverlayFromField(source), {
+    pageIndex: 0,
+    box: { x: 0.42, y: 0.31, w: 0.08, h: 0.02 },
+  });
+  assert.equal(seeded.current[0]?.borrowerId, undefined);
+  assert.equal(located.warnings?.[0]?.code, 'UNIDENTIFIED_BORROWER');
+
+  const assigned = locateIncomeEntities({
+    roster: [], fields,
+    borrowers: [
+      { id: 'borrower-1', name: 'Synthetic Primary Borrower', role: 'Borrower' },
+      { id: 'borrower-2', name: 'Synthetic Co-Borrower', role: 'CoBorrower' },
+    ],
+    assignments: { 'upload-w2:0:W-2': 'borrower-2' },
+  });
+  const assignedSeed = seedW2FromLocation(assigned, fields).current[0];
+  assert.equal(assignedSeed?.borrowerId, 'borrower-2');
+  assert.equal(assigned.warnings?.length, 0);
 });

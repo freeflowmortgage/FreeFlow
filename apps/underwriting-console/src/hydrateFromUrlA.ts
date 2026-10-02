@@ -152,7 +152,11 @@ export function seedW2FromLocation(
   }
 
   const discoveredW2 = new Map<string, LocatedMatch[]>();
-  for (const match of result.discovered.filter((item) => item.kind === 'w2')) {
+  // An unidentified W-2 is held out of qualifying income until the underwriter
+  // assigns it, but it still belongs in the review workspace. Omitting it here
+  // replaced the extracted employer and wages with an empty placeholder and
+  // also discarded the document IDs needed for source-box highlighting.
+  for (const match of [...result.discovered, ...(result.unidentified ?? [])].filter((item) => item.kind === 'w2')) {
     const key = discoveredIdentityKey(match);
     const list = discoveredW2.get(key) ?? [];
     list.push(match);

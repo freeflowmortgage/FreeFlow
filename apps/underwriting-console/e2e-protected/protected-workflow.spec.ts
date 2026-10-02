@@ -140,7 +140,16 @@ test('protected Income appends multiple uploaded PDFs to Nate\'s document worksp
       return route.fulfill({ status: 201, json: { source: 'UPLOAD', attachmentId, status: 'PROCESSED' } });
     }
     if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: multiUploadContext(attachmentIds) });
-    if (path.endsWith('/metadata-requirements')) return route.fulfill({ json: { extractionId: path.includes('extraction-2') ? 'extraction-2' : 'extraction-1', status: 'ACTIVE', review: null, requirements: [] } });
+    if (path.endsWith('/metadata-requirements')) {
+      const extractionId = path.includes('extraction-2') ? 'extraction-2' : 'extraction-1';
+      return route.fulfill({ json: {
+        extractionId, status: 'ACTIVE', review: null,
+        requirements: extractionId === 'extraction-1' ? [
+          { extractionId, entityId: 'w2-p0-0', field: 'borrowerAssignment', form: 'W-2' },
+          { extractionId, entityId: 'w2-p0-0', field: 'employmentRole', form: 'W-2' },
+        ] : [],
+      } });
+    }
     return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
   });
 
@@ -159,6 +168,18 @@ test('protected Income appends multiple uploaded PDFs to Nate\'s document worksp
   await expect.poll(() => attachmentIds.length).toBe(2);
   await page.getByRole('button', { name: 'Wages', exact: true }).click();
   await expect(page.getByTitle('w2.pdf')).toBeVisible();
+  const w2Warning = page.getByTestId('unidentified-borrower-warning').filter({ hasText: 'W-2 from' });
+  await expect(w2Warning).toContainText('Detected Synthetic Person');
+  await w2Warning.getByTestId('assign-borrower').selectOption('borrower-2');
+  await expect(w2Warning).toHaveCount(0);
+  await expect(page.getByTestId('borrower-chip').filter({ hasText: 'Detected Synthetic Person' })).toContainText('Co-borrower');
+  const w2Box5 = page.locator('[data-qa-field="w2-box5"]');
+  await expect(w2Box5.locator('input')).toHaveValue('96,000.00');
+  await w2Box5.click();
+  await expect(page.getByTestId('pdf-highlight')).toHaveAttribute('data-box', '0.42,0.31,0.08,0.02');
+  await page.getByTestId('authoritative-workflow-tab').click();
+  await expect(page.getByLabel(/W-2 .* borrowerAssignment/)).toHaveValue('borrower-2');
+  await page.getByTestId('income-workspace-tab').click();
   await page.getByRole('button', { name: 'Sch C', exact: true }).click();
   await expect(page.getByTitle('schedule-c.pdf')).toBeVisible();
 });
@@ -403,8 +424,11 @@ function multiUploadContext(attachmentIds: readonly string[]) {
   const attachments = attachmentIds.map((attachmentId) => ({ attachmentId, category: attachmentId === 'upload-1' ? 'W2_WAGE' : 'Schedule C', version: 1, pageCount: 1, parserVersion: 'income-parser-v5' }));
   const extractions = attachmentIds.map((attachmentId, index) => index === 0 ? {
     id: 'extraction-1', attachmentId, sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: [], confidence: 99,
-    normalizedInput: { w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 96000 }] },
-    evidence: { fields: [{ collection: 'w2Extracts', index: 0, field: 'box1', pageIndex: 0, box: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 } }] }, metadataReview: null,
+    normalizedInput: {
+      w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 96000, box5Wages: 96000 }],
+      formRecords: [{ entityId: 'w-2-p0', form: 'W-2', pageIndex: 0, fields: [{ sourceFieldId: 'w2-employee-name', value: 'Detected Synthetic Person' }] }],
+    },
+    evidence: { fields: [{ collection: 'w2Extracts', index: 0, field: 'box5', pageIndex: 0, box: { x: 0.42, y: 0.31, w: 0.08, h: 0.02 } }] }, metadataReview: null,
   } : {
     id: 'extraction-2', attachmentId, sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: [], confidence: 99,
     normalizedInput: { formRecords: [{ entityId: 'Schedule C:business-1', form: 'Schedule C', pageIndex: 0, fields: [{ sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' }, { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 }] }] },
@@ -412,7 +436,10 @@ function multiUploadContext(attachmentIds: readonly string[]) {
   });
   return {
     loan: { id: LOAN, version: 1 + attachmentIds.length, status: attachmentIds.length ? 'DOCS_UPLOADED' : 'DRAFT', program: 'CONVENTIONAL', borrowerName: 'Synthetic Borrower' },
-    borrowers: [{ borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' }],
+    borrowers: [
+      { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' },
+      { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER' },
+    ],
     attachments,
     extractions,
     calculation: null,

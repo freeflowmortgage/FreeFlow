@@ -30,6 +30,8 @@ export type BorrowerWarning = {
   assignmentKey?: string;
   documentId?: string;
   pageIndex?: number;
+  /** Parsed person name used only for an explicit, browser-session assignment. */
+  personName?: string;
 };
 
 export type LocatePage = {
@@ -880,6 +882,7 @@ export function locateIncomeEntities(options: {
       assignmentKey: assignmentKey(match),
       documentId: match.documentId,
       pageIndex: match.pageIndex,
+      personName: match.personName,
     });
   }
   if (!fromLoan && borrowers.length > 1) {

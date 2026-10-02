@@ -16,7 +16,7 @@ export default function BorrowerWarningsPanel({
 }: {
   borrowers: LoanBorrower[];
   warnings: BorrowerWarning[];
-  onAssign: (assignmentKey: string, borrowerId: string) => void;
+  onAssign: (assignmentKey: string, borrowerId: string, personName?: string) => void;
   assignmentLockedMessage?: string;
   onOpenAuthoritativeReview?: () => void;
 }) {
@@ -71,7 +71,7 @@ export default function BorrowerWarningsPanel({
               data-testid="assign-borrower"
               defaultValue=""
               onChange={(event) => {
-                if (event.target.value) onAssign(warning.assignmentKey!, event.target.value);
+                if (event.target.value) onAssign(warning.assignmentKey!, event.target.value, warning.personName);
               }}
               className="rounded border border-rose-300 bg-white px-2 py-1 text-[11px] font-bold text-rose-900"
             >
