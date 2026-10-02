@@ -15,6 +15,9 @@ test('selects calculation fields and coordinate evidence without OCR or raw resp
   });
   const employers = result.normalizedInput.w2Records as Array<Record<string, unknown>>;
   assert.equal(employers[0]?.annualWages, 120000);
+  assert.equal(employers[0]?.pageIndex, 0);
+  assert.equal(employers[0]?.box1Wages, 120000);
+  assert.equal(employers[0]?.box5Wages, 121000);
   assert.equal(employers[0]?.role, undefined);
   assert.equal(result.schemaVersion, 'income-extraction-v2');
   assert.equal(result.canonicalHash.length, 64);
@@ -22,6 +25,38 @@ test('selects calculation fields and coordinate evidence without OCR or raw resp
   assert.equal(serialized.includes('never persist me'), false);
   assert.equal(serialized.includes('borrower-secret.pdf'), false);
   assert.equal(serialized.includes('000-00-0000'), false);
+});
+
+test('persists bounded Schedule E display metadata and nested financial box evidence', () => {
+  const result = selectPersistableParserExtraction({
+    scheduleEProperties: [{
+      pageIndex: 2,
+      column: 'B',
+      year: 2025,
+      address: '100 Synthetic Lane',
+      propertyType: 'Rental',
+      fairRentalDays: 365,
+      financials: { '3': 24000, '21': 12000 },
+      boxes: {
+        address: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 },
+        financials: {
+          '3': { x: 0.2, y: 0.3, w: 0.1, h: 0.03 },
+          '21': { x: 0.4, y: 0.5, w: 0.1, h: 0.03 },
+        },
+      },
+    }],
+    pages: [{ words: [{ text: 'never persist schedule e OCR' }] }],
+  });
+
+  const properties = result.normalizedInput.scheduleEProperties as Array<Record<string, unknown>>;
+  assert.equal(properties[0]?.pageIndex, 2);
+  assert.equal(properties[0]?.column, 'B');
+  assert.equal(properties[0]?.rentsReceived, 24000);
+  assert.equal(properties[0]?.netIncomeLoss, 12000);
+  const evidence = result.evidence.fields as Array<Record<string, unknown>>;
+  assert.ok(evidence.some((field) => field.collection === 'scheduleEProperties' && field.field === 'financials.3'));
+  assert.ok(evidence.some((field) => field.collection === 'scheduleEProperties' && field.field === 'financials.21'));
+  assert.equal(JSON.stringify(result).includes('never persist schedule e OCR'), false);
 });
 
 test('is deterministic and fails closed for unsupported or incomplete parser output', () => {

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConsoleView } from './appTypes';
 import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
 import Conversational1003 from './components/Conversational1003';
 import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
+import UnderwriterSplitViewDemo from './components/UnderwriterSplitViewDemo';
 import PdfCoordinateCanvas, { type SpatialCoordinates } from './components/PdfCoordinateCanvas';
 import { PortalApiError, portalClient } from './api/portalClient';
 import { EncompassHostError, type EncompassHostBridge } from './encompass-host/bridge';
@@ -16,6 +17,11 @@ import {
   type ConsoleContext,
   type MetadataRequirement,
 } from './protectedWorkflow';
+import {
+  protectedWorkspaceContext,
+  protectedWorkspaceDocuments,
+  type ProtectedLocalDocument,
+} from './protectedWorkspace';
 
 const MAX_DOCUMENT_BYTES = 40 * 1024 * 1024;
 const EMPLOYMENT_ROLES = ['CURRENT', 'CONCURRENT', 'PRIOR', 'PRIMARY', 'SECONDARY'] as const;
@@ -23,17 +29,23 @@ const PAY_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY'] as cons
 const BASE_METHODS = ['hourly', 'period', 'ytd', 'prior'] as const;
 const WORKFLOW_STEPS = ['NO_LOAN_CONTEXT', 'BOUND', 'DOCUMENT_UPLOADED', 'EXTRACTED', 'REVIEW_REQUIRED', 'READY_TO_CALCULATE', 'CALCULATED', 'APPROVED', 'READY_TO_WRITE', 'WRITTEN'] as const;
 
-type LocalDocument = Readonly<{ file: File; url: string; attachmentId: string | null }>;
+type LocalDocument = ProtectedLocalDocument & Readonly<{ id: string; url: string }>;
+type IncomeSurface = 'WORKSPACE' | 'AUTHORITATIVE';
 
 export default function ProtectedApp() {
-  const [requestedView, setRequestedView] = useState<ConsoleView | null>(null);
+  const initialIncomeDemo = new URLSearchParams(window.location.search).get('demo') === 'income';
+  const [requestedView, setRequestedView] = useState<ConsoleView | null>(initialIncomeDemo ? 'split' : null);
+  const [incomeDemo, setIncomeDemo] = useState(initialIncomeDemo);
   const [syntheticProductDemosEnabled, setSyntheticProductDemosEnabled] = useState(false);
   const [contextState, setContextState] = useState<ConsoleContext | null>(null);
   const [hostBridge, setHostBridge] = useState<EncompassHostBridge | null>(null);
   const [hostLoanGuid, setHostLoanGuid] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<MetadataRequirement[] | null>(null);
   const [reviewValues, setReviewValues] = useState<Record<string, string>>({});
-  const [localDocument, setLocalDocument] = useState<LocalDocument | null>(null);
+  const [localDocuments, setLocalDocuments] = useState<LocalDocument[]>([]);
+  const localDocumentsRef = useRef<LocalDocument[]>([]);
+  const [activeLocalDocumentId, setActiveLocalDocumentId] = useState<string | null>(null);
+  const [incomeSurface, setIncomeSurface] = useState<IncomeSurface>('WORKSPACE');
   const [selectedEvidence, setSelectedEvidence] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
@@ -50,6 +62,7 @@ export default function ProtectedApp() {
   }, []);
 
   useEffect(() => {
+    if (incomeDemo) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -73,7 +86,7 @@ export default function ProtectedApp() {
       }
     })();
     return () => { cancelled = true; };
-  }, [refreshContext]);
+  }, [refreshContext, incomeDemo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,28 +100,42 @@ export default function ProtectedApp() {
     return () => { cancelled = true; };
   }, [contextState?.loan.id, contextState?.loan.version]);
 
-  useEffect(() => () => { if (localDocument) URL.revokeObjectURL(localDocument.url); }, [localDocument]);
+  localDocumentsRef.current = localDocuments;
+  useEffect(() => () => {
+    for (const document of localDocumentsRef.current) URL.revokeObjectURL(document.url);
+  }, []);
+
+  const localDocument = localDocuments.find((item) => item.id === activeLocalDocumentId) ?? localDocuments[0] ?? null;
 
   const activeExtraction = useMemo(() => {
     const active = contextState?.extractions.filter((item) => item.status === 'ACTIVE') ?? [];
     if (!active.length) return null;
-    if (localDocument?.attachmentId) return active.find((item) => item.attachmentId === localDocument.attachmentId) ?? active[0];
+    if (localDocument && !localDocument.attachmentId) return null;
+    if (localDocument?.attachmentId) return active.find((item) => item.attachmentId === localDocument.attachmentId) ?? null;
     return active[0];
-  }, [contextState, localDocument?.attachmentId]);
+  }, [contextState, localDocument?.id, localDocument?.attachmentId]);
   const evidence = useMemo(() => readEvidenceFields(activeExtraction?.evidence), [activeExtraction]);
   const activeHighlight: SpatialCoordinates | null = evidence[selectedEvidence]
     ? { pageIndex: evidence[selectedEvidence].pageIndex, box: evidence[selectedEvidence].box }
     : null;
   const workflowState = deriveProtectedWorkflowState(contextState, requirements, Boolean(hostBridge && hostLoanGuid));
   const currentStep = Math.max(0, WORKFLOW_STEPS.indexOf(workflowState as typeof WORKFLOW_STEPS[number]));
+  const workspaceDocuments = useMemo(
+    () => protectedWorkspaceDocuments(contextState, localDocuments),
+    [contextState, localDocuments],
+  );
+  const workspaceContext = useMemo(() => protectedWorkspaceContext(contextState), [contextState]);
 
-  const selectDocument = (file: File | undefined) => {
+  const selectDocuments = (files: readonly File[]) => {
     setActionError(null);
-    if (!file) return;
-    if (file.type !== 'application/pdf') { setActionError('Only PDF documents are supported.'); return; }
-    if (file.size > MAX_DOCUMENT_BYTES) { setActionError('The document exceeds the 40 MiB limit.'); return; }
-    const next = { file, url: URL.createObjectURL(file), attachmentId: null };
-    setLocalDocument((previous) => { if (previous) URL.revokeObjectURL(previous.url); return next; });
+    if (!files.length) return;
+    const invalid = files.find((file) => file.type !== 'application/pdf');
+    if (invalid) { setActionError(`${invalid.name}: only PDF documents are supported.`); return; }
+    const oversized = files.find((file) => file.size > MAX_DOCUMENT_BYTES);
+    if (oversized) { setActionError(`${oversized.name}: the document exceeds the 40 MiB limit.`); return; }
+    const next = files.map((file): LocalDocument => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), attachmentId: null }));
+    setLocalDocuments((current) => [...current, ...next]);
+    setActiveLocalDocumentId(next[0]?.id ?? null);
     setCurrentPage(1); setPageCount(1); setSelectedEvidence(0);
   };
 
@@ -123,12 +150,24 @@ export default function ProtectedApp() {
     }, 'The hosted documents could not be pulled.');
   };
 
-  const uploadDocument = async () => {
-    if (!contextState || !localDocument) return;
+  const uploadDocuments = async (files?: readonly File[]) => {
+    if (!contextState) return;
+    let selected = localDocuments.filter((item) => item.attachmentId === null);
+    if (files?.length) {
+      const invalid = files.find((file) => file.type !== 'application/pdf' || file.size > MAX_DOCUMENT_BYTES);
+      if (invalid) { setActionError(`${invalid.name}: use a PDF up to 40 MiB.`); return; }
+      const next = files.map((file): LocalDocument => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), attachmentId: null }));
+      selected = next;
+      setLocalDocuments((current) => [...current, ...next]);
+      setActiveLocalDocumentId(next[0]?.id ?? null);
+    }
+    if (!selected.length) return;
     await runAction('UPLOAD', async () => {
-      const uploaded = await portalClient.uploadIncomeDocument(contextState.loan.id, localDocument.file);
-      setLocalDocument((current) => current ? { ...current, attachmentId: uploaded.attachmentId } : current);
-      await refreshContext(contextState.loan.id);
+      for (const document of selected) {
+        const uploaded = await portalClient.uploadIncomeDocument(contextState.loan.id, document.file);
+        setLocalDocuments((current) => current.map((item) => item.id === document.id ? { ...item, attachmentId: uploaded.attachmentId } : item));
+        await refreshContext(contextState.loan.id);
+      }
     }, 'The PDF could not be uploaded or processed.');
   };
 
@@ -206,7 +245,23 @@ export default function ProtectedApp() {
     finally { setBusy(null); }
   };
 
-  if (!requestedView) return <B2BLanding onOpenService={setRequestedView} protectedMode />;
+  const backToProducts = () => {
+    setRequestedView(null);
+    setIncomeDemo(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('demo');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+  const openIncomeDemo = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('demo', 'income');
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  };
+
+  if (!requestedView) return <B2BLanding onOpenService={setRequestedView} onOpenIncomeDemo={openIncomeDemo} protectedMode />;
+  if (requestedView === 'split' && incomeDemo) {
+    return <ProtectedIncomeDemo onBack={backToProducts} />;
+  }
   if (requestedView === 'intake' || requestedView === 'appraisal') {
     return (
       <ProtectedProductDemo
@@ -227,7 +282,11 @@ export default function ProtectedApp() {
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
           <div className="flex items-center gap-3"><BrandLogo compact /><div><span className="text-sm font-bold text-slate-900">Income</span><p className="text-[11px] text-slate-500">Authoritative protected workflow</p></div></div>
-          <div className="flex items-center gap-2"><span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Protected</span><span data-testid="workflow-state" className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">{workflowState.replace(/_/g, ' ')}</span></div>
+          <div className="flex items-center gap-2">
+            <button data-testid="back-to-products" type="button" onClick={backToProducts} className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-emerald-400 hover:text-emerald-700">Back to products</button>
+            <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Protected</span>
+            <span data-testid="workflow-state" className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">{workflowState.replace(/_/g, ' ')}</span>
+          </div>
         </header>
 
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-3">
@@ -238,6 +297,43 @@ export default function ProtectedApp() {
 
         {(contextError || actionError) ? <div role="alert" className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-800">{actionError ?? contextError}</div> : null}
 
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
+          <div className="flex rounded-lg border border-slate-200 p-1" aria-label="Income view">
+            <button data-testid="income-workspace-tab" type="button" onClick={() => setIncomeSurface('WORKSPACE')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${incomeSurface === 'WORKSPACE' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>Review workspace</button>
+            <button data-testid="authoritative-workflow-tab" type="button" onClick={() => setIncomeSurface('AUTHORITATIVE')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${incomeSurface === 'AUTHORITATIVE' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}>Authoritative workflow</button>
+          </div>
+          <p className="text-xs text-slate-500">Documents stay available in this browser session; persisted calculations and approvals remain server-authoritative.</p>
+        </div>
+
+        {incomeSurface === 'WORKSPACE' ? (
+          workspaceDocuments.length && workspaceContext ? (
+            <section className="h-[calc(100vh-13rem)] min-h-[780px] p-4" data-testid="authenticated-income-workspace">
+              <UnderwriterSplitViewDemo
+                source="live"
+                liveDocuments={workspaceDocuments}
+                parseBusy={busy === 'UPLOAD'}
+                parseError={actionError}
+                onParseFiles={(files) => void uploadDocuments(files)}
+                protectedContext={workspaceContext}
+                onOpenAuthoritativeWorkflow={() => setIncomeSurface('AUTHORITATIVE')}
+              />
+            </section>
+          ) : (
+            <section className="grid min-h-[620px] place-items-center bg-slate-50 p-6" data-testid="workspace-empty-state">
+              <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <h2 className="text-lg font-extrabold text-slate-950">Load the complete income package</h2>
+                <p className="mt-2 text-sm text-slate-600">Select every PDF for the loan. Each document is processed through the protected parser, retained in browser memory for Nate’s page-and-box review, and appended to the workspace.</p>
+                <input data-testid="protected-pdf-input" className="mt-6 block w-full text-xs" type="file" accept="application/pdf" multiple onChange={(event) => { selectDocuments(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocuments.some((item) => item.attachmentId === null) || busy !== null} onClick={() => void uploadDocuments()} className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading and extracting...' : `Upload ${localDocuments.filter((item) => item.attachmentId === null).length || ''} document${localDocuments.filter((item) => item.attachmentId === null).length === 1 ? '' : 's'}`}</button>
+                  {consoleRuntime.hosted ? <button data-testid="pull-documents" type="button" disabled={!contextState || busy !== null} onClick={() => void pullHostedDocuments()} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-800 disabled:opacity-40">{busy === 'PULL' ? 'Pulling...' : 'Pull hosted documents'}</button> : null}
+                </div>
+                {localDocuments.length ? <ul className="mt-4 space-y-1 text-left text-xs text-slate-600">{localDocuments.map((document) => <li key={document.id}>{document.attachmentId ? 'Processed' : 'Ready'} · {document.file.name}</li>)}</ul> : null}
+                <p className="mt-4 text-xs text-slate-500">PDF only, up to 40 MiB each. Raw bytes are not persisted or placed on queues.</p>
+              </div>
+            </section>
+          )
+        ) : (
         <div className="grid min-h-[720px] gap-0 lg:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
           <section className="border-b border-slate-200 bg-slate-100 p-4 lg:border-b-0 lg:border-r">
             {localDocument ? (
@@ -256,12 +352,13 @@ export default function ProtectedApp() {
           <section className="space-y-5 overflow-y-auto p-5">
             <div className="rounded-lg border border-slate-200 p-4">
               <h2 className="text-sm font-bold text-slate-900">1. Source document</h2>
-              <input data-testid="protected-pdf-input" className="mt-3 block w-full text-xs" type="file" accept="application/pdf" onChange={(event) => selectDocument(event.target.files?.[0])} />
+              <input data-testid="protected-pdf-input" className="mt-3 block w-full text-xs" type="file" accept="application/pdf" multiple onChange={(event) => { selectDocuments(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
               <div className="mt-3 flex flex-wrap gap-2">
-                <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocument || busy !== null || localDocument.attachmentId !== null} onClick={() => void uploadDocument()} className="rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading...' : localDocument?.attachmentId ? 'Uploaded' : 'Upload and extract'}</button>
+                <button data-testid="upload-pdf" type="button" disabled={!contextState || !localDocuments.some((item) => item.attachmentId === null) || busy !== null} onClick={() => void uploadDocuments()} className="rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'UPLOAD' ? 'Uploading...' : 'Upload and extract'}</button>
                 {consoleRuntime.hosted ? <button data-testid="pull-documents" type="button" disabled={!contextState || busy !== null} onClick={() => void pullHostedDocuments()} className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 disabled:opacity-40">{busy === 'PULL' ? 'Pulling...' : 'Pull hosted documents'}</button> : null}
               </div>
               <p className="mt-2 text-xs text-slate-500">PDF only, up to 40 MiB. Hosted pull sends attachment ids only. Raw document bytes are not placed on the queue.</p>
+              {localDocuments.length > 1 ? <div className="mt-3 flex flex-wrap gap-1">{localDocuments.map((document) => <button key={document.id} type="button" onClick={() => { setActiveLocalDocumentId(document.id); setCurrentPage(1); setSelectedEvidence(0); }} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${localDocument?.id === document.id ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 text-slate-600'}`}>{document.file.name}</button>)}</div> : null}
               {(contextState?.borrowers?.length ?? 0) > 0 ? <ol data-testid="borrower-roster" className="mt-3 space-y-1 text-xs text-slate-700">{contextState!.borrowers!.map((borrower) => <li key={borrower.borrowerKey}>{borrower.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {borrower.borrowerKey}</li>)}</ol> : null}
             </div>
 
@@ -291,8 +388,26 @@ export default function ProtectedApp() {
             {consoleRuntime.hosted ? <div className="rounded-lg border border-slate-200 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-slate-500">Explicitly writes only the backend-approved field map, then calculates, commits, and reads back the approval marker.</p><button data-testid="write-host" type="button" disabled={!canWrite || busy !== null || contextState?.hostWrite?.status === 'SUCCEEDED'} onClick={() => void writeApprovedResult()} className="mt-3 rounded bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'WRITE' ? 'Writing...' : contextState?.hostWrite?.status === 'SUCCEEDED' ? 'Durably written' : 'Write approved result'}</button>{failedCurrentWrite ? <p className="mt-2 text-xs font-medium text-red-700">The prior host write failed. A new approval is required before retrying.</p> : null}</div> : null}
           </section>
         </div>
+        )}
 
         <footer className="border-t border-slate-200 px-6 py-4 text-xs text-slate-500">{contextState ? `Loan ${contextState.loan.id} / version ${contextState.loan.version} / ${contextState.loan.program}${contextState.loan.borrowerName ? ` / ${contextState.loan.borrowerName}` : ''}` : contextError ?? 'Loading authoritative context...'}</footer>
+      </div>
+    </main>
+  );
+}
+
+function ProtectedIncomeDemo({ onBack }: { onBack: () => void }) {
+  return (
+    <main className="mx-auto max-w-[1500px] px-4 py-5 md:px-6" data-testid="protected-income-demo">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+        <div>
+          <p className="text-sm font-bold text-indigo-950">Income Intelligence · original synthetic demonstration</p>
+          <p className="text-xs text-indigo-800">Comparison mode only. It does not persist documents, approve income, or call the connector or Encompass.</p>
+        </div>
+        <button data-testid="demo-back-to-products" type="button" onClick={onBack} className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-900">Back to products</button>
+      </div>
+      <div className="h-[calc(100vh-8rem)] min-h-[780px]">
+        <UnderwriterSplitViewDemo source="demo" />
       </div>
     </main>
   );

@@ -69,6 +69,7 @@ import { loadIntakeSession } from '../intake/sessionStore';
 import { buildEncompassPayloadFromIntake } from '../intake/encompassExport';
 import UrlAEntityRoster from './UrlAEntityRoster';
 import BorrowerWarningsPanel from './BorrowerWarningsPanel';
+import type { ProtectedWorkspaceContext } from '../protectedWorkspace';
 import { SPLIT_DOC_CHANNEL, type DocPaneSnapshot, type SplitDocMessage } from '../splitDocSync';
 import PdfDocumentViewer from './PdfDocumentViewer';
 import FixturePdfViewer from './FixturePdfViewer';
@@ -498,6 +499,8 @@ export default function UnderwriterSplitViewDemo({
   onParseFiles,
   onUseDemo,
   onUseLive,
+  protectedContext = null,
+  onOpenAuthoritativeWorkflow,
 }: {
   liveSession?: LiveParseSession | null;
   liveDocuments?: LiveDocument[];
@@ -508,6 +511,8 @@ export default function UnderwriterSplitViewDemo({
   onParseFiles?: (files: File[]) => void;
   onUseDemo?: () => void;
   onUseLive?: () => void;
+  protectedContext?: ProtectedWorkspaceContext | null;
+  onOpenAuthoritativeWorkflow?: () => void;
 } = {}) {
   const packet: LiveDocument[] = liveDocuments.length
     ? liveDocuments
@@ -529,15 +534,20 @@ export default function UnderwriterSplitViewDemo({
   );
   const scheduleEExtracts = useMemo(() => allScheduleEExtracts(packet), [packet.map((doc) => doc.id).join('|')]);
   const urlARoster = useMemo(
-    () => (isLive ? employmentEntitiesFromUrlA(loadIntakeSession()?.answers) : DEMO_URLA_ENTITIES),
-    [isLive],
+    () => (protectedContext ? [] : isLive ? employmentEntitiesFromUrlA(loadIntakeSession()?.answers) : DEMO_URLA_ENTITIES),
+    [isLive, protectedContext],
   );
   const loanBorrowers = useMemo<LoanBorrower[]>(
-    () => (isLive ? borrowersFromUrlA(loadIntakeSession()?.answers) : DEMO_BORROWERS),
-    [isLive],
+    () => (protectedContext ? protectedContext.borrowers : isLive ? borrowersFromUrlA(loadIntakeSession()?.answers) : DEMO_BORROWERS),
+    [isLive, protectedContext],
   );
   /** Underwriter's "assign to borrower" choices for documents that name nobody on the 1003. */
-  const [borrowerAssignments, setBorrowerAssignments] = useState<Record<string, string>>({});
+  const [borrowerAssignments, setBorrowerAssignments] = useState<Record<string, string>>(
+    () => protectedContext?.borrowerAssignments ?? {},
+  );
+  useEffect(() => {
+    if (protectedContext) setBorrowerAssignments(protectedContext.borrowerAssignments);
+  }, [protectedContext]);
   const locateResult: LocateResult = useMemo(() => {
     if (!isLive) {
       return {
@@ -1154,7 +1164,12 @@ export default function UnderwriterSplitViewDemo({
     { year: 2024, interestIncome: 3900, dividendIncome: 7100, capitalGainsNetLoss: 9800 },
   ]);
   const [assetIncomeIncluded, setAssetIncomeIncluded] = useState(false);
-  const [loanProgram, setLoanProgram] = useState<'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA'>('CONVENTIONAL');
+  const [loanProgram, setLoanProgram] = useState<'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA'>(
+    protectedContext?.loanProgram ?? 'CONVENTIONAL',
+  );
+  useEffect(() => {
+    if (protectedContext) setLoanProgram(protectedContext.loanProgram);
+  }, [protectedContext?.loanProgram]);
   const [schCPnl, setSchCPnl] = useState<YtdPnl>(EMPTY_PNL);
   const [sCorpPnl, setSCorpPnl] = useState<YtdPnl>(EMPTY_PNL);
   const [cCorpPnl, setCCorpPnl] = useState<YtdPnl>(EMPTY_PNL);
@@ -1373,8 +1388,8 @@ export default function UnderwriterSplitViewDemo({
   // Demo keeps the sample borrower. A live upload starts blank and takes the name from the PDF, then the 1003 draft.
   const intakeBorrowerName = isLive ? loadIntakeSession()?.answers.borrowerName?.trim() : '';
   const borrowerMetadata = {
-    loanId: isLive ? 'Live' : 'LN-2026-88042',
-    borrowerName: isLive ? (liveBorrowerName(mappedFields) || intakeBorrowerName || '—') : 'Sarah K. Vance',
+    loanId: protectedContext?.loanId ?? (isLive ? 'Live' : 'LN-2026-88042'),
+    borrowerName: protectedContext?.borrowers[0]?.name ?? (isLive ? (liveBorrowerName(mappedFields) || intakeBorrowerName || '—') : 'Sarah K. Vance'),
     /** Everyone on the loan, for the header. The single-name field above feeds the pay stub checks. */
     borrowerNames: multipleBorrowers ? borrowers.map((borrower) => borrower.name).join(' & ') : '',
     currentEmployer: activeW2Employer.employerName,
@@ -3102,6 +3117,7 @@ export default function UnderwriterSplitViewDemo({
             <select
               value={loanProgram}
               onChange={(event) => setLoanProgram(event.target.value as typeof loanProgram)}
+              disabled={Boolean(protectedContext)}
               className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-800 outline-none"
               aria-label="Loan program"
             >
@@ -3166,7 +3182,7 @@ export default function UnderwriterSplitViewDemo({
               }}
             />
           </label>
-          {packet.length > 0 ? (
+          {packet.length > 0 && !protectedContext ? (
             <button
               type="button"
               onClick={() => (isLive ? onUseDemo?.() : onUseLive?.())}
@@ -3179,11 +3195,26 @@ export default function UnderwriterSplitViewDemo({
         {parseError ? <p className="w-full text-xs text-rose-600">{parseError}</p> : null}
       </div>
 
+      {protectedContext ? (
+        <div data-testid="protected-workspace-banner" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-[11px] text-indigo-950">
+          <span>
+            <strong>Authenticated review workspace.</strong> OCR fields, highlights, and worksheet math are shown here; approval and delivery use only the persisted authoritative calculation.
+          </span>
+          {protectedContext.authoritativeMonthlyIncome !== null ? (
+            <span data-testid="workspace-authoritative-income" className="rounded bg-white px-2 py-1 font-black text-indigo-900">
+              Authoritative {usd(protectedContext.authoritativeMonthlyIncome)}/mo
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <UrlAEntityRoster result={locateResult} onSelect={selectUrlAEntity} />
       <BorrowerWarningsPanel
         borrowers={borrowers}
         warnings={locateResult.warnings ?? []}
         onAssign={(key, borrowerId) => setBorrowerAssignments((current) => ({ ...current, [key]: borrowerId }))}
+        assignmentLockedMessage={protectedContext ? 'Review assignment' : undefined}
+        onOpenAuthoritativeReview={onOpenAuthoritativeWorkflow}
       />
 
 
@@ -4858,15 +4889,19 @@ export default function UnderwriterSplitViewDemo({
 
               <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">Sync these selections</h4>
-                  <p className="mt-1 text-xs text-slate-500">Writes the amounts above to the eFolder. Nothing syncs until you click here.</p>
+                  <h4 className="text-sm font-bold text-slate-900">{protectedContext ? 'Authoritative approval and delivery' : 'Sync these selections'}</h4>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {protectedContext
+                      ? 'The protected workflow persists borrower assignments, recalculates on the server, records approval, and writes only the approved field map.'
+                      : 'Writes the amounts above to the eFolder. Nothing syncs until you click here.'}
+                  </p>
                 </div>
                 <button
                   type="button"
-                  onClick={handleExportSync}
+                  onClick={protectedContext ? onOpenAuthoritativeWorkflow : handleExportSync}
                   className="flex items-center gap-2 self-end rounded-lg bg-emerald-500 px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-950 shadow-sm transition hover:bg-emerald-600"
                 >
-                  Sync <ArrowRight className="h-4 w-4" />
+                  {protectedContext ? 'Open authoritative workflow' : 'Sync'} <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
             </div>

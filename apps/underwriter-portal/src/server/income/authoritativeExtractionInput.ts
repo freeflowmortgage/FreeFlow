@@ -87,7 +87,15 @@ const extractionInput = z.object({
   scheduleEProperties: z.array(scheduleE).max(300).optional(),
 }).strict();
 
-const persistedW2 = w2.omit({ role: true });
+const persistedW2 = w2.omit({ role: true }).extend({
+  pageIndex: z.number().int().min(0).max(10_000).optional(),
+  box1Wages: money.optional(),
+  box5Wages: money.optional(),
+}).strict();
+const persistedScheduleE = scheduleE.extend({
+  pageIndex: z.number().int().min(0).max(10_000).optional(),
+  column: z.enum(['A', 'B', 'C']).optional(),
+}).strict();
 const persistedField = z.object({
   sourceFieldId: z.string().trim().min(1).max(100), value: z.string().max(255).optional(), numericValue: money.optional(),
 }).strict();
@@ -99,7 +107,7 @@ const persistedExtractionInput = z.object({
   gseInvestor: z.enum(['FNMA', 'FREDDIE']).optional(),
   w2Records: z.array(persistedW2).max(100).optional(),
   formRecords: z.array(persistedFormRecord).max(2_000).optional(),
-  scheduleEProperties: z.array(scheduleE).max(300).optional(),
+  scheduleEProperties: z.array(persistedScheduleE).max(300).optional(),
 }).strict();
 
 export type ExtractionMetadataAssignment = Readonly<{
@@ -206,7 +214,8 @@ function projectPersistedInput(
       if (requireBorrower && !roster.has(metadata.get(propertyEntityId)?.borrowerKey ?? '')) {
         requirements.push({ extractionId, entityId: propertyEntityId, field: 'borrowerAssignment', form: 'Schedule E' });
       }
-      return { ...property, entityId: propertyEntityId };
+      const { pageIndex: _pageIndex, column: _column, ...calculationProperty } = property;
+      return { ...calculationProperty, entityId: propertyEntityId };
     });
   }
   for (const row of persisted.w2Records ?? []) {
@@ -217,7 +226,8 @@ function projectPersistedInput(
       requirements.push({ extractionId, entityId: row.entityId, field: 'borrowerAssignment', form: 'W-2' });
     }
     if (!role || (requireBorrower && (!assignment?.borrowerKey || !roster.has(assignment.borrowerKey)))) continue;
-    push(projected, 'w2Employers', { ...row, role });
+    const { pageIndex: _pageIndex, box1Wages: _box1Wages, box5Wages: _box5Wages, ...calculationRow } = row;
+    push(projected, 'w2Employers', { ...calculationRow, role });
   }
   for (const record of persisted.formRecords ?? []) {
     if (record.form === 'Paystub') {

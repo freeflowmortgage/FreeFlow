@@ -11,10 +11,14 @@ export default function BorrowerWarningsPanel({
   borrowers,
   warnings,
   onAssign,
+  assignmentLockedMessage,
+  onOpenAuthoritativeReview,
 }: {
   borrowers: LoanBorrower[];
   warnings: BorrowerWarning[];
   onAssign: (assignmentKey: string, borrowerId: string) => void;
+  assignmentLockedMessage?: string;
+  onOpenAuthoritativeReview?: () => void;
 }) {
   if (borrowers.length <= 1 && !warnings.length) return null;
   const fromDocuments = borrowers.some((borrower) => borrower.fromDocuments);
@@ -53,7 +57,15 @@ export default function BorrowerWarningsPanel({
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1">{warning.message}</span>
-          {warning.code === 'UNIDENTIFIED_BORROWER' && warning.assignmentKey && borrowers.length ? (
+          {warning.code === 'UNIDENTIFIED_BORROWER' && warning.assignmentKey && borrowers.length && assignmentLockedMessage ? (
+            <button
+              type="button"
+              onClick={onOpenAuthoritativeReview}
+              className="rounded border border-rose-300 bg-white px-2 py-1 text-[11px] font-bold text-rose-900"
+            >
+              {assignmentLockedMessage}
+            </button>
+          ) : warning.code === 'UNIDENTIFIED_BORROWER' && warning.assignmentKey && borrowers.length ? (
             <select
               aria-label="Assign document to a borrower"
               data-testid="assign-borrower"

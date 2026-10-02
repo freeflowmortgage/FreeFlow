@@ -53,6 +53,63 @@ test('protected product cards fail closed when synthetic demos are disabled', as
   await expect(page.getByTestId('protected-workflow')).toHaveCount(0);
 });
 
+test('Income demo is isolated from protected APIs and can return to the product landing page', async ({ page }) => {
+  const protectedApiCalls: string[] = [];
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => {
+    protectedApiCalls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } } });
+  });
+
+  await page.goto('/?demo=income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await expect(page.getByText('Income Intelligence · original synthetic demonstration')).toBeVisible();
+  await page.getByRole('button', { name: 'Reconcile' }).click();
+  await expect(page.getByRole('button', { name: 'Sync' })).toBeVisible();
+  expect(protectedApiCalls).toEqual([]);
+  await page.getByTestId('demo-back-to-products').click();
+  await expect(page.getByTestId('b2b-landing')).toBeVisible();
+  await expect(page.getByTestId('enter-income-demo')).toBeVisible();
+  const popupPromise = page.waitForEvent('popup');
+  await page.getByTestId('enter-income-demo').click();
+  const demoPage = await popupPromise;
+  await expect(demoPage.getByTestId('protected-income-demo')).toBeVisible();
+  expect(new URL(demoPage.url()).searchParams.get('demo')).toBe('income');
+  await demoPage.close();
+});
+
+test('protected Income appends multiple uploaded PDFs to Nate\'s document workspace', async ({ page }) => {
+  const attachmentIds: string[] = [];
+  await page.route('**/runtime-config.json', (route) => route.fulfill({ json: { testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' } } }));
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v1/encompass-host/launch') return route.fulfill({ json: { loanId: LOAN, loanVersion: 1, integrationMode: 'ENCOMPASS_HOSTED', created: true } });
+    if (path === `/api/v1/loans/${LOAN}/income-documents`) {
+      const attachmentId = `upload-${attachmentIds.length + 1}`;
+      attachmentIds.push(attachmentId);
+      return route.fulfill({ status: 201, json: { source: 'UPLOAD', attachmentId, status: 'PROCESSED' } });
+    }
+    if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: multiUploadContext(attachmentIds) });
+    if (path.endsWith('/metadata-requirements')) return route.fulfill({ json: { extractionId: path.includes('extraction-2') ? 'extraction-2' : 'extraction-1', status: 'ACTIVE', review: null, requirements: [] } });
+    return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open workspace' }).click();
+  const first = await PDFDocument.create(); first.addPage([612, 792]);
+  const second = await PDFDocument.create(); second.addPage([612, 792]);
+  await page.getByTestId('protected-pdf-input').setInputFiles([
+    { name: 'w2.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await first.save()) },
+    { name: 'schedule-c.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await second.save()) },
+  ]);
+  await page.getByTestId('upload-pdf').click();
+  await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
+  await expect.poll(() => attachmentIds.length).toBe(2);
+  await page.getByRole('button', { name: 'Wages', exact: true }).click();
+  await expect(page.getByTitle('w2.pdf')).toBeVisible();
+  await page.getByRole('button', { name: 'Sch C', exact: true }).click();
+  await expect(page.getByTitle('schedule-c.pdf')).toBeVisible();
+});
+
 test('protected white workflow binds, uploads, reviews, calculates, approves, and durably writes', async ({ page }) => {
   let stage: 'bound' | 'uploaded' | 'reviewed' | 'calculated' | 'approved' | 'written' = 'bound';
   let fieldMapRequests = 0;
@@ -94,6 +151,9 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   await page.getByTestId('protected-pdf-input').setInputFiles({ name: 'synthetic-income.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) });
   await page.getByTestId('upload-pdf').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
+  await expect(page.getByTestId('authenticated-income-workspace')).toBeVisible();
+  await expect(page.getByTestId('protected-workspace-banner')).toContainText('persisted authoritative calculation');
+  await page.getByTestId('authoritative-workflow-tab').click();
   await page.getByRole('combobox').selectOption('CURRENT');
   await page.getByRole('button', { name: 'Confirm reviewed metadata' }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('READY TO CALCULATE');
@@ -110,6 +170,8 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   expect(unsafeHeaders).toEqual([]);
   expect(bodies.find((item) => item.path === '/api/income/calculate')?.body).toEqual({ loanId: LOAN, extractionIds: [EXTRACTION] });
   expect(bodies.some((item) => item.path === '/parse' || item.path === '/api/underwrite/process')).toBe(false);
+  await page.getByTestId('back-to-products').click();
+  await expect(page.getByTestId('b2b-landing')).toBeVisible();
 });
 
 test('protected white workflow visibly preserves a backend launch failure', async ({ page }) => {
@@ -125,6 +187,7 @@ test('protected white workflow visibly preserves a backend launch failure', asyn
   await page.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page.getByRole('alert')).toHaveText('Hosted mode is temporarily unavailable. (HOSTED_MODE_UNAVAILABLE)');
   await expect(page.getByTestId('workflow-state')).toHaveText('NO LOAN CONTEXT');
+  await page.getByTestId('authoritative-workflow-tab').click();
   await expect(page.getByTestId('calculate-income')).toBeDisabled();
   await expect(page.getByTestId('approve-income')).toBeDisabled();
   await expect(page.getByTestId('write-host')).toBeDisabled();
@@ -164,6 +227,7 @@ test('TB-01 through TB-12 two-borrower hosted path assigns both documents and wr
   await page.goto('/');
   await page.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('BOUND');
+  await page.getByTestId('authoritative-workflow-tab').click();
   await expect(page.getByTestId('borrower-roster')).toContainText('Primary borrower-1');
   await expect(page.getByTestId('borrower-roster')).toContainText('Co-borrower borrower-2');
   await expect(page.getByTestId('calculate-income')).toBeDisabled();
@@ -223,6 +287,7 @@ test('demo gate harness renders paystub and matching W-2 reconciliation, then ap
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Open workspace' }).click();
+  await page.getByTestId('authoritative-workflow-tab').click();
   await page.getByTestId('pull-documents').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
   const labels = page.locator('label');
@@ -254,6 +319,28 @@ test('demo gate harness renders paystub and matching W-2 reconciliation, then ap
   await expect(page.getByTestId('write-host')).toBeDisabled();
   expect(fieldMapRequests).toBe(1);
 });
+
+function multiUploadContext(attachmentIds: readonly string[]) {
+  const attachments = attachmentIds.map((attachmentId) => ({ attachmentId, category: attachmentId === 'upload-1' ? 'W2_WAGE' : 'Schedule C', version: 1, pageCount: 1, parserVersion: 'income-parser-v5' }));
+  const extractions = attachmentIds.map((attachmentId, index) => index === 0 ? {
+    id: 'extraction-1', attachmentId, sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: [], confidence: 99,
+    normalizedInput: { w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 96000 }] },
+    evidence: { fields: [{ collection: 'w2Extracts', index: 0, field: 'box1', pageIndex: 0, box: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 } }] }, metadataReview: null,
+  } : {
+    id: 'extraction-2', attachmentId, sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: [], confidence: 99,
+    normalizedInput: { formRecords: [{ entityId: 'Schedule C:business-1', form: 'Schedule C', pageIndex: 0, fields: [{ sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' }, { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 }] }] },
+    evidence: { fields: [{ collection: 'formExtracts', entityId: 'Schedule C:business-1', field: 'ent1-net', pageIndex: 0, box: { x: 0.2, y: 0.3, w: 0.2, h: 0.03 } }] }, metadataReview: null,
+  });
+  return {
+    loan: { id: LOAN, version: 1 + attachmentIds.length, status: attachmentIds.length ? 'DOCS_UPLOADED' : 'DRAFT', program: 'CONVENTIONAL', borrowerName: 'Synthetic Borrower' },
+    borrowers: [{ borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' }],
+    attachments,
+    extractions,
+    calculation: null,
+    approval: null,
+    hostWrite: null,
+  };
+}
 
 function demoGateRequirements() {
   return [

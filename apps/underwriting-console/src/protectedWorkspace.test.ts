@@ -1,0 +1,104 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import type { ConsoleContext } from './protectedWorkflow';
+import { mapIncomeFields } from './incomeFieldMap';
+import { liveSchCPatch, liveWagePatch } from './liveHydrate';
+import {
+  protectedWorkspaceContext,
+  protectedWorkspaceDocuments,
+  rehydrateProtectedParseResponse,
+} from './protectedWorkspace';
+
+const extraction: ConsoleContext['extractions'][number] = {
+  id: 'extraction-1',
+  attachmentId: 'upload-1',
+  sourceDocumentVersion: 1,
+  parserVersion: 'income-parser-v5',
+  schemaVersion: 'income-extraction-v2',
+  status: 'ACTIVE',
+  warnings: ['AUTHORITATIVE_TAX_YEAR_REQUIRED'],
+  confidence: 98.5,
+  normalizedInput: {
+    w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 96000, pageIndex: 0, box1Wages: 95000, box5Wages: 96000 }],
+    formRecords: [{
+      entityId: 'Schedule C:business-1', form: 'Schedule C', pageIndex: 1,
+      fields: [
+        { sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' },
+        { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 },
+      ],
+    }],
+    scheduleEProperties: [{ year: 2025, propertyAddress: '100 Synthetic Lane', propertyType: 'RENTAL', rentsReceived: 24000, netIncomeLoss: 12000, pageIndex: 2, column: 'B' }],
+  },
+  evidence: { fields: [
+    { collection: 'w2Extracts', index: 0, field: 'box1', pageIndex: 0, box: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 } },
+    { collection: 'formExtracts', entityId: 'Schedule C:business-1', field: 'ent1-net', pageIndex: 1, box: { x: 0.2, y: 0.3, w: 0.2, h: 0.03 } },
+    { collection: 'scheduleEProperties', index: 0, field: 'address', pageIndex: 2, box: { x: 0.15, y: 0.25, w: 0.35, h: 0.03 } },
+    { collection: 'scheduleEProperties', index: 0, field: 'financials.3', pageIndex: 2, box: { x: 0.25, y: 0.35, w: 0.15, h: 0.03 } },
+  ] },
+  metadataReview: {
+    id: 'review-1', metadataVersion: 1, current: true,
+    assignments: [
+      { entityId: 'w2-p0-0', borrowerKey: 'borrower-1', employmentRole: 'CURRENT' },
+      { entityId: 'Schedule C:business-1', borrowerKey: 'borrower-2', taxYear: 2025 },
+    ],
+  },
+};
+
+const context: ConsoleContext = {
+  loan: { id: 'loan-1', version: 3, status: 'DOCS_UPLOADED', program: 'CONVENTIONAL', borrowerName: 'Synthetic Borrower' },
+  borrowers: [
+    { borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' },
+    { borrowerKey: 'borrower-2', ordinal: 1, role: 'CO_BORROWER' },
+  ],
+  attachments: [{ attachmentId: 'upload-1', category: 'W2_WAGE', version: 1, pageCount: 3, parserVersion: 'income-parser-v5' }],
+  extractions: [extraction],
+  calculation: { id: 'calculation-1', calculatedLoanVersion: 3, qualifyingMonthlyIncome: '18000.00', trendingResult: 'STABLE', yearsAnalyzed: [2025], current: true },
+  approval: null,
+  hostWrite: null,
+};
+
+test('rehydrates persisted fields and coordinate evidence for Nate\'s workspace without OCR text', () => {
+  const result = rehydrateProtectedParseResponse(extraction, 3);
+  assert.equal(result.pages.length, 3);
+  assert.deepEqual(result.pages[0]?.formIds, ['W-2']);
+  assert.deepEqual(result.pages[1]?.formIds, ['Schedule C']);
+  assert.deepEqual(result.pages[2]?.formIds, ['Schedule E']);
+  assert.equal(result.pages.every((page) => page.words.length === 0), true);
+  assert.equal(result.w2Extracts?.[0]?.box1, 95000);
+  assert.equal(result.w2Extracts?.[0]?.box5, 96000);
+  assert.deepEqual(result.w2Extracts?.[0]?.boxes?.box1, { x: 0.1, y: 0.2, w: 0.3, h: 0.04 });
+  assert.equal(result.formExtracts?.find((field) => field.sourceFieldId === 'ent1-net')?.fieldLabel, 'Net Profit or Loss (Line 31)');
+  assert.deepEqual(result.formExtracts?.find((field) => field.sourceFieldId === 'ent1-net')?.box, { x: 0.2, y: 0.3, w: 0.2, h: 0.03 });
+  assert.equal(result.scheduleEProperties?.[0]?.address, '100 Synthetic Lane');
+  assert.equal(result.scheduleEProperties?.[0]?.column, 'B');
+  assert.deepEqual(result.scheduleEProperties?.[0]?.boxes?.financials?.['3'], { x: 0.25, y: 0.35, w: 0.15, h: 0.03 });
+  assert.equal(JSON.stringify(result).includes('rawOcrText'), false);
+
+  const mapped = mapIncomeFields(result);
+  assert.equal(liveWagePatch(mapped)?.w2Year1Box5, 96000);
+  assert.equal(liveSchCPatch(mapped)?.line31, 120000);
+  assert.deepEqual(mapped.find((field) => field.sourceFieldId === 'ent1-net')?.box, { x: 0.2, y: 0.3, w: 0.2, h: 0.03 });
+});
+
+test('includes only active persisted extractions whose original PDF remains in the browser session', () => {
+  const file = new File(['%PDF-synthetic'], 'income.pdf', { type: 'application/pdf' });
+  const documents = protectedWorkspaceDocuments(context, [
+    { file, attachmentId: 'upload-1' },
+    { file: new File(['%PDF-pending'], 'pending.pdf', { type: 'application/pdf' }), attachmentId: null },
+  ]);
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0]?.file, file);
+  assert.equal(documents[0]?.result.transaction_id, 'extraction-1');
+});
+
+test('maps authoritative loan identity and reviewed borrower assignments without defaulting documents', () => {
+  const workspace = protectedWorkspaceContext(context);
+  assert.equal(workspace?.loanId, 'loan-1');
+  assert.equal(workspace?.borrowers[0]?.name, 'Synthetic Borrower');
+  assert.equal(workspace?.borrowers[1]?.name, 'Co-borrower (borrower-2)');
+  assert.equal(workspace?.authoritativeMonthlyIncome, 18000);
+  assert.deepEqual(workspace?.borrowerAssignments, {
+    'upload-1:0:W-2': 'borrower-1',
+    'upload-1:1:Schedule C': 'borrower-2',
+  });
+});
