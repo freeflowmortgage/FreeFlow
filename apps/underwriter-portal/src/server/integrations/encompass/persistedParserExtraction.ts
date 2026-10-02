@@ -64,6 +64,9 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
       ...(limitedText(raw.ein, 20) ? { ein: limitedText(raw.ein, 20) } : {}),
       year,
       annualWages: box1 ?? box5,
+      pageIndex,
+      ...(box1 !== null ? { box1Wages: box1 } : {}),
+      ...(box5 !== null ? { box5Wages: box5 } : {}),
     });
     warnings.push('W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED');
     collectBoxEvidence(fields, 'w2Extracts', index, pageIndex, raw.boxes);
@@ -81,7 +84,8 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
       throw new Error('Schedule E extraction is missing authoritative calculation fields.');
     }
     const propertyType = String(raw.propertyType ?? '').toLowerCase().includes('royal') ? 'ROYALTY' : 'RENTAL';
-    const row: JsonObject = { year, propertyAddress: address, propertyType };
+    const column = raw.column === 'A' || raw.column === 'B' || raw.column === 'C' ? raw.column : null;
+    const row: JsonObject = { year, propertyAddress: address, propertyType, pageIndex, ...(column ? { column } : {}) };
     copyMoney(row, financials, '3', propertyType === 'ROYALTY' ? 'royaltiesReceived' : 'rentsReceived');
     copyMoney(row, financials, '9', 'insurance');
     copyMoney(row, financials, '12', 'mortgageInterest');
@@ -94,6 +98,12 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
     if (fairRentalDays !== null) row.fairRentalDays = fairRentalDays;
     scheduleEProperties.push(row);
     collectBoxEvidence(fields, 'scheduleEProperties', index, pageIndex, raw.boxes);
+    const scheduleEBoxes = isRecord(raw.boxes) ? raw.boxes : {};
+    const financialBoxes = isRecord(scheduleEBoxes.financials) ? scheduleEBoxes.financials : {};
+    for (const key of Object.keys(financialBoxes).sort().slice(0, 40)) {
+      const box = coordinateBox(financialBoxes[key]);
+      if (box) fields.push({ collection: 'scheduleEProperties', index, field: `financials.${key.slice(0, 20)}`, pageIndex, box });
+    }
   }
 
   const formRecordMap = new Map<string, { entityId: string; form: string; pageIndex: number; fields: JsonObject[] }>();

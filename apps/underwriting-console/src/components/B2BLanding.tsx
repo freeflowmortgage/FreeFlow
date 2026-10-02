@@ -87,9 +87,11 @@ const AUDIENCES = [
 
 export default function B2BLanding({
   onOpenService,
+  onOpenIncomeDemo,
   protectedMode = false,
 }: {
   onOpenService: (view: ConsoleView) => void;
+  onOpenIncomeDemo?: () => void;
   protectedMode?: boolean;
 }) {
   return (
@@ -115,6 +117,16 @@ export default function B2BLanding({
             >
               Book a walkthrough
             </a>
+            {protectedMode && onOpenIncomeDemo ? (
+              <button
+                type="button"
+                data-testid="open-income-demo"
+                onClick={onOpenIncomeDemo}
+                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
+              >
+                View demo
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => onOpenService('split')}
@@ -156,6 +168,15 @@ export default function B2BLanding({
               >
                 {protectedMode ? 'Open protected workflow' : 'Try the live demo'}
               </button>
+              {protectedMode && onOpenIncomeDemo ? (
+                <button
+                  type="button"
+                  onClick={onOpenIncomeDemo}
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-6 py-3 text-sm font-bold text-indigo-800 hover:border-indigo-400"
+                >
+                  View Income demo ↗
+                </button>
+              ) : null}
             </div>
             <p className="mt-4 text-xs font-semibold text-slate-400">
               {protectedMode
@@ -264,6 +285,16 @@ export default function B2BLanding({
                     >
                       Open in workspace
                     </button>
+                    {protectedMode && product.id === 'income' && onOpenIncomeDemo ? (
+                      <button
+                        type="button"
+                        data-testid="enter-income-demo"
+                        onClick={onOpenIncomeDemo}
+                        className="text-xs font-bold text-indigo-700 hover:underline"
+                      >
+                        View demo ↗
+                      </button>
+                    ) : null}
                     {!protectedMode ? <a
                       href={`#${product.demoHash}`}
                       target="_blank"

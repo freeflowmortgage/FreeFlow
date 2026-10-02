@@ -8,12 +8,34 @@ test('merges only validated persisted extraction input and namespaces local enti
   const result = mergeAuthoritativeExtractionInputs([{
     extractionId: '00000000-0000-4000-8000-000000000101',
     normalizedInput: {
-      w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 120000 }],
+      w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 120000, pageIndex: 0, box1Wages: 120000, box5Wages: 121000 }],
     },
     metadataAssignments: [{ entityId: 'w2-p0-0', employmentRole: 'CURRENT' }],
   }]);
   assert.equal(result.w2Employers?.[0].annualWages, 120000);
   assert.equal(result.w2Employers?.[0].entityId, '00000000-0000-4000-8000-000000000101:w2-p0-0');
+  assert.equal('pageIndex' in (result.w2Employers?.[0] ?? {}), false);
+  assert.equal('box1Wages' in (result.w2Employers?.[0] ?? {}), false);
+  assert.equal('box5Wages' in (result.w2Employers?.[0] ?? {}), false);
+});
+
+test('strips Schedule E display metadata before authoritative calculation projection', () => {
+  const result = mergeAuthoritativeExtractionInputs([{
+    extractionId: '00000000-0000-4000-8000-000000000102',
+    normalizedInput: {
+      scheduleEProperties: [{
+        entityId: 'schedule-e-p2-b', year: 2025, propertyAddress: '100 Synthetic Lane',
+        propertyType: 'RENTAL', rentsReceived: 24000, netIncomeLoss: 12000, pageIndex: 2, column: 'B',
+      }],
+    },
+  }]);
+
+  const property = result.scheduleEProperties?.[0] as unknown as (Record<string, unknown> | undefined);
+  assert.equal(property?.rentsReceived, 24000);
+  assert.equal(property?.netIncomeLoss, 12000);
+  assert.equal(property?.entityId, '00000000-0000-4000-8000-000000000102:schedule-e-0');
+  assert.equal('pageIndex' in (property ?? {}), false);
+  assert.equal('column' in (property ?? {}), false);
 });
 
 test('returns exact reviewed metadata requirements and projects supported non-W2 records', () => {
