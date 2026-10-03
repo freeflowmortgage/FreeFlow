@@ -221,13 +221,17 @@ function projectPersistedInput(
   for (const row of persisted.w2Records ?? []) {
     const assignment = metadata.get(row.entityId);
     const role = assignment?.employmentRole;
+    const authoritativeBox5 = typeof row.box5Wages === 'number' && row.box5Wages > 0 ? row.box5Wages : undefined;
+    if (authoritativeBox5 === undefined) {
+      requirements.push({ extractionId, entityId: row.entityId, field: 'requiredParserField', form: 'W-2' });
+    }
     if (!role) requirements.push({ extractionId, entityId: row.entityId, field: 'employmentRole', form: 'W-2' });
     if (requireBorrower && (!assignment?.borrowerKey || !roster.has(assignment.borrowerKey))) {
       requirements.push({ extractionId, entityId: row.entityId, field: 'borrowerAssignment', form: 'W-2' });
     }
-    if (!role || (requireBorrower && (!assignment?.borrowerKey || !roster.has(assignment.borrowerKey)))) continue;
-    const { pageIndex: _pageIndex, box1Wages: _box1Wages, box5Wages: _box5Wages, ...calculationRow } = row;
-    push(projected, 'w2Employers', { ...calculationRow, role });
+    if (authoritativeBox5 === undefined || !role || (requireBorrower && (!assignment?.borrowerKey || !roster.has(assignment.borrowerKey)))) continue;
+    const { pageIndex: _pageIndex, annualWages: _annualWages, box1Wages: _box1Wages, box5Wages: _box5Wages, ...calculationRow } = row;
+    push(projected, 'w2Employers', { ...calculationRow, annualWages: authoritativeBox5, role });
   }
   for (const record of persisted.formRecords ?? []) {
     if (record.form === 'Paystub') {
@@ -448,7 +452,7 @@ function priorW2WageLookup(
     for (const row of Array.isArray(input.w2Records) ? input.w2Records : []) {
       if (!isRecord(row) || typeof row.entityId !== 'string') continue;
       const employer = employerIdentityKey(typeof row.employerName === 'string' ? row.employerName : '');
-      const wages = [row.annualWages, row.annualIncome, row.annualBaseIncome].find((amount) => typeof amount === 'number');
+      const wages = typeof row.box5Wages === 'number' && row.box5Wages > 0 ? row.box5Wages : undefined;
       if (!employer || typeof wages !== 'number') continue;
       const borrowerKey = assignments.get(row.entityId);
       if (borrowerKey) keyed.set(`${borrowerKey}:${employer}`, wages);

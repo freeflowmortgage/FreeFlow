@@ -59,7 +59,7 @@ function line(result: ReturnType<typeof authorize>['result'], borrowerKey: strin
 test('AC-01 two-borrower W-2 assignment, calculation, and review', () => {
   const records: RecordInput[] = [1, 2].map((ordinal) => ({
     extractionId: `00000000-0000-4000-8000-00000000010${ordinal}`,
-    normalizedInput: { w2Records: [{ entityId: `w2-${ordinal}`, employerName: ordinal === 1 ? 'Northwind Labs' : 'Other Co', year: 2025, annualWages: ordinal === 1 ? 96000 : 72000 }] },
+    normalizedInput: { w2Records: [{ entityId: `w2-${ordinal}`, employerName: ordinal === 1 ? 'Northwind Labs' : 'Other Co', year: 2025, annualWages: ordinal === 1 ? 96000 : 72000, box5Wages: ordinal === 1 ? 96000 : 72000 }] },
     metadataAssignments: [{ entityId: `w2-${ordinal}`, employmentRole: 'CURRENT' as const, borrowerKey: `borrower-${ordinal}` }],
   }));
   assert.throws(() => mergeAuthoritativeExtractionInputs(records.map(({ metadataAssignments: _ignored, ...record }) => record), { borrowerRoster: KEYS }), (error: unknown) => error instanceof ExtractionMetadataRequiredError && error.requirements.some((item) => item.field === 'borrowerAssignment'));
@@ -73,12 +73,12 @@ test('AC-01 two-borrower W-2 assignment, calculation, and review', () => {
 test('AC-02 same employer on the other borrower is not cross-assigned', () => {
   const borrowerOne = {
     extractionId: '00000000-0000-4000-8000-000000000202',
-    normalizedInput: { w2Records: [{ entityId: 'w2-match', employerName: 'Northwind Labs', year: 2025, annualWages: 96000 }] },
+    normalizedInput: { w2Records: [{ entityId: 'w2-match', employerName: 'Northwind Labs', year: 2025, annualWages: 96000, box5Wages: 96000 }] },
     metadataAssignments: [{ entityId: 'w2-match', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-1' }],
   };
   const otherBorrowerSameEmployer = {
     extractionId: '00000000-0000-4000-8000-000000000203',
-    normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Northwind Labs', year: 2025, annualWages: 72000 }] },
+    normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Northwind Labs', year: 2025, annualWages: 72000, box5Wages: 72000 }] },
     metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-2' }],
   };
   const { reconciliation, result } = authorize([borrowerOne, otherBorrowerSameEmployer]);
@@ -111,7 +111,7 @@ test('AC-11 a paystub beside another employer W-2 keeps both wages and records t
     reviewedPaystub('00000000-0000-4000-8000-000000000211'),
     {
       extractionId: '00000000-0000-4000-8000-000000000212',
-      normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Other Co', year: 2025, annualWages: 12000 }] },
+      normalizedInput: { w2Records: [{ entityId: 'w2-other', employerName: 'Other Co', year: 2025, annualWages: 12000, box5Wages: 12000 }] },
       metadataAssignments: [{ entityId: 'w2-other', employmentRole: 'CONCURRENT' as const, borrowerKey: 'borrower-1' }],
     },
   ];
@@ -224,7 +224,7 @@ test('demo gate fixture calculates paystub plus matching W-2, self-employed stac
     reviewedPaystub('00000000-0000-4000-8000-000000000401'),
     {
       extractionId: '00000000-0000-4000-8000-000000000402',
-      normalizedInput: { w2Records: [{ entityId: 'w2-b1', employerName: 'Northwind Labs', year: 2025, annualWages: 96000 }] },
+      normalizedInput: { w2Records: [{ entityId: 'w2-b1', employerName: 'Northwind Labs', year: 2025, annualWages: 96000, box5Wages: 96000 }] },
       metadataAssignments: [{ entityId: 'w2-b1', employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-1' }],
     },
     business('00000000-0000-4000-8000-000000000403', 'Schedule C', 'sch-c', [

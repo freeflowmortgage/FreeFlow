@@ -55,6 +55,7 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
     const employerName = limitedText(raw.employerName, 255);
     const box1 = money(raw.box1);
     const box5 = money(raw.box5);
+    const hasAuthoritativeBox5 = box5 !== null && box5 > 0;
     if (pageIndex === null || year === null || !employerName || (box1 === null && box5 === null)) {
       throw new Error('W-2 extraction is missing authoritative calculation fields.');
     }
@@ -63,12 +64,13 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
       employerName,
       ...(limitedText(raw.ein, 20) ? { ein: limitedText(raw.ein, 20) } : {}),
       year,
-      annualWages: box1 ?? box5,
+      ...(hasAuthoritativeBox5 ? { annualWages: box5 } : {}),
       pageIndex,
       ...(box1 !== null ? { box1Wages: box1 } : {}),
       ...(box5 !== null ? { box5Wages: box5 } : {}),
     });
     warnings.push('W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED');
+    if (!hasAuthoritativeBox5) warnings.push('W2_BOX5_REQUIRED');
     collectBoxEvidence(fields, 'w2Extracts', index, pageIndex, raw.boxes);
   }
 

@@ -14,7 +14,7 @@ test('selects calculation fields and coordinate evidence without OCR or raw resp
     formExtracts: [{ form: 'W-2', ssn: '000-00-0000' }],
   });
   const employers = result.normalizedInput.w2Records as Array<Record<string, unknown>>;
-  assert.equal(employers[0]?.annualWages, 120000);
+  assert.equal(employers[0]?.annualWages, 121000);
   assert.equal(employers[0]?.pageIndex, 0);
   assert.equal(employers[0]?.box1Wages, 120000);
   assert.equal(employers[0]?.box5Wages, 121000);
@@ -60,8 +60,14 @@ test('persists bounded Schedule E display metadata and nested financial box evid
 });
 
 test('is deterministic and fails closed for unsupported or incomplete parser output', () => {
-  const input = { w2Extracts: [{ pageIndex: 1, year: 2024, employerName: 'Synthetic Employer', box1: 90000 }] };
-  assert.equal(selectPersistableParserExtraction(input).canonicalHash, selectPersistableParserExtraction(input).canonicalHash);
+  const input = { w2Extracts: [{ pageIndex: 1, year: 2024, employerName: 'Synthetic Employer', box1: 90000, box5: 0 }] };
+  const selected = selectPersistableParserExtraction(input);
+  assert.equal(selected.canonicalHash, selectPersistableParserExtraction(input).canonicalHash);
+  const w2 = selected.normalizedInput.w2Records as Array<Record<string, unknown>>;
+  assert.equal(w2[0]?.annualWages, undefined);
+  assert.equal(w2[0]?.box1Wages, 90000);
+  assert.equal(w2[0]?.box5Wages, 0);
+  assert.ok(selected.warnings.includes('W2_BOX5_REQUIRED'));
   assert.throws(() => selectPersistableParserExtraction({ pages: [{ words: [] }] }));
   assert.throws(() => selectPersistableParserExtraction({ w2Extracts: [{ pageIndex: 0, year: null, employerName: 'Synthetic', box1: 1 }] }));
 });

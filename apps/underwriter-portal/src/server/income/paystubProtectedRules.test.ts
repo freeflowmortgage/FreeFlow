@@ -60,7 +60,7 @@ function paystub(options: {
 function w2(extractionId: string, entityId: string, employerName: string, annualWages: number, borrowerKey?: string): RecordInput {
   return {
     extractionId,
-    normalizedInput: { w2Records: [{ entityId, employerName, year: 2025, annualWages }] },
+    normalizedInput: { w2Records: [{ entityId, employerName, year: 2025, annualWages, box5Wages: annualWages }] },
     ...(borrowerKey ? { metadataAssignments: [{ entityId, employmentRole: 'CURRENT' as const, borrowerKey }] } : {}),
   };
 }
