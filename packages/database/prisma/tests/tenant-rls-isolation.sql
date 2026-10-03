@@ -22,8 +22,8 @@ INSERT INTO "income_extractions" (
   "id", "tenantId", "loanId", "sourceDocumentId", "sourceAttachmentId", "sourceDocumentVersion",
   "sourceContentHash", "parserVersion", "schemaVersion", "normalizedInput", "evidence", "canonicalHash"
 ) VALUES
-  ('22222222-2222-4222-8222-222222222222', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '20202020-2020-4020-8020-202020202020', 'attachment-a', 1, repeat('a', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-a","employerName":"Synthetic Employer A","year":2025,"annualWages":97481.4}]}', '{"fields":[]}', repeat('c', 64)),
-  ('23232323-2323-4232-8232-232323232323', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ffffffff-ffff-4fff-8fff-ffffffffffff', '21212121-2121-4121-8121-212121212121', 'attachment-b', 1, repeat('b', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-b","employerName":"Synthetic Employer B","year":2025,"annualWages":84000}]}', '{"fields":[]}', repeat('d', 64));
+  ('22222222-2222-4222-8222-222222222222', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '20202020-2020-4020-8020-202020202020', 'attachment-a', 1, repeat('a', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-a","employerName":"Synthetic Employer A","year":2025,"annualWages":97481.4,"box5Wages":97481.4}]}', '{"fields":[]}', repeat('c', 64)),
+  ('23232323-2323-4232-8232-232323232323', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ffffffff-ffff-4fff-8fff-ffffffffffff', '21212121-2121-4121-8121-212121212121', 'attachment-b', 1, repeat('b', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-b","employerName":"Synthetic Employer B","year":2025,"annualWages":84000,"box5Wages":84000}]}', '{"fields":[]}', repeat('d', 64));
 
 DO $role_assertions$
 DECLARE

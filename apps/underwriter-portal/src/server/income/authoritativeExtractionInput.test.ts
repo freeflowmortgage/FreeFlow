@@ -12,11 +12,39 @@ test('merges only validated persisted extraction input and namespaces local enti
     },
     metadataAssignments: [{ entityId: 'w2-p0-0', employmentRole: 'CURRENT' }],
   }]);
-  assert.equal(result.w2Employers?.[0].annualWages, 120000);
+  assert.equal(result.w2Employers?.[0].annualWages, 121000);
   assert.equal(result.w2Employers?.[0].entityId, '00000000-0000-4000-8000-000000000101:w2-p0-0');
   assert.equal('pageIndex' in (result.w2Employers?.[0] ?? {}), false);
   assert.equal('box1Wages' in (result.w2Employers?.[0] ?? {}), false);
   assert.equal('box5Wages' in (result.w2Employers?.[0] ?? {}), false);
+});
+
+test('W-2 calculation uses Box 5 and fails closed when Box 5 was not extracted', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000108';
+  const metadataAssignments = [{ entityId: 'w2-p0-0', employmentRole: 'CURRENT' as const }];
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: {
+      w2Records: [{
+        entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025,
+        annualWages: 159550.98, box1Wages: 159550.98, box5Wages: 142800,
+      }],
+    },
+    metadataAssignments,
+  }]);
+  assert.equal(projected.w2Employers?.[0].annualWages, 142800);
+
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: {
+      w2Records: [{ entityId: 'w2-p0-0', employerName: 'Synthetic Employer', year: 2025, annualWages: 159550.98, box1Wages: 159550.98, box5Wages: 0 }],
+    },
+    metadataAssignments,
+  }]), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{ extractionId, entityId: 'w2-p0-0', field: 'requiredParserField', form: 'W-2' }]);
+    return true;
+  });
 });
 
 test('strips Schedule E display metadata before authoritative calculation projection', () => {
