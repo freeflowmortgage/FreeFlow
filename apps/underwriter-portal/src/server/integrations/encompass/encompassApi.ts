@@ -36,13 +36,18 @@ export async function parseWithIncomeService(
   bytes: Uint8Array,
   options: Readonly<{ parserUrl: string; fetch?: Fetch }>,
 ): Promise<ParsedAttachment> {
-  const response = await (options.fetch ?? fetch)(options.parserUrl, {
-    method: 'POST',
-    redirect: 'error',
-    signal: AbortSignal.timeout(300_000),
-    headers: { 'content-type': 'application/pdf', 'x-document-title': 'encompass-document.pdf' },
-    body: Buffer.from(bytes),
-  });
+  let response: Response;
+  try {
+    response = await (options.fetch ?? fetch)(options.parserUrl, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(300_000),
+      headers: { 'content-type': 'application/pdf', 'x-document-title': 'encompass-document.pdf' },
+      body: Buffer.from(bytes),
+    });
+  } catch {
+    throw new EncompassApiError('DOCUMENT_PARSER_UNAVAILABLE', 'Document parser request failed.', true);
+  }
   if (!response.ok) throw httpError('DOCUMENT_PARSER_FAILED', response.status);
   const value = await readJson(response, 'DOCUMENT_PARSER_RESPONSE_INVALID');
   if (!isRecord(value)) throw new EncompassApiError('DOCUMENT_PARSER_RESPONSE_INVALID', 'Unexpected parser response.', false);

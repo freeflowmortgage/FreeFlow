@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -81,6 +82,27 @@ def test_extracts_box5_and_employer_from_copy_b() -> None:
     assert "US Bank" in row["employerName"]
     assert row["box5"] == 121500.0
     assert row["box1"] == 120000.0
+
+
+def test_supplied_converter_words_do_not_trigger_a_second_ocr_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fitz
+    import w2_grid
+
+    doc = fitz.open()
+    doc.new_page(width=612, height=792)
+    data = doc.tobytes()
+    doc.close()
+    supplied = SimpleNamespace(
+        index=0,
+        words=[{"text": "Uniform Residential Loan Application", "x": 0.1, "y": 0.1, "w": 0.4, "h": 0.03}],
+    )
+
+    def unexpected_second_ocr(_page):
+        raise AssertionError("converter-supplied OCR words must be reused")
+
+    monkeypatch.setattr(w2_grid, "ocr_page_words", unexpected_second_ocr)
+
+    assert extract_w2_pages(data, ocr_pages=[supplied]) == []
 
 
 class _Rect:

@@ -892,7 +892,12 @@ def extract_w2_pages(
                     if _extract_is_plausible(parsed):
                         break
                     parsed = None
-            if _should_ocr_w2(page, page_words, parsed):
+            # The shared converter has already made the OCR/native-text
+            # decision for every supplied page. Re-running the specialized
+            # fallback here loads a second RapidOCR engine and can exhaust the
+            # parser task on multi-page scanned packets. Keep the fallback for
+            # standalone callers that did not supply converter evidence.
+            if convert_page is None and _should_ocr_w2(page, page_words, parsed):
                 try:
                     ocr_words = ocr_page_words(page)
                 except Exception:
