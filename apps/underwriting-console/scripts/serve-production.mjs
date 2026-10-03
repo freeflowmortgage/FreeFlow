@@ -22,6 +22,7 @@ if (testHostRequested && (!testHostLoanGuid || !/^[A-Za-z0-9-]{1,255}$/.test(tes
 const syntheticProductDemos = process.env.FREEFLOW_RUNTIME_ENV === 'development'
   && process.env.FREEFLOW_SYNTHETIC_PRODUCT_DEMOS === 'true';
 const logoutUrl = parseLogoutUrl(process.env.COGNITO_LOGOUT_URL);
+const authSessionCookieName = parseCookieName(process.env.ALB_AUTH_SESSION_COOKIE_NAME);
 
 const frameAncestors = runtimeMode === 'encompass-hosted'
   ? parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS)
@@ -54,6 +55,12 @@ function parseLogoutUrl(value) {
   return candidate.toString();
 }
 
+function parseCookieName(value) {
+  const candidate = value?.trim() || 'AWSELBAuthSessionCookie';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(candidate)) throw new Error('ALB_AUTH_SESSION_COOKIE_NAME_INVALID');
+  return candidate;
+}
+
 createServer(async (req, res) => {
   const requestUrl = new URL(req.url || '/', 'http://localhost');
   const pathname = requestUrl.pathname;
@@ -80,8 +87,8 @@ createServer(async (req, res) => {
     }
     const expired = 'deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=None';
     res.setHeader('Set-Cookie', [
-      `AWSELBAuthSessionCookie=${expired}`,
-      ...Array.from({ length: 4 }, (_, index) => `AWSELBAuthSessionCookie-${index}=${expired}`),
+      `${authSessionCookieName}=${expired}`,
+      ...Array.from({ length: 4 }, (_, index) => `${authSessionCookieName}-${index}=${expired}`),
     ]);
     res.writeHead(302, { Location: logoutUrl });
     res.end();

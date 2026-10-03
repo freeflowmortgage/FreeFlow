@@ -33,6 +33,7 @@ const child = spawn(process.execPath, ['scripts/serve-production.mjs'], {
     ...process.env,
     FREEFLOW_RUNTIME_MODE: 'protected-web',
     COGNITO_LOGOUT_URL: 'https://auth.example.com/logout?client_id=test&logout_uri=https%3A%2F%2Fapp.example.com%2F',
+    ALB_AUTH_SESSION_COOKIE_NAME: 'FreeFlowDevAuth',
     PORT: String(port),
   },
   stdio: 'ignore',
@@ -50,7 +51,10 @@ try {
   const logout = await fetch(`http://127.0.0.1:${port}/logout`, { redirect: 'manual' });
   assert.equal(logout.status, 302);
   assert.equal(logout.headers.get('location'), 'https://auth.example.com/logout?client_id=test&logout_uri=https%3A%2F%2Fapp.example.com%2F');
-  assert.match(logout.headers.get('set-cookie') || '', /AWSELBAuthSessionCookie/);
+  const logoutCookies = logout.headers.get('set-cookie') || '';
+  assert.match(logoutCookies, /FreeFlowDevAuth=deleted/);
+  assert.match(logoutCookies, /FreeFlowDevAuth-0=deleted/);
+  assert.doesNotMatch(logoutCookies, /AWSELBAuthSessionCookie/);
 } finally {
   child.kill();
   await once(child, 'exit');
