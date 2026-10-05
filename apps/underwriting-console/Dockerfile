@@ -69,7 +69,9 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
 
 COPY --from=builder --chown=node:node /app/apps/underwriting-console/dist ./dist
 COPY --from=builder --chown=node:node /app/services/doc-parser/templates ./forms
+# serve-production.mjs loads sibling scripts at startup. Keep every local import beside it.
 COPY --from=builder --chown=node:node /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
+COPY --from=builder --chown=node:node /app/apps/underwriting-console/scripts/portal-hosts.mjs ./portal-hosts.mjs
 
 USER node
 
