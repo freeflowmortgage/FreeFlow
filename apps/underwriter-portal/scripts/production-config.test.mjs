@@ -39,6 +39,17 @@ test('a complete production environment is accepted', () => {
   assert.deepEqual(validateProductionConfig(validProductionEnv()), []);
 });
 
+test('optional extra trusted origins must each be an https origin', () => {
+  const accepted = validProductionEnv();
+  accepted.TRUSTED_ORIGINS = 'https://app.dev.freeflowmortgage.com';
+  assert.deepEqual(validateProductionConfig(accepted), []);
+
+  const rejected = validProductionEnv();
+  rejected.TRUSTED_ORIGINS = 'http://app.dev.freeflowmortgage.com/workspace';
+  const errors = validateProductionConfig(rejected);
+  assert.ok(errors.includes('TRUSTED_ORIGINS entries must be https origins.'));
+});
+
 test('staging accepts disabled integrations without placeholder credentials', () => {
   const env = validProductionEnv();
   env.FREEFLOW_RUNTIME_ENV = 'staging';

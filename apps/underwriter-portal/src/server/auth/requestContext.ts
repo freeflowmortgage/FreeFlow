@@ -116,18 +116,38 @@ export function withRequestContext(
  * requires an exact Origin match in protected runtimes. This intentionally
  * fails closed when a browser, proxy, or future endpoint omits the header.
  */
+const FREEFLOW_DEV_SALES_ORIGIN = 'https://dev.freeflowmortgage.com';
+const FREEFLOW_DEV_APP_ORIGIN = 'https://app.dev.freeflowmortgage.com';
+
+function parseConfiguredOrigin(raw: string): string {
+  const parsed = new URL(raw);
+  if (parsed.origin === 'null' || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw new Error('TRUSTED_ORIGIN must be an origin.');
+  }
+  return parsed.origin;
+}
+
+function allowedOrigins(): ReadonlySet<string> {
+  const primary = parseConfiguredOrigin(requiredEnvironment('TRUSTED_ORIGIN'));
+  const allowed = new Set<string>([primary]);
+  // freeflow-dev serves the signed-in product on a second hostname. Mutations from
+  // that host stay exact-origin checks; every other configured origin is unchanged.
+  if (primary === FREEFLOW_DEV_SALES_ORIGIN) allowed.add(FREEFLOW_DEV_APP_ORIGIN);
+  const extras = process.env.TRUSTED_ORIGINS?.trim();
+  if (extras) {
+    for (const entry of extras.split(/\s+/)) allowed.add(parseConfiguredOrigin(entry));
+  }
+  return allowed;
+}
+
 function enforceTrustedOrigin(req: NextApiRequest): void {
   if (!isProtectedRuntime() || !isUnsafeMethod(req.method)) return;
 
-  const configuredOrigin = requiredEnvironment('TRUSTED_ORIGIN');
-  let expectedOrigin: string;
+  let allowed: ReadonlySet<string>;
   try {
-    const parsed = new URL(configuredOrigin);
-    if (parsed.origin === 'null' || parsed.pathname !== '/' || parsed.search || parsed.hash) {
-      throw new Error('TRUSTED_ORIGIN must be an origin.');
-    }
-    expectedOrigin = parsed.origin;
-  } catch {
+    allowed = allowedOrigins();
+  } catch (error) {
+    if (error instanceof RequestAuthenticationError) throw error;
     throw new RequestAuthenticationError(503, 'ORIGIN_VALIDATION_UNAVAILABLE', 'Request validation is temporarily unavailable.');
   }
 
@@ -136,7 +156,7 @@ function enforceTrustedOrigin(req: NextApiRequest): void {
     throw new RequestAuthenticationError(403, 'ORIGIN_REQUIRED', 'The request origin could not be verified.');
   }
 
-  if (origin !== expectedOrigin) {
+  if (!allowed.has(origin)) {
     throw new RequestAuthenticationError(403, 'ORIGIN_NOT_ALLOWED', 'The request origin is not permitted.');
   }
 }

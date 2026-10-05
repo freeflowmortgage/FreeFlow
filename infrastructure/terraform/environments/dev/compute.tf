@@ -119,7 +119,9 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
         { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
         { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
-        ], var.enable_encompass_document_pull_worker ? [
+        ], length(local.portal_extra_hostnames) > 0 ? [
+        { name = "TRUSTED_ORIGINS", value = join(" ", [for host in local.portal_extra_hostnames : "https://${host}"]) },
+        ] : [], var.enable_encompass_document_pull_worker ? [
         { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
         ] : [], var.enable_encompass_connector ? [
         { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = "http://encompass-connector.freeflow.local:8080" },
@@ -450,7 +452,7 @@ resource "aws_ecs_task_definition" "console" {
         { name = "FREEFLOW_SYNTHETIC_PRODUCT_DEMOS", value = "true" },
         { name = "COGNITO_LOGOUT_URL", value = "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com/logout?client_id=${aws_cognito_user_pool_client.alb[0].id}&logout_uri=${urlencode("https://${var.portal_hostname}/")}" },
         { name = "ALB_AUTH_SESSION_COOKIE_NAME", value = "FreeFlowDevAuth" },
-        { name = "ENCOMPASS_FRAME_ANCESTORS", value = var.encompass_frame_ancestors },
+        { name = "ENCOMPASS_FRAME_ANCESTORS", value = local.console_frame_ancestors },
         { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
         { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },
         { name = "ENCOMPASS_TEST_HOST_LOAN_GUID", value = var.encompass_test_host_loan_guid },

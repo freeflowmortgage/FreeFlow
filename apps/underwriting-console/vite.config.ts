@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import { parseMiddleware } from './src/server/parseMiddleware';
+import { demoDocumentMiddleware } from './src/server/demoDocumentMiddleware';
 import { summaryPdfMiddleware } from './src/server/summaryPdfMiddleware';
 import { intakeDeliverMiddleware } from './src/server/intakeDeliverMiddleware';
 import { appraisalAuditMiddleware } from './src/server/appraisalAuditMiddleware';
@@ -32,6 +33,12 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    {
+      name: 'freeflow-demo-documents',
+      configureServer(server) {
+        server.middlewares.use(demoDocumentMiddleware());
+      },
+    },
     ...(!demoRuntime ? [{
       name: 'freeflow-synthetic-urar-fixture',
       async generateBundle() {

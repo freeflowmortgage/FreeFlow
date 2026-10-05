@@ -1,4 +1,12 @@
 import assert from 'node:assert/strict';
+import { frameAncestorsForDevPortal } from './portal-hosts.mjs';
+
+assert.equal(
+  frameAncestorsForDevPortal('https://dev.freeflowmortgage.com'),
+  'https://dev.freeflowmortgage.com https://app.dev.freeflowmortgage.com',
+);
+assert.equal(frameAncestorsForDevPortal('https://app.example.com'), 'https://app.example.com');
+assert.equal(frameAncestorsForDevPortal("'none'"), "'none'");
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync } from 'node:fs';
@@ -41,6 +49,7 @@ const child = spawn(process.execPath, ['scripts/serve-production.mjs'], {
 try {
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal((await fetch(`http://127.0.0.1:${port}/fixtures/income-smoke.pdf`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/solo-demo/docs/paystub.pdf`)).status, 404);
   assert.equal((await fetch(`http://127.0.0.1:${port}/parse`, { method: 'POST' })).status, 404);
   const health = await fetch(`http://127.0.0.1:${port}/health`);
   assert.equal(health.status, 200);
@@ -67,7 +76,7 @@ const hosted = spawn(process.execPath, ['scripts/serve-production.mjs'], {
 try {
   await new Promise((resolve) => setTimeout(resolve, 300));
   const response = await fetch(`http://127.0.0.1:${hostedPort}/health`);
-  assert.match(response.headers.get('content-security-policy') || '', /frame-ancestors https:\/\/dev\.freeflowmortgage\.com/);
+  assert.match(response.headers.get('content-security-policy') || '', /frame-ancestors https:\/\/dev\.freeflowmortgage\.com https:\/\/app\.dev\.freeflowmortgage\.com/);
   assert.equal(response.headers.has('x-frame-options'), false);
   assert.deepEqual(await (await fetch(`http://127.0.0.1:${hostedPort}/runtime-config.json`)).json(), {
     testHost: { enabled: false, loanGuid: null }, syntheticProductDemos: { enabled: false },
@@ -109,6 +118,11 @@ try {
   assert.equal(paystub.headers.get('content-type'), 'application/pdf');
   assert.equal(Buffer.from(await paystub.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
   assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/fixtures/docs/not-allowlisted.pdf`)).status, 404);
+  const publicPaystub = await fetch(`http://127.0.0.1:${qualificationPort}/solo-demo/docs/paystub.pdf?hourly=52.5&ytdBase=61000`);
+  assert.equal(publicPaystub.status, 200);
+  assert.equal(publicPaystub.headers.get('content-type'), 'application/pdf');
+  assert.equal(Buffer.from(await publicPaystub.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
+  assert.equal((await fetch(`http://127.0.0.1:${qualificationPort}/solo-demo/docs/not-allowlisted.pdf`)).status, 404);
 } finally {
   qualification.kill();
   await once(qualification, 'exit');
@@ -130,6 +144,7 @@ try {
     testHost: { enabled: false, loanGuid: null }, syntheticProductDemos: { enabled: false },
   });
   assert.equal((await fetch(`http://127.0.0.1:${productionFlagPort}/fixtures/urar-1004.pdf`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${productionFlagPort}/solo-demo/docs/paystub.pdf`)).status, 404);
 } finally {
   productionFlag.kill();
   await once(productionFlag, 'exit');

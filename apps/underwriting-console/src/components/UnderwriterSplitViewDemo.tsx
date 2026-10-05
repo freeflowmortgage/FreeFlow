@@ -501,6 +501,7 @@ export default function UnderwriterSplitViewDemo({
   onUseLive,
   protectedContext = null,
   onOpenAuthoritativeWorkflow,
+  fixtureDocumentPrefix = '/fixtures/docs',
 }: {
   liveSession?: LiveParseSession | null;
   liveDocuments?: LiveDocument[];
@@ -513,6 +514,8 @@ export default function UnderwriterSplitViewDemo({
   onUseLive?: () => void;
   protectedContext?: ProtectedWorkspaceContext | null;
   onOpenAuthoritativeWorkflow?: () => void;
+  /** `/fixtures/docs` behind Cognito, or `/solo-demo/docs` for the public sales demo. */
+  fixtureDocumentPrefix?: string;
 } = {}) {
   const packet: LiveDocument[] = liveDocuments.length
     ? liveDocuments
@@ -2946,7 +2949,7 @@ export default function UnderwriterSplitViewDemo({
         if (wageDocKind === 'w2') {
           return {
             label: `Form W-2 (${prevEmployerW2.year})`,
-            url: `/fixtures/docs/w2.pdf?${q({
+            url: `${fixtureDocumentPrefix}/w2.pdf?${q({
               year: prevEmployerW2.year,
               employer: prevEmployerW2.employerName,
               ein: prevEmployerW2.ein,
@@ -2960,7 +2963,7 @@ export default function UnderwriterSplitViewDemo({
         }
         return {
           label: 'Earnings statement',
-          url: `/fixtures/docs/paystub.pdf?${q({
+          url: `${fixtureDocumentPrefix}/paystub.pdf?${q({
             employer: borrowerMetadata.currentEmployer,
             borrower: borrowerMetadata.borrowerName,
             hourly: currentHourlyRate,
@@ -2987,14 +2990,14 @@ export default function UnderwriterSplitViewDemo({
         });
         return {
           label: `Schedule E (${props.year})`,
-          url: `/fixtures/docs/schedule-e.pdf?${q(props)}`,
+          url: `${fixtureDocumentPrefix}/schedule-e.pdf?${q(props)}`,
         };
       }
       case 'SCHEDULE_C': {
         const y = schCYears[canvasYearIndex];
         return {
           label: `Schedule C (${y.year})`,
-          url: `/fixtures/docs/schedule-c.pdf?${q({
+          url: `${fixtureDocumentPrefix}/schedule-c.pdf?${q({
             line31: y.line31,
             line13: y.line13,
             line30: y.line30,
@@ -3007,7 +3010,7 @@ export default function UnderwriterSplitViewDemo({
         const y = sCorpYears[canvasYearIndex];
         return {
           label: `Schedule K-1 1120-S (${y.year})`,
-          url: `/fixtures/docs/k1-1120s.pdf?${q({
+          url: `${fixtureDocumentPrefix}/k1-1120s.pdf?${q({
             ordinary: y.ordinaryIncome,
             rental: y.netRentalRealEstate,
             otherRental: y.otherNetRental,
@@ -3020,7 +3023,7 @@ export default function UnderwriterSplitViewDemo({
         const y = partnershipYears[canvasYearIndex];
         return {
           label: `Schedule K-1 1065 (${y.year})`,
-          url: `/fixtures/docs/k1-1065.pdf?${q({
+          url: `${fixtureDocumentPrefix}/k1-1065.pdf?${q({
             ordinary: y.ordinaryIncome,
             rental: y.netRentalRealEstate,
             otherRental: y.otherNetRental,
@@ -3054,6 +3057,7 @@ export default function UnderwriterSplitViewDemo({
     sCorpShareholderPct,
     partnershipProfitPctEnd,
     partnershipCapitalPctEnd,
+    fixtureDocumentPrefix,
   ]);
 
   const docChips = (

@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { frameAncestorsForDevPortal } from './portal-hosts.mjs';
 
 const runtimeMode = process.env.FREEFLOW_RUNTIME_MODE || '';
 if (!['protected-web', 'encompass-hosted'].includes(runtimeMode)) {
@@ -25,7 +26,7 @@ const logoutUrl = parseLogoutUrl(process.env.COGNITO_LOGOUT_URL);
 const authSessionCookieName = parseCookieName(process.env.ALB_AUTH_SESSION_COOKIE_NAME);
 
 const frameAncestors = runtimeMode === 'encompass-hosted'
-  ? parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS)
+  ? frameAncestorsForDevPortal(parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS))
   : "'none'";
 
 const root = resolve(process.cwd(), 'dist');
@@ -94,7 +95,9 @@ createServer(async (req, res) => {
     res.end();
     return;
   }
-  if (pathname.startsWith('/fixtures/docs/')) {
+  // `/fixtures/*` is Cognito-protected at the ALB. `/solo-demo/docs/` is the same
+  // allowlisted synthetic generator on a path the sales demo can fetch without login.
+  if (pathname.startsWith('/fixtures/docs/') || pathname.startsWith('/solo-demo/docs/')) {
     if (!syntheticProductDemos || req.method !== 'GET') {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end('{"error":{"code":"CONSOLE_ROUTE_DISABLED"}}');

@@ -25,6 +25,13 @@ import {
 } from './protectedWorkspace';
 import { findDuplicate } from './livePacket';
 import type { LiveDocument, ParseResponse } from './parseTypes';
+import {
+  PUBLIC_DEMO_DOCUMENT_PREFIX,
+  appWorkspaceHref,
+  isPublicIncomeDemoHash,
+  isSalesLandingHost,
+  isSoftwareEntryHost,
+} from './salesHost';
 
 const MAX_DOCUMENT_BYTES = 40 * 1024 * 1024;
 const EMPLOYMENT_ROLES = ['CURRENT', 'CONCURRENT', 'PRIOR', 'PRIMARY', 'SECONDARY'] as const;
@@ -54,6 +61,9 @@ function ProtectedWorkflowApp() {
   const initialView: ConsoleView = requestedProduct === 'intake' || requestedProduct === 'appraisal' ? requestedProduct : 'split';
   const [requestedView, setRequestedView] = useState<ConsoleView | null>(initialIncomeDemo || initialWorkspace ? initialView : null);
   const incomeDemo = initialIncomeDemo;
+  const salesLanding = isSalesLandingHost(window.location.hostname);
+  const softwareEntry = isSoftwareEntryHost(window.location.hostname);
+  const [publicIncomeDemo, setPublicIncomeDemo] = useState(() => isPublicIncomeDemoHash(window.location.hash));
   const [syntheticProductDemosEnabled, setSyntheticProductDemosEnabled] = useState(false);
   const [contextState, setContextState] = useState<ConsoleContext | null>(null);
   const [hostBridge, setHostBridge] = useState<EncompassHostBridge | null>(null);
@@ -80,7 +90,13 @@ function ProtectedWorkflowApp() {
   }, []);
 
   useEffect(() => {
-    if (incomeDemo || !requestedView) return;
+    const onHash = () => setPublicIncomeDemo(isPublicIncomeDemoHash(window.location.hash));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    if (incomeDemo || publicIncomeDemo || !requestedView) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -109,7 +125,7 @@ function ProtectedWorkflowApp() {
       }
     })();
     return () => { cancelled = true; };
-  }, [refreshContext, incomeDemo, requestedView]);
+  }, [refreshContext, incomeDemo, publicIncomeDemo, requestedView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,7 +287,27 @@ function ProtectedWorkflowApp() {
   const backToProducts = () => {
     window.location.assign('/');
   };
-  if (!requestedView) return <B2BLanding onOpenService={(view) => window.location.assign(`/workspace?product=${view}`)} protectedMode />;
+  const leavePublicDemo = () => {
+    if (window.location.hash) window.location.hash = '';
+    else setPublicIncomeDemo(false);
+  };
+  if (softwareEntry && !publicIncomeDemo && window.location.pathname === '/') {
+    window.location.replace('/workspace');
+    return null;
+  }
+  if (!window.location.pathname.startsWith('/workspace') && publicIncomeDemo) {
+    return <ProtectedIncomeDemo fixtureDocumentPrefix={PUBLIC_DEMO_DOCUMENT_PREFIX} onBack={leavePublicDemo} />;
+  }
+  if (!requestedView) {
+    return (
+      <B2BLanding
+        onOpenService={(view) => window.location.assign(salesLanding ? appWorkspaceHref(view) : `/workspace?product=${view}`)}
+        protectedMode
+        salesEntry={salesLanding}
+        workspaceHref={salesLanding ? appWorkspaceHref : undefined}
+      />
+    );
+  }
   if (requestedView === 'split' && incomeDemo) {
     return <ProtectedIncomeDemo onBack={backToProducts} />;
   }
@@ -400,7 +436,7 @@ function ProtectedWorkflowApp() {
   );
 }
 
-function ProtectedIncomeDemo({ onBack }: { onBack: () => void }) {
+function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' }: { onBack: () => void; fixtureDocumentPrefix?: string }) {
   const [documents, setDocuments] = useState<LiveDocument[]>([]);
   const documentsRef = useRef<LiveDocument[]>([]);
   const [showLive, setShowLive] = useState(false);
@@ -464,6 +500,7 @@ function ProtectedIncomeDemo({ onBack }: { onBack: () => void }) {
           onParseFiles={(files) => void parsePdfs(files)}
           onUseDemo={() => setShowLive(false)}
           onUseLive={() => setShowLive(true)}
+          fixtureDocumentPrefix={fixtureDocumentPrefix}
         />
       </div>
     </main>
