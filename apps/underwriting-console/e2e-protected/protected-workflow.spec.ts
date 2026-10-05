@@ -7,6 +7,80 @@ const CALCULATION = '00000000-0000-4000-8000-000000000400';
 const APPROVAL = '00000000-0000-4000-8000-000000000500';
 const WRITE = '00000000-0000-4000-8000-000000000600';
 
+test('sales host Demo opens the public income demo and sign-in links use the software host', async ({ page }) => {
+  const protectedCalls: string[] = [];
+  const pdfPaths: string[] = [];
+  await page.route((url) => url.pathname === '/runtime-config.json' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/fixtures/'), (route) => {
+    protectedCalls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 500, json: { error: { code: 'LOGIN_REQUIRED' } } });
+  });
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('.pdf')) pdfPaths.push(path);
+  });
+
+  await page.goto('http://dev.freeflowmortgage.com:3013/');
+  await expect(page.getByTestId('b2b-landing')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Login', exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('open-income-demo')).toHaveText('Demo');
+  const workspaceLinks = page.locator('a[href*="/workspace"]');
+  const hrefs = await workspaceLinks.evaluateAll((elements) => elements.map((element) => element.getAttribute('href')));
+  expect(hrefs.length).toBeGreaterThan(0);
+  expect(hrefs.every((href) => href?.startsWith('https://app.dev.freeflowmortgage.com/workspace?product='))).toBe(true);
+  await expect(page.getByRole('link', { name: 'Start an AI 1003' })).toHaveAttribute('href', 'https://app.dev.freeflowmortgage.com/workspace?product=intake');
+  await expect(page.getByRole('link', { name: 'Explore the workspace' })).toHaveAttribute('href', 'https://app.dev.freeflowmortgage.com/workspace?product=split');
+
+  await page.getByTestId('open-income-demo').click();
+  await expect(page).toHaveURL(/\/#demo-income$/);
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await expect(page.getByText(/Loading the Earnings statement source document failed/)).toHaveCount(0);
+  await page.locator('[data-qa-field="ps-hourly-rate"]').first().click();
+  await expect(page.getByTestId('pdf-highlight')).toBeVisible();
+  expect(pdfPaths.some((path) => path.startsWith('/solo-demo/docs/'))).toBe(true);
+  expect(pdfPaths.some((path) => path.startsWith('/fixtures/') || path.startsWith('/workspace'))).toBe(false);
+  expect(protectedCalls).toEqual([]);
+
+  await page.getByTestId('demo-back-to-products').click();
+  await expect(page.getByTestId('b2b-landing')).toBeVisible();
+  await expect(page).not.toHaveURL(/\/workspace/);
+});
+
+test('software host bare slash enters the workspace and a public demo hash does not', async ({ page }) => {
+  await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
+    testHost: { enabled: false, loanGuid: null },
+    syntheticProductDemos: { enabled: false },
+  } }));
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } }));
+
+  await page.goto('http://app.dev.freeflowmortgage.com:3013/#demo-income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await expect(page).not.toHaveURL(/\/workspace/);
+
+  await page.goto('http://app.dev.freeflowmortgage.com:3013/');
+  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page.getByTestId('b2b-landing')).toHaveCount(0);
+});
+
+test('public hash income demo stays off the Cognito workspace path', async ({ page }) => {
+  const protectedCalls: string[] = [];
+  await page.route((url) => url.pathname === '/runtime-config.json' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/fixtures/'), (route) => {
+    protectedCalls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 500, json: { error: { code: 'LOGIN_REQUIRED' } } });
+  });
+
+  await page.goto('/#demo-income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await expect(page).toHaveURL(/#demo-income$/);
+  await expect(page).not.toHaveURL(/\/workspace/);
+  await expect(page.getByText(/Loading the Earnings statement source document failed/)).toHaveCount(0);
+  await page.locator('[data-qa-field="ps-hourly-rate"]').first().click();
+  await expect(page.getByTestId('pdf-highlight')).toBeVisible();
+  expect(protectedCalls).toEqual([]);
+  await page.getByTestId('demo-back-to-products').click();
+  await expect(page.getByTestId('b2b-landing')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeVisible();
+});
+
 test('public landing waits for Login before loading protected runtime or loan context', async ({ page }) => {
   const protectedCalls: string[] = [];
   await page.route((url) => url.pathname === '/runtime-config.json' || url.pathname.startsWith('/api/'), (route) => {

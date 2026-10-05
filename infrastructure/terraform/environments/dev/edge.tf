@@ -61,8 +61,8 @@ resource "aws_cognito_user_pool_client" "alb" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   supported_identity_providers         = ["COGNITO"]
-  callback_urls                        = ["https://${var.portal_hostname}/oauth2/idpresponse"]
-  logout_urls                          = ["https://${var.portal_hostname}/"]
+  callback_urls                        = local.portal_callback_urls
+  logout_urls                          = local.portal_logout_urls
   access_token_validity                = 60
   id_token_validity                    = 60
   refresh_token_validity               = 1
@@ -84,8 +84,9 @@ resource "aws_cognito_user_pool_domain" "live_test" {
 resource "aws_acm_certificate" "portal" {
   count = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) ? 1 : 0
 
-  domain_name       = var.portal_hostname
-  validation_method = "DNS"
+  domain_name               = var.portal_hostname
+  subject_alternative_names = length(local.portal_extra_hostnames) > 0 ? local.portal_extra_hostnames : null
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true

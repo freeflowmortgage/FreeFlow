@@ -138,6 +138,60 @@ test('rejects a cross-site unsafe request even when its identity assertion is va
   assert.equal((state.body as { error: { code: string } }).error.code, 'ORIGIN_NOT_ALLOWED');
 });
 
+test('freeflow-dev software host is allowed only beside the sales origin', async () => {
+  const previousOrigin = process.env.TRUSTED_ORIGIN;
+  const previousExtras = process.env.TRUSTED_ORIGINS;
+  mutableEnvironment.TRUSTED_ORIGIN = 'https://dev.freeflowmortgage.com';
+  delete mutableEnvironment.TRUSTED_ORIGINS;
+  try {
+    let handlerRan = false;
+    const wrapped = withRequestContext('income:calculate', async () => { handlerRan = true; }, {
+      verifyToken: async () => ({ subject: 'subject-1', authTime: new Date(), expiresAt: new Date() }),
+      resolveMembership: async () => ({ id: USER_ID, tenantId: TENANT_ID, role: 'UNDERWRITER' }),
+    });
+    const allowed = response();
+    await wrapped(request({
+      origin: 'https://app.dev.freeflowmortgage.com',
+      'x-amzn-oidc-data': 'signed-token',
+    }, 'POST'), allowed.res);
+    assert.equal(handlerRan, true);
+
+    handlerRan = false;
+    const rejected = response();
+    await wrapped(request({
+      origin: 'https://attacker.example',
+      'x-amzn-oidc-data': 'signed-token',
+    }, 'POST'), rejected.res);
+    assert.equal(handlerRan, false);
+    assert.equal(rejected.state.status, 403);
+    assert.equal((rejected.state.body as { error: { code: string } }).error.code, 'ORIGIN_NOT_ALLOWED');
+  } finally {
+    mutableEnvironment.TRUSTED_ORIGIN = previousOrigin;
+    if (previousExtras === undefined) delete mutableEnvironment.TRUSTED_ORIGINS;
+    else mutableEnvironment.TRUSTED_ORIGINS = previousExtras;
+  }
+});
+
+test('malformed extra trusted origins fail closed', async () => {
+  const previousExtras = process.env.TRUSTED_ORIGINS;
+  mutableEnvironment.TRUSTED_ORIGINS = 'not a url';
+  try {
+    const wrapped = withRequestContext('income:calculate', async () => {
+      throw new Error('handler must not run');
+    }, {
+      verifyToken: async () => ({ subject: 'subject-1', authTime: new Date(), expiresAt: new Date() }),
+      resolveMembership: async () => ({ id: USER_ID, tenantId: TENANT_ID, role: 'UNDERWRITER' }),
+    });
+    const { res, state } = response();
+    await wrapped(protectedPost({ 'x-amzn-oidc-data': 'signed-token' }), res);
+    assert.equal(state.status, 503);
+    assert.equal((state.body as { error: { code: string } }).error.code, 'ORIGIN_VALIDATION_UNAVAILABLE');
+  } finally {
+    if (previousExtras === undefined) delete mutableEnvironment.TRUSTED_ORIGINS;
+    else mutableEnvironment.TRUSTED_ORIGINS = previousExtras;
+  }
+});
+
 test('allows a same-origin unsafe request after identity and membership verification', async () => {
   let handlerRan = false;
   const wrapped = withRequestContext(

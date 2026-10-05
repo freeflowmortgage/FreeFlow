@@ -4,7 +4,7 @@ import { mapIncomeFields } from '../incomeFieldMap';
 import type { ParsePage, ParseResponse, ParseWord } from '../parseTypes';
 import { generateIncomeSmokePdf } from './generateIncomeSmokePdf';
 import { generateUrarPdf } from './generateUrarPdf';
-import { generateDemoFixtureDocument } from './demoFixtureDocuments';
+import { handleSyntheticDemoDocument } from './demoDocumentMiddleware';
 import { droppedUrarExists, loadDroppedUrar } from './fillDroppedUrar';
 
 const DEFAULT_DOC_PARSER_URL = 'http://127.0.0.1:8080';
@@ -313,24 +313,7 @@ export function parseMiddleware(): Connect.NextHandleFunction {
       return;
     }
 
-    if (path.startsWith('/fixtures/docs/') && req.method === 'GET') {
-      const params = new URLSearchParams((req.url || '').split('?')[1] ?? '');
-      void generateDemoFixtureDocument(path, params)
-        .then((document) => {
-          if (!document) {
-            sendJson(res, 404, { detail: 'Unknown demo document.' });
-            return;
-          }
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/pdf');
-          res.setHeader('Content-Disposition', `inline; filename="${document.kind}-demo.pdf"`);
-          res.end(document.bytes);
-        })
-        .catch((error) => {
-          sendJson(res, 500, { detail: error instanceof Error ? error.message : 'Demo document failed.' });
-        });
-      return;
-    }
+    if (handleSyntheticDemoDocument(req, res)) return;
 
     if (path === '/health' && req.method === 'GET') {
       void tryPythonHealth().then((python) => {

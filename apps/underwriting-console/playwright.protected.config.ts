@@ -16,7 +16,11 @@ export default defineConfig({
     url: 'http://127.0.0.1:3013',
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { ...process.env, VITE_FREEFLOW_RUNTIME_MODE: 'encompass-hosted' },
+    env: {
+      ...process.env,
+      VITE_FREEFLOW_RUNTIME_MODE: 'encompass-hosted',
+      VITE_ALLOWED_HOSTS: '127.0.0.1,localhost,dev.freeflowmortgage.com,app.dev.freeflowmortgage.com',
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

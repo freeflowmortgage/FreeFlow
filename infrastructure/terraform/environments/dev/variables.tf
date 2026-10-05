@@ -73,6 +73,20 @@ variable "portal_hostname" {
   default     = "dev.mb-ai.com"
 }
 
+variable "portal_app_hostnames" {
+  type        = list(string)
+  description = "Additional HTTPS hostnames for this same portal. freeflow-dev uses app.dev.freeflowmortgage.com as the software entry beside the sales host. Leave empty for a single-hostname stack."
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for host in var.portal_app_hostnames :
+      can(regex("^[a-z0-9.-]+$", host)) && endswith(host, ".${var.domain_name}") && host != var.portal_hostname
+    ])
+    error_message = "portal_app_hostnames must be other subdomains of domain_name."
+  }
+}
+
 variable "domain_name" {
   type        = string
   description = "Registered parent domain for the portal hostname."

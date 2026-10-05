@@ -2,14 +2,21 @@ import { generatePaystubPdf } from './generatePaystubPdf';
 import { generateW2Pdf } from './generateW2Pdf';
 import { fillK1Partnership, fillK1SCorp, fillScheduleC, fillScheduleE, fillW2, num } from './demoDocs';
 
+const SYNTHETIC_DEMO_PREFIXES = ['/fixtures/docs/', '/solo-demo/docs/'] as const;
+
+export function isSyntheticDemoDocumentPath(pathname: string): boolean {
+  return SYNTHETIC_DEMO_PREFIXES.some((prefix) => pathname.startsWith(prefix) && pathname.endsWith('.pdf'));
+}
+
 /** Generates only the allowlisted synthetic documents used by the comparison demo. */
 export async function generateDemoFixtureDocument(
   pathname: string,
   params: URLSearchParams,
 ): Promise<Readonly<{ kind: string; bytes: Uint8Array }> | null> {
-  const prefix = '/fixtures/docs/';
-  if (!pathname.startsWith(prefix) || !pathname.endsWith('.pdf')) return null;
+  const prefix = SYNTHETIC_DEMO_PREFIXES.find((candidate) => pathname.startsWith(candidate));
+  if (!prefix || !pathname.endsWith('.pdf')) return null;
   const kind = pathname.slice(prefix.length, -'.pdf'.length);
+  if (!/^[a-z0-9-]+$/.test(kind)) return null;
   const producers: Readonly<Record<string, () => Promise<Uint8Array>>> = {
     paystub: () => generatePaystubPdf({
       employer: params.get('employer') || 'Apex Technology Partners LLC',
