@@ -103,6 +103,41 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  console-image:
+    name: Console image imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build console image
+        run: docker build --file apps/underwriting-console/Dockerfile --tag freeflow/console:ci .
+      - name: Load serve-production and require a healthy response
+        # `node --check` parses one file and does not resolve ESM imports, so it
+        # would still pass if portal-hosts.mjs were missing from the image.
+        run: |
+          docker run --rm -i \
+            --env FREEFLOW_RUNTIME_MODE=protected-web \
+            --env PORT=3000 \
+            --entrypoint node \
+            freeflow/console:ci \
+            --input-type=module \
+            - <<'EOF'
+          await import('/app/serve-production.mjs');
+          const deadline = Date.now() + 10000;
+          let lastError;
+          while (Date.now() < deadline) {
+            try {
+              const response = await fetch('http://127.0.0.1:3000/health');
+              if (response.ok && (await response.text()).includes('HEALTHY')) process.exit(0);
+            } catch (error) {
+              lastError = error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          console.error(lastError);
+          process.exit(1);
+          EOF
+
   deployment-contract:
     name: Validate immutable deployment contract
     runs-on: ubuntu-latest
