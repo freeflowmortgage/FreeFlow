@@ -5,6 +5,7 @@ import {
   chosenW2Income,
   ownedByPrimaryBorrower,
   splitIncomeByBorrower,
+  w2BaseMethods,
   type ChosenW2Income,
   type PriorEmployerWageHistory,
   type W2BaseMethodId,
@@ -136,10 +137,20 @@ export function parseBorrowerIncomeRequest(request: unknown): ParsedBorrowerInco
   return BorrowerIncomeRequestSchema.parse(request) as ParsedBorrowerIncomeRequest;
 }
 
+/**
+ * The recommended base method came out to zero while another method did not,
+ * usually because a salaried stub has no hourly rate or hours. The console
+ * recommends the same zero, so callers must review rather than rely on it.
+ */
+export const W2_RECOMMENDED_BASE_ZERO = 'W2_RECOMMENDED_BASE_ZERO';
+
+export type BorrowerIncomeEmployerWarning = typeof W2_RECOMMENDED_BASE_ZERO;
+
 export interface BorrowerIncomeEmployerResult extends ChosenW2Income {
   id: string;
   borrowerId: string;
   employerName?: string;
+  warnings: BorrowerIncomeEmployerWarning[];
 }
 
 export interface BorrowerIncomeRow extends Form1084BorrowerIncome {
@@ -166,20 +177,29 @@ export interface BorrowerIncomeResult {
 export function calculateBorrowerIncome(request: BorrowerIncomeRequest): BorrowerIncomeResult {
   const parsed = parseBorrowerIncomeRequest(request);
   const primaryId = parsed.borrowers[0].id;
-  const employers: BorrowerIncomeEmployerResult[] = parsed.w2Employers.map((employer) => ({
-    id: employer.id,
-    borrowerId: employer.borrowerId ?? primaryId,
-    ...(employer.employerName ? { employerName: employer.employerName } : {}),
-    ...chosenW2Income(
-      employer,
-      {
-        ownedByPrimary: ownedByPrimaryBorrower(employer, parsed.borrowers),
-        priorEmployer: parsed.priorEmployer,
-        ytdMonthsElapsed: parsed.ytdMonthsElapsed,
-      },
-      { base: employer.baseMethod, variable: employer.variableMethod },
-    ),
-  }));
+  const employers: BorrowerIncomeEmployerResult[] = parsed.w2Employers.map((employer) => {
+    const context = {
+      ownedByPrimary: ownedByPrimaryBorrower(employer, parsed.borrowers),
+      priorEmployer: parsed.priorEmployer,
+      ytdMonthsElapsed: parsed.ytdMonthsElapsed,
+    };
+    const chosen = chosenW2Income(employer, context, { base: employer.baseMethod, variable: employer.variableMethod });
+    const warnings: BorrowerIncomeEmployerWarning[] = [];
+    if (
+      !employer.baseMethod
+      && chosen.baseMonthly === 0
+      && w2BaseMethods(employer, context).options.some((option) => option.monthly > 0)
+    ) {
+      warnings.push(W2_RECOMMENDED_BASE_ZERO);
+    }
+    return {
+      id: employer.id,
+      borrowerId: employer.borrowerId ?? primaryId,
+      ...(employer.employerName ? { employerName: employer.employerName } : {}),
+      ...chosen,
+      warnings,
+    };
+  });
   const rows = splitIncomeByBorrower({
     borrowers: parsed.borrowers,
     w2: employers.map((employer) => ({
