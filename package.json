@@ -16,7 +16,9 @@
   },
   "pnpm": {
     "overrides": {
-      "postcss": "8.5.28"
+      "postcss": "8.5.28",
+      "sharp": "0.35.5",
+      "source-map-js": "1.2.2"
     }
   },
   "packageManager": "pnpm@9.12.0"
