@@ -108,7 +108,12 @@ import {
   compactSourceLines,
   computeRental1038CashFlow,
   qualifyingProgramNote,
+  chosenW2Income,
+  splitIncomeByBorrower,
+  w2BaseMethods,
+  w2VariableMethods,
   type Form1084BorrowerIncome,
+  type W2MethodContext,
 } from '@mortgage-pos/mortgage-engine';
 import { IncomeEntitySelector, type IncomeEntityOption } from './IncomeEntitySelector';
 import UsdaDistributionToggle from './UsdaDistributionToggle';
@@ -1427,27 +1432,22 @@ export default function UnderwriterSplitViewDemo({
   // ==================== 5. COMPLEX CALCULATORS & MATHEMATICAL MODELS ====================
 
   // A. 4-Way Base Wage Reconciliation [cite: 177]
-  const payPeriodsPerYear =
-    activeW2Employer.payFrequency === 'WEEKLY' ? 52
-      : activeW2Employer.payFrequency === 'BIWEEKLY' ? 26
-        : activeW2Employer.payFrequency === 'MONTHLY' ? 12
-          : 24;
+  const w2ContextFor = (entry: W2Employer): W2MethodContext => ({
+    ownedByPrimary: ownedByPrimary(entry),
+    priorEmployer: prevEmployerW2,
+  });
   const baseWageReconciliation = useMemo(() => {
-    const hourlyMethod = (currentHourlyRate * currentWeeklyHours * 52) / 12; // Standard Hourly Pay Rate Method
-    const periodAnnualizedMethod = (currentPeriodBasePay * payPeriodsPerYear) / 12;
-    const ytdAverageMethod = currentBaseYtd / 7.5; // August 15 represents 7.5 elapsed months of the year
-    const priorYearW2Average =
-      (activeW2Employer.w2Year1Box5 || (ownedByPrimary(activeW2Employer) ? prevEmployerW2.box5Wages : 0)) / 12;
-
+    const methods = w2BaseMethods(activeW2Employer, w2ContextFor(activeW2Employer));
+    const monthly = (id: string) => methods.options.find((option) => option.id === id)?.monthly ?? 0;
     return {
-      hourlyMethod,
-      periodAnnualizedMethod,
-      ytdAverageMethod,
-      priorYearW2Average,
-      maxVariancePct: Math.abs(((hourlyMethod - ytdAverageMethod) / hourlyMethod) * 100)
+      hourlyMethod: monthly('hourly'),
+      periodAnnualizedMethod: monthly('period'),
+      ytdAverageMethod: monthly('ytd'),
+      priorYearW2Average: monthly('prior'),
+      maxVariancePct: methods.maxVariancePct,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
-  }, [currentHourlyRate, currentWeeklyHours, currentPeriodBasePay, currentBaseYtd, prevEmployerW2.box5Wages, payPeriodsPerYear, activeW2Employer.w2Year1Box5, activeW2Employer.borrowerId, borrowers]);
+  }, [activeW2Employer, prevEmployerW2, borrowers]);
 
   // B. Variable Income Rolling & Continuity (Job Transition Adapter) [cite: 177]
   const variableContinuityCalculations = useMemo(() => {
@@ -1486,39 +1486,12 @@ export default function UnderwriterSplitViewDemo({
     return { y1, y2 };
   }, [schCYears]);
 
-  const pickMonthly = (options: Record<string, number>, selected: string | null | undefined, recommendedId: string) =>
-    options[selected && selected in options ? selected : recommendedId] ?? 0;
   // Employers not on screen still count with the method the underwriter chose for
   // them (or the recommended one), so each borrower's share matches their own tab.
-  const w2BaseMonthlyOf = (entry: W2Employer) => {
-    const periods = entry.payFrequency === 'WEEKLY' ? 52 : entry.payFrequency === 'BIWEEKLY' ? 26 : entry.payFrequency === 'MONTHLY' ? 12 : 24;
-    const hourly = (entry.hourlyRate * entry.weeklyHours * 52) / 12;
-    const ytd = entry.baseYtd / 7.5;
-    const priorBox5 = entry.w2Year1Box5 || (ownedByPrimary(entry) ? prevEmployerW2.box5Wages : 0);
-    const variancePct = Math.abs(((hourly - ytd) / hourly) * 100);
-    return pickMonthly(
-      { hourly, period: (entry.currentPeriodBasePay * periods) / 12, ytd, prior: priorBox5 / 12, not_used: 0 },
-      w2BaseChoices[entry.id],
-      variancePct > 10 ? (hourly <= ytd ? 'hourly' : 'ytd') : 'period',
-    );
-  };
-  const w2VariableMonthlyOf = (entry: W2Employer) => {
-    const fromWvoe = entry.wageDocSource === 'WVOE';
-    const total = fromWvoe
-      ? entry.wvoeBonus + entry.wvoeOvertime
-      : entry.bonusYtd + entry.overtimeYtd + entry.tipsYtd + entry.commissionYtd;
-    const months = Math.max(fromWvoe ? entry.wvoeMonths : entry.monthsAtJob, 1);
-    const current = total / months;
-    const withPrior = ownedByPrimary(entry);
-    const merged = withPrior
-      ? (entry.bonusYtd + entry.overtimeYtd + prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime) / (entry.monthsAtJob + 12)
-      : current;
-    return pickMonthly(
-      { current, avg24: merged, not_used: 0 },
-      w2VarChoices[entry.id],
-      withPrior && entry.monthsAtJob < 12 ? 'avg24' : 'current',
-    );
-  };
+  const w2IncomeOf = (entry: W2Employer) =>
+    chosenW2Income(entry, w2ContextFor(entry), { base: w2BaseChoices[entry.id], variable: w2VarChoices[entry.id] });
+  const w2BaseMonthlyOf = (entry: W2Employer) => w2IncomeOf(entry).baseMonthly;
+  const w2VariableMonthlyOf = (entry: W2Employer) => w2IncomeOf(entry).variableMonthly;
   const additionalW2Monthly = useMemo(
     () =>
       w2Employers
@@ -1960,11 +1933,10 @@ export default function UnderwriterSplitViewDemo({
   }, [baseWageReconciliation]);
 
   const w2VarPicks = useMemo(() => {
-    const current = variableContinuityCalculations.currentMonthlyVariableAvg;
-    const withPrior = ownedByPrimary(activeW2Employer);
-    const merged = withPrior
-      ? (currentBonusYtd + currentOtYtd + prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime) / (monthsAtCurrentJob + 12)
-      : current;
+    const methods = w2VariableMethods(activeW2Employer, w2ContextFor(activeW2Employer));
+    const current = methods.options.find((option) => option.id === 'current')?.monthly ?? 0;
+    const merged = methods.options.find((option) => option.id === 'avg24')?.monthly ?? 0;
+    const withPrior = methods.mergesPriorEmployer;
     const options = [
       { id: 'current', label: 'Current job only', monthly: current, formula: `(Bonus YTD + OT YTD) / ${monthsAtCurrentJob} months` },
       {
@@ -1989,10 +1961,12 @@ export default function UnderwriterSplitViewDemo({
       recommendedId: 'current',
       reason: withPrior
         ? 'Twelve or more months at the current job. Guideline uses the current-job variable average unless the underwriter elects the 24-month merge.'
-        : `The previous-employer history on the 1003 is ${borrowerName(undefined)}'s, so ${borrowerName(activeW2Employer.borrowerId)}'s variable income uses this job only.`,
+        : ownedByPrimary(activeW2Employer)
+          ? 'No previous employer on the 1003, so variable income uses this job only.'
+          : `The previous-employer history on the 1003 is ${borrowerName(undefined)}'s, so ${borrowerName(activeW2Employer.borrowerId)}'s variable income uses this job only.`,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
-  }, [variableContinuityCalculations.currentMonthlyVariableAvg, currentBonusYtd, currentOtYtd, prevEmployerW2.box12Bonus, prevEmployerW2.box14Overtime, monthsAtCurrentJob, activeW2Employer.borrowerId, borrowers]);
+  }, [activeW2Employer, prevEmployerW2, monthsAtCurrentJob, borrowers]);
 
   const schCPicks = useMemo(() => {
     const rec = seRecommend(schCFlow.y1, schCFlow.y2, twoYearSchC, false, loanProgram);
@@ -2119,40 +2093,34 @@ export default function UnderwriterSplitViewDemo({
   // person's income to their own fields instead of crediting the primary with all of it.
   const incomeByBorrower: Form1084BorrowerIncome[] = (() => {
     if (!multipleBorrowers) return [];
-    const rows = borrowers.map((_, borrowerIndex) => ({
-      borrowerIndex,
-      w2BaseMonthly: 0,
-      w2VariableMonthly: 0,
-      selfEmployedMonthly: 0,
-      qualifyingMonthlyIncome: 0,
-    }));
-    const rowFor = (borrowerId?: string) => rows[Math.max(0, borrowers.findIndex((borrower) => borrower.id === borrowerId))];
-    for (const entry of w2Employers) {
-      const active = entry.id === activeW2Employer.id;
-      rowFor(entry.borrowerId).w2BaseMonthly += active ? w2BaseChosen.monthly : w2BaseMonthlyOf(entry);
-      rowFor(entry.borrowerId).w2VariableMonthly += active ? w2VarChosen.monthly : w2VariableMonthlyOf(entry);
-    }
-    const addBusiness = <T extends { id: string; borrowerId?: string }>(
+    const businessShares = <T extends { id: string; borrowerId?: string }>(
       entities: T[],
       activeId: string,
       activeMonthly: number,
       monthlyOf: (entity: T) => number,
-    ) => {
-      for (const entity of entities) {
-        rowFor(entity.borrowerId).selfEmployedMonthly += entity.id === activeId ? activeMonthly : monthlyOf(entity);
-      }
-    };
-    addBusiness(schCEntities, activeSchC.id, schCChosen.monthly, schCMonthlyOf);
-    addBusiness(sCorpEntities, activeSCorp.id, sCorpChosen.monthly, sCorpMonthlyOf);
-    addBusiness(partnershipEntities, activePartnership.id, partnershipChosen.monthly, partnershipMonthlyOf);
-    addBusiness(cCorpEntities, activeCCorp.id, cCorpChosen.monthly, cCorpMonthlyOf);
-    addBusiness(scheduleFEntities, activeScheduleF.id, scheduleFChosen.monthly, scheduleFMonthlyOf);
-    for (const row of rows) {
-      row.qualifyingMonthlyIncome = row.w2BaseMonthly + row.w2VariableMonthly + row.selfEmployedMonthly;
-    }
-    // Rental and asset income are held jointly; Encompass carries them once, on the primary borrower.
-    rows[0].qualifyingMonthlyIncome += form1084CashFlow.rentalMonthly + form1084CashFlow.assetIncomeMonthly;
-    return rows;
+    ) => entities.map((entity) => ({
+      borrowerId: entity.borrowerId,
+      monthly: entity.id === activeId ? activeMonthly : monthlyOf(entity),
+    }));
+    return splitIncomeByBorrower({
+      borrowers,
+      w2: w2Employers.map((entry) => {
+        const active = entry.id === activeW2Employer.id;
+        return {
+          borrowerId: entry.borrowerId,
+          baseMonthly: active ? w2BaseChosen.monthly : w2BaseMonthlyOf(entry),
+          variableMonthly: active ? w2VarChosen.monthly : w2VariableMonthlyOf(entry),
+        };
+      }),
+      selfEmployed: [
+        ...businessShares(schCEntities, activeSchC.id, schCChosen.monthly, schCMonthlyOf),
+        ...businessShares(sCorpEntities, activeSCorp.id, sCorpChosen.monthly, sCorpMonthlyOf),
+        ...businessShares(partnershipEntities, activePartnership.id, partnershipChosen.monthly, partnershipMonthlyOf),
+        ...businessShares(cCorpEntities, activeCCorp.id, cCorpChosen.monthly, cCorpMonthlyOf),
+        ...businessShares(scheduleFEntities, activeScheduleF.id, scheduleFChosen.monthly, scheduleFMonthlyOf),
+      ],
+      jointMonthly: form1084CashFlow.rentalMonthly + form1084CashFlow.assetIncomeMonthly,
+    });
   })();
 
   const intakeAnswers = isLive ? loadIntakeSession()?.answers : undefined;
