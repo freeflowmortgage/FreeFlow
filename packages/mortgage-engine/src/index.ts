@@ -10,3 +10,5 @@ export * from './mismoD1cMapper';
 export * from './paystubMismoMapper';
 export * from './encompass-urla-map';
 export * from './encompass-custom-fields';
+export * from './w2-income-methods';
+export * from './borrower-income-api';
