@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS base
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -42,7 +42,7 @@ RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
 
 # 3. Production runtime stage (runs Vite custom middleware server for PDF/OCR and Appraisal proxy)
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688 AS runner
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:5c546c873970e79e5c9152cd9c8a9c7013824352bc89071d21feb15ad68496aa AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -50,12 +50,13 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV VITE_CACHE_DIR=/tmp/freeflow/vite
 
-RUN microdnf update -y \
-    && microdnf install -y tar xz shadow-utils libstdc++ \
-    && curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz \
-    && echo 'd60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307  node-v22.23.2-linux-x64.tar.xz' | sha256sum -c - \
-    && tar -xJf node-v22.23.2-linux-x64.tar.xz -C /usr/local --strip-components=1 \
-    && rm node-v22.23.2-linux-x64.tar.xz \
+# AL2023 locks packages to the image's release; --releasever=latest pulls current security fixes.
+RUN microdnf --releasever=latest update -y \
+    && microdnf --releasever=latest install -y tar xz shadow-utils libstdc++ \
+    && curl -fsSLO https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz \
+    && echo 'fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6  node-v24.21.0-linux-x64.tar.xz' | sha256sum -c - \
+    && tar -xJf node-v24.21.0-linux-x64.tar.xz -C /usr/local --strip-components=1 \
+    && rm node-v24.21.0-linux-x64.tar.xz \
     && microdnf clean all \
     && rm -rf /var/cache/dnf \
     && groupadd -g 1001 nodejs \

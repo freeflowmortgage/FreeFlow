@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Scan full history with Gitleaks
@@ -34,14 +34,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
         with:
           version: 9.12.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
-      - uses: actions/setup-python@v5
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -74,7 +75,7 @@ jobs:
             dockerfile: services/encompass-connector/Dockerfile
             context: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build immutable commit image
         run: >-
           docker build
@@ -96,7 +97,7 @@ jobs:
           format: spdx-json
           output-file: ${{ matrix.name }}-${{ github.sha }}.spdx.json
       - name: Retain rollback SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.name }}-${{ github.sha }}-sbom
           path: ${{ matrix.name }}-${{ github.sha }}.spdx.json
@@ -108,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate Docker Bake targets and deployment script
         shell: pwsh
         run: ./infrastructure/scripts/Deploy-FreeFlowDev.ps1 -ValidateOnly

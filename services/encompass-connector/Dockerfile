@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Internal-only foundation image. It contains no LOS credentials or PDF persistence.
 
-FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS base
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV COREPACK_HOME="/pnpm/corepack"
@@ -40,7 +40,7 @@ RUN pnpm --filter @mortgage-pos/encompass-connector --prod deploy /runtime \
     && /app/packages/database/node_modules/.bin/prisma generate --schema prisma/schema.prisma \
     && rm -rf /runtime/prisma
 
-FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS runner
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runner
 
 RUN apk add --no-cache openssl \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \

@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:68b1e82cd69ade271c092bc1959fa6fc820945d0c8dbb7a88cf6c1824a184688
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:5c546c873970e79e5c9152cd9c8a9c7013824352bc89071d21feb15ad68496aa
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -6,8 +6,9 @@ ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-RUN microdnf update -y \
-    && microdnf install -y \
+# AL2023 locks packages to the image's release; --releasever=latest pulls current security fixes.
+RUN microdnf --releasever=latest update -y \
+    && microdnf --releasever=latest install -y \
         libgomp \
         libX11 \
         libxcb \
