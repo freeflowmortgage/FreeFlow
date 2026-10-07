@@ -64,6 +64,50 @@ The script uses the full Git commit as the immutable ECR tag. If that tag is
 already present, its digest is verified and reused. ECR scans must complete
 with zero critical and zero high findings before Terraform planning begins.
 
+## Images published from main
+
+Every push to `main` runs `.github/workflows/publish-dev-images.yml`. It builds
+the five images from the same Bake targets, pushes them to ECR tagged with the
+full commit SHA, waits for the ECR scan, and fails on any HIGH or CRITICAL
+finding. The job summary lists each `*_image = "...@sha256:..."` reference.
+It never touches ECS or Terraform state.
+
+Because the tag is the commit, running the script above from a clean checkout
+of that `main` commit reuses the published images and goes straight to the
+saved plan:
+
+```powershell
+git checkout <main commit>
+./infrastructure/scripts/Deploy-FreeFlowDev.ps1 -Service parser -Apply
+```
+
+A specific image can be republished from the Actions tab with
+**Run workflow** on `main` and a `service` choice. Commits merged before the
+workflow existed have no published images until it is run on them.
+
+One-time setup, from an administrative profile:
+
+1. Set `enable_github_image_publisher = true` in the dev `terraform.tfvars`. If
+   the account already has the `token.actions.githubusercontent.com` OIDC
+   provider, also set `github_oidc_provider_arn`.
+2. Apply only the publisher addresses:
+
+   ```powershell
+   terraform -chdir=infrastructure/terraform/environments/dev apply `
+     -target='aws_iam_openid_connect_provider.github' `
+     -target='aws_iam_role.github_image_publisher' `
+     -target='aws_iam_role_policy.github_image_publisher'
+   ```
+
+3. Store the `github_image_publisher_role_arn` output as the repository
+   variable `AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN` (Settings > Secrets and
+   variables > Actions > Variables). The workflow is skipped while it is
+   unset.
+
+The role trusts only `refs/heads/main` of the configured repository, can push
+to and read scan results from the five release repositories, and has no ECS,
+IAM, Terraform state, or image-delete permissions.
+
 ## Safety behavior
 
 - Modified or untracked non-ignored files stop the deployment before any image

@@ -32,3 +32,10 @@ parser_image     = ""
 console_image    = ""
 migration_image  = ""
 connector_image  = ""
+
+# GitHub Actions pushes commit-tagged images to ECR from main through OIDC.
+# Set the role ARN output as the AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN repository
+# variable. Supply github_oidc_provider_arn if the account already has one.
+enable_github_image_publisher = false
+github_repository             = "nwjenson/Freeflow"
+github_oidc_provider_arn      = null

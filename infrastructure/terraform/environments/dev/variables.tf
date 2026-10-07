@@ -323,3 +323,27 @@ variable "connector_image" {
     error_message = "connector_image must be an immutable @sha256 digest reference when the connector is enabled."
   }
 }
+
+variable "enable_github_image_publisher" {
+  type        = bool
+  description = "Creates the GitHub Actions OIDC role that pushes immutable commit images to ECR from main. It cannot deploy."
+  default     = false
+}
+
+variable "github_repository" {
+  type        = string
+  description = "GitHub owner/name allowed to assume the image publisher role from its main branch."
+  default     = "nwjenson/Freeflow"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must be an owner/name pair."
+  }
+}
+
+variable "github_oidc_provider_arn" {
+  type        = string
+  description = "Existing token.actions.githubusercontent.com OIDC provider ARN. Leave null to create one; an account holds only one."
+  default     = null
+  nullable    = true
+}
