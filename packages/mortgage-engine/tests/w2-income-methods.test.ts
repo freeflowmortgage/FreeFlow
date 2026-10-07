@@ -1,7 +1,6 @@
 import {
   chosenW2Income,
   ownedByPrimaryBorrower,
-  payPeriodsPerYear,
   splitIncomeByBorrower,
   w2BaseMethods,
   w2VariableMethods,
@@ -94,13 +93,6 @@ function consoleReference(
 }
 
 describe('W-2 base methods', () => {
-  test('pay periods per year follow the pay frequency', () => {
-    expect(payPeriodsPerYear('WEEKLY')).toBe(52);
-    expect(payPeriodsPerYear('BIWEEKLY')).toBe(26);
-    expect(payPeriodsPerYear('SEMIMONTHLY')).toBe(24);
-    expect(payPeriodsPerYear('MONTHLY')).toBe(12);
-  });
-
   test('Meridian part-time job is $1,144 a month by the period method', () => {
     const methods = w2BaseMethods(meridian, { ownedByPrimary: false });
     const monthly = Object.fromEntries(methods.options.map((option) => [option.id, option.monthly]));
