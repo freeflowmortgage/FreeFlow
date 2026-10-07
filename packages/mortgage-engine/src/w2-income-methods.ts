@@ -71,7 +71,7 @@ export interface W2BaseMethods {
 export interface W2VariableMethods {
   options: W2MethodOption<W2VariableMethodId>[];
   recommendedId: W2VariableMethodId;
-  /** False when the 24-month merge has no prior-employer history to add. */
+  /** False for a co-borrower, or when the 1003 has no prior-employer history to add. */
   mergesPriorEmployer: boolean;
 }
 
@@ -115,13 +115,21 @@ export function w2BaseMethods(employer: W2EmployerWageInput, context: W2MethodCo
   };
 }
 
+/** True when the 1003 lists a previous employer with any W-2 wages, bonus or overtime. */
+export function hasPriorEmployerHistory(prior: PriorEmployerWageHistory | undefined): boolean {
+  return !!prior && (prior.box5Wages > 0 || prior.box12Bonus > 0 || prior.box14Overtime > 0);
+}
+
 export function w2VariableMethods(employer: W2EmployerWageInput, context: W2MethodContext): W2VariableMethods {
   const fromWvoe = employer.wageDocSource === 'WVOE';
   const total = fromWvoe
     ? employer.wvoeBonus + employer.wvoeOvertime
     : employer.bonusYtd + employer.overtimeYtd + employer.tipsYtd + employer.commissionYtd;
   const current = total / Math.max(fromWvoe ? employer.wvoeMonths : employer.monthsAtJob, 1);
-  const mergesPriorEmployer = context.ownedByPrimary;
+  // Without prior history the merge would divide this job's variable pay by
+  // 12 months nobody worked, so a primary borrower would get less than an
+  // identical co-borrower.
+  const mergesPriorEmployer = context.ownedByPrimary && hasPriorEmployerHistory(context.priorEmployer);
   const prior = context.priorEmployer;
   const merged = mergesPriorEmployer
     ? (employer.bonusYtd + employer.overtimeYtd + (prior?.box12Bonus ?? 0) + (prior?.box14Overtime ?? 0))

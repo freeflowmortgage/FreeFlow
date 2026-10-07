@@ -1961,7 +1961,9 @@ export default function UnderwriterSplitViewDemo({
       recommendedId: 'current',
       reason: withPrior
         ? 'Twelve or more months at the current job. Guideline uses the current-job variable average unless the underwriter elects the 24-month merge.'
-        : `The previous-employer history on the 1003 is ${borrowerName(undefined)}'s, so ${borrowerName(activeW2Employer.borrowerId)}'s variable income uses this job only.`,
+        : ownedByPrimary(activeW2Employer)
+          ? 'No previous employer on the 1003, so variable income uses this job only.'
+          : `The previous-employer history on the 1003 is ${borrowerName(undefined)}'s, so ${borrowerName(activeW2Employer.borrowerId)}'s variable income uses this job only.`,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
   }, [activeW2Employer, prevEmployerW2, monthsAtCurrentJob, borrowers]);
