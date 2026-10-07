@@ -90,6 +90,7 @@ exception messages.
 |---|---|---|
 | `POST /api/v1/income/extractions` | `income:process` | Stream/validate a PDF to the private parser; return allowlisted extraction and evidence; persist no raw document/OCR text |
 | `POST /api/v1/loans/{loanId}/income-calculations` | `income:calculate` | Load tenant-scoped loan and validated extraction; run versioned deterministic rules server-side |
+| `POST /api/v1/income/borrower-split` | `income:calculate` | Stateless per-borrower W-2 method and 1084 split for callers that hold their own loan file; no database reads or writes; see below |
 | `POST /api/v1/loans/{loanId}/income-approvals` | `income:approve` | Append approval/override event with reason and optimistic version; never update history |
 | `GET /api/v1/loans/{loanId}/income-summary` | `loan:read` | Return only real tenant-scoped state; 404/503 rather than fixture fallback |
 | `GET /api/v1/loans/{loanId}/income-summary.pdf` | `loan:read` | Render from an approved/versioned calculation; `no-store`; audit export. Until that source exists, protected runtimes return `503 SUMMARY_DATA_UNAVAILABLE` rather than render synthetic fields |
@@ -103,6 +104,86 @@ exception messages.
 
 `map-encompass-fields` is a library function, not an HTTP endpoint. Queue
 construction and worker startup are separate processes, not Pages API modules.
+
+### Stateless borrower income split
+
+`POST /api/v1/income/borrower-split` runs the same W-2 base and variable method
+math and per-borrower split as the underwriting console's Wages tab
+(`@mortgage-pos/mortgage-engine`, `w2-income-methods.ts`). It is for systems
+that keep their own loan file, such as Mortgage-POS, and is not a
+loan-scoped calculation of record: it reads no extraction, writes no audit row,
+and does not log the body. Because it changes no state it does not take an
+`Idempotency-Key`. It still runs behind the request context middleware, so
+protected runtimes require the verified identity and exact `Origin`.
+
+The body is `borrower-income-v1` (`BorrowerIncomeRequestSchema`), capped at
+64 KB, and unknown keys are rejected:
+
+```json
+{
+  "borrowers": [{ "id": "b1" }, { "id": "b2" }],
+  "priorEmployer": { "box5Wages": 78500, "box12Bonus": 18000, "box14Overtime": 6000 },
+  "w2Employers": [
+    { "id": "w2-apex", "borrowerId": "b1", "payFrequency": "SEMIMONTHLY", "hourlyRate": 45,
+      "weeklyHours": 40, "currentPeriodBasePay": 3600, "baseYtd": 54000,
+      "bonusYtd": 12500, "overtimeYtd": 4200, "monthsAtJob": 8 },
+    { "id": "w2-meridian", "borrowerId": "b2", "payFrequency": "BIWEEKLY", "wageDocSource": "WVOE",
+      "hourlyRate": 22, "weeklyHours": 12, "currentPeriodBasePay": 528, "baseYtd": 7920,
+      "wvoeMonths": 24, "monthsAtJob": 29, "w2Year1Box5": 11440 }
+  ],
+  "selfEmployed": [{ "id": "s1", "borrowerId": "b2", "kind": "SCHEDULE_C", "monthly": 1500 }],
+  "rentalMonthly": 900,
+  "assetIncomeMonthly": 0
+}
+```
+
+Rules the caller should know:
+
+- Borrowers are in 1003 order; the first is the primary. Income without a
+  `borrowerId` is the primary's, and a `borrowerId` not on the request is a 400.
+- `priorEmployer` is the primary borrower's previous employer from the 1003.
+  It merges into the 24-month variable average only for the primary, only when
+  they are under 12 months at the job, and only when it has wages, bonus or
+  overtime. A co-borrower's variable income always uses their own job.
+- `baseMethod` (`hourly`, `period`, `ytd`, `prior`, `not_used`) and
+  `variableMethod` (`current`, `avg24`, `not_used`) are the underwriter's
+  choices; omit them for the guideline recommendation. The YTD average divides
+  by `ytdMonthsElapsed`, default 7.5.
+- Rental and asset income are joint and credited once, to the primary.
+- Self-employed `monthly` is cash flow the caller has already calculated.
+- Amounts are monthly and unrounded except the YTD, W-2 and WVOE figures, which
+  are as reported. Round when displaying or writing to the LOS.
+
+The 200 response is the engine's `BorrowerIncomeResult` plus provenance:
+
+| Field | Meaning |
+|---|---|
+| `schemaVersion`, `ruleVersion` | `borrower-income-v1` and the W-2 method rule version |
+| `borrowers[]` | Each borrower's `w2BaseMonthly`, `w2VariableMonthly`, `selfEmployedMonthly` and `qualifyingMonthlyIncome`, in request order |
+| `employers[]` | Chosen and recommended method and monthly amount per employer, plus `warnings` |
+| `totals` | Sums across borrowers; `qualifyingMonthlyIncome` equals the sum of the borrower rows |
+| `requestId` | Same as the `X-Request-Id` header |
+| `inputHash` | SHA-256 of the validated request with defaults filled, keys sorted |
+
+`W2_RECOMMENDED_BASE_ZERO` in `employers[].warnings` means the recommended base
+came out to zero while another method did not, which is what a salaried stub
+without an hourly rate produces. Send an explicit `baseMethod` after review.
+
+Errors use the envelope above: 400 `INVALID_BORROWER_INCOME_REQUEST` with
+`issues[]` of `{ path, message }` (no submitted values), 401/403 from the
+middleware, 405 for anything but `POST`, and 500
+`BORROWER_INCOME_CALCULATION_FAILED`.
+
+The result is calculation evidence, not an approval or a credit decision.
+Callers that rely on it for an ability-to-repay determination keep the
+response, `inputHash`, `ruleVersion` and `requestId` with their loan record
+(Reg Z §1026.43 and the record retention in §1026.25(c)(3)).
+
+Services outside this workspace can consume the engine as a package:
+`pnpm --filter @mortgage-pos/mortgage-engine build:dist` compiles CommonJS and
+declarations to `packages/mortgage-engine/dist`, and `pnpm pack` points `main`
+and `types` there. The workspace `build` stays `tsc --noEmit`, which the
+Dockerfiles run.
 
 ## Parser contract
 
