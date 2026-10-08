@@ -64,6 +64,16 @@ The script uses the full Git commit as the immutable ECR tag. If that tag is
 already present, its digest is verified and reused. ECR scans must complete
 with zero critical and zero high findings before Terraform planning begins.
 
+## Pinned live digests (`freeflow-dev.pins.auto.tfvars.json`)
+
+`infrastructure/terraform/environments/dev/freeflow-dev.pins.auto.tfvars.json`
+records the image digests (and extra portal hostnames) that are actually live in
+freeflow-dev. Terraform auto-loads it after any local `terraform.tfvars`, so a
+stale local file cannot roll ECS back; `-var` flags passed by
+`Deploy-FreeFlowDev.ps1` still take precedence. Whenever images are deployed
+(by the script or out of band), update this file in a reviewed PR so a plain
+`terraform plan` stays free of image drift.
+
 ## Safety behavior
 
 - Modified or untracked non-ignored files stop the deployment before any image
