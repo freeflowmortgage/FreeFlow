@@ -16,9 +16,10 @@ resource "aws_ecs_task_definition" "parser" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "1024"
-  memory                   = "4096"
-  execution_role_arn       = aws_iam_role.parser_execution.arn
-  task_role_arn            = aws_iam_role.parser_task.arn
+  # Cost: 7/14-day peak was ~0.98 GB (24% of 4 GB); 2 GB keeps ~2x headroom.
+  memory             = "2048"
+  execution_role_arn = aws_iam_role.parser_execution.arn
+  task_role_arn      = aws_iam_role.parser_task.arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -304,10 +305,11 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
   family                   = "${local.name_prefix}-document-pull-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "512"
-  memory                   = "1024"
-  execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.document_pull_worker_task[0].arn
+  # Cost: idle worker (~0.03% CPU, ~45 MB peak memory over 14 days).
+  cpu                = "256"
+  memory             = "512"
+  execution_role_arn = aws_iam_role.task_execution.arn
+  task_role_arn      = aws_iam_role.document_pull_worker_task[0].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -353,10 +355,11 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
   family                   = "${local.name_prefix}-encompass-sync-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "512"
-  memory                   = "1024"
-  execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.encompass_sync_worker_task[0].arn
+  # Cost: idle worker (~0.03% CPU, ~45 MB peak memory over 14 days).
+  cpu                = "256"
+  memory             = "512"
+  execution_role_arn = aws_iam_role.task_execution.arn
+  task_role_arn      = aws_iam_role.encompass_sync_worker_task[0].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
