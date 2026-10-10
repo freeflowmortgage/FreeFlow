@@ -1,8 +1,14 @@
+import asyncio
 import io
+import threading
+import time
 import pytest
 from httpx import AsyncClient, ASGITransport
+from fastapi.responses import JSONResponse
 
+import server
 from server import app
+from pdf_splitter import OcrPageBudgetExceeded
 from pdf_splitter import pre_split_tax_returns, CORE_RULES
 from ai_pdf_converter import PageResult, ConvertResult, OcrWord, PageInspect
 from mismo_xml_exporter import generate_mismo_34_xml
@@ -56,6 +62,58 @@ async def test_health_check():
         data = res.json()
         assert data["status"] == "HEALTHY"
         assert data["version"] == "5.0.0"
+
+
+@pytest.mark.asyncio
+async def test_health_stays_responsive_during_long_parse(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_parse(*_args):
+        started.set()
+        release.wait(timeout=2)
+        return JSONResponse({"status": "synthetic-complete"})
+
+    monkeypatch.setattr(server, "_process_document_sync", slow_parse)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        parse_task = asyncio.create_task(client.post(
+            "/parse",
+            content=b"%PDF-synthetic",
+            headers={"Content-Type": "application/pdf", "x-document-title": "synthetic.pdf"},
+        ))
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=1)
+        before = time.perf_counter()
+        health = await client.get("/health")
+        elapsed = time.perf_counter() - before
+        release.set()
+        parsed = await parse_task
+
+    assert health.status_code == 200
+    assert elapsed < 1
+    assert parsed.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_ocr_budget_exceeded_is_a_clean_retryable_failure(monkeypatch):
+    def over_budget(*_args):
+        raise OcrPageBudgetExceeded(required=13, budget=12)
+
+    monkeypatch.setattr(server, "_process_document_sync", over_budget)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/parse",
+            content=b"%PDF-synthetic",
+            headers={"Content-Type": "application/pdf", "x-document-title": "synthetic.pdf"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "DOCUMENT_PROCESSOR_UNAVAILABLE",
+        "message": "Document processing is temporarily unavailable for this OCR workload.",
+        "retryable": True,
+    }
 
 
 @pytest.mark.asyncio
