@@ -5,6 +5,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { fieldMatchesInspectId, type InspectOverlay } from '../livePacket';
 import type { MappedIncomeField, ParsePage } from '../parseTypes';
 import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
+import { pdfScrollTarget } from '../pdfScrollTarget';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -160,12 +161,15 @@ export default function PdfDocumentViewer({
       const container = scrollRef.current;
       const page = pageRefs.current[index];
       if (!container || !page) return;
-      const pageTop = page.offsetTop;
-      const top = box
-        ? pageTop + (box.y + box.h / 2) * page.offsetHeight - container.clientHeight / 2
-        : pageTop - PAGE_GAP_PX;
-      const left = box ? page.offsetLeft + (box.x + box.w / 2) * page.offsetWidth - container.clientWidth / 2 : container.scrollLeft;
-      container.scrollTo({ top: Math.max(0, top), left: Math.max(0, left), behavior: 'auto' });
+      const paneRect = container.getBoundingClientRect();
+      const pageRect = page.getBoundingClientRect();
+      const { top, left } = pdfScrollTarget(
+        { top: paneRect.top, left: paneRect.left, width: container.clientWidth, height: container.clientHeight, scrollTop: container.scrollTop, scrollLeft: container.scrollLeft },
+        { top: pageRect.top, left: pageRect.left, width: pageRect.width, height: pageRect.height },
+        box,
+        PAGE_GAP_PX,
+      );
+      container.scrollTo({ top, left, behavior: 'auto' });
       // The page shown is the page reported, whatever moved it: a search hit,
       // the page buttons or a worksheet click.
       if (index !== reportedPage.current) {
