@@ -310,6 +310,15 @@ async def process_document(request: Request):
         )
         convert_ms = (time.perf_counter() - convert_started) * 1000
         split_result = pre_split_tax_returns(convert_result)
+        try:
+            from urla_borrowers import extract_urla_borrowers
+        except ImportError:
+            from src.urla_borrowers import extract_urla_borrowers
+        urla_borrowers = (
+            extract_urla_borrowers(convert_result.pages)
+            if "urla_1003_detected" in split_result.flags
+            else []
+        )
         schedule_e_started = time.perf_counter()
         has_schedule_e = any(
             any(label.startswith("Schedule E") for label in labels)
@@ -398,6 +407,7 @@ async def process_document(request: Request):
                 "scheduleEProperties": schedule_e_properties,
                 "w2Extracts": w2_extracts,
                 "formExtracts": form_extracts,
+                "urlaBorrowers": urla_borrowers,
             }
         )
     except HTTPException:

@@ -84,6 +84,15 @@ SUPPLEMENTAL_RULES = {
     ),
 }
 
+# URLA/Form 1003 is an origination document, not an income document. Detect it
+# after OCR so callers can route it to the separate AI 1003 workflow without
+# treating a scanned application as a malformed income extraction.
+URLA_1003 = re.compile(
+    r"Uniform\s+Residential\s+Loan\s+Application|"
+    r"Fannie\s+Mae\s+Form\s+1003|Freddie\s+Mac\s+Form\s+65",
+    re.IGNORECASE,
+)
+
 # A W-2 back/instruction page can repeat the form title but contains none of
 # the numbered wage/tax cells. Do not send it to extraction merely because its
 # header OCR says "Form W-2".
@@ -167,6 +176,7 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     classifications: dict[int, list[str]] = {}
     statement_refs: list[StatementRef] = []
     page_texts: dict[int, str] = {}
+    urla_1003_detected = False
 
     for page in pages:
         text = page.text()
@@ -184,6 +194,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         # "Schedule E (Form 1040)" footer, and a rental page was routed onto
         # the partnership tab.
         search_text = re.sub(r"[^\S\n]+", " ", text).strip()
+        if pattern_matches(URLA_1003, text) or pattern_matches(URLA_1003, search_text):
+            urla_1003_detected = True
 
         matched = [
             name
@@ -263,6 +275,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     if not sorted_targets:
         flags.append("no_core_forms_detected")
         logger.warning("split_no_targets pages=%s", total_pages)
+    if urla_1003_detected:
+        flags.append("urla_1003_detected")
     if unresolved:
         flags.append("unresolved_see_statement")
 
