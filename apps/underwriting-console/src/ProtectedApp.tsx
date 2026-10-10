@@ -7,7 +7,7 @@ import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
 import SplitDocPane from './components/SplitDocPane';
 import UnderwriterSplitViewDemo from './components/UnderwriterSplitViewDemo';
 import PdfCoordinateCanvas, { type SpatialCoordinates } from './components/PdfCoordinateCanvas';
-import { PortalApiError, portalClient } from './api/portalClient';
+import { portalClient } from './api/portalClient';
 import { EncompassHostError, type EncompassHostBridge } from './encompass-host/bridge';
 import { loadConsoleRuntimeConfiguration, resolveEncompassHostBridge } from './encompass-host/runtimeHost';
 import { consoleRuntime } from './runtimeMode';
@@ -24,6 +24,7 @@ import {
   type ProtectedLocalDocument,
 } from './protectedWorkspace';
 import { findDuplicate } from './livePacket';
+import { describeProtectedError } from './protectedErrorMessage';
 import type { LiveDocument, ParseResponse } from './parseTypes';
 import {
   PUBLIC_DEMO_DOCUMENT_PREFIX,
@@ -543,8 +544,7 @@ function ReviewField({ item, borrowers, value, onChange }: { item: MetadataRequi
 
 function requirementKey(value: MetadataRequirement): string { return `${value.extractionId}:${value.entityId}:${value.field}`; }
 function describeError(error: unknown, fallback: string): string {
-  if (error instanceof PortalApiError || error instanceof EncompassHostError) return `${error.message} (${error.code})`;
-  return error instanceof Error && error.message ? error.message : fallback;
+  return describeProtectedError(error, fallback);
 }
 function formatCurrency(value: string | number): string {
   const parsed = Number(value);

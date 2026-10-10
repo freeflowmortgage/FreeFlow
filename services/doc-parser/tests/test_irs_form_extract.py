@@ -130,8 +130,8 @@ def test_select_ocr_covers_a_lone_scan_in_a_native_packet() -> None:
     assert select_ocr_page_indices(inspected, split) == {8}
 
 
-def test_select_ocr_budget_prefers_recognized_pages_when_over_the_cap() -> None:
-    from pdf_splitter import OCR_PAGE_BUDGET
+def test_select_ocr_budget_fails_instead_of_returning_a_partial_document() -> None:
+    from pdf_splitter import OCR_PAGE_BUDGET, OcrPageBudgetExceeded
 
     total = OCR_PAGE_BUDGET + 5
     inspected = [SimpleNamespace(index=i, use_ocr=True) for i in range(total)]
@@ -141,10 +141,10 @@ def test_select_ocr_budget_prefers_recognized_pages_when_over_the_cap() -> None:
         statement_refs=[],
         unresolved_statements=[],
     )
-    selected = select_ocr_page_indices(inspected, split)
-
-    assert len(selected) == OCR_PAGE_BUDGET
-    assert total - 1 in selected, "a recognized page must not lose to the budget"
+    with pytest.raises(OcrPageBudgetExceeded) as raised:
+        select_ocr_page_indices(inspected, split)
+    assert raised.value.required == total
+    assert raised.value.budget == OCR_PAGE_BUDGET
 
 
 def test_select_ocr_hybrid_form_pages_skips_blank_companion_pages() -> None:

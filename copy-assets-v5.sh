@@ -62,6 +62,8 @@ find_source() {
         "knowledge"
         "docs/Architecture"
         "docs/architecture"
+        "archive/superseded/docs-artifacts/root"
+        "archive/superseded/docs-artifacts/architecture"
         "${DOWNLOADS_DIR}"
         "Apps/web/lib/encompass"
         "apps/web/lib/encompass"

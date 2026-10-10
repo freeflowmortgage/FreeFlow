@@ -34,7 +34,16 @@ CORE_RULES = {
         re.IGNORECASE,
     ),
     "Schedule D (Capital Gains)": re.compile(r"Schedule D.*Capital Gains and Losses", re.IGNORECASE),
-    "Schedule E (Page 1 - Rentals)": re.compile(r"Schedule E.*Supplemental Income and Loss", re.IGNORECASE),
+    # Some preparer suites emit page content out of visual order, placing the
+    # "SCHEDULE E" masthead after the "Supplemental Income and Loss" subtitle
+    # and a page apart in the text stream. Title-then-subtitle then never
+    # matches, so the Part I caption is carried as its own signature. It is
+    # unique to page 1; page 2 opens Part II on partnerships and S corporations.
+    "Schedule E (Page 1 - Rentals)": re.compile(
+        r"Schedule E.*Supplemental Income and Loss|"
+        r"Income or Loss From Rental Real Estate and Royalties",
+        re.IGNORECASE,
+    ),
     "Schedule E (Page 2 - K-1s)": re.compile(
         r"Schedule E \(Form 1040\).*Page 2|Part II.*Income or Loss From Partnerships and S Corporations",
         re.IGNORECASE,
@@ -83,6 +92,15 @@ SUPPLEMENTAL_RULES = {
         re.IGNORECASE,
     ),
 }
+
+# URLA/Form 1003 is an origination document, not an income document. Detect it
+# after OCR so callers can route it to the separate AI 1003 workflow without
+# treating a scanned application as a malformed income extraction.
+URLA_1003 = re.compile(
+    r"Uniform\s+Residential\s+Loan\s+Application|"
+    r"Fannie\s+Mae\s+Form\s+1003|Freddie\s+Mac\s+Form\s+65",
+    re.IGNORECASE,
+)
 
 # A W-2 back/instruction page can repeat the form title but contains none of
 # the numbered wage/tax cells. Do not send it to extraction merely because its
@@ -167,6 +185,7 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     classifications: dict[int, list[str]] = {}
     statement_refs: list[StatementRef] = []
     page_texts: dict[int, str] = {}
+    urla_1003_detected = False
 
     for page in pages:
         text = page.text()
@@ -184,6 +203,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
         # "Schedule E (Form 1040)" footer, and a rental page was routed onto
         # the partnership tab.
         search_text = re.sub(r"[^\S\n]+", " ", text).strip()
+        if pattern_matches(URLA_1003, text) or pattern_matches(URLA_1003, search_text):
+            urla_1003_detected = True
 
         matched = [
             name
@@ -263,6 +284,8 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     if not sorted_targets:
         flags.append("no_core_forms_detected")
         logger.warning("split_no_targets pages=%s", total_pages)
+    if urla_1003_detected:
+        flags.append("urla_1003_detected")
     if unresolved:
         flags.append("unresolved_see_statement")
 
@@ -275,8 +298,17 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     )
 
 
-OCR_PAGE_BUDGET = int(os.environ.get("OCR_PAGE_BUDGET", "80"))
+OCR_PAGE_BUDGET = int(os.environ.get("OCR_PAGE_BUDGET", "12"))
 """Ceiling on pages OCR'd in one request, to bound latency on huge packets."""
+
+
+class OcrPageBudgetExceeded(RuntimeError):
+    """The request needs more OCR work than one small parser task may accept."""
+
+    def __init__(self, required: int, budget: int) -> None:
+        self.required = required
+        self.budget = budget
+        super().__init__(f"OCR page budget exceeded: required={required} budget={budget}")
 
 
 def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult) -> set[int]:
@@ -289,8 +321,8 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     borrower's scanned return inside an otherwise native packet was dropped
     with nothing but an INFO log to show for it.
 
-    Only the page budget removes work now, and it prefers already-recognized
-    pages and reports the shortfall to the caller.
+    The page budget rejects the whole request rather than returning a partial
+    extraction that could silently omit borrower income evidence.
     """
     pages = list(inspected)
     needs = {
@@ -307,19 +339,15 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     }
     if hybrid_form_pages:
         logger.info("ocr_hybrid_form_pages pages=%s", sorted(hybrid_form_pages))
-        return hybrid_form_pages
+        needs = hybrid_form_pages
 
     if len(needs) <= OCR_PAGE_BUDGET:
         logger.info("ocr_selected pages=%s", sorted(needs))
         return needs
 
-    kept = set(split_result.target_pages)
-    prioritized = sorted(needs & kept) + sorted(needs - kept)
-    selected = set(prioritized[:OCR_PAGE_BUDGET])
     logger.warning(
-        "ocr_budget_exceeded budget=%s needed=%s skipped=%s",
+        "ocr_budget_exceeded budget=%s needed=%s",
         OCR_PAGE_BUDGET,
         len(needs),
-        sorted(needs - selected),
     )
-    return selected
+    raise OcrPageBudgetExceeded(len(needs), OCR_PAGE_BUDGET)

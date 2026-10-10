@@ -1,8 +1,14 @@
+import asyncio
 import io
+import threading
+import time
 import pytest
 from httpx import AsyncClient, ASGITransport
+from fastapi.responses import JSONResponse
 
+import server
 from server import app
+from pdf_splitter import OcrPageBudgetExceeded
 from pdf_splitter import pre_split_tax_returns, CORE_RULES
 from ai_pdf_converter import PageResult, ConvertResult, OcrWord, PageInspect
 from mismo_xml_exporter import generate_mismo_34_xml
@@ -56,6 +62,58 @@ async def test_health_check():
         data = res.json()
         assert data["status"] == "HEALTHY"
         assert data["version"] == "5.0.0"
+
+
+@pytest.mark.asyncio
+async def test_health_stays_responsive_during_long_parse(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_parse(*_args):
+        started.set()
+        release.wait(timeout=2)
+        return JSONResponse({"status": "synthetic-complete"})
+
+    monkeypatch.setattr(server, "_process_document_sync", slow_parse)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        parse_task = asyncio.create_task(client.post(
+            "/parse",
+            content=b"%PDF-synthetic",
+            headers={"Content-Type": "application/pdf", "x-document-title": "synthetic.pdf"},
+        ))
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=1)
+        before = time.perf_counter()
+        health = await client.get("/health")
+        elapsed = time.perf_counter() - before
+        release.set()
+        parsed = await parse_task
+
+    assert health.status_code == 200
+    assert elapsed < 1
+    assert parsed.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_ocr_budget_exceeded_is_a_clean_retryable_failure(monkeypatch):
+    def over_budget(*_args):
+        raise OcrPageBudgetExceeded(required=13, budget=12)
+
+    monkeypatch.setattr(server, "_process_document_sync", over_budget)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/parse",
+            content=b"%PDF-synthetic",
+            headers={"Content-Type": "application/pdf", "x-document-title": "synthetic.pdf"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "DOCUMENT_PROCESSOR_UNAVAILABLE",
+        "message": "Document processing is temporarily unavailable for this OCR workload.",
+        "retryable": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -350,6 +408,39 @@ def test_pdf_splitter_classifies_native_multiline_form_titles(text: str, label: 
     page = PageResult(index=0, width_px=612, height_px=792, is_native_text=True, plain_text=text, words=[])
     result = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
     assert label in result.classifications[0]
+
+
+def test_pdf_splitter_classifies_schedule_e_page_one_emitted_out_of_visual_order():
+    """A preparer suite streams the masthead last, after the Part I body.
+
+    "Schedule E" then sits a page of text away from "Supplemental Income and
+    Loss", and the subtitle is reached before the masthead, so neither reading
+    order satisfies title-then-subtitle. The rental page went unclassified and
+    its property never reached the 1084.
+    """
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=True,
+        plain_text=(
+            "Name(s) shown on return\nSchedule E (Form 1040) 2025 Created 5/6/25\n"
+            "Type of Property:\nProperties:\nIncome:\n"
+            + "\n".join(str(line) for line in range(3, 27))
+            + "\nIncome or Loss From Rental Real Estate and Royalties\n"
+            "Physical address of each property (street, city, state, ZIP code)\n"
+            "Rents received\nTotal expenses. Add lines 5 through 19\n"
+            + ". " * 400
+            + "\nSupplemental Income and Loss\n2025\nSCHEDULE E\n13\nPart I\n"
+        ),
+        words=[],
+    )
+
+    result = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
+
+    assert result.target_pages == [0]
+    assert "Schedule E (Page 1 - Rentals)" in result.classifications[0]
+    assert "Schedule E (Page 2 - K-1s)" not in result.classifications[0]
 
 
 def test_pdf_splitter_classifies_schedule_f():
