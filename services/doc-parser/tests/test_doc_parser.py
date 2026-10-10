@@ -352,6 +352,39 @@ def test_pdf_splitter_classifies_native_multiline_form_titles(text: str, label: 
     assert label in result.classifications[0]
 
 
+def test_pdf_splitter_classifies_schedule_e_page_one_emitted_out_of_visual_order():
+    """A preparer suite streams the masthead last, after the Part I body.
+
+    "Schedule E" then sits a page of text away from "Supplemental Income and
+    Loss", and the subtitle is reached before the masthead, so neither reading
+    order satisfies title-then-subtitle. The rental page went unclassified and
+    its property never reached the 1084.
+    """
+    page = PageResult(
+        index=0,
+        width_px=612,
+        height_px=792,
+        is_native_text=True,
+        plain_text=(
+            "Name(s) shown on return\nSchedule E (Form 1040) 2025 Created 5/6/25\n"
+            "Type of Property:\nProperties:\nIncome:\n"
+            + "\n".join(str(line) for line in range(3, 27))
+            + "\nIncome or Loss From Rental Real Estate and Royalties\n"
+            "Physical address of each property (street, city, state, ZIP code)\n"
+            "Rents received\nTotal expenses. Add lines 5 through 19\n"
+            + ". " * 400
+            + "\nSupplemental Income and Loss\n2025\nSCHEDULE E\n13\nPart I\n"
+        ),
+        words=[],
+    )
+
+    result = pre_split_tax_returns(ConvertResult(pages=[page], page_count=1, ocr_page_count=0))
+
+    assert result.target_pages == [0]
+    assert "Schedule E (Page 1 - Rentals)" in result.classifications[0]
+    assert "Schedule E (Page 2 - K-1s)" not in result.classifications[0]
+
+
 def test_pdf_splitter_classifies_schedule_f():
     page = PageResult(
         index=0,
