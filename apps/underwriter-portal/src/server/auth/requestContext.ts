@@ -93,7 +93,10 @@ export function withRequestContext(
     } catch (error) {
       console.error('[portal-api] route failed', {
         requestId,
-        errorType: error instanceof Error ? error.name : 'UnknownError',
+        method: req.method ?? 'UNKNOWN',
+        path: requestPath(req.url),
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        errorMessage: scrubErrorMessage(error),
       });
       if (res.headersSent) {
         res.destroy();
@@ -108,6 +111,21 @@ export function withRequestContext(
       });
     }
   };
+}
+
+function requestPath(rawUrl: string | undefined): string {
+  if (!rawUrl) return '/';
+  try { return new URL(rawUrl, 'http://portal.internal').pathname || '/'; }
+  catch { return '/'; }
+}
+
+function scrubErrorMessage(error: unknown): string {
+  const message = error instanceof Error && error.message ? error.message : 'Unknown failure';
+  return message
+    .replace(/\b\d{10}\b/g, '[redacted-number]')
+    .replace(/\b[^\s"'?&/\\]+\.(?:pdf|tiff?|png|jpe?g)\b/gi, '[redacted-file]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .slice(0, 500);
 }
 
 /**

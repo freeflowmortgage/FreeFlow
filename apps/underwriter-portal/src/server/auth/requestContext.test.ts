@@ -248,10 +248,13 @@ test('rejects duplicate identity headers', async () => {
 
 test('converts an authenticated handler failure into a stable 500 envelope', async () => {
   const { res, state } = response();
+  const logged: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...values: unknown[]) => { logged.push(values); };
   const wrapped = withRequestContext(
     'loan:read',
     async () => {
-      throw new Error('database details must not escape');
+      throw new Error('database details for 1234567890 in borrower-statement.pdf must not escape');
     },
     {
       verifyToken: async () => identity,
@@ -259,7 +262,13 @@ test('converts an authenticated handler failure into a stable 500 envelope', asy
     },
   );
 
-  await wrapped(request({ 'x-amzn-oidc-data': 'signed-token' }), res);
+  const req = request({ 'x-amzn-oidc-data': 'signed-token' });
+  req.url = '/api/v1/loans/loan-1?npi=1234567890&filename=borrower-statement.pdf';
+  try {
+    await wrapped(req, res);
+  } finally {
+    console.error = originalConsoleError;
+  }
   assert.equal(state.status, 500);
   assert.equal((state.body as { error: { code: string } }).error.code, 'INTERNAL_ERROR');
   assert.doesNotMatch(JSON.stringify(state.body), /database details/);
@@ -267,4 +276,11 @@ test('converts an authenticated handler failure into a stable 500 envelope', asy
   assert.equal(state.headers['cache-control'], 'no-store');
   assert.equal(state.headers['x-content-type-options'], 'nosniff');
   assert.equal(state.headers['referrer-policy'], 'no-referrer');
+  const log = JSON.stringify(logged);
+  assert.match(log, /requestId/);
+  assert.match(log, /"method":"GET"/);
+  assert.match(log, /"path":"\/api\/v1\/loans\/loan-1"/);
+  assert.match(log, /"errorName":"Error"/);
+  assert.match(log, /"errorMessage":/);
+  assert.doesNotMatch(log, /1234567890|borrower-statement\.pdf|\?npi=|filename=/);
 });

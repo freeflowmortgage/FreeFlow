@@ -36,14 +36,22 @@ export async function parseWithIncomeService(
   bytes: Uint8Array,
   options: Readonly<{ parserUrl: string; fetch?: Fetch }>,
 ): Promise<ParsedAttachment> {
-  const response = await (options.fetch ?? fetch)(options.parserUrl, {
-    method: 'POST',
-    redirect: 'error',
-    signal: AbortSignal.timeout(300_000),
-    headers: { 'content-type': 'application/pdf', 'x-document-title': 'encompass-document.pdf' },
-    body: Buffer.from(bytes),
-  });
-  if (!response.ok) throw httpError('DOCUMENT_PARSER_FAILED', response.status);
+  let response: Response;
+  try {
+    response = await (options.fetch ?? fetch)(options.parserUrl, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(300_000),
+      headers: { 'content-type': 'application/pdf', 'x-document-title': 'encompass-document.pdf' },
+      body: Buffer.from(bytes),
+    });
+  } catch {
+    throw parserUnavailable();
+  }
+  if (!response.ok) {
+    if (response.status === 408 || response.status === 429 || response.status >= 500) throw parserUnavailable();
+    throw httpError('DOCUMENT_PARSER_FAILED', response.status);
+  }
   const value = await readJson(response, 'DOCUMENT_PARSER_RESPONSE_INVALID');
   if (!isRecord(value)) throw new EncompassApiError('DOCUMENT_PARSER_RESPONSE_INVALID', 'Unexpected parser response.', false);
   const result = isRecord(value.result) ? value.result : value;
@@ -73,8 +81,15 @@ export async function parseWithIncomeService(
 }
 
 async function readJson(response: Response, safeCode: string): Promise<unknown> {
-  try { return await response.json(); }
+  let body: string;
+  try { body = await response.text(); }
+  catch { throw parserUnavailable(); }
+  try { return JSON.parse(body) as unknown; }
   catch { throw new EncompassApiError(safeCode, 'Remote service returned malformed JSON.', false); }
+}
+
+function parserUnavailable(): EncompassApiError {
+  return new EncompassApiError('DOCUMENT_PARSER_UNAVAILABLE', 'Document processing is temporarily unavailable.', true);
 }
 
 function httpError(prefix: string, status: number): EncompassApiError {
