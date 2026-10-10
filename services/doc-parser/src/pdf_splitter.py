@@ -34,7 +34,16 @@ CORE_RULES = {
         re.IGNORECASE,
     ),
     "Schedule D (Capital Gains)": re.compile(r"Schedule D.*Capital Gains and Losses", re.IGNORECASE),
-    "Schedule E (Page 1 - Rentals)": re.compile(r"Schedule E.*Supplemental Income and Loss", re.IGNORECASE),
+    # Some preparer suites emit page content out of visual order, placing the
+    # "SCHEDULE E" masthead after the "Supplemental Income and Loss" subtitle
+    # and a page apart in the text stream. Title-then-subtitle then never
+    # matches, so the Part I caption is carried as its own signature. It is
+    # unique to page 1; page 2 opens Part II on partnerships and S corporations.
+    "Schedule E (Page 1 - Rentals)": re.compile(
+        r"Schedule E.*Supplemental Income and Loss|"
+        r"Income or Loss From Rental Real Estate and Royalties",
+        re.IGNORECASE,
+    ),
     "Schedule E (Page 2 - K-1s)": re.compile(
         r"Schedule E \(Form 1040\).*Page 2|Part II.*Income or Loss From Partnerships and S Corporations",
         re.IGNORECASE,
