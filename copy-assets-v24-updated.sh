@@ -83,6 +83,8 @@ find_source() {
         "Docs/Architecture"
         "docs/Architecture"
         "docs/architecture"
+        "archive/superseded/docs-artifacts/root"
+        "archive/superseded/docs-artifacts/architecture"
         "artifacts"
         "knowledge"
         "${DOWNLOADS_DIR}"
