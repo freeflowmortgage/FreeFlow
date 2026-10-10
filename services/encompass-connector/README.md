@@ -1,9 +1,8 @@
 # Encompass connector service
 
 Separate private ECS service for the custom Encompass connector. It is not
-part of the portal process. FreeFlow core communicates only through its signed
-service contract; a lender-specific direct Encompass implementation is injected
-into the separately deployed connector.
+part of the portal process. In real mode it is the only process that resolves
+the lender-scoped LOS credential secret.
 
 ## Implemented
 
@@ -12,28 +11,21 @@ into the separately deployed connector.
 - Server-authoritative tenant/lender/deployment binding through
   `PrismaBindingStore` with forced RLS.
 - Non-production Bearer S2S stub. `NODE_ENV=production` refuses to boot it.
-- Explicit `synthetic-freeflow-dev` mode returns the deterministic in-memory
-  W-2 attachment `synthetic-income-document-1` and thirteen read-only morning-pack
-  fixture attachments, including two `synthetic-pack-w2-*` W-2s
-  (`synthetic-pack-w2-2021-nates` and `synthetic-pack-w2-2021-coborrower`),
-  Schedule B interest `synthetic-pack-schedule-b-2025`, Schedule C
-  `synthetic-pack-schedule-c-2025`, Schedule F `synthetic-pack-schedule-f-2025`,
-  Schedule D `synthetic-pack-schedule-d-2025`, Form 1120-S
-  `synthetic-pack-form-1120s-2025`, K-1 (1120-S)
-  `synthetic-pack-schedule-k1-1120s-2025`, and Form 1120
-  `synthetic-pack-form-1120-2025`. 1003 employment is not a morning-pack PDF.
-  Fixture bytes are baked into the image and are not written back to disk.
+- Real mode uses ICE client credentials inside this service and does not expose
+  credentials to portal or worker request bodies.
+- Explicit `synthetic-freeflow-dev` mode returns one deterministic attachment
+  and constructs a deterministic PDF in memory.
 - Compiled Node runtime, UID 1001, read-only-root compatibility, and health.
 
 The synthetic implementation is selected only when `NODE_ENV`,
 `FREEFLOW_RUNTIME_ENV`, `CONNECTOR_MODE`, and `CONNECTOR_BOUND_TENANT_ID` all
-match the freeflow-dev development configuration. It performs no live
-Encompass calls.
+match the freeflow-dev development configuration. It performs no Encompass or
+Developer Connect calls.
 
 ## Security boundaries
 
-- Service tokens and database credentials are different types and stores.
-- FreeFlow core never accepts or stores lender Encompass credentials.
+- Service tokens, database credentials, and future LOS credentials are
+  different types and stores.
 - Raw PDF bytes are never written to disk, S3, a database, logs, or audit data.
 - The response path clears the connector-owned byte buffer after constructing
   the response.
@@ -55,7 +47,6 @@ The compiled image contains:
 - `dist/index.js` — service runtime
 - `dist/bootstrapSyntheticBinding.js` — idempotent migrator-only dev bootstrap
 - `dist/privateSmoke.js` — private-boundary smoke caller
-- `fixtures/morning-pack-2026-09-29/` — read-only synthetic pack PDFs
 
 After an authorized freeflow-dev Terraform apply, run the binding bootstrap
 task once, then run `dist/privateSmoke.js` as a one-off task with the application

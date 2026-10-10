@@ -5,7 +5,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/index.js --external:@prisma/client && esbuild scripts/bootstrapSyntheticBinding.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/bootstrapSyntheticBinding.js --external:@prisma/client && esbuild scripts/privateSmoke.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/privateSmoke.js --external:@prisma/client && esbuild scripts/realConnectorParserSmoke.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/realConnectorParserSmoke.js --external:@prisma/client",
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/index.js --external:@prisma/client && esbuild scripts/bootstrapSyntheticBinding.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/bootstrapSyntheticBinding.js --external:@prisma/client && esbuild scripts/privateSmoke.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/privateSmoke.js --external:@prisma/client && esbuild scripts/realConnectorParserSmoke.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/realConnectorParserSmoke.js --external:@prisma/client",
     "test": "tsx --test tests/*.test.ts",
     "test:database-bindings": "tsx --test tests/prisma-binding-store.integration.ts",
     "start": "tsx src/index.ts"

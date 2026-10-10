@@ -2,12 +2,11 @@
  * Custom Encompass connector SERVICE SKELETON.
  *
  * Separate process/package from the portal. Not wired to document-pull APIs,
- * SQS workers, or a vendor-hosted API client. Do not deploy to live ECS.
+ * SQS workers, or Developer Connect. Do not deploy to live ECS.
  *
  * Stubbed: real LOS I/O and production S2S (mTLS / signed+replay).
- * freeflow-dev may explicitly select deterministic synthetic I/O
- * (in-memory W-2 plus baked morning-pack fixtures).
- * Forbidden: LOS credentials and PDF persistence.
+ * freeflow-dev may explicitly select deterministic in-memory synthetic I/O.
+ * Forbidden: LOS credentials, PDF persistence, flipping DC/worker flags.
  *
  * NODE_ENV=production refuses to boot while the NON-PROD Bearer stub is selected.
  */

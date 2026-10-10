@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
-import { EncompassConnectorError, type EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
+import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
 import { HmacSignedReplayServiceAuthVerifier, NonProdBearerServiceAuthVerifier } from './auth';
 import { PrismaBindingStore } from './binding';
+import { CustomConnectorService } from './connector/customConnectorService';
+import { readEncompassRuntimeCredentials } from './connector/encompassApiClient';
 import {
   SYNTHETIC_FREEFLOW_DEV_MODE,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
@@ -36,10 +38,7 @@ export function assertProductionAllowsAuth(
   }
 }
 
-export function createConnectorRuntime(
-  env: NodeJS.ProcessEnv,
-  directConnector?: EncompassConnector,
-): ConnectorRuntime {
+export function createConnectorRuntime(env: NodeJS.ProcessEnv): ConnectorRuntime {
   const authKind = env.CONNECTOR_SERVICE_AUTH_KIND?.trim() || SKELETON_SERVICE_AUTH_KIND;
   assertProductionAllowsAuth(env.NODE_ENV, authKind);
 
@@ -52,7 +51,7 @@ export function createConnectorRuntime(
     deps: {
       authVerifier: selectAuthVerifier(env, authKind, serviceToken, tenantId),
       bindingStore: new PrismaBindingStore(new PrismaClient()),
-      connector: selectConnector(env, directConnector),
+      connector: selectConnector(env),
     },
   };
 }
@@ -72,16 +71,9 @@ function selectAuthVerifier(env: NodeJS.ProcessEnv, authKind: string, serviceTok
   return new NonProdBearerServiceAuthVerifier(serviceToken && tenantId ? [{ token: serviceToken, serviceId: 'portal', tenantId }] : []);
 }
 
-function selectConnector(env: NodeJS.ProcessEnv, directConnector?: EncompassConnector) {
+function selectConnector(env: NodeJS.ProcessEnv) {
   if (env.CONNECTOR_MODE?.trim() !== SYNTHETIC_FREEFLOW_DEV_MODE) {
-    if (!directConnector || directConnector.kind !== 'custom') {
-      throw new EncompassConnectorError(
-        'DIRECT_ENCOMPASS_CONNECTOR_REQUIRED',
-        'A separately implemented direct Encompass connector is required.',
-        false,
-      );
-    }
-    return directConnector;
+    return new CustomConnectorService(readEncompassRuntimeCredentials(env));
   }
   if (
     env.NODE_ENV !== 'development'
@@ -97,10 +89,7 @@ function selectConnector(env: NodeJS.ProcessEnv, directConnector?: EncompassConn
   return new SyntheticFreeflowDevConnector();
 }
 
-export function bootConnectorService(
-  env: NodeJS.ProcessEnv = process.env,
-  directConnector?: EncompassConnector,
-) {
-  const runtime = createConnectorRuntime(env, directConnector);
+export function bootConnectorService(env: NodeJS.ProcessEnv = process.env) {
+  const runtime = createConnectorRuntime(env);
   return startConnectorHttpServer(runtime);
 }

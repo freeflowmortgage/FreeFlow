@@ -1,0 +1,148 @@
+name: Publish dev images
+
+# Builds every runtime image for the main commit, pushes it to the dev ECR
+# repositories tagged with the full commit SHA, and waits for the ECR scan.
+# Publishing never deploys: roll a digest out with Deploy-FreeFlowDev.ps1,
+# which reuses these images instead of rebuilding them.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Image to publish
+        type: choice
+        default: all
+        options: [all, portal, parser, console, migration, connector]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-dev-images-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.name }} image
+    if: github.ref == 'refs/heads/main' && vars.AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: portal
+            repository: mortgage-api
+            variable: portal_image
+            bake_env: PORTAL_IMAGE
+          - name: parser
+            repository: mortgage-income-parser
+            variable: parser_image
+            bake_env: PARSER_IMAGE
+          - name: console
+            repository: mortgage-underwriting-console
+            variable: console_image
+            bake_env: CONSOLE_IMAGE
+          - name: migration
+            repository: mortgage-database-migrations
+            variable: migration_image
+            bake_env: MIGRATION_IMAGE
+          - name: connector
+            repository: mortgage-encompass-connector
+            variable: connector_image
+            bake_env: CONNECTOR_IMAGE
+    steps:
+      - name: Select image
+        id: select
+        env:
+          REQUESTED: ${{ inputs.service || 'all' }}
+        run: |
+          if [ "$REQUESTED" = all ] || [ "$REQUESTED" = "${{ matrix.name }}" ]; then
+            echo "selected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "selected=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.select.outputs.selected == 'true'
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.select.outputs.selected == 'true'
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN }}
+          role-session-name: publish-${{ matrix.name }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        if: steps.select.outputs.selected == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Check for an existing commit image
+        id: existing
+        if: steps.select.outputs.selected == 'true'
+        run: |
+          digest=$(aws ecr describe-images \
+            --repository-name "${{ matrix.repository }}" \
+            --image-ids "imageTag=${GITHUB_SHA}" \
+            --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+          if [ -n "$digest" ] && [ "$digest" != None ]; then
+            echo "Reusing ${{ matrix.repository }}:${GITHUB_SHA} ($digest)"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.select.outputs.selected == 'true' && steps.existing.outputs.found == 'false'
+
+      # Provenance is disabled to keep the single-manifest Linux/AMD64 image
+      # contract that ECS, ECR scanning, and Deploy-FreeFlowDev.ps1 expect.
+      - name: Build and push
+        if: steps.select.outputs.selected == 'true' && steps.existing.outputs.found == 'false'
+        run: |
+          export ${{ matrix.bake_env }}="${{ steps.ecr.outputs.registry }}/${{ matrix.repository }}:${GITHUB_SHA}"
+          docker buildx bake \
+            --file docker-bake.hcl \
+            --progress plain \
+            --provenance=false \
+            --push \
+            --set "${{ matrix.name }}.cache-from=type=gha,scope=${{ matrix.name }}" \
+            --set "${{ matrix.name }}.cache-to=type=gha,mode=max,scope=${{ matrix.name }}" \
+            ${{ matrix.name }}
+
+      - name: Require a clean ECR scan
+        id: scan
+        if: steps.select.outputs.selected == 'true'
+        run: |
+          image_id="imageTag=${GITHUB_SHA}"
+          aws ecr wait image-scan-complete --repository-name "${{ matrix.repository }}" --image-id "$image_id"
+          read -r critical high < <(aws ecr describe-image-scan-findings \
+            --repository-name "${{ matrix.repository }}" --image-id "$image_id" \
+            --query '[imageScanFindings.findingSeverityCounts.CRITICAL, imageScanFindings.findingSeverityCounts.HIGH]' \
+            --output text)
+          critical=${critical/None/0}
+          high=${high/None/0}
+          if [ "$critical" -gt 0 ] || [ "$high" -gt 0 ]; then
+            echo "::error::ECR scan blocked ${{ matrix.name }}: CRITICAL=$critical HIGH=$high"
+            exit 1
+          fi
+          digest=$(aws ecr describe-images --repository-name "${{ matrix.repository }}" \
+            --image-ids "$image_id" --query 'imageDetails[0].imageDigest' --output text)
+          reference="${{ steps.ecr.outputs.registry }}/${{ matrix.repository }}@${digest}"
+          echo "reference=$reference" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ matrix.name }}"
+            echo
+            echo "ECR scan passed (CRITICAL=0, HIGH=0) for commit \`${GITHUB_SHA}\`."
+            echo
+            echo '```'
+            echo "${{ matrix.variable }} = \"$reference\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

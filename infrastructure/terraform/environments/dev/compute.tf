@@ -206,22 +206,27 @@ resource "aws_ecs_task_definition" "connector" {
       capabilities       = { add = [], drop = ["ALL"] }
     }
     environment = [
-      # The synthetic Bearer path is explicit development-only configuration.
-      # Its service token is distinct from database and future LOS credentials.
-      { name = "NODE_ENV", value = "development" },
-      { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
+      # The synthetic path remains explicit development-only configuration.
+      # Real mode uses signed service authentication and resolves lender-scoped
+      # LOS credentials only inside this separate connector task.
+      { name = "NODE_ENV", value = local.connector_real_encompass ? "production" : "development" },
+      { name = "FREEFLOW_RUNTIME_ENV", value = local.connector_real_encompass ? "staging" : "development" },
       { name = "PORT", value = "8080" },
       { name = "LOG_LEVEL", value = "info" },
-      { name = "CONNECTOR_MODE", value = "synthetic-freeflow-dev" },
+      { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
-      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_service_auth_kind },
+      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : local.connector_service_auth_kind },
       { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
-    secrets = [
+    secrets = concat([
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
       { name = "CONNECTOR_SERVICE_TOKEN", valueFrom = aws_secretsmanager_secret.connector_service_token[0].arn },
       { name = "CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
-    ]
+      ], local.connector_real_encompass ? [
+      { name = "ENCOMPASS_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:clientId::" },
+      { name = "ENCOMPASS_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:clientSecret::" },
+      { name = "ENCOMPASS_INSTANCE_ID", valueFrom = "${aws_secretsmanager_secret.connector_encompass_credentials[0].arn}:instanceId::" },
+    ] : [])
     portMappings = [{
       name          = "http"
       containerPort = 8080
