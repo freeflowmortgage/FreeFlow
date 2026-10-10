@@ -298,8 +298,17 @@ def pre_split_tax_returns(convert_result: "ConvertResult", output_pdf_path: str 
     )
 
 
-OCR_PAGE_BUDGET = int(os.environ.get("OCR_PAGE_BUDGET", "80"))
+OCR_PAGE_BUDGET = int(os.environ.get("OCR_PAGE_BUDGET", "12"))
 """Ceiling on pages OCR'd in one request, to bound latency on huge packets."""
+
+
+class OcrPageBudgetExceeded(RuntimeError):
+    """The request needs more OCR work than one small parser task may accept."""
+
+    def __init__(self, required: int, budget: int) -> None:
+        self.required = required
+        self.budget = budget
+        super().__init__(f"OCR page budget exceeded: required={required} budget={budget}")
 
 
 def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult) -> set[int]:
@@ -312,8 +321,8 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     borrower's scanned return inside an otherwise native packet was dropped
     with nothing but an INFO log to show for it.
 
-    Only the page budget removes work now, and it prefers already-recognized
-    pages and reports the shortfall to the caller.
+    The page budget rejects the whole request rather than returning a partial
+    extraction that could silently omit borrower income evidence.
     """
     pages = list(inspected)
     needs = {
@@ -330,19 +339,15 @@ def select_ocr_page_indices(inspected: Iterable[Any], split_result: SplitResult)
     }
     if hybrid_form_pages:
         logger.info("ocr_hybrid_form_pages pages=%s", sorted(hybrid_form_pages))
-        return hybrid_form_pages
+        needs = hybrid_form_pages
 
     if len(needs) <= OCR_PAGE_BUDGET:
         logger.info("ocr_selected pages=%s", sorted(needs))
         return needs
 
-    kept = set(split_result.target_pages)
-    prioritized = sorted(needs & kept) + sorted(needs - kept)
-    selected = set(prioritized[:OCR_PAGE_BUDGET])
     logger.warning(
-        "ocr_budget_exceeded budget=%s needed=%s skipped=%s",
+        "ocr_budget_exceeded budget=%s needed=%s",
         OCR_PAGE_BUDGET,
         len(needs),
-        sorted(needs - selected),
     )
-    return selected
+    raise OcrPageBudgetExceeded(len(needs), OCR_PAGE_BUDGET)

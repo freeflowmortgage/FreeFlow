@@ -19,6 +19,7 @@ os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("freeflow.server")
@@ -60,16 +61,17 @@ AIPDFConverter = None
 pre_split_tax_returns = None
 extract_irs_form_fields = None
 select_ocr_page_indices = None
+OcrPageBudgetExceeded = RuntimeError
 _engine_error: str | None = None
 try:
     from ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
     from irs_form_extract import extract_irs_form_fields
-    from pdf_splitter import pre_split_tax_returns, select_ocr_page_indices
+    from pdf_splitter import OcrPageBudgetExceeded, pre_split_tax_returns, select_ocr_page_indices
 except Exception as exc:
     try:
         from src.ai_pdf_converter import MAX_PDF_BYTES, AIPDFConverter
         from src.irs_form_extract import extract_irs_form_fields
-        from src.pdf_splitter import pre_split_tax_returns, select_ocr_page_indices
+        from src.pdf_splitter import OcrPageBudgetExceeded, pre_split_tax_returns, select_ocr_page_indices
     except Exception:
         extract_irs_form_fields = None  # type: ignore[assignment]
         select_ocr_page_indices = None  # type: ignore[assignment]
@@ -282,136 +284,30 @@ async def process_document(request: Request):
         if len(pdf_bytes) > MAX_PDF_BYTES:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail="PDF exceeds parser size limit.")
 
-        document_id = _document_id(pdf_bytes)
-
-        schedule_e_properties: list = []
-        w2_extracts: list = []
-        try:
-            from schedule_e_grid import extract_schedule_e_pages
-        except ImportError:
-            from src.schedule_e_grid import extract_schedule_e_pages
-        try:
-            from w2_grid import extract_w2_pages
-        except ImportError:
-            from src.w2_grid import extract_w2_pages
-
-        converter = get_converter()
-        inspect_started = time.perf_counter()
-        inspected = converter.inspect_pages(pdf_bytes)
-        preview = converter.inspect_as_convert_result(inspected)
-        preview_split = pre_split_tax_returns(preview)
-        inspect_ms = (time.perf_counter() - inspect_started) * 1000
-        ocr_indices = select_ocr_page_indices(inspected, preview_split) if select_ocr_page_indices else None
-        convert_started = time.perf_counter()
-        convert_result = converter.convert_to_ai_ready(
+        return await run_in_threadpool(
+            _process_document_sync,
             pdf_bytes,
-            inspected=inspected,
-            ocr_page_indices=ocr_indices,
-        )
-        convert_ms = (time.perf_counter() - convert_started) * 1000
-        split_result = pre_split_tax_returns(convert_result)
-        try:
-            from urla_borrowers import extract_urla_borrowers
-        except ImportError:
-            from src.urla_borrowers import extract_urla_borrowers
-        urla_borrowers = (
-            extract_urla_borrowers(convert_result.pages)
-            if "urla_1003_detected" in split_result.flags
-            else []
-        )
-        schedule_e_started = time.perf_counter()
-        has_schedule_e = any(
-            any(label.startswith("Schedule E") for label in labels)
-            for labels in split_result.classifications.values()
-        )
-        if has_schedule_e:
-            try:
-                schedule_e_properties = extract_schedule_e_pages(pdf_bytes, ocr_pages=convert_result.pages)
-            except Exception as grid_exc:
-                logger.warning("schedule_e_grid_skipped: %s", grid_exc)
-        schedule_e_ms = (time.perf_counter() - schedule_e_started) * 1000
-        try:
-            w2_extracts = extract_w2_pages(pdf_bytes, ocr_pages=convert_result.pages)
-            logger.info("w2_grid_complete count=%s", len(w2_extracts))
-        except Exception as grid_exc:
-            logger.warning("w2_grid_skipped: %s", grid_exc)
-
-        extract_started = time.perf_counter()
-        form_extracts: list = []
-        if extract_irs_form_fields is not None:
-            try:
-                form_extracts = extract_irs_form_fields(
-                    pdf_bytes,
-                    ocr_pages=convert_result.pages,
-                    page_indices=split_result.target_pages,
-                )
-            except Exception as extract_exc:
-                logger.warning("irs_form_extract_skipped: %s", extract_exc)
-        extract_ms = (time.perf_counter() - extract_started) * 1000
-
-        del pdf_bytes
-
-        kept = set(split_result.target_pages)
-        page_payload = []
-        for page in convert_result.pages:
-            page_payload.append(
-                {
-                    "index": page.index,
-                    "formIds": split_result.classifications.get(page.index, []),
-                    "isNativeText": page.is_native_text,
-                    "inKeepSet": page.index in kept,
-                    "meanConfidence": page.mean_confidence,
-                    "skewDegrees": page.skew_degrees,
-                    "words": [word.to_dict() for word in page.words],
-                    "flags": page.flags,
-                }
-            )
-
-        has_business = any(
-            any(
-                label.startswith(("Schedule C", "Schedule E", "Form 1120", "Form 1065", "Schedule K-1", "Form 8825"))
-                for label in labels
-            )
-            for labels in split_result.classifications.values()
-        )
-
-        logger.info(
-            "parse_complete txn=%s pages=%s kept=%s ocr=%s inspect_ms=%.1f convert_ms=%.1f "
-            "schedule_e_ms=%.1f extract_ms=%.1f total_ms=%.1f",
+            original_name,
             transaction_id,
-            convert_result.page_count,
-            len(split_result.target_pages),
-            convert_result.ocr_page_count,
-            inspect_ms,
-            convert_ms,
-            schedule_e_ms,
-            extract_ms,
-            (time.perf_counter() - request_started) * 1000,
-        )
-
-        return JSONResponse(
-            content={
-                "transaction_id": transaction_id,
-                "document_id": document_id,
-                "original_filename": original_name,
-                "was_sandwich_applied": False,
-                "total_pages_scanned": convert_result.page_count,
-                "pages_extracted_count": len(split_result.target_pages),
-                "extracted_page_indices": split_result.target_pages,
-                "has_business_returns": has_business,
-                "ocr_page_count": convert_result.ocr_page_count,
-                "flags": convert_result.flags + split_result.flags,
-                "classifications": {str(k): v for k, v in split_result.classifications.items()},
-                "unresolved_statements": split_result.to_dict()["unresolved_statements"],
-                "pages": page_payload,
-                "scheduleEProperties": schedule_e_properties,
-                "w2Extracts": w2_extracts,
-                "formExtracts": form_extracts,
-                "urlaBorrowers": urla_borrowers,
-            }
+            request_started,
         )
     except HTTPException:
         raise
+    except OcrPageBudgetExceeded as exc:
+        logger.warning(
+            "parse_ocr_budget_exceeded txn=%s required=%s budget=%s",
+            transaction_id,
+            exc.required,
+            exc.budget,
+        )
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "DOCUMENT_PROCESSOR_UNAVAILABLE",
+                "message": "Document processing is temporarily unavailable for this OCR workload.",
+                "retryable": True,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
@@ -420,6 +316,144 @@ async def process_document(request: Request):
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Document processing failed during in-memory execution.",
         ) from exc
+
+
+def _process_document_sync(
+    pdf_bytes: bytes,
+    original_name: str,
+    transaction_id: str,
+    request_started: float,
+) -> JSONResponse:
+    """Run CPU-bound PDF inspection, OCR, and extraction outside the event loop."""
+
+    document_id = _document_id(pdf_bytes)
+
+    schedule_e_properties: list = []
+    w2_extracts: list = []
+    try:
+        from schedule_e_grid import extract_schedule_e_pages
+    except ImportError:
+        from src.schedule_e_grid import extract_schedule_e_pages
+    try:
+        from w2_grid import extract_w2_pages
+    except ImportError:
+        from src.w2_grid import extract_w2_pages
+
+    converter = get_converter()
+    inspect_started = time.perf_counter()
+    inspected = converter.inspect_pages(pdf_bytes)
+    preview = converter.inspect_as_convert_result(inspected)
+    preview_split = pre_split_tax_returns(preview)
+    inspect_ms = (time.perf_counter() - inspect_started) * 1000
+    ocr_indices = select_ocr_page_indices(inspected, preview_split) if select_ocr_page_indices else None
+    convert_started = time.perf_counter()
+    convert_result = converter.convert_to_ai_ready(
+        pdf_bytes,
+        inspected=inspected,
+        ocr_page_indices=ocr_indices,
+    )
+    convert_ms = (time.perf_counter() - convert_started) * 1000
+    split_result = pre_split_tax_returns(convert_result)
+    try:
+        from urla_borrowers import extract_urla_borrowers
+    except ImportError:
+        from src.urla_borrowers import extract_urla_borrowers
+    urla_borrowers = (
+        extract_urla_borrowers(convert_result.pages)
+        if "urla_1003_detected" in split_result.flags
+        else []
+    )
+    schedule_e_started = time.perf_counter()
+    has_schedule_e = any(
+        any(label.startswith("Schedule E") for label in labels)
+        for labels in split_result.classifications.values()
+    )
+    if has_schedule_e:
+        try:
+            schedule_e_properties = extract_schedule_e_pages(pdf_bytes, ocr_pages=convert_result.pages)
+        except Exception as grid_exc:
+            logger.warning("schedule_e_grid_skipped: %s", grid_exc)
+    schedule_e_ms = (time.perf_counter() - schedule_e_started) * 1000
+    try:
+        w2_extracts = extract_w2_pages(pdf_bytes, ocr_pages=convert_result.pages)
+        logger.info("w2_grid_complete count=%s", len(w2_extracts))
+    except Exception as grid_exc:
+        logger.warning("w2_grid_skipped: %s", grid_exc)
+
+    extract_started = time.perf_counter()
+    form_extracts: list = []
+    if extract_irs_form_fields is not None:
+        try:
+            form_extracts = extract_irs_form_fields(
+                pdf_bytes,
+                ocr_pages=convert_result.pages,
+                page_indices=split_result.target_pages,
+            )
+        except Exception as extract_exc:
+            logger.warning("irs_form_extract_skipped: %s", extract_exc)
+    extract_ms = (time.perf_counter() - extract_started) * 1000
+
+    del pdf_bytes
+
+    kept = set(split_result.target_pages)
+    page_payload = []
+    for page in convert_result.pages:
+        page_payload.append(
+            {
+                "index": page.index,
+                "formIds": split_result.classifications.get(page.index, []),
+                "isNativeText": page.is_native_text,
+                "inKeepSet": page.index in kept,
+                "meanConfidence": page.mean_confidence,
+                "skewDegrees": page.skew_degrees,
+                "words": [word.to_dict() for word in page.words],
+                "flags": page.flags,
+            }
+        )
+
+    has_business = any(
+        any(
+            label.startswith(("Schedule C", "Schedule E", "Form 1120", "Form 1065", "Schedule K-1", "Form 8825"))
+            for label in labels
+        )
+        for labels in split_result.classifications.values()
+    )
+
+    logger.info(
+        "parse_complete txn=%s pages=%s kept=%s ocr=%s inspect_ms=%.1f convert_ms=%.1f "
+        "schedule_e_ms=%.1f extract_ms=%.1f total_ms=%.1f",
+        transaction_id,
+        convert_result.page_count,
+        len(split_result.target_pages),
+        convert_result.ocr_page_count,
+        inspect_ms,
+        convert_ms,
+        schedule_e_ms,
+        extract_ms,
+        (time.perf_counter() - request_started) * 1000,
+    )
+
+    return JSONResponse(
+        content={
+            "transaction_id": transaction_id,
+            "document_id": document_id,
+            "original_filename": original_name,
+            "was_sandwich_applied": False,
+            "total_pages_scanned": convert_result.page_count,
+            "pages_extracted_count": len(split_result.target_pages),
+            "extracted_page_indices": split_result.target_pages,
+            "has_business_returns": has_business,
+            "ocr_page_count": convert_result.ocr_page_count,
+            "flags": convert_result.flags + split_result.flags,
+            "classifications": {str(k): v for k, v in split_result.classifications.items()},
+            "unresolved_statements": split_result.to_dict()["unresolved_statements"],
+            "pages": page_payload,
+            "scheduleEProperties": schedule_e_properties,
+            "w2Extracts": w2_extracts,
+            "formExtracts": form_extracts,
+            "urlaBorrowers": urla_borrowers,
+        }
+    )
 
 
 if __name__ == "__main__":
