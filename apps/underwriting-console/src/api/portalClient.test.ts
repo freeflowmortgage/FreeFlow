@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PortalApiError, portalClient } from './portalClient';
+import { describeProtectedError } from '../protectedErrorMessage';
+
+test('shows a retryable message when document processing is unavailable', () => {
+  const message = describeProtectedError(
+    new PortalApiError(503, 'DOCUMENT_PROCESSOR_UNAVAILABLE', 'The uploaded document could not be processed.'),
+    'Upload failed.',
+  );
+  assert.equal(message, 'The document processor is busy or temporarily unavailable. Please retry.');
+});
 
 test('document-pull requests use the protected portal API with same-origin cookies only', async () => {
   const originalFetch = globalThis.fetch;
