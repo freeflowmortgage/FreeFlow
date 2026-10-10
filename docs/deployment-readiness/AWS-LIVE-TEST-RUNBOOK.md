@@ -7,8 +7,8 @@ This runbook deploys the FreeFlow portal and income parser into the existing
 environment, not production approval.
 
 - Synthetic documents and synthetic identities only.
-- Encompass uses a synthetic connector in this environment. Real ICE and Stripe
-  writes remain unavailable; production credentials are not installed.
+- Encompass uses a synthetic connector in this environment. Live Encompass and
+  Stripe writes remain unavailable; production credentials are not installed.
 - One task per service keeps the live-test cost low and is not high availability.
 - The QA console and appraisal parser are not deployed in this slice.
 - A connector-to-parser retention canary passed on 2026-09-26; the full
@@ -120,7 +120,7 @@ ordered migration.
 
 Create the initial Cognito user with `admin-create-user`, set a permanent
 password through the supported Cognito flow, and record the returned `sub`.
-Run the migration task again with container overrides for:
+Run the migration task again with container overrides for a user seed:
 
 ```text
 SEED_OIDC_SUBJECT=<Cognito sub>
@@ -134,6 +134,12 @@ as `UNDERWRITER` or `BROKER_OWNER`. The seed is idempotent. Do not put an email,
 password, subject, or secret into Terraform variables or source control. Follow
 the dedicated user-access runbook for the complete procedure.
 
+For an approved tenant-mode change, run the same private task separately with
+only `SEED_TENANT_ID` and `SEED_ENCOMPASS_INTEGRATION_MODE` (`NONE`,
+`ENCOMPASS_HOSTED`, or `CUSTOM_CONNECTOR`). The mode-only path changes no
+tenant identity, membership, loan, or borrower rows. Omitting the mode preserves
+the existing configuration.
+
 ## Verification
 
 1. ECS reports one healthy task for the portal, private parser, connector,
@@ -146,7 +152,7 @@ the dedicated user-access runbook for the complete procedure.
 6. A synthetic PDF traverses portal to parser, respects the 40 MiB limit, and
    leaves no PDF/raw XML in database, queues, task filesystems, or logs.
 7. Billing remains fail-closed and the connector identifies itself as the
-   synthetic dev provider unless an approved ICE sandbox binding is installed.
+   synthetic dev provider unless an approved direct custom-connector binding is installed.
 
 ## Pause and cost control
 

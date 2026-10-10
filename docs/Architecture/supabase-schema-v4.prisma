@@ -103,9 +103,7 @@ model TenantConfiguration {
   enableEncompassSync   Boolean               @default(true)  // Active Encompass REST connection
   enableUshdaValidation Boolean               @default(true)  // USDA dual-track math activated
 
-  // Encrypted API Keys for Ellie Mae Developer Connect and Stripe
-  encompassClientId     String?               @db.VarChar(255)
-  encompassInstanceId   String?               @db.VarChar(255)
+  // Billing webhook secret only; LOS credentials remain outside core FreeFlow.
   stripeWebhookSecret   String?               @db.VarChar(255)
 
   updatedAt             DateTime              @updatedAt @db.Timestamptz

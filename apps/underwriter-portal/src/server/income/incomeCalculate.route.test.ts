@@ -35,6 +35,7 @@ test('cross-tenant or wrong-loan extraction ids are not disclosed', async () => 
   const handler = createIncomeCalculationHandler({
     withTenantTransaction: (async (_scope, operation) => operation({
       loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+      loanBorrower: { findMany: async () => [] },
       incomeExtraction: { findMany: async () => [] },
     } as never)) as never,
   });
@@ -51,6 +52,7 @@ test('calculation loads persisted extraction and writes cryptographic provenance
   const extraction = currentExtraction();
   const transaction = {
     loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+    loanBorrower: { findMany: async () => [] },
     incomeExtraction: { findMany: async () => [extraction] },
     $queryRaw: async () => {
       queryCount += 1;
@@ -98,6 +100,7 @@ test('superseded and source-version-stale extractions fail before calculation', 
     const handler = createIncomeCalculationHandler({
       withTenantTransaction: (async (_scope, operation) => operation({
         loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+        loanBorrower: { findMany: async () => [] },
         incomeExtraction: { findMany: async () => [record] },
       } as never)) as never,
     });
@@ -112,8 +115,8 @@ function currentExtraction() {
   return {
     id: EXTRACTION, status: 'ACTIVE', schemaVersion: 'income-extraction-v2', parserVersion: 'income-parser-v5', warnings: ['W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED'],
     normalizedInput: { w2Records: [
-      { entityId: 'w2-2025', employerName: 'Synthetic Employer', year: 2025, annualWages: 120000 },
-      { entityId: 'w2-2024', employerName: 'Synthetic Employer', year: 2024, annualWages: 108000 },
+      { entityId: 'w2-2025', employerName: 'Synthetic Employer', year: 2025, annualWages: 120000, box5Wages: 120000 },
+      { entityId: 'w2-2024', employerName: 'Synthetic Employer', year: 2024, annualWages: 108000, box5Wages: 108000 },
     ] },
     metadataReviews: [{ id: REVIEW, metadataVersion: 1, canonicalHash: REVIEW_HASH, extractionHash: EXTRACTION_HASH, sourceDocumentVersion: 1, sourceContentHash: SOURCE_HASH, assignments: [
       { entityId: 'w2-2025', employmentRole: 'CURRENT' }, { entityId: 'w2-2024', employmentRole: 'CURRENT' },

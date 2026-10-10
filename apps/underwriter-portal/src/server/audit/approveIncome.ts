@@ -3,6 +3,7 @@ import type { RequestContext } from '../auth/requestContext';
 import { ApiError } from '../http/apiError';
 import { hashCanonical } from '../http/canonical';
 import { hasCurrentCalculationExtractions } from '../income/extractionFreshness';
+import { readBorrowerIncome } from '../income/loanBorrowerRoster';
 import {
   AUDIT_ACTIONS,
   AUDIT_REASON_CODES,
@@ -166,6 +167,7 @@ export async function approveIncomeCalculation(
       rentalMonthly: true,
       rentalLiabilityMonthly: true,
       housingExpenseAdjustment: true,
+      borrowerIncome: true,
       entityType: true,
       extractionBindings: {
         select: {
@@ -193,6 +195,17 @@ export async function approveIncomeCalculation(
   }
   if (!hasCurrentCalculationExtractions(calculation.extractionBindings)) {
     throw new ApiError(409, 'STALE_CALCULATION_EXTRACTION', 'The reviewed calculation no longer has current extraction provenance.');
+  }
+  const borrowerLines = readBorrowerIncome(calculation.borrowerIncome);
+  if (borrowerLines.length >= 2) {
+    const roster = await transaction.loanBorrower.findMany({
+      where: { tenantId: context.tenantId, loanId: loan.id },
+      orderBy: { ordinal: 'asc' },
+      select: { borrowerKey: true },
+    });
+    if (borrowerLines.length !== roster.length || borrowerLines.some((line, index) => line.borrowerKey !== roster[index]?.borrowerKey)) {
+      throw new ApiError(409, 'STALE_BORROWER_ROSTER', 'The borrower roster changed after calculation.');
+    }
   }
 
   const approvedCalculation = input.action === AUDIT_ACTIONS.INCOME_OVERRIDE
@@ -228,6 +241,7 @@ export async function approveIncomeCalculation(
         rentalMonthly: calculation.rentalMonthly,
         rentalLiabilityMonthly: calculation.rentalLiabilityMonthly,
         housingExpenseAdjustment: calculation.housingExpenseAdjustment,
+        ...(borrowerLines.length ? { borrowerIncome: borrowerLines } : {}),
       },
       select: {
         id: true, qualifyingMonthlyIncome: true, totalAnnualCashFlow: true,
@@ -272,6 +286,7 @@ export async function approveIncomeCalculation(
       qualifyingMonthlyIncome: approvedCalculation.qualifyingMonthlyIncome.toString(),
       totalAnnualCashFlow: approvedCalculation.totalAnnualCashFlow.toString(),
       yearsAnalyzed: approvedCalculation.yearsAnalyzed,
+      borrowers: borrowerLines.map((line) => ({ borrowerKey: line.borrowerKey, ordinal: line.ordinal, qualifyingMonthlyIncome: line.qualifyingMonthlyIncome })),
     }),
   });
 

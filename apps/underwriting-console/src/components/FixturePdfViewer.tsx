@@ -289,7 +289,9 @@ export default function FixturePdfViewer({
               key={box.id}
               type="button"
               title={box.id}
+              data-testid={box.selected ? 'pdf-highlight' : undefined}
               data-box-id={box.id}
+              data-box={`${box.x},${box.y},${box.width},${box.height}`}
               data-overlay-visible={box.selected ? 'true' : 'false'}
               className={`absolute box-border rounded-sm ${
                 box.selected

@@ -20,9 +20,6 @@ const CORE_REQUIRED_VARIABLES = [
 ];
 const PRODUCTION_INTEGRATION_VARIABLES = [
   'REDIS_URL',
-  'ENCOMPASS_BASE_URL',
-  'ENCOMPASS_CLIENT_ID',
-  'ENCOMPASS_CLIENT_SECRET',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
 ];
@@ -124,11 +121,24 @@ export function validateProductionConfig(env) {
 
   parseUrl(env, 'APP_BASE_URL', errors, ['https:'], { originOnly: true });
   parseUrl(env, 'TRUSTED_ORIGIN', errors, ['https:'], { originOnly: true });
+  const trustedOrigins = value(env, 'TRUSTED_ORIGINS');
+  if (trustedOrigins) {
+    if (PLACEHOLDER_PATTERN.test(trustedOrigins)) errors.push('TRUSTED_ORIGINS contains a placeholder or mock value.');
+    for (const entry of trustedOrigins.split(/\s+/)) {
+      try {
+        const parsed = new URL(entry);
+        if (parsed.protocol !== 'https:' || parsed.pathname !== '/' || parsed.search || parsed.hash || parsed.username || parsed.password) {
+          errors.push('TRUSTED_ORIGINS entries must be https origins.');
+        }
+      } catch {
+        errors.push('TRUSTED_ORIGINS entries must be https origins.');
+      }
+    }
+  }
   parseUrl(env, 'DOC_PARSER_URL', errors, ['http:', 'https:']);
   parseUrl(env, 'DOC_PARSER_SERVICE_URL', errors, ['http:', 'https:']);
   parseUrl(env, 'APPRAISAL_PARSER_URL', errors, ['http:', 'https:']);
   parseUrl(env, 'OIDC_ISSUER', errors, ['https:']);
-  parseUrl(env, 'ENCOMPASS_BASE_URL', errors, ['https:']);
   parseUrl(env, 'SYNC_QUEUE_URL', errors, ['https:']);
   parseUrl(env, 'SYNC_DLQ_URL', errors, ['https:']);
 

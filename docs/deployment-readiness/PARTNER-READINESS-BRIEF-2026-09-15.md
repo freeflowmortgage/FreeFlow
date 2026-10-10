@@ -1,8 +1,8 @@
 # FreeFlow: How Close Are We?
 
 > September 15 progress: the safe Encompass document-pull plumbing is now built
-> and tested locally. It remains switched off until we connect the partner's ICE
-> sandbox credentials and prove one synthetic loan end to end in AWS.
+> and tested locally. It remains switched off until we connect the partner's
+> lender-scoped custom connector and prove one synthetic loan end to end in AWS.
 
 Date: September 15, 2026  
 Weekend target: September 19-20  

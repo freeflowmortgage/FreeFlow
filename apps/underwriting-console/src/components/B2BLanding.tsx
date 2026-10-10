@@ -87,9 +87,29 @@ const AUDIENCES = [
 
 export default function B2BLanding({
   onOpenService,
+  onOpenIncomeDemo,
+  protectedMode = false,
+  salesEntry = false,
+  workspaceHref,
 }: {
   onOpenService: (view: ConsoleView) => void;
+  onOpenIncomeDemo?: () => void;
+  protectedMode?: boolean;
+  /** Sales host: Demo stays on this page; sign-in links leave for the software host. */
+  salesEntry?: boolean;
+  workspaceHref?: (view: ConsoleView) => string;
 }) {
+  const workspaceControl = (view: ConsoleView, className: string, label: string, testId?: string) =>
+    salesEntry && workspaceHref ? (
+      <a href={workspaceHref(view)} data-testid={testId} className={className}>
+        {label}
+      </a>
+    ) : (
+      <button type="button" data-testid={testId} onClick={() => onOpenService(view)} className={className}>
+        {label}
+      </button>
+    );
+
   return (
     <div data-testid="b2b-landing" className="min-h-full bg-[#f4f7fb] text-slate-900" style={{ fontFamily: 'Manrope, Roboto, system-ui, sans-serif' }}>
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur">
@@ -113,13 +133,35 @@ export default function B2BLanding({
             >
               Book a walkthrough
             </a>
-            <button
-              type="button"
-              onClick={() => onOpenService('split')}
-              className="rounded-full bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 hover:from-emerald-700 hover:to-emerald-600"
-            >
-              Open workspace
-            </button>
+            {salesEntry ? (
+              <a
+                href="#demo-income"
+                data-testid="open-income-demo"
+                className="rounded-full bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 hover:from-emerald-700 hover:to-emerald-600"
+              >
+                Demo
+              </a>
+            ) : (
+              <>
+                {protectedMode && onOpenIncomeDemo ? (
+                  <button
+                    type="button"
+                    data-testid="open-income-demo"
+                    onClick={onOpenIncomeDemo}
+                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
+                  >
+                    View demo
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => onOpenService('split')}
+                  className="rounded-full bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 hover:from-emerald-700 hover:to-emerald-600"
+                >
+                  Login
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -147,16 +189,25 @@ export default function B2BLanding({
               >
                 Book a 20-minute walkthrough
               </a>
-              <button
-                type="button"
-                onClick={() => onOpenService('split')}
-                className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
-              >
-                Try the live demo
-              </button>
+              {workspaceControl(
+                'split',
+                'rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-800 hover:border-emerald-400 hover:text-emerald-700',
+                protectedMode ? 'Login to workspace' : 'Try the live demo',
+              )}
+              {protectedMode && onOpenIncomeDemo ? (
+                <button
+                  type="button"
+                  onClick={onOpenIncomeDemo}
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-6 py-3 text-sm font-bold text-indigo-800 hover:border-indigo-400"
+                >
+                  View Income demo ↗
+                </button>
+              ) : null}
             </div>
             <p className="mt-4 text-xs font-semibold text-slate-400">
-              No sandbox sign-up · every demo below runs in your browser right now
+              {protectedMode
+                ? 'Authenticated tenant and loan context required'
+                : 'No sandbox sign-up · every demo below runs in your browser right now'}
             </p>
           </div>
           <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
@@ -228,39 +279,60 @@ export default function B2BLanding({
             return (
               <li key={product.id} className="flex">
                 <div className="group flex h-full w-full flex-col rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-400 hover:shadow-[0_20px_50px_rgba(5,150,105,0.12)]">
-                  <button
-                    type="button"
-                    data-testid={product.testId}
-                    onClick={() => onOpenService(product.view)}
-                    className="flex flex-1 flex-col text-left"
-                  >
-                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span className="mt-6 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-700">{product.kicker}</span>
-                    <span className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-xl font-extrabold tracking-tight text-slate-950">{product.title}</span>
-                      <ArrowUpRight className="h-4 w-4 text-slate-300 transition group-hover:text-emerald-600" />
-                    </span>
-                    <span className="mt-2 text-sm leading-relaxed text-slate-600">{product.line}</span>
-                    <ul className="mt-5 space-y-2">
-                      {product.points.map((point) => (
-                        <li key={point} className="flex items-start gap-2 text-sm text-slate-700">
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                          {point}
-                        </li>
-                      ))}
-                    </ul>
-                  </button>
+                  {(() => {
+                    const cardBody = (
+                      <>
+                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <span className="mt-6 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-700">{product.kicker}</span>
+                        <span className="mt-2 flex items-center justify-between gap-2">
+                          <span className="text-xl font-extrabold tracking-tight text-slate-950">{product.title}</span>
+                          <ArrowUpRight className="h-4 w-4 text-slate-300 transition group-hover:text-emerald-600" />
+                        </span>
+                        <span className="mt-2 text-sm leading-relaxed text-slate-600">{product.line}</span>
+                        <ul className="mt-5 space-y-2">
+                          {product.points.map((point) => (
+                            <li key={point} className="flex items-start gap-2 text-sm text-slate-700">
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                              {point}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    );
+                    return salesEntry && workspaceHref ? (
+                      <a href={workspaceHref(product.view)} data-testid={product.testId} className="flex flex-1 flex-col text-left">
+                        {cardBody}
+                      </a>
+                    ) : (
+                      <button type="button" data-testid={product.testId} onClick={() => onOpenService(product.view)} className="flex flex-1 flex-col text-left">
+                        {cardBody}
+                      </button>
+                    );
+                  })()}
                   <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => onOpenService(product.view)}
-                      className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
-                    >
-                      Open in workspace
-                    </button>
-                    <a
+                    {workspaceControl(
+                      product.view,
+                      'rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700',
+                      protectedMode ? 'Login to workspace' : 'Open in workspace',
+                    )}
+                    {protectedMode && product.id === 'income' && onOpenIncomeDemo ? (
+                      <button
+                        type="button"
+                        data-testid="enter-income-demo"
+                        onClick={onOpenIncomeDemo}
+                        className="text-xs font-bold text-indigo-700 hover:underline"
+                      >
+                        View demo ↗
+                      </button>
+                    ) : null}
+                    {salesEntry && product.id === 'income' ? (
+                      <a href="#demo-income" data-testid="enter-income-demo" className="text-xs font-bold text-emerald-700 hover:underline">
+                        Launch solo demo
+                      </a>
+                    ) : null}
+                    {!protectedMode ? <a
                       href={`#${product.demoHash}`}
                       target="_blank"
                       rel="noreferrer"
@@ -268,7 +340,7 @@ export default function B2BLanding({
                       className="text-xs font-bold text-emerald-700 hover:underline"
                     >
                       Launch solo demo ↗
-                    </a>
+                    </a> : null}
                   </div>
                 </div>
               </li>
@@ -301,13 +373,11 @@ export default function B2BLanding({
                 Session export for MISMO / Encompass handoff
               </li>
             </ul>
-            <button
-              type="button"
-              onClick={() => onOpenService('intake')}
-              className="mt-8 rounded-full bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-400"
-            >
-              Start an AI 1003
-            </button>
+            {workspaceControl(
+              'intake',
+              'mt-8 rounded-full bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-400',
+              'Start an AI 1003',
+            )}
           </div>
           <div className="flex justify-center">
             <div className="rounded-[2rem] bg-white/5 p-6 ring-1 ring-white/10">
@@ -400,13 +470,11 @@ export default function B2BLanding({
               >
                 Book a walkthrough
               </a>
-              <button
-                type="button"
-                onClick={() => onOpenService('split')}
-                className="rounded-full border border-white/25 bg-white/5 px-6 py-3 text-sm font-bold text-white hover:bg-white/10"
-              >
-                Explore the workspace
-              </button>
+              {workspaceControl(
+                'split',
+                'rounded-full border border-white/25 bg-white/5 px-6 py-3 text-sm font-bold text-white hover:bg-white/10',
+                'Explore the workspace',
+              )}
             </div>
           </div>
         </div>

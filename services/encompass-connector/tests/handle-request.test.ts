@@ -12,7 +12,9 @@ import { NonProdBearerServiceAuthVerifier } from '../src/auth';
 import { MemoryBindingStore } from '../src/binding';
 import {
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS,
   SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
   SyntheticFreeflowDevConnector,
 } from '../src/connector/syntheticFreeflowDevConnector';
@@ -151,7 +153,9 @@ test('authenticated and bound synthetic list/download returns deterministic veri
 
   const listed = await handleConnectorRequest(listRequest(requestBody), syntheticDeps);
   assert.equal(listed.status, 200);
-  assert.deepEqual(await listed.json(), { attachments: [{ id: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID }] });
+  assert.deepEqual(await listed.json(), {
+    attachments: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id })),
+  });
 
   const downloaded = await handleConnectorRequest(new Request(`${ORIGIN}${CONNECTOR_SERVICE_CONTRACT.downloadPath}`, {
     method: 'POST',
@@ -168,6 +172,25 @@ test('authenticated and bound synthetic list/download returns deterministic veri
   const bytes = new Uint8Array(await downloaded.arrayBuffer());
   assert.equal(new TextDecoder().decode(bytes.subarray(0, 5)), '%PDF-');
   assert.equal(downloaded.headers.get('x-content-sha256'), createHash('sha256').update(bytes).digest('hex'));
+
+  for (const pack of SYNTHETIC_FREEFLOW_DEV_MORNING_PACK) {
+    const packDownload = await handleConnectorRequest(new Request(`${ORIGIN}${CONNECTOR_SERVICE_CONTRACT.downloadPath}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({
+        contractVersion: CONNECTOR_SERVICE_CONTRACT.version,
+        ...requestBody,
+        loanId: 'synthetic-loan',
+        correlationId: 'synthetic-correlation',
+        attachmentId: pack.id,
+      }),
+    }), syntheticDeps);
+    assert.equal(packDownload.status, 200);
+    const packBytes = new Uint8Array(await packDownload.arrayBuffer());
+    assert.equal(new TextDecoder().decode(packBytes.subarray(0, 5)), '%PDF-');
+    assert.equal(packDownload.headers.get('x-content-sha256'), pack.sha256);
+    assert.equal(packDownload.headers.get('x-content-sha256'), createHash('sha256').update(packBytes).digest('hex'));
+  }
 });
 
 test('connector failures retain a safe provider-neutral response', async () => {

@@ -13,6 +13,10 @@ create_hosted_zone  = false
 hosted_zone_id      = null
 domain_name         = "freeflowmortgage.com"
 portal_hostname     = "dev.freeflowmortgage.com"
+# Software entry on the same dev ALB. DNS, the certificate, and the Cognito
+# client already include this hostname. Listed so a future apply keeps the SAN
+# and callback/logout URLs. Do not apply while the edge stack is on hold.
+portal_app_hostnames = ["app.dev.freeflowmortgage.com"]
 
 # Temporary PLTE HTTP mode must be restricted to approved workstation /32s.
 plte_allowed_ipv4_cidrs = []
@@ -23,19 +27,25 @@ enable_services = false
 enable_parser   = false
 enable_encompass_document_pull_worker = false
 enable_encompass_connector            = false
+encompass_connector_mode              = "synthetic-freeflow-dev"
+encompass_connector_service_auth_kind = ""
 enable_console  = false
+enable_encompass_test_host = false
+encompass_test_host_loan_guid = "00000000-0000-4000-8000-00000000d001"
 enable_monitoring = false
 operations_alert_email = null
 portal_desired_count = 0
 portal_image     = ""
+connector_worker_image = ""
 parser_image     = ""
 console_image    = ""
 migration_image  = ""
 connector_image  = ""
+connector_service_token_rotation_epoch = ""
 
 # GitHub Actions pushes commit-tagged images to ECR from main through OIDC.
 # Set the role ARN output as the AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN repository
 # variable. Supply github_oidc_provider_arn if the account already has one.
 enable_github_image_publisher = false
-github_repository             = "nwjenson/Freeflow"
+github_repository             = "freeflowmortgage/FreeFlow"
 github_oidc_provider_arn      = null

@@ -5,12 +5,24 @@ export const INCOME_EXTRACTION_SCHEMA_VERSION = 'income-extraction-v2';
 const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   'Schedule C': new Set(['ent1-name', 'ent1-ein', 'ent1-net', 'ent1-dep', 'ent1-depletion', 'ent1-meals', 'ent1-home', 'ent1-other-income', 'ent1-amort']),
   'Schedule F': new Set(['schedule-f-name', 'schedule-f-ein', 'schedule-f-net', 'schedule-f-coop-ccc', 'schedule-f-other', 'schedule-f-depreciation', 'schedule-f-other-expense', 'schedule-f-home', 'schedule-f-amort']),
-  'Form 1120-S': new Set(['scorp-name', 'scorp-ein', 'scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist', 'scorp-own-pct', 'scorp-depletion', 'scorp-meals']),
-  'Form 1065': new Set(['pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals']),
+  'Form 1120-S': new Set([
+    'scorp-name', 'scorp-ein', 'scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist', 'scorp-own-pct', 'scorp-depletion', 'scorp-meals',
+    'scorp-return-name', 'scorp-return-ein', 'scorp-return-gross', 'scorp-return-wages', 'scorp-return-ord',
+    'scorp-return-4797', 'scorp-return-other', 'scorp-return-dep', 'scorp-return-depletion', 'scorp-return-meals',
+  ]),
+  'Form 1065': new Set([
+    'pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals',
+    'pt-return-name', 'pt-return-ein', 'pt-return-gross', 'pt-return-wages', 'pt-return-ord', 'pt-return-gp',
+    'pt-return-4797', 'pt-return-other', 'pt-return-dep', 'pt-return-depletion', 'pt-return-meals',
+  ]),
   'Form 1120': new Set(['c1120-name', 'c1120-ein', 'c1120-taxable', 'c1120-tax', 'c1120-dep', 'c1120-depletion', 'c1120-amort', 'c1120-meals', 'c1120-nol']),
   'Form 1040': new Set(['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']),
   'Schedule B': new Set(['schedule-b-interest', 'schedule-b-dividends']),
   'Schedule D': new Set(['schedule-d-capital-gain-loss']),
+  'Paystub': new Set([
+    'ps-employee-name', 'ps-employer-name', 'ps-hourly-rate', 'ps-hours-week', 'ps-current-base', 'ps-base-ytd',
+    'ps-bonus-ytd', 'ps-ot-ytd', 'ps-tips-ytd', 'ps-commission-ytd', 'ps-rsu-ytd', 'ps-other-ytd', 'ps-pay-frequency',
+  ]),
 });
 
 type JsonObject = Record<string, unknown>;
@@ -43,6 +55,7 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
     const employerName = limitedText(raw.employerName, 255);
     const box1 = money(raw.box1);
     const box5 = money(raw.box5);
+    const hasAuthoritativeBox5 = box5 !== null && box5 > 0;
     if (pageIndex === null || year === null || !employerName || (box1 === null && box5 === null)) {
       throw new Error('W-2 extraction is missing authoritative calculation fields.');
     }
@@ -51,9 +64,13 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
       employerName,
       ...(limitedText(raw.ein, 20) ? { ein: limitedText(raw.ein, 20) } : {}),
       year,
-      annualWages: box1 ?? box5,
+      ...(hasAuthoritativeBox5 ? { annualWages: box5 } : {}),
+      pageIndex,
+      ...(box1 !== null ? { box1Wages: box1 } : {}),
+      ...(box5 !== null ? { box5Wages: box5 } : {}),
     });
     warnings.push('W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED');
+    if (!hasAuthoritativeBox5) warnings.push('W2_BOX5_REQUIRED');
     collectBoxEvidence(fields, 'w2Extracts', index, pageIndex, raw.boxes);
   }
 
@@ -69,7 +86,8 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
       throw new Error('Schedule E extraction is missing authoritative calculation fields.');
     }
     const propertyType = String(raw.propertyType ?? '').toLowerCase().includes('royal') ? 'ROYALTY' : 'RENTAL';
-    const row: JsonObject = { year, propertyAddress: address, propertyType };
+    const column = raw.column === 'A' || raw.column === 'B' || raw.column === 'C' ? raw.column : null;
+    const row: JsonObject = { year, propertyAddress: address, propertyType, pageIndex, ...(column ? { column } : {}) };
     copyMoney(row, financials, '3', propertyType === 'ROYALTY' ? 'royaltiesReceived' : 'rentsReceived');
     copyMoney(row, financials, '9', 'insurance');
     copyMoney(row, financials, '12', 'mortgageInterest');
@@ -82,6 +100,12 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
     if (fairRentalDays !== null) row.fairRentalDays = fairRentalDays;
     scheduleEProperties.push(row);
     collectBoxEvidence(fields, 'scheduleEProperties', index, pageIndex, raw.boxes);
+    const scheduleEBoxes = isRecord(raw.boxes) ? raw.boxes : {};
+    const financialBoxes = isRecord(scheduleEBoxes.financials) ? scheduleEBoxes.financials : {};
+    for (const key of Object.keys(financialBoxes).sort().slice(0, 40)) {
+      const box = coordinateBox(financialBoxes[key]);
+      if (box) fields.push({ collection: 'scheduleEProperties', index, field: `financials.${key.slice(0, 20)}`, pageIndex, box });
+    }
   }
 
   const formRecordMap = new Map<string, { entityId: string; form: string; pageIndex: number; fields: JsonObject[] }>();

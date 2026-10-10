@@ -129,7 +129,6 @@ echo -e "\n${CYAN}[6/8] Migrating Node.js API Gateway Routes & Ellie Mae Integra
 migrate_file "calculate.ts" "apps/web/src/pages/api/income/calculate.ts" "Form 1084 Math Execution Endpoint"
 migrate_file "underwrite-process-route-v2.ts" "apps/web/src/pages/api/underwrite/process.ts" "In-Memory Income Slicer Streaming API Route"
 migrate_file "appraisal-audit-route.ts" "apps/web/src/pages/api/underwrite/appraisal-audit.ts" "In-Memory Appraisal mTLS API Route"
-migrate_file "encompass-sync.ts" "apps/web/src/pages/api/underwrite/encompass-sync.ts" "ICE Encompass REST Client Sync Dispatcher"
 migrate_file "map-encompass-fields-v3.ts" "apps/web/src/pages/api/underwrite/map-encompass-fields.ts" "Encompass Field Transformer (v3)"
 migrate_file "encompass-fallback-queue.ts" "apps/web/src/pages/api/underwrite/encompass-fallback-queue.ts" "Redis-Backed Encompass Dispatch Queue"
 migrate_file "encompass-pull-efolder-docs.ts" "apps/web/src/pages/api/underwrite/encompass-pull-efolder-docs.ts" "Encompass Inbound Queue Doc Puller"

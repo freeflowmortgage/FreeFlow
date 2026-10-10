@@ -1,6 +1,7 @@
 import type { DocumentPullQueueMessage } from './documentPull';
-import { EncompassApiError, type EncompassAttachment, type ParsedAttachment } from './encompassApi';
+import type { EncompassAttachment, ParsedAttachment } from './encompassApi';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
+import { classifyDocumentPullFailure, logDocumentPullFailure } from './documentPullFailure';
 
 const MAX_AGGREGATE_BYTES = 80 * 1024 * 1024;
 const MAX_AGGREGATE_PAGES = 300;
@@ -82,10 +83,10 @@ export async function runDocumentPullJob(
     await dependencies.succeed(job, attachmentCount, processedCount);
     return 'SUCCEEDED';
   } catch (error) {
-    const known = error instanceof EncompassApiError || error instanceof EncompassConnectorError;
-    const retryable = known ? error.retryable : true;
-    await dependencies.fail(job, known ? error.safeCode : 'DOCUMENT_PULL_UNEXPECTED', retryable);
-    return retryable ? 'RETRYABLE_FAILURE' : 'FAILED';
+    const classified = classifyDocumentPullFailure(error);
+    logDocumentPullFailure(error, classified);
+    await dependencies.fail(job, classified.safeCode, classified.retryable);
+    return classified.retryable ? 'RETRYABLE_FAILURE' : 'FAILED';
   }
 }
 

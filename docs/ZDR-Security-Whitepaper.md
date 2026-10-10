@@ -54,7 +54,7 @@ To support our Zero-Data-Retention commitment, FreeFlow utilizes a secure, conta
              │
              ├──► Underwriter Interactive Dashboard (https://app.freeflowsolutions.com)
              │
-             └──► Direct Sync to ICE Encompass / Secure MISMO v3.4 XML Download
+             └──► Direct Sync to Encompass / Secure MISMO v3.4 XML Download
 ```
 
 ### A. Phase 1: Encrypted Ingestion in Transit
@@ -108,12 +108,12 @@ Our relational database schema records all human actions to ensure compliance un
 
 ## 5. Third-Party Risk Management (TPRM) Fast-Track Strategy
 
-Establishing direct API integrations with systems like ICE Encompass typically requires a mature **SOC 2 Type II certification** [cite: 20]. While FreeFlow maintains enterprise security compliance, we provide lenders with a **frictionless compliance bypass** to enable immediate production pilots:
+Establishing direct LOS integrations requires lender security review and explicit authorization. FreeFlow supports two controlled pilot paths:
 
-1.  **The MISMO v3.4 Drag-and-Drop Offline Sync:**  
+1.  **The MISMO v3.4 Drag-and-Drop Offline Sync:**
     Underwriters and processors can use FreeFlow as a sandboxed web application. They upload the tax documents to our secure, white-labeled subdomain (e.g., `app.freeflowmortgagesolutions.com`), verify the numbers on the split-screen, and download the finalized **MISMO v3.4 XML payload** directly to their local desktop. They then drag-and-drop this XML file into Encompass. Because there is **zero direct server-to-server connection**, the bank's IT department can bypass months of SOC 2 and security committee reviews.
-2.  **User-Owned API Connectors:**  
-    For lenders desiring direct API syncing, our multi-tenant settings allow them to enter **their own pre-approved Encompass Developer Connect Client IDs and secrets**. All API calls execute within the lender’s pre-approved developer envelope, meaning FreeFlow operates as an authorized endpoint within their existing security perimeter.
+2.  **Lender-Scoped Custom Connector:**
+    For direct synchronization, the lender deploys or approves a tenant-bound connector. FreeFlow calls it over authenticated, replay-protected service transport; LOS credentials remain isolated from the FreeFlow core application.
 
 ---
 

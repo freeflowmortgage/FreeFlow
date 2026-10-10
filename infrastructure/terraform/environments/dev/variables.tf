@@ -73,6 +73,20 @@ variable "portal_hostname" {
   default     = "dev.mb-ai.com"
 }
 
+variable "portal_app_hostnames" {
+  type        = list(string)
+  description = "Additional HTTPS hostnames for this same portal. freeflow-dev uses app.dev.freeflowmortgage.com as the software entry beside the sales host. Leave empty for a single-hostname stack."
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for host in var.portal_app_hostnames :
+      can(regex("^[a-z0-9.-]+$", host)) && endswith(host, ".${var.domain_name}") && host != var.portal_hostname
+    ])
+    error_message = "portal_app_hostnames must be other subdomains of domain_name."
+  }
+}
+
 variable "domain_name" {
   type        = string
   description = "Registered parent domain for the portal hostname."
@@ -215,14 +229,66 @@ variable "encompass_connector_mode" {
   }
 }
 
+variable "connector_service_token_rotation_epoch" {
+  type        = string
+  description = "Explicit rotation epoch for the custom connector service token. Preserve the deployed value during hosted-only changes."
+  default     = ""
+
+  validation {
+    condition     = var.connector_service_token_rotation_epoch == "" || can(regex("^[A-Za-z0-9._-]{1,64}$", var.connector_service_token_rotation_epoch))
+    error_message = "connector_service_token_rotation_epoch must be empty or a 1-64 character safe identifier."
+  }
+}
+
 variable "enable_console" {
   type        = bool
-  description = "Enables the underwriting console. It remains IP-restricted on HTTP during the Cognito/HTTPS transition."
+  description = "Enables the Encompass-hosted underwriting console behind the authenticated HTTPS listener."
   default     = false
 
   validation {
-    condition     = !var.enable_console || (var.enable_edge && var.enable_services)
-    error_message = "The underwriting console requires edge and services."
+    condition     = !var.enable_console || (var.enable_edge && var.enable_services && var.enable_cognito_edge)
+    error_message = "The Encompass-hosted console requires edge, services, and the authenticated HTTPS listener."
+  }
+}
+
+variable "enable_encompass_test_host" {
+  type        = bool
+  description = "Enables the deterministic Encompass host only in this synthetic dev qualification stack."
+  default     = false
+
+  validation {
+    condition     = !var.enable_encompass_test_host || var.enable_console
+    error_message = "The deterministic Encompass test host requires the hosted console."
+  }
+}
+
+variable "encompass_test_host_loan_guid" {
+  type        = string
+  description = "Synthetic active Encompass loan GUID exposed by the deterministic dev qualification host. Rotate between qualification loans through reviewed Terraform configuration."
+  default     = "00000000-0000-4000-8000-00000000d001"
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.encompass_test_host_loan_guid))
+    error_message = "encompass_test_host_loan_guid must be a valid UUIDv4 loan identifier."
+  }
+}
+
+variable "encompass_frame_ancestors" {
+  type        = string
+  description = "Space-separated HTTPS CSP frame-ancestor sources for the lender-approved Encompass hosts."
+  default     = ""
+
+  validation {
+    condition = !var.enable_console || (
+      length(trimspace(var.encompass_frame_ancestors)) > 0 &&
+      !strcontains(var.encompass_frame_ancestors, "*") &&
+      !strcontains(var.encompass_frame_ancestors, ";") &&
+      alltrue([
+        for origin in split(" ", trimspace(var.encompass_frame_ancestors)) :
+        can(regex("^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$", origin))
+      ])
+    )
+    error_message = "Hosted console frame ancestors must be explicit HTTPS origins without wildcards or directive separators."
   }
 }
 
@@ -280,6 +346,28 @@ variable "portal_image" {
   }
 }
 
+variable "encompass_connector_service_auth_kind" {
+  type        = string
+  description = "Optional explicit auth contract for the separately managed connector fallback. Empty derives it from connector mode."
+  default     = ""
+
+  validation {
+    condition     = contains(["", "signed-replay", "bearer-stub-non-prod"], var.encompass_connector_service_auth_kind)
+    error_message = "encompass_connector_service_auth_kind must be empty, signed-replay, or bearer-stub-non-prod."
+  }
+}
+
+variable "connector_worker_image" {
+  type        = string
+  description = "Optional immutable portal-derived image pinned independently for custom connector workers. Empty follows portal_image."
+  default     = ""
+
+  validation {
+    condition     = var.connector_worker_image == "" || can(regex("@sha256:[0-9a-f]{64}$", var.connector_worker_image))
+    error_message = "connector_worker_image must be empty or an immutable @sha256 digest reference."
+  }
+}
+
 variable "parser_image" {
   type        = string
   description = "Income parser ECR image reference pinned with @sha256:."
@@ -333,7 +421,7 @@ variable "enable_github_image_publisher" {
 variable "github_repository" {
   type        = string
   description = "GitHub owner/name allowed to assume the image publisher role from its main branch."
-  default     = "nwjenson/Freeflow"
+  default     = "freeflowmortgage/FreeFlow"
 
   validation {
     condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))

@@ -197,14 +197,17 @@ export function inspectOverlayFromField(field: MappedIncomeField | undefined): I
 export function inspectFieldIds(fieldId: string | null | undefined): string[] {
   if (!fieldId) return [];
   const canonical = canonicalInspectFieldId(fieldId);
-  // 1065 / 1120-S QA rows are keyed per year ("k1-oi-y1") while the parser
-  // uses its own ids ("pt-return-other"), so without this translation a click
-  // on those rows never reached the document. Wage and rental ids already
-  // match the parser and keep exact matching.
-  if (/^(?:k1|scorp)-/.test(fieldId)) {
-    return [...new Set([fieldId, canonical, ...inspectFamily(fieldId)])];
-  }
-  return canonical === fieldId ? [fieldId] : [fieldId, canonical];
+  // Worksheet ids and parser ids differ across several form families
+  // (schc-l31/ent1-net, k1-oi/pt-return-other, ccorp-ti/c1120-taxable, ...).
+  // Apply the existing family mapping consistently so every supported tab can
+  // land on its parser-provided source box. Exact wage/rental ids remain in
+  // the set and retain their document-scoping rules in fieldForInspection.
+  return [...new Set([
+    fieldId,
+    canonical,
+    ...inspectFamily(fieldId),
+    ...(canonical === fieldId ? [] : inspectFamily(canonical)),
+  ])];
 }
 
 export function fieldMatchesInspectId(

@@ -69,7 +69,7 @@ jobs:
             echo "selected=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.select.outputs.selected == 'true'
 
       - uses: aws-actions/configure-aws-credentials@v4

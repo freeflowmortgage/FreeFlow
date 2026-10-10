@@ -61,8 +61,8 @@ resource "aws_cognito_user_pool_client" "alb" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   supported_identity_providers         = ["COGNITO"]
-  callback_urls                        = ["https://${var.portal_hostname}/oauth2/idpresponse"]
-  logout_urls                          = ["https://${var.portal_hostname}/"]
+  callback_urls                        = local.portal_callback_urls
+  logout_urls                          = local.portal_logout_urls
   access_token_validity                = 60
   id_token_validity                    = 60
   refresh_token_validity               = 1
@@ -84,8 +84,9 @@ resource "aws_cognito_user_pool_domain" "live_test" {
 resource "aws_acm_certificate" "portal" {
   count = var.enable_edge && (var.enable_https_certificate || var.enable_cognito_edge) ? 1 : 0
 
-  domain_name       = var.portal_hostname
-  validation_method = "DNS"
+  domain_name               = var.portal_hostname
+  subject_alternative_names = length(local.portal_extra_hostnames) > 0 ? local.portal_extra_hostnames : null
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
@@ -349,6 +350,17 @@ resource "aws_lb_listener" "https" {
   certificate_arn   = var.dns_managed_externally ? aws_acm_certificate.portal[0].arn : aws_acm_certificate_validation.portal[0].certificate_arn
 
   default_action {
+    type             = "forward"
+    target_group_arn = var.enable_console ? aws_lb_target_group.console[0].arn : aws_lb_target_group.portal[0].arn
+  }
+}
+
+resource "aws_lb_listener_rule" "console_workspace_https" {
+  count        = var.enable_edge && var.enable_cognito_edge && var.enable_console ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 90
+
+  action {
     order = 1
     type  = "authenticate-cognito"
 
@@ -363,10 +375,16 @@ resource "aws_lb_listener" "https" {
     }
   }
 
-  default_action {
+  action {
     order            = 2
     type             = "forward"
-    target_group_arn = var.enable_console ? aws_lb_target_group.console[0].arn : aws_lb_target_group.portal[0].arn
+    target_group_arn = aws_lb_target_group.console[0].arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/workspace*", "/runtime-config.json", "/fixtures/*"]
+    }
   }
 }
 

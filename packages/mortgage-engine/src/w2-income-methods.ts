@@ -1,4 +1,5 @@
 import type { Form1084BorrowerIncome } from './encompass-urla-map';
+import { payPeriodsPerYear, type PayFrequency } from './paystubAnnualization';
 
 /**
  * W-2 base and variable income methods, and each borrower's share of the 1084.
@@ -10,7 +11,7 @@ import type { Form1084BorrowerIncome } from './encompass-urla-map';
  * get the same numbers by calling these functions.
  */
 
-export type W2PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
+export type W2PayFrequency = PayFrequency;
 export type W2WageDocSource = 'PAYSTUB' | 'WVOE';
 export type W2BaseMethodId = 'hourly' | 'period' | 'ytd' | 'prior' | 'not_used';
 export type W2VariableMethodId = 'current' | 'avg24' | 'not_used';
@@ -87,13 +88,6 @@ export interface ChosenW2Income {
   variableMethodId: W2VariableMethodId;
   variableRecommendedId: W2VariableMethodId;
   variableMonthly: number;
-}
-
-export function payPeriodsPerYear(frequency: W2PayFrequency): number {
-  if (frequency === 'WEEKLY') return 52;
-  if (frequency === 'BIWEEKLY') return 26;
-  if (frequency === 'MONTHLY') return 12;
-  return 24;
 }
 
 export function w2BaseMethods(employer: W2EmployerWageInput, context: W2MethodContext): W2BaseMethods {

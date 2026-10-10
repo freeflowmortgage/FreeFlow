@@ -41,13 +41,36 @@ unset PGPASSWORD
 export DATABASE_URL="$MIGRATOR_DATABASE_URL"
 /app/packages/database/node_modules/.bin/prisma migrate deploy --schema=/app/packages/database/prisma/schema.prisma
 
+: "${SEED_ENCOMPASS_INTEGRATION_MODE:=}"
+: "${SEED_TENANT_ID:=00000000-0000-4000-8000-000000000100}"
+
+case "$SEED_TENANT_ID" in
+  *[!0-9a-fA-F-]*)
+    echo "SEED_TENANT_ID must be a UUID." >&2
+    exit 1
+    ;;
+esac
+case "$SEED_ENCOMPASS_INTEGRATION_MODE" in
+  ""|NONE|ENCOMPASS_HOSTED|CUSTOM_CONNECTOR) ;;
+  *)
+    echo "SEED_ENCOMPASS_INTEGRATION_MODE is not an allowed integration mode." >&2
+    exit 1
+    ;;
+esac
+
+if [ -n "$SEED_ENCOMPASS_INTEGRATION_MODE" ]; then
+  psql "$MIGRATOR_DATABASE_URL" --set=ON_ERROR_STOP=1 \
+    --set=tenant_id="$SEED_TENANT_ID" \
+    --set=encompass_integration_mode="$SEED_ENCOMPASS_INTEGRATION_MODE" \
+    --file=/app/packages/database/prisma/bootstrap/set-tenant-integration-mode.sql
+fi
+
 if [ -n "${SEED_OIDC_SUBJECT:-}" ] || [ -n "${SEED_EMAIL:-}" ]; then
   if [ -z "${SEED_OIDC_SUBJECT:-}" ] || [ -z "${SEED_EMAIL:-}" ]; then
     echo "SEED_OIDC_SUBJECT and SEED_EMAIL must be supplied together." >&2
     exit 1
   fi
 
-  : "${SEED_TENANT_ID:=00000000-0000-4000-8000-000000000100}"
   : "${SEED_USER_ID:=00000000-0000-4000-8000-000000000101}"
   : "${SEED_FIRST_NAME:=Synthetic}"
   : "${SEED_LAST_NAME:=Underwriter}"

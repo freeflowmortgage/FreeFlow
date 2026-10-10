@@ -34,6 +34,16 @@ test('transaction-local context isolates both tenants through Prisma', async () 
   assert.deepEqual(tenantBLoans, [{ tenantId: TENANT_B }]);
 });
 
+test('transaction advisory locks execute without deserializing PostgreSQL void', async () => {
+  const affected = await withTenantTransaction(
+    { tenantId: TENANT_A, principalId: USER_A },
+    (transaction) => transaction.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${'synthetic-upload-lock'}, 0))
+    `,
+  );
+  assert.equal(affected, 1);
+});
+
 test('verified identity lookup is narrow before activating tenant context', async () => {
   const result = await withIdentityTransaction('verified-subject-a', async (transaction) => {
     const users = await transaction.user.findMany({ select: { id: true, tenantId: true } });

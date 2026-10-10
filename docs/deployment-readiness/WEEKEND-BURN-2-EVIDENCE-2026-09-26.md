@@ -96,10 +96,10 @@ behavior was changed.
   deployment, forbidden credential input, deterministic list/download, PDF
   signature, and content hash. It exited `0`.
 - The deployed connector-to-parser smoke exited `0`.
-- Live ICE qualification requires a sandbox client ID/secret/instance ID, the
-  authoritative tenant-to-lender/deployment binding, one synthetic loan GUID,
-  a supported synthetic attachment, the custom fields, and least-privilege API
-  permissions. No live ICE result is claimed.
+- Live Encompass qualification requires the separately deployed custom
+  connector, an authoritative tenant-to-lender/deployment binding, one
+  synthetic loan GUID, a supported synthetic attachment, the custom fields,
+  and least-privilege permissions. No live Encompass result is claimed.
 
 ## CI and local qualification
 
@@ -125,4 +125,4 @@ behavior was changed.
 Largest internal execution scope: complete the live authenticated reviewer,
 membership/role, and cross-object matrix and repeat the real synthetic customer
 flow from fresh sessions. Alert-email confirmation, rollback, outage, and
-secret-rotation evidence also remain. ICE sandbox qualification is external.
+secret-rotation evidence also remain. Direct connector qualification is external.

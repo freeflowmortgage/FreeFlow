@@ -17,8 +17,8 @@ Legend: **LIVE** (code + tests, may still need a digest burn) · **PARTIAL**
 (library or infra only) · **STUB** (route exists, returns fail-closed) ·
 **MISSING** (no production path).
 
-Do not copy `docs/encompass-sync.ts`, password-grant OAuth, or console fixture
-routes into production.
+Do not put lender LOS credentials or console fixture routes into the core
+application.
 
 ---
 
@@ -49,12 +49,13 @@ see production RDS, production Encompass, or real borrower files.
 | MISMO 3.4 URLA (1003) intake | PARTIAL | `apps/underwriting-console/src/intake/mismoExport.ts` | — | QA only; no prod persist |
 | MISMO D1C vendor blocks | PARTIAL | `packages/mortgage-engine/src/mismoD1cMapper.ts` | P0-08 | No vendor APIs yet |
 | ULAD | MISSING | — | — | Out of scope unless LOS requires it |
-| Encompass **web** (Developer Connect) | PARTIAL | v1 sync API + `encompass-sync-worker` + connector | P0-08 | Repository path is complete; qualify one real ICE sandbox write/reconciliation |
-| Encompass **eFolder pull** | PARTIAL | v1 document-pull API + worker + connector | P0-08 | Selected-attachment, bounded, ZDR path exists; qualify real ICE sandbox retrieval |
+| Encompass **hosted bridge** | PARTIAL | hosted launch/write APIs + browser bridge | P0-08 | Qualify direct read/write in a customer test tenant |
+| Encompass **custom connector** | PARTIAL | v1 sync/document APIs + workers + signed connector contract | P0-08 | Qualify the separately deployed direct connector against a customer test tenant |
+| Encompass **eFolder pull** | PARTIAL | v1 document-pull API + worker + custom connector | P0-08 | Selected-attachment, bounded, ZDR path exists; qualify direct test-tenant retrieval |
 | Encompass field PATCH map | PARTIAL | `map-encompass-fields-v2.ts` | P0-08 | Custom fields must exist in instance |
 | Encompass **desktop** (SmartClient / COM / plugin) | MISSING | none | — | iframe CSP only; see §6 |
 | SQS sync + DLQ | LIVE (dev qualified) | `infrastructure/terraform/.../messaging.tf` | P0-08 | Encrypted queue/DLQ redrive passed; keep real provider writes disabled until sandbox binding is supplied |
-| Sync worker ECS task | LIVE (synthetic provider) | `syncWorkerRuntime.ts` + Terraform task/service | P0-08, P0-15 | Dev worker is healthy; enable real writes only with authoritative ICE sandbox binding |
+| Sync worker ECS task | LIVE (synthetic provider) | `syncWorkerRuntime.ts` + Terraform task/service | P0-08, P0-15 | Dev worker is healthy; enable live writes only with an authoritative custom connector binding |
 | Appraisal / URAR 1004 | PARTIAL | `services/appraisal-parser` | P0-11 | Native/AcroForm only; no RapidOCR |
 | Stripe billing | STUB in protected runtime | `billing/webhook.ts` | P0-09 | Authoritative reconcile |
 | Cognito + ALB OIDC | PARTIAL | TF + `albOidc.ts` | P0-01, P0-15 | Live negative edge checks and MFA pass; positive reviewer and full object matrix remain |
@@ -157,8 +158,8 @@ download that is not stored. Never log the XML.
 - Tests: `packages/mortgage-engine/tests/urla-employment-roster.test.ts`
 
 **Go live:** this stays a **client-delivery relay** (ZDR). If product needs
-URLA into Encompass web, the worker uses Developer Connect loan application
-APIs with tenant credentials from Secrets Manager — not this Vite middleware.
+URLA into Encompass, the worker uses the tenant-bound custom connector — not
+this Vite middleware. LOS credentials never enter the FreeFlow core runtime.
 
 ### 4.3 Day 1 Certainty (D1C) snippets
 
@@ -192,9 +193,11 @@ XML.
 
 ---
 
-## 5. Encompass web (Developer Connect)
+## 5. Direct Encompass integration
 
-This is the **only** supported live Encompass integration.
+FreeFlow supports two direct paths: an Encompass-hosted browser bridge and a
+separately deployed custom connector. The licensed third-party API adapter is
+not part of this product.
 
 ### Current code
 
@@ -207,9 +210,9 @@ This is the **only** supported live Encompass integration.
 | `POST /api/v1/loans/{loanId}/encompass-document-pulls` | Queues explicit selected attachment IDs through the bound connector |
 | `buildEncompassFieldUpdatePayload` | Maps 1084 → `CX.FREEFLOW.*` + 1003 other-income |
 | SQS + DLQ | Identifier-only dispatch, bounded exponential retry, five-delivery DLQ |
-| `docs/encompass-sync.ts` | **Forbidden prototype** (password grant, header tenant) |
+| Encompass-hosted bridge | Uses the active host loan and allowlisted custom fields |
 
-### Implemented production flow (sandbox qualification still required)
+### Implemented custom-connector flow (test-tenant qualification still required)
 
 ```
 APPROVED → QUEUED → IN_PROGRESS → SUCCEEDED | RETRYABLE_FAILURE | FAILED
@@ -226,10 +229,9 @@ Worker:
 1. Revalidate the tenant-scoped durable job and server-side connector binding.
 2. Load immutable approval; abort if version stale.
 3. Map with `map-encompass-fields-v2.ts` (and MISMO attach if enabled).
-4. OAuth **client credentials** (or ICE-approved grant). **Never** resource
-   owner password. **Never** a shared underwriter Encompass login.
-5. `PATCH https://api.elliemae.com/encompass/v1/loans/{loanId}` (host from
-   `ENCOMPASS_BASE_URL`).
+4. Call the lender-bound connector over authenticated, replay-protected
+   service-to-service transport. FreeFlow core never receives LOS credentials.
+5. The separately deployed connector performs the direct Encompass operation.
 6. Conditional state update; duplicate SQS delivery is a no-op.
 7. Reconcile unknown outcomes; DLQ gets safe codes only.
 
@@ -240,15 +242,12 @@ Implemented API:
 
 ### Encompass admin (lender instance)
 
-Do this in ICE Encompass Developer Connect **before** enabling `enableEncompassSync`:
+Before enabling `enableEncompassSync`:
 
-1. Create an API client; store `ENCOMPASS_CLIENT_ID` /
-   `ENCOMPASS_CLIENT_SECRET` / `ENCOMPASS_INSTANCE_ID` in Secrets Manager
-   (per tenant if multi-lender).
-2. Redirect URI if using user-delegated OAuth:
-   `https://app.freeflowmortgage.com/api/auth/callback/encompass`
-   (dev: `https://dev.freeflowmortgage.com/...`). **Do not** use the path in
-   archived checklists against production until the callback route exists.
+1. Install and authorize the FreeFlow hosted custom tool and/or the lender's
+   separately deployed direct connector.
+2. Register the exact FreeFlow hosted origin and enforce the lender's normal
+   Encompass user permissions.
 3. Create custom fields (must match the mapper):
 
    | Encompass field | Purpose |
@@ -268,8 +267,8 @@ Do this in ICE Encompass Developer Connect **before** enabling `enableEncompassS
    LO entry.
 5. eFolder: document type for “FreeFlow 1084 evidence” (PDF summary only,
    generated from **approved** calc). Optional MISMO `*.xml` type.
-6. Grant the API user loan read/write **only** on folders the tenant owns.
-7. Sandbox loan: sync once, inspect desktop **and** web UI, confirm no second
+6. Grant the connector identity loan read/write **only** on folders the lender owns.
+7. Test loan: sync once, inspect desktop **and** web UI, confirm no second
    write on replay.
 
 ### eFolder pull (documents in)
@@ -283,8 +282,8 @@ Worker, not the browser:
 
 ### Env (production example)
 
-- `ENCOMPASS_CLIENT_ID`, `ENCOMPASS_CLIENT_SECRET` (secret ARN)
-- `ENCOMPASS_INSTANCE_ID`, `ENCOMPASS_BASE_URL`
+- `ENCOMPASS_CONNECTOR_SERVICE_URL`
+- `ENCOMPASS_CONNECTOR_SIGNING_KEY` (secret ARN)
 - `SYNC_QUEUE_URL`, `SYNC_DLQ_URL`
 - Tenant flag `enableEncompassSync` — must actually gate the worker
 
@@ -306,29 +305,26 @@ integration.
 
 ### What desktop go-live would require (if a lender demands it)
 
-FreeFlow’s supported model is **Encompass web APIs**. Desktop is a **hosting
-shell**, not a second source of truth.
+FreeFlow’s supported model is the hosted bridge plus the direct custom
+connector. Desktop is a **hosting shell**, not a second source of truth.
 
 If product later embeds the portal in Encompass desktop:
 
-1. CSP `frame-ancestors` allowlist only:
-   `'self'` plus the lender’s Encompass hosts (historically
-   `https://*.elliemae.net`, `https://*.encompassloanofficer.com`,
-   `https://*.encompasssolutions.com`, `https://*.ice.com`). Confirm the live
-   ICE host list at ship time; do not copy archive lists blindly.
+1. CSP `frame-ancestors` allowlist only: `'self'` plus the exact lender-hosted
+   Encompass origins confirmed during tenant onboarding.
 2. ALB OIDC still authenticates the **human**. Do not trust Encompass desktop
    headers as tenant identity.
 3. No COM/SmartClient field writes from the browser. All writes still go
    through the sync worker.
 4. Loan GUID must come from a signed server session after the user opens the
    loan in Encompass, not from `postMessage` without origin checks.
-5. Certify on the ICE-supported SmartClient / web hybrid version the lender
+5. Certify on the SmartClient / web hybrid version the lender
    actually runs (version pin in the runbook).
-6. If a true desktop plugin is required, that is a **new .NET/ICE SDK
+6. If a true desktop plugin is required, that is a **new signed .NET
    project**, signed, versioned, and out of this Node/Python monorepo.
 
-Until that project exists, go-live instruction is: **Encompass desktop users
-open the same web portal; sync is Developer Connect only.**
+Until that project exists, Encompass desktop users open the same hosted tool;
+service-side work uses the custom connector only.
 
 ---
 
@@ -372,7 +368,7 @@ Do not skip. Later steps assume earlier exits.
 | C | OCR worker isolation + timeouts + no word dump | Health stays 200 during a 40-page scan |
 | D | Cognito live + tenant matrix on every portal route | P0-01/02 evidence |
 | E | `sync_jobs` schema + SQS worker ECS task | Duplicate message harmless |
-| F | Encompass **sandbox** Developer Connect + custom fields | One PATCH + optional MISMO attach |
+| F | Encompass customer test tenant + hosted bridge/custom connector fields | One direct write + optional MISMO attach |
 | G | eFolder pull → parser → discard | ZDR canary |
 | H | Stripe webhook reconcile in staging | P0-09 tests |
 | I | Appraisal service or explicit “not in this launch” | Written product scope |
@@ -411,4 +407,4 @@ Do not advertise 300-page scan ingest on the synchronous `/parse` API.
 - Desktop Underwriter / Loan Product Advisor / GUS APIs
 - Plaid / Truework / Argyle / The Work Number HTTP APIs
 - Production MinIO/S3 staging of borrower PDFs
-- Using `docs/encompass-sync.ts` or password-grant OAuth
+- Storing lender LOS credentials in FreeFlow core

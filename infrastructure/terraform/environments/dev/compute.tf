@@ -16,9 +16,10 @@ resource "aws_ecs_task_definition" "parser" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "1024"
-  memory                   = "4096"
-  execution_role_arn       = aws_iam_role.parser_execution.arn
-  task_role_arn            = aws_iam_role.parser_task.arn
+  # Cost: 7/14-day peak was ~0.98 GB (24% of 4 GB); 2 GB keeps ~2x headroom.
+  memory             = "2048"
+  execution_role_arn = aws_iam_role.parser_execution.arn
+  task_role_arn      = aws_iam_role.parser_task.arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -111,6 +112,7 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "PORT", value = "8000" },
         { name = "HOSTNAME", value = "0.0.0.0" },
         { name = "APP_BASE_URL", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
+        { name = "APP_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
         { name = "TRUSTED_ORIGIN", value = var.enable_cognito_edge ? "https://${var.portal_hostname}" : "http://${aws_lb.portal[0].dns_name}" },
         { name = "PARSER_ENABLED", value = var.enable_parser ? "true" : "false" },
         { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080/api/underwrite/process" },
@@ -118,8 +120,13 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
         { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
         { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
-        ], var.enable_encompass_document_pull_worker ? [
+        ], length(local.portal_extra_hostnames) > 0 ? [
+        { name = "TRUSTED_ORIGINS", value = join(" ", [for host in local.portal_extra_hostnames : "https://${host}"]) },
+        ] : [], var.enable_encompass_document_pull_worker ? [
         { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
+        ] : [], var.enable_encompass_connector ? [
+        { name = "ENCOMPASS_CONNECTOR_SERVICE_URL", value = "http://encompass-connector.freeflow.local:8080" },
+        { name = "ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
         ] : [], var.enable_cognito_edge ? [
         { name = "OIDC_ISSUER", value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.live_test[0].id}" },
         { name = "OIDC_CLIENT_ID", value = aws_cognito_user_pool_client.alb[0].id },
@@ -132,10 +139,12 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "DEV_AUTH_TENANT_ID", value = "00000000-0000-4000-8000-000000000100" },
         { name = "DEV_AUTH_SUBJECT", value = "plte-dev-underwriter" },
       ])
-      secrets = [
+      secrets = concat([
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:url::" },
         { name = "FIELD_ENCRYPTION_KEY", valueFrom = aws_secretsmanager_secret.field_encryption.arn },
-      ]
+        ], var.enable_encompass_connector ? [
+        { name = "ENCOMPASS_CONNECTOR_SIGNING_KEY", valueFrom = aws_secretsmanager_secret.connector_service_signing_key[0].arn },
+      ] : [])
       portMappings = [{
         name          = "http"
         containerPort = 8000
@@ -197,15 +206,16 @@ resource "aws_ecs_task_definition" "connector" {
       capabilities       = { add = [], drop = ["ALL"] }
     }
     environment = [
-      # The synthetic Bearer path is explicit development-only configuration.
-      # Its service token is distinct from database and future LOS credentials.
-      { name = "NODE_ENV", value = "development" },
-      { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
+      # The synthetic path remains explicit development-only configuration.
+      # Real mode uses signed service authentication and resolves lender-scoped
+      # LOS credentials only inside this separate connector task.
+      { name = "NODE_ENV", value = local.connector_real_encompass ? "production" : "development" },
+      { name = "FREEFLOW_RUNTIME_ENV", value = local.connector_real_encompass ? "staging" : "development" },
       { name = "PORT", value = "8080" },
       { name = "LOG_LEVEL", value = "info" },
       { name = "CONNECTOR_MODE", value = var.encompass_connector_mode },
       { name = "CONNECTOR_BOUND_TENANT_ID", value = local.synthetic_connector_tenant_id },
-      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : "bearer-stub-non-prod" },
+      { name = "CONNECTOR_SERVICE_AUTH_KIND", value = local.connector_real_encompass ? "signed-replay" : local.connector_service_auth_kind },
       { name = "CONNECTOR_SIGNED_SERVICE_ID", value = "freeflow-connector-smoke" },
     ]
     secrets = concat([
@@ -300,10 +310,11 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
   family                   = "${local.name_prefix}-document-pull-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "512"
-  memory                   = "1024"
-  execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.document_pull_worker_task[0].arn
+  # Cost: idle worker (~0.03% CPU, ~45 MB peak memory over 14 days).
+  cpu                = "256"
+  memory             = "512"
+  execution_role_arn = aws_iam_role.task_execution.arn
+  task_role_arn      = aws_iam_role.document_pull_worker_task[0].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -312,7 +323,7 @@ resource "aws_ecs_task_definition" "document_pull_worker" {
 
   container_definitions = jsonencode([{
     name                   = "document-pull-worker"
-    image                  = var.portal_image
+    image                  = var.connector_worker_image != "" ? var.connector_worker_image : var.portal_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
@@ -349,10 +360,11 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
   family                   = "${local.name_prefix}-encompass-sync-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "512"
-  memory                   = "1024"
-  execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.encompass_sync_worker_task[0].arn
+  # Cost: idle worker (~0.03% CPU, ~45 MB peak memory over 14 days).
+  cpu                = "256"
+  memory             = "512"
+  execution_role_arn = aws_iam_role.task_execution.arn
+  task_role_arn      = aws_iam_role.encompass_sync_worker_task[0].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -361,7 +373,7 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
 
   container_definitions = jsonencode([{
     name                   = "encompass-sync-worker"
-    image                  = var.portal_image
+    image                  = var.connector_worker_image != "" ? var.connector_worker_image : var.portal_image
     essential              = true
     readonlyRootFilesystem = true
     user                   = "1001"
@@ -443,25 +455,17 @@ resource "aws_ecs_task_definition" "console" {
       }
       environment = [
         { name = "PORT", value = "3000" },
-        { name = "HOST", value = "0.0.0.0" },
-        { name = "DOC_PARSER_URL", value = "http://income-parser.freeflow.local:8080" },
-        { name = "DOC_PARSER_TIMEOUT_MS", value = "300000" },
-        { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
-        { name = "VITE_CACHE_DIR", value = "/tmp/freeflow/vite" },
-        { name = "TMPDIR", value = "/tmp/freeflow" },
-        { name = "VITE_ALLOWED_HOSTS", value = join(",", [aws_lb.portal[0].dns_name, var.portal_hostname]) },
+        { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
+        { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
+        { name = "FREEFLOW_SYNTHETIC_PRODUCT_DEMOS", value = "true" },
+        { name = "COGNITO_LOGOUT_URL", value = "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com/logout?client_id=${aws_cognito_user_pool_client.alb[0].id}&logout_uri=${urlencode("https://${var.portal_hostname}/")}" },
+        { name = "ALB_AUTH_SESSION_COOKIE_NAME", value = "FreeFlowDevAuth" },
+        { name = "ENCOMPASS_FRAME_ANCESTORS", value = local.console_frame_ancestors },
+        { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
+        { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },
+        { name = "ENCOMPASS_TEST_HOST_LOAN_GUID", value = var.encompass_test_host_loan_guid },
       ]
-      entryPoint = ["/bin/sh", "-c"]
-      command = [join("\n", [
-        "set -eu",
-        "rm -rf /tmp/freeflow/app",
-        "mkdir -p /tmp/freeflow/app/apps",
-        "cp -R /app/apps/underwriting-console /tmp/freeflow/app/apps/underwriting-console",
-        "rm -rf /tmp/freeflow/app/apps/underwriting-console/node_modules",
-        "ln -s /app/apps/underwriting-console/node_modules /tmp/freeflow/app/apps/underwriting-console/node_modules",
-        "ln -s /app/packages /tmp/freeflow/app/packages",
-        "exec /app/apps/underwriting-console/node_modules/.bin/vite --config /tmp/freeflow/app/apps/underwriting-console/vite.config.ts --host 0.0.0.0 --port 3000 /tmp/freeflow/app/apps/underwriting-console",
-      ])]
+      command = ["node", "/app/serve-production.mjs"]
       portMappings = [{
         name          = "http"
         containerPort = 3000

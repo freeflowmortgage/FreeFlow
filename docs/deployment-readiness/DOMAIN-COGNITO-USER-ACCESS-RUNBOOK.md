@@ -88,6 +88,11 @@ the human; FreeFlow's database remains authoritative for tenant and role access.
    SEED_ROLE=<least-privileged role>
    ```
 
+   Configure an approved tenant integration mode in a separate private task
+   invocation using only `SEED_TENANT_ID` and
+   `SEED_ENCOMPASS_INTEGRATION_MODE`. The supported mode-only path does not
+   reseed or modify the tester.
+
 4. Wait for the task to stop; require exit code `0` and the successful seed log
    marker. A Cognito user without an active database membership must still be
    denied application access.

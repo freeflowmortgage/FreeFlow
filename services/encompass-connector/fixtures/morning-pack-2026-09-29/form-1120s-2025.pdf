@@ -1,0 +1,43 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 471 >>
+stream
+BT /F1 9 Tf
+1 0 0 1 72 740 Tm (U.S. Income Tax Return for an S Corporation) Tj
+1 0 0 1 72 712 Tm (Tax year 2025) Tj
+1 0 0 1 72 660 Tm (Name of corporation) Tj
+1 0 0 1 170 660 Tm (Synthetic S Corp Return) Tj
+1 0 0 1 72 630 Tm (Employer identification number) Tj
+1 0 0 1 212 630 Tm (98-7654321) Tj
+1 0 0 1 72 600 Tm (Ordinary business income \(loss\)) Tj
+1 0 0 1 217 600 Tm (142000.00) Tj
+1 0 0 1 72 570 Tm (Depreciation not claimed) Tj
+1 0 0 1 187 570 Tm (18000.00) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000762 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+832
+%%EOF

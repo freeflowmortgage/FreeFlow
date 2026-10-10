@@ -201,7 +201,6 @@ migrate_file "calculate.ts" "apps/underwriter-portal/src/pages/api/income/calcul
 skip_protected "underwrite-process-route-v2.ts / live process.ts"
 migrate_file "appraisal-audit-route.ts" "apps/web/src/pages/api/underwrite/appraisal-audit.ts" "In-Memory Appraisal mTLS API Route"
 migrate_file "appraisal-audit-route.ts" "apps/underwriter-portal/src/pages/api/underwrite/appraisal-audit.ts" "In-Memory Appraisal mTLS API Route (portal)"
-migrate_file "encompass-sync.ts" "apps/underwriter-portal/src/pages/api/underwrite/encompass-sync.ts" "ICE Encompass REST Client Sync Dispatcher"
 migrate_file "map-encompass-fields-v3.ts" "apps/underwriter-portal/src/pages/api/underwrite/map-encompass-fields.ts" "Encompass Field Transformer (v3)" "map-encompass-fields-v2.ts"
 migrate_file "encompass-fallback-queue.ts" "apps/underwriter-portal/src/pages/api/underwrite/encompass-fallback-queue.ts" "Redis-Backed Encompass Dispatch Queue"
 migrate_file "encompass-pull-efolder-docs.ts" "apps/underwriter-portal/src/pages/api/underwrite/encompass-pull-efolder-docs.ts" "Encompass Inbound Queue Doc Puller"

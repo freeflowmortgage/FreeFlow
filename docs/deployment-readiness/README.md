@@ -61,5 +61,5 @@ provider workflows, shared links, parser output minimization, supply-chain
 controls, HA/restore qualification, observability, and independent security
 testing remain incomplete. All P0 items must close before production traffic or
 real borrower data is allowed. Integration-by-integration launch steps
-(RapidOCR, MISMO 3.4, Encompass Developer Connect vs desktop, D1C, appraisal)
+(RapidOCR, MISMO 3.4, Encompass hosted/custom connector vs desktop, D1C, appraisal)
 are in [GO-LIVE-MAP.md](GO-LIVE-MAP.md).

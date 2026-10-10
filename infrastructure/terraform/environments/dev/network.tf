@@ -207,13 +207,19 @@ resource "aws_security_group_rule" "console_to_s3_image_layers" {
   prefix_list_ids   = [data.aws_prefix_list.s3.id]
 }
 
+# Cost: interface endpoints bill per AZ-hour ($0.01 each). Dev keeps them in a
+# single AZ; tasks in the other AZ reach them cross-AZ. Not for production.
+locals {
+  interface_endpoint_subnet_ids = slice(var.app_private_subnet_ids, 0, 1)
+}
+
 resource "aws_vpc_endpoint" "console_ecr_api" {
   count               = var.enable_console || var.enable_encompass_connector ? 1 : 0
   vpc_id              = data.aws_vpc.existing.id
   service_name        = "com.amazonaws.${var.aws_region}.ecr.api"
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
-  subnet_ids          = var.app_private_subnet_ids
+  subnet_ids          = local.interface_endpoint_subnet_ids
   security_group_ids  = [aws_security_group.console_aws_endpoints[0].id]
 }
 
@@ -223,7 +229,7 @@ resource "aws_vpc_endpoint" "console_ecr_dkr" {
   service_name        = "com.amazonaws.${var.aws_region}.ecr.dkr"
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
-  subnet_ids          = var.app_private_subnet_ids
+  subnet_ids          = local.interface_endpoint_subnet_ids
   security_group_ids  = [aws_security_group.console_aws_endpoints[0].id]
 }
 
@@ -233,7 +239,7 @@ resource "aws_vpc_endpoint" "console_logs" {
   service_name        = "com.amazonaws.${var.aws_region}.logs"
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
-  subnet_ids          = var.app_private_subnet_ids
+  subnet_ids          = local.interface_endpoint_subnet_ids
   security_group_ids  = [aws_security_group.console_aws_endpoints[0].id]
 }
 
@@ -243,7 +249,7 @@ resource "aws_vpc_endpoint" "connector_secretsmanager" {
   service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
-  subnet_ids          = var.app_private_subnet_ids
+  subnet_ids          = local.interface_endpoint_subnet_ids
   security_group_ids  = [aws_security_group.console_aws_endpoints[0].id]
 }
 

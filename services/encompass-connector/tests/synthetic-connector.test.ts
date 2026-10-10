@@ -4,8 +4,20 @@ import test from 'node:test';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
 import {
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
+  SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS,
   SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
   SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
+  SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
+  SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
   SyntheticFreeflowDevConnector,
 } from '../src/connector/syntheticFreeflowDevConnector';
 
@@ -15,10 +27,40 @@ const CONTEXT = {
   correlationId: 'synthetic-unit-test',
 };
 
-test('synthetic freeflow-dev connector returns deterministic metadata and in-memory PDF bytes', async () => {
+test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pack fixtures', async () => {
   const connector = new SyntheticFreeflowDevConnector();
-  assert.deepEqual(await connector.listActiveAttachments(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID), [
-    { id: SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID },
+  assert.deepEqual(
+    await connector.listActiveAttachments(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID),
+    SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.map((id) => ({ id })),
+  );
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS[0], SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID);
+  assert.equal(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.length, 14);
+  assert.equal(
+    SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.at(-1),
+    SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+  );
+  for (const id of [
+    SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID,
+    SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
+  ]) {
+    assert.ok(SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.some((candidate) => candidate === id));
+  }
+  assert.deepEqual(
+    SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => attachment.id),
+    SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS.slice(1),
+  );
+  const listedIds = (await connector.listActiveAttachments(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID))
+    .map((attachment) => attachment.id);
+  const packW2Ids = listedIds.filter((id) => id.startsWith('synthetic-pack-w2-'));
+  assert.ok(packW2Ids.length >= 2);
+  assert.deepEqual(packW2Ids, [
+    SYNTHETIC_PACK_W2_2021_NATES_ATTACHMENT_ID,
+    SYNTHETIC_PACK_W2_2021_COBORROWER_ATTACHMENT_ID,
   ]);
 
   const first = await connector.downloadOriginalAttachment(
@@ -35,6 +77,91 @@ test('synthetic freeflow-dev connector returns deterministic metadata and in-mem
   assert.deepEqual(first.bytes, second.bytes);
   assert.equal(first.sha256, createHash('sha256').update(first.bytes).digest('hex'));
   assert.equal(first.sha256, second.sha256);
+
+  const pdf = new TextDecoder().decode(first.bytes);
+  assert.match(pdf, /1 0 0 1 72 756 Tm \(Form W-2 Wage and Tax Statement 2025\) Tj/);
+  assert.match(pdf, /1 0 0 1 42 710 Tm \(00-0000000\) Tj/);
+  assert.match(pdf, /1 0 0 1 42 680 Tm \(FreeFlow Synthetic Payroll LLC\) Tj/);
+  assert.match(pdf, /1 0 0 1 340 710 Tm \(120000\.00\) Tj/);
+  assert.match(pdf, /1 0 0 1 340 664 Tm \(120000\.00\) Tj/);
+  assert.match(pdf, /1 0 0 1 462 664 Tm \(1740\.00\) Tj/);
+
+  for (const pack of SYNTHETIC_FREEFLOW_DEV_MORNING_PACK) {
+    const downloaded = await connector.downloadOriginalAttachment(
+      CONTEXT,
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      pack.id,
+    );
+    const repeated = await connector.downloadOriginalAttachment(
+      CONTEXT,
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      pack.id,
+    );
+    assert.equal(new TextDecoder().decode(downloaded.bytes.subarray(0, 5)), '%PDF-');
+    assert.equal(downloaded.sha256, pack.sha256);
+    assert.equal(downloaded.sha256, createHash('sha256').update(downloaded.bytes).digest('hex'));
+    assert.deepEqual(downloaded.bytes, repeated.bytes);
+    assert.equal(downloaded.sha256, repeated.sha256);
+    const packText = new TextDecoder().decode(downloaded.bytes);
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID) {
+      assert.ok(listedIds.includes(SYNTHETIC_PACK_SCHEDULE_B_2025_ATTACHMENT_ID));
+      assert.match(packText, /Schedule B \\\(Form 1040\\\) Interest and Ordinary Dividends/);
+      assert.match(packText, /1 0 0 1 72 602 Tm \(Total interest\) Tj/);
+      assert.match(packText, /1 0 0 1 200 602 Tm \(12000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_C_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule C \\\(Form 1040\\\) Profit or Loss From Business/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Business name\) Tj/);
+      assert.match(packText, /1 0 0 1 150 660 Tm \(Synthetic Consulting\) Tj/);
+      assert.match(packText, /1 0 0 1 72 630 Tm \(Net profit or loss\) Tj/);
+      assert.match(packText, /1 0 0 1 154 630 Tm \(96000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(13 Depreciation\) Tj/);
+      assert.match(packText, /1 0 0 1 151 600 Tm \(8500\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_F_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule F \\\(Form 1040\\\) Profit or Loss From Farming/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Farm name\) Tj/);
+      assert.match(packText, /1 0 0 1 134 660 Tm \(Synthetic Farm\) Tj/);
+      assert.match(packText, /1 0 0 1 72 630 Tm \(Net farm profit or loss\) Tj/);
+      assert.match(packText, /1 0 0 1 174 630 Tm \(48000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(14 Depreciation\) Tj/);
+      assert.match(packText, /1 0 0 1 151 600 Tm \(3200\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_D_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule D \\\(Form 1040\\\) Capital Gains and Losses/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Combine lines 7 and 15\) Tj/);
+      assert.match(packText, /1 0 0 1 183 660 Tm \(12000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_FORM_1120S_2025_ATTACHMENT_ID) {
+      assert.match(packText, /U\.S\. Income Tax Return for an S Corporation/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Name of corporation\) Tj/);
+      assert.match(packText, /1 0 0 1 170 660 Tm \(Synthetic S Corp Return\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(Ordinary business income \\\(loss\\\)\) Tj/);
+      assert.match(packText, /1 0 0 1 217 600 Tm \(142000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 570 Tm \(Depreciation not claimed\) Tj/);
+      assert.match(packText, /1 0 0 1 187 570 Tm \(18000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_SCHEDULE_K1_1120S_2025_ATTACHMENT_ID) {
+      assert.match(packText, /Schedule K-1 \\\(Form 1120-S\\\)/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Corporation's name\) Tj/);
+      assert.match(packText, /1 0 0 1 167 660 Tm \(Synthetic S Corp\) Tj/);
+      assert.match(packText, /1 0 0 1 72 630 Tm \(Ordinary business income\) Tj/);
+      assert.match(packText, /1 0 0 1 192 630 Tm \(100000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(Percentage of stock ownership\) Tj/);
+      assert.match(packText, /1 0 0 1 211 600 Tm \(100%\) Tj/);
+      assert.match(packText, /1 0 0 1 72 570 Tm \(Distributions\) Tj/);
+      assert.match(packText, /1 0 0 1 138 570 Tm \(100000\.00\) Tj/);
+    }
+    if (pack.id === SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID) {
+      assert.match(packText, /U\.S\. Corporation Income Tax Return/);
+      assert.match(packText, /1 0 0 1 72 660 Tm \(Name of corporation\) Tj/);
+      assert.match(packText, /1 0 0 1 170 660 Tm \(Synthetic C Corp\) Tj/);
+      assert.match(packText, /1 0 0 1 72 600 Tm \(Taxable income\) Tj/);
+      assert.match(packText, /1 0 0 1 152 600 Tm \(120000\.00\) Tj/);
+      assert.match(packText, /1 0 0 1 72 570 Tm \(20 Depreciation\) Tj/);
+      assert.match(packText, /1 0 0 1 151 570 Tm \(15000\.00\) Tj/);
+    }
+  }
 });
 
 test('synthetic freeflow-dev connector rejects every other tenant, loan, and attachment', async () => {
@@ -50,5 +177,13 @@ test('synthetic freeflow-dev connector rejects every other tenant, loan, and att
   await assert.rejects(
     () => connector.downloadOriginalAttachment(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, 'wrong-attachment'),
     (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'SYNTHETIC_ATTACHMENT_NOT_FOUND',
+  );
+  await assert.rejects(
+    () => connector.downloadOriginalAttachment(
+      { ...CONTEXT, tenantId: crypto.randomUUID() },
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      SYNTHETIC_PACK_FORM_1065_2025_ATTACHMENT_ID,
+    ),
+    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'SYNTHETIC_LOAN_NOT_FOUND',
   );
 });

@@ -49,7 +49,7 @@ function isTurn(value: ReturnType<typeof getNextTurn>): value is AgentTurn {
   return 'prompt' in value;
 }
 
-export default function Conversational1003() {
+export default function Conversational1003({ syntheticDemo = false }: { syntheticDemo?: boolean }) {
   const [answers, setAnswers] = useState<IntakeAnswers>({});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [turn, setTurn] = useState<AgentTurn | null>(null);
@@ -134,7 +134,7 @@ export default function Conversational1003() {
   useEffect(() => {
     // Device-local draft (ZDR-safe): offer to resume a midstream session so a
     // phone lock or app switch never forces the borrower to start over.
-    const saved = loadIntakeSession();
+    const saved = syntheticDemo ? null : loadIntakeSession();
     if (saved) setResumable(saved);
     const first = getNextTurn({});
     if (isTurn(first)) {
@@ -143,18 +143,18 @@ export default function Conversational1003() {
     }
     // Initial greeting only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [syntheticDemo]);
 
   // Autosave the draft to the borrower's device on every answer (cleared on delivery)
   useEffect(() => {
-    if (done || Object.keys(answers).length === 0) return;
+    if (syntheticDemo || done || Object.keys(answers).length === 0) return;
     saveIntakeSession({ answers, lang, leadSent });
-  }, [answers, lang, leadSent, done]);
+  }, [answers, lang, leadSent, done, syntheticDemo]);
 
   // Early lead relay: the moment we have a name and contact info, hand the lead
   // to the client's CRM API so an abandoned session still reaches the LO.
   useEffect(() => {
-    if (leadSent || !answers.borrowerName || (!answers.email && !answers.phone)) return;
+    if (syntheticDemo || leadSent || !answers.borrowerName || (!answers.email && !answers.phone)) return;
     setLeadSent(true); // optimistic; a failed relay retries on the next answer
     fetch('/api/intake/lead', {
       method: 'POST',
@@ -169,7 +169,7 @@ export default function Conversational1003() {
         lang,
       }),
     }).catch(() => setLeadSent(false));
-  }, [answers.borrowerName, answers.email, answers.phone, answers.loanPurpose, lang, leadSent]);
+  }, [answers.borrowerName, answers.email, answers.phone, answers.loanPurpose, lang, leadSent, syntheticDemo]);
 
   function resumeSavedSession() {
     if (!resumable) return;
@@ -393,7 +393,7 @@ export default function Conversational1003() {
   // payload to the client's LOS API. The borrower downloads nothing; FreeFlow
   // holds the session in memory only until this handoff succeeds.
   useEffect(() => {
-    if (!done || delivery.state !== 'idle') return;
+    if (syntheticDemo || !done || delivery.state !== 'idle') return;
     setDelivery({ state: 'sending' });
     const xml = buildMismo34Xml(answers);
     fetch('/api/intake/deliver', {
@@ -411,7 +411,7 @@ export default function Conversational1003() {
         clearIntakeSession();
       })
       .catch(() => setDelivery({ state: 'error' }));
-  }, [done, delivery.state, answers]);
+  }, [done, delivery.state, answers, syntheticDemo]);
 
   /** LO-side backup: download the same MISMO 3.4 XML that was delivered via API */
   function exportSession() {
@@ -433,8 +433,13 @@ export default function Conversational1003() {
   return (
     <div
       data-testid="ai-1003-workspace"
-      className="flex h-full min-h-[780px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex-row"
+      className="relative flex h-full min-h-[780px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex-row"
     >
+      {syntheticDemo ? (
+        <div data-testid="ai-1003-synthetic-banner" className="absolute inset-x-0 top-0 z-20 bg-amber-100 px-4 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-amber-900">
+          Synthetic demo · memory only · no lead or LOS delivery
+        </div>
+      ) : null}
       <div className="flex min-h-[60vh] w-full min-w-0 flex-col border-b border-slate-200 lg:min-h-0 lg:w-[52%] lg:border-b-0 lg:border-r">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div className="flex items-start gap-3">
@@ -581,13 +586,14 @@ export default function Conversational1003() {
                       : 'border-slate-200 bg-white text-slate-600'
                 }`}
               >
-                {delivery.state === 'sending' && <span className="font-semibold">Delivering MISMO 3.4 to the lender’s API…</span>}
-                {delivery.state === 'delivered' && (
+                {syntheticDemo ? <span className="font-semibold">Synthetic session complete. No lead or MISMO payload was transmitted.</span> : null}
+                {!syntheticDemo && delivery.state === 'sending' && <span className="font-semibold">Delivering MISMO 3.4 to the lender’s API…</span>}
+                {!syntheticDemo && delivery.state === 'delivered' && (
                   <span className="font-semibold">
                     Delivered to client LOS API · receipt {delivery.receiptId?.slice(0, 8)} · ZDR relay, no copy retained
                   </span>
                 )}
-                {delivery.state === 'error' && (
+                {!syntheticDemo && delivery.state === 'error' && (
                   <>
                     <span className="font-semibold">Delivery failed — the loan officer can retry or use the MISMO backup download.</span>
                     <button
