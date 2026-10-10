@@ -1,5 +1,6 @@
 export type { EncompassConnector } from './connector';
-export { createEncompassConnector } from './factory';
+export { createEncompassConnector, DEVELOPER_CONNECT_ENABLED_DEFAULT } from './factory';
+export { DeveloperConnectAdapter } from './adapters/developerConnectAdapter';
 export { CustomConnectorAdapter, MAX_CONNECTOR_PDF_BYTES } from './adapters/customConnectorAdapter';
 export { EncompassConnectorError } from './errors';
 export { assertNoLosCredentials } from './secrets';
@@ -21,5 +22,6 @@ export type {
   EncompassApprovedIncomeUpdate,
   EncompassWriteResult,
   ConnectorServiceAuth,
+  DeveloperConnectClient,
   CreateEncompassConnectorOptions,
 } from './types';

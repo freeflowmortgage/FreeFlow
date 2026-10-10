@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS base
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -45,7 +45,7 @@ RUN pnpm --filter @mortgage-pos/database prisma:generate
 RUN pnpm --filter underwriting-console build
 RUN ./services/encompass-connector/node_modules/esbuild/bin/esbuild \
         apps/underwriting-console/src/server/demoFixtureDocuments.ts \
-        --bundle --platform=node --target=node22 --format=cjs \
+        --bundle --platform=node --target=node24 --format=cjs \
         --outfile=apps/underwriting-console/dist/server/demo-fixtures.cjs
 RUN cp -R apps/underwriting-console/node_modules/pdfkit/js/data \
         apps/underwriting-console/dist/server/data
@@ -53,7 +53,7 @@ RUN cp -R apps/underwriting-console/node_modules/pdfkit/js/data \
 # 3. Static protected runtime. Parser and fixture middleware are demo/QA-only.
 # Reuse the scan-clean pinned Node Alpine runtime used by the portal rather
 # than carrying an RPM package manager and unused curl/PCRE libraries.
-FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS runner
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

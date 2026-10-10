@@ -27,6 +27,7 @@ enable_services = false
 enable_parser   = false
 enable_encompass_document_pull_worker = false
 enable_encompass_connector            = false
+encompass_connector_mode              = "synthetic-freeflow-dev"
 encompass_connector_service_auth_kind = ""
 enable_console  = false
 enable_encompass_test_host = false
@@ -41,3 +42,10 @@ console_image    = ""
 migration_image  = ""
 connector_image  = ""
 connector_service_token_rotation_epoch = ""
+
+# GitHub Actions pushes commit-tagged images to ECR from main through OIDC.
+# Set the role ARN output as the AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN repository
+# variable. Supply github_oidc_provider_arn if the account already has one.
+enable_github_image_publisher = false
+github_repository             = "freeflowmortgage/FreeFlow"
+github_oidc_provider_arn      = null
