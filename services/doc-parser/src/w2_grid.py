@@ -243,11 +243,15 @@ def _copy_b_words(page: Any, words: list[dict[str, Any]] | None) -> list[dict[st
 
 def _federal_wage_words(page: Any, words: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Drop SSN/EIN/address (left identity column). Wages sit to the right of that column."""
-    copy_b = _copy_b_words(page, words)
+    items = list(words or [])
+    copy_b = _copy_b_words(page, items)
     if not copy_b:
         return copy_b
     width, _height = _page_size(page)
-    blob = " ".join(str(word.get("text") or "") for word in copy_b)
+    # Detect the source layout before Copy B clipping removes Copy C. Four-up
+    # sheets use a half-width wage column; forgetting that state moves the
+    # minimum x-coordinate past every federal wage cell.
+    blob = " ".join(str(word.get("text") or "") for word in items)
     native = ""
     try:
         native = _page_plain_text(page)
@@ -310,8 +314,23 @@ def _currency_entries(words: list[dict[str, Any]]) -> list[tuple[float, dict[str
                 "text": match.group(0),
             }
             entries.append((amount, piece))
-    entries.sort(key=lambda item: (float(item[1].get("y0") or 0), float(item[1].get("x0") or 0)))
-    return entries
+    # OCR baselines on the same printed row commonly differ by a few pixels.
+    # Group those entries before sorting left-to-right so Box 5 cannot trade
+    # places with Box 6 merely because the tax value was read slightly higher.
+    rows: list[list[tuple[float, dict[str, Any]]]] = []
+    for entry in sorted(entries, key=lambda item: float(item[1].get("y0") or 0)):
+        y0 = float(entry[1].get("y0") or 0)
+        if rows:
+            row_y = sum(float(item[1].get("y0") or 0) for item in rows[-1]) / len(rows[-1])
+            if abs(y0 - row_y) <= 6.0:
+                rows[-1].append(entry)
+                continue
+        rows.append([entry])
+    return [
+        entry
+        for row in rows
+        for entry in sorted(row, key=lambda item: float(item[1].get("x0") or 0))
+    ]
 
 
 def parse_unified_w2_matrix(
@@ -434,6 +453,19 @@ def _apply_federal_fallbacks(
         matrix = parse_unified_w2_matrix(page, words, page_index=page_index)
         if matrix:
             current = _merge_box_dict(current, matrix)
+            # A Medicare-validated matrix establishes the complete printed
+            # 3x2 federal grid. Prefer all six coordinate-derived values over
+            # an unvalidated template clip, which can land one row too low on
+            # older four-up W-2 revisions and mislabel Box 5 as Box 1.
+            if matrix.get("isMedicareValidated"):
+                overlay = dict(current.get("boxes") or {})
+                matrix_boxes = matrix.get("boxes") or {}
+                for key in ("box1", "box2", "box3", "box4", "box5", "box6"):
+                    if matrix.get(key):
+                        current[key] = matrix[key]
+                        if matrix_boxes.get(key):
+                            overlay[key] = matrix_boxes[key]
+                current["boxes"] = overlay
     reported = parse_adp_reported_wages(page, words)
     for key in ("box1", "box3", "box5"):
         if not float(current.get(key) or 0) and reported.get(key):
@@ -527,11 +559,12 @@ def _first_company_line(raw: str) -> str:
 
 
 def _identity_column_words(page: Any, words: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    copy_b = _copy_b_words(page, words)
+    items = list(words or [])
+    copy_b = _copy_b_words(page, items)
     if not copy_b:
         return []
     width, _height = _page_size(page)
-    blob = " ".join(str(word.get("text") or "") for word in copy_b)
+    blob = " ".join(str(word.get("text") or "") for word in items)
     four_up = is_four_up_w2(blob)
     summary = is_earnings_summary_page(blob)
     max_x = width * (0.32 if (four_up or summary) else 0.48)
@@ -892,7 +925,12 @@ def extract_w2_pages(
                     if _extract_is_plausible(parsed):
                         break
                     parsed = None
-            if _should_ocr_w2(page, page_words, parsed):
+            # The shared converter has already made the OCR/native-text
+            # decision for every supplied page. Re-running the specialized
+            # fallback here loads a second RapidOCR engine and can exhaust the
+            # parser task on multi-page scanned packets. Keep the fallback for
+            # standalone callers that did not supply converter evidence.
+            if convert_page is None and _should_ocr_w2(page, page_words, parsed):
                 try:
                     ocr_words = ocr_page_words(page)
                 except Exception:
