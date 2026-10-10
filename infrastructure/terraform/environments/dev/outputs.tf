@@ -117,3 +117,7 @@ output "operations_dashboard_name" {
 output "operations_alert_topic_arn" {
   value = var.enable_monitoring ? aws_sns_topic.operations[0].arn : null
 }
+
+output "github_image_publisher_role_arn" {
+  value = var.enable_github_image_publisher ? aws_iam_role.github_image_publisher[0].arn : null
+}

@@ -118,6 +118,17 @@ resource "aws_security_group_rule" "connector_to_s3_image_layers" {
   prefix_list_ids   = [data.aws_prefix_list.s3.id]
 }
 
+resource "aws_security_group_rule" "connector_to_encompass_dev" {
+  count             = local.connector_real_encompass ? 1 : 0
+  type              = "egress"
+  description       = "Development-only HTTPS from connector to Encompass through NAT"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.connector[0].id
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
 resource "aws_security_group" "console" {
   count       = var.enable_console ? 1 : 0
   name        = "${local.name_prefix}-console-sg"
