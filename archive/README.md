@@ -20,4 +20,6 @@ Live code is the newest drop in each family. Older numbered copies and Windows `
 - `superseded/ui/` — unversioned `apps/web` split-view (was already v5)
 - `superseded/stripe/` — `stripe-billing-router-v4 (1).ts`
 - `superseded/migrator/` — `copy-assets.ps1` (v2), older docs `copy-assets-v5.sh`, unsafe v7/v19 overlay scripts and the legacy repo splitter
+- `superseded/docs-artifacts/` — historical source/configuration examples moved
+  out of `docs/`; these are reference artifacts, not production implementation
 - `superseded/docs-dupes/` — duplicate and stale runbooks/configuration drops, including the old v2 schema and sandwich-PDF QA playbook
