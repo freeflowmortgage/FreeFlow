@@ -13,7 +13,7 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:3014',
     trace: 'on-first-retry',
   },
-  webServer: {
+  webServer: process.env.FREEFLOW_PLAYWRIGHT_EXTERNAL_SERVER === '1' ? undefined : {
     command: 'corepack pnpm exec vite --host 127.0.0.1 --port 3014',
     cwd: consoleDirectory,
     url: 'http://127.0.0.1:3014',
