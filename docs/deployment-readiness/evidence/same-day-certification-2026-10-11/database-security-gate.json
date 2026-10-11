@@ -1,47 +1,55 @@
 {
-  "schemaVersion": "freeflow-database-security-gate-v1",
+  "schemaVersion": "freeflow-database-security-gate-v2",
   "classification": "SANITIZED_SYNTHETIC_DISPOSABLE_EXECUTION",
   "executionDate": "2026-10-11",
-  "implementationRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
-  "results": {
-    "migrationsApplied": "PASS",
-    "migrationCount": 19,
-    "incompleteOrRolledBackMigrations": 0,
-    "latestMigration": "20261011110000_encompass_sync_approved_preview",
-    "fieldReadbackCommentVerified": "Validated Encompass field status/reason codes only; no raw field values, value-derived hashes, or provider messages.",
-    "tenantRlsIsolationSql": "PASS",
-    "connectorBindingSql": "PASS",
-    "appRoleDatabaseIntegration": "PASS",
-    "appRoleTestsPassed": 7,
-    "workerRoleBindingIntegration": "PASS",
-    "workerRoleTestsPassed": 3
+  "finalRevisionDatabaseGate": {
+    "executionRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+    "environment": "FRESH_DISPOSABLE_POSTGRESQL_16",
+    "results": {
+      "migrationsApplied": "PASS",
+      "migrationCount": 19,
+      "incompleteOrRolledBackMigrations": 0,
+      "latestMigration": "20261011110000_encompass_sync_approved_preview",
+      "fieldReadbackCommentVerified": "Validated Encompass field status/reason codes only; no raw field values, value-derived hashes, or provider messages.",
+      "tenantRlsIsolationSql": "PASS",
+      "connectorBindingSql": "PASS",
+      "appRoleDatabaseIntegration": "PASS",
+      "appRoleTestsPassed": 7,
+      "workerRoleBindingIntegration": "PASS",
+      "workerRoleTestsPassed": 3
+    },
+    "cleanup": {
+      "databaseContainersRemoved": true,
+      "databaseContainersRemaining": 0,
+      "persistentDatabaseChanged": false
+    },
+    "preFixFinding": {
+      "status": "FIXED_AND_CLEANLY_RERUN",
+      "finding": "The standalone lifecycle database test assumed its fixed synthetic tenant and user existed on a zero-to-head database.",
+      "fixCommit": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+      "productionCodeChanged": false
+    }
   },
-  "securityRuntime": {
+  "historicalLiveRuntimeObservations": {
+    "executionRevision": "d72c1fad75b08361859b4665d834fc4b6b755266",
+    "evidenceBoundary": "OBSERVED_DURING_ONE_OFF_LIVE_RUN_RAW_LOGS_PATTERN_SET_AND_RESULT_DIGEST_NOT_RETAINED",
     "postgresqlStorage": "DISPOSABLE_TMPFS",
     "parserUidGid": "8888:8888",
     "parserReadOnlyRoot": true,
     "parserCapabilitiesDropped": true,
     "parserNoNewPrivileges": true,
     "parserTmpfs": true,
-    "rawDocumentByteaColumns": 0,
-    "parserSensitiveLogHits": 0,
-    "portalSensitiveLogHits": 0,
-    "sensitiveLogScanEvidenceBoundary": "OBSERVED_DURING_ONE_OFF_RUN_RAW_LOGS_PATTERN_SET_AND_RESULT_DIGEST_NOT_RETAINED",
-    "expectedScopedObjectDeniedEvents": 1
+    "rawDocumentByteaColumnsObserved": 0,
+    "parserSensitiveLogHitsObserved": 0,
+    "portalSensitiveLogHitsObserved": 0,
+    "expectedScopedObjectDeniedEventsObserved": 1,
+    "cleanupObserved": {
+      "containersRemoved": true,
+      "networkRemoved": true,
+      "oneOffParserImageRemoved": true,
+      "temporaryBrowserHarnessRemoved": true,
+      "listenersRemaining": 0
+    }
   },
-  "cleanup": {
-    "containersRemoved": true,
-    "networkRemoved": true,
-    "oneOffParserImageRemoved": true,
-    "temporaryBrowserHarnessRemovedAfterOriginalRun": true,
-    "listenersRemaining": 0,
-    "persistentDatabaseChanged": false
-  },
-  "preFixFinding": {
-    "status": "FIXED_AND_CLEANLY_RERUN",
-    "finding": "The standalone lifecycle database test assumed its fixed synthetic tenant and user existed on a zero-to-head database.",
-    "fixCommit": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
-    "productionCodeChanged": false
-  },
-  "note": "A fresh PostgreSQL 16 database was migrated from zero after the fixture fix. All SQL, app-role, and worker-role gates passed, and both disposable validation containers were removed."
+  "note": "The final database gate and historical live-runtime observations are separate executions and must not be combined into one final-revision runtime claim."
 }

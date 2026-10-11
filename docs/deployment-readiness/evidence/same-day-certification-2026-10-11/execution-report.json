@@ -50,9 +50,13 @@
       "status": "FAIL",
       "boundary": "Override loan total can retain unreconciled borrower totals; approved snapshot fails closed"
     },
-    "malformedAndConflictingInputHandling": {
+    "malformedDocumentHandling": {
       "status": "PASS",
-      "boundary": "Component/simulator tests only; not rerun as live browser cases"
+      "boundary": "Component tests cover unsupported media type, empty, malformed/non-PDF, oversized, parser rejection, and buffer scrubbing; not rerun as live browser cases"
+    },
+    "conflictingDocumentValues": {
+      "status": "NOT_EXECUTED",
+      "boundary": "No semantic conflicting-document-values test was identified; database/writeback conflict tests do not establish this behavior"
     },
     "providerTimeoutFailureRetryHandling": {
       "status": "PASS",

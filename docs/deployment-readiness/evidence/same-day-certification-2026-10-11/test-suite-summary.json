@@ -117,6 +117,7 @@
     "full live standalone lifecycle at the final implementation revision",
     "live JSON file-import path",
     "live browser anonymous or expired-session cases",
+    "semantic conflicting-document-values handling",
     "official MISMO XSD and implementation-requirement validation",
     "real Encompass authentication, loan import, document retrieval, writeback, or readback",
     "production or AWS deployment"
