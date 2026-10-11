@@ -108,11 +108,12 @@ test('custom adapter scrubs copied document bytes when validation fails', async 
   assert.equal(sourceChunk.every((value) => value === 0), true);
 });
 
-test('custom adapter treats network failure during write as an unknown outcome', async () => {
+test('custom adapter treats network failure during write as a retryable unknown outcome without leaking transport text', async () => {
+  const transportDetail = 'network unavailable for borrower-sensitive upstream';
   const adapter = new CustomConnectorAdapter({
     binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
     serviceAuth: { authorizationHeader: 'Bearer service-token' },
-    fetch: (async () => { throw new TypeError('network unavailable'); }) as typeof fetch,
+    fetch: (async () => { throw new TypeError(transportDetail); }) as typeof fetch,
   });
   await assert.rejects(
     () => adapter.applyApprovedIncomeUpdate(context, 'loan-guid', {
@@ -120,7 +121,25 @@ test('custom adapter treats network failure during write as an unknown outcome',
       fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approved' }],
     }),
     (error: unknown) => error instanceof EncompassConnectorError
-      && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+      && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN'
+      && error.retryable
+      && !`${error.message}\n${error.stack ?? ''}`.includes(transportDetail),
+  );
+});
+
+test('custom adapter maps rejected reconciliation reads to a retryable safe error without leaking transport text', async () => {
+  const transportDetail = 'socket reset for provider tenant borrower-secret';
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => { throw new DOMException(transportDetail, 'AbortError'); }) as typeof fetch,
+  });
+  await assert.rejects(
+    () => adapter.readFields(context, 'loan-guid', ['CX.FREEFLOW.APPROVAL.ID']),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'CONNECTOR_SERVICE_UNAVAILABLE'
+      && error.retryable
+      && !`${error.message}\n${error.stack ?? ''}`.includes(transportDetail),
   );
 });
 

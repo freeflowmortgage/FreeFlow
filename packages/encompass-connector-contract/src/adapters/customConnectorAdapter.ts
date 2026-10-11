@@ -184,17 +184,29 @@ export class CustomConnectorAdapter implements EncompassConnector {
     assertNoLosCredentials(body);
     const fetchImpl = this.options.fetch ?? fetch;
     const bodyText = JSON.stringify(body);
-    const response = await fetchImpl(`${this.origin}${path}`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        accept: 'application/json, application/pdf',
-        'content-type': 'application/json',
-        ...serviceAuthHeaders(this.options.serviceAuth!, 'POST', path, bodyText),
-      },
-      body: bodyText,
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(`${this.origin}${path}`, {
+        method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          accept: 'application/json, application/pdf',
+          'content-type': 'application/json',
+          ...serviceAuthHeaders(this.options.serviceAuth!, 'POST', path, bodyText),
+        },
+        body: bodyText,
+      });
+    } catch {
+      const writeOutcomeUnknown = path === CONNECTOR_SERVICE_CONTRACT.applyUpdatePath;
+      throw new EncompassConnectorError(
+        writeOutcomeUnknown ? 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN' : 'CONNECTOR_SERVICE_UNAVAILABLE',
+        writeOutcomeUnknown
+          ? 'Connector write outcome is unknown and requires reconciliation.'
+          : 'Connector service is temporarily unavailable.',
+        true,
+      );
+    }
     if (!response.ok) {
       let safeCode = `CONNECTOR_SERVICE_FAILED_${response.status}`;
       try {
