@@ -11,6 +11,7 @@
     "lint": "next lint",
     "test": "node --test scripts/*.test.mjs && tsx --test src/server/auth/*.test.ts src/server/audit/*.test.ts src/server/http/*.test.ts src/server/income/*.test.ts src/server/integrations/encompass/*.test.ts src/server/observability/*.test.ts",
     "certify:encompass": "tsx scripts/encompass-certification.ts",
+    "certify:standalone-exports": "tsx scripts/standalone-export-evidence.ts",
     "test:database-isolation": "tsx --test src/server/database/*.integration.test.ts",
     "validate:production-config": "node scripts/production-config.mjs"
   },

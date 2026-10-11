@@ -1,0 +1,79 @@
+{
+  "exportProfile": "freeflow-approved-income-json-v1",
+  "schemaVersion": "freeflow-approved-income-snapshot-v1",
+  "normalizedLoan": {
+    "schemaVersion": "freeflow-normalized-loan-v1",
+    "loanProgram": "CONVENTIONAL",
+    "borrowers": [
+      {
+        "borrowerKey": "borrower-1",
+        "ordinal": 0,
+        "role": "PRIMARY"
+      }
+    ]
+  },
+  "loan": {
+    "id": "00000000-0000-4000-8000-000000000200",
+    "version": 4,
+    "program": "CONVENTIONAL",
+    "integrationMode": "NONE"
+  },
+  "approval": {
+    "eventId": "00000000-0000-4000-8000-000000000400",
+    "calculationId": "00000000-0000-4000-8000-000000000300",
+    "action": "INCOME_APPROVED",
+    "approvedAt": "2026-10-11T08:30:00.000Z",
+    "approvedLoanVersion": 3
+  },
+  "calculation": {
+    "schemaVersion": "authoritative-extractions-v1",
+    "source": "persisted-parser-extractions",
+    "mortgageRuleVersion": "form-1084-v9",
+    "canonicalInputHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceDocumentHashes": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "qualifyingMonthlyIncome": "8000.00",
+    "totalAnnualCashFlow": "96000.00",
+    "trendingResult": "SINGLE_YEAR",
+    "yearsAnalyzed": [
+      2025
+    ],
+    "components": {
+      "w2BaseMonthly": "8000.00",
+      "w2VariableMonthly": null,
+      "scheduleCMonthly": null,
+      "scheduleFMonthly": null,
+      "form1120SMonthly": null,
+      "form1065Monthly": null,
+      "form1120Monthly": null,
+      "assetIncomeMonthly": null,
+      "rentalMonthly": null,
+      "rentalLiabilityMonthly": null,
+      "housingExpenseAdjustment": null
+    },
+    "borrowers": [
+      {
+        "borrowerKey": "borrower-1",
+        "ordinal": 0,
+        "role": "PRIMARY",
+        "qualifyingMonthlyIncome": "8000.00"
+      }
+    ]
+  },
+  "provenance": {
+    "extractions": [
+      {
+        "extractionId": "00000000-0000-4000-8000-000000000500",
+        "extractionHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sourceDocumentId": "00000000-0000-4000-8000-000000000600",
+        "sourceDocumentVersion": 1,
+        "sourceContentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "metadataReviewId": null,
+        "metadataReviewVersion": null,
+        "metadataReviewHash": null
+      }
+    ]
+  },
+  "snapshotHash": "0719f460abc4c4c4f24f61e86330107a05b9770d29f5c45e8588edb725131fb5"
+}
