@@ -20,7 +20,7 @@ export type SyncWorkerDependencies = Readonly<{
   claim(message: EncompassSyncQueueMessage): Promise<ClaimedSync | null>;
   apply(job: ClaimedSync): Promise<EncompassWriteResult>;
   readFields(job: ClaimedSync): Promise<Readonly<Record<string, string>>>;
-  succeed(job: ClaimedSync, providerRevision: string | undefined, readback: EncompassFieldReadbackReport): Promise<void>;
+  succeed(job: ClaimedSync, providerRevision: string | undefined, readback: EncompassFieldReadbackReport): Promise<boolean>;
   retry(job: ClaimedSync, safeCode: string): Promise<void>;
   reconcile(job: ClaimedSync, safeCode: string): Promise<void>;
   fail(job: ClaimedSync, safeCode: string, readback?: EncompassFieldReadbackReport): Promise<void>;
@@ -38,8 +38,7 @@ export async function runEncompassSyncJob(
       const actualFields = await dependencies.readFields(job);
       const readback = compareEncompassFieldReadback(job.fields, actualFields);
       if (readback.allSucceeded) {
-        await dependencies.succeed(job, undefined, readback);
-        return 'SUCCEEDED';
+        return await dependencies.succeed(job, undefined, readback) ? 'SUCCEEDED' : 'FAILED';
       }
       await dependencies.fail(job, readbackSafeCode(readback), readback);
       return 'FAILED';
@@ -71,8 +70,7 @@ export async function runEncompassSyncJob(
       await dependencies.fail(job, readbackSafeCode(readback), readback);
       return 'FAILED';
     }
-    await dependencies.succeed(job, result.providerRevision, readback);
-    return 'SUCCEEDED';
+    return await dependencies.succeed(job, result.providerRevision, readback) ? 'SUCCEEDED' : 'FAILED';
   } catch (error) {
     if (error instanceof EncompassConnectorError
       && (error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN' || error.retryable)) {

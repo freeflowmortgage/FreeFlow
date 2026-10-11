@@ -429,10 +429,37 @@ BEGIN
 END
 $sync_preview_constraint$;
 
+DO $sync_v2_target_constraint$
+BEGIN
+  BEGIN
+    INSERT INTO "encompass_sync_jobs" (
+      "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+      "expectedLoanVersion", "idempotencyKey", "correlationId",
+      "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields", "updatedAt"
+    ) VALUES (
+      '31313131-3131-4131-8131-313131313131',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      '17171717-1717-4171-8171-171717171717',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      2, 'sync-target-invalid-01', 'sync-target-invalid',
+      'encompass-write-preview-v2', repeat('b', 64),
+      '[{"fieldName":"CX.FREEFLOW.APPROVAL.ID","value":"17171717-1717-4171-8171-171717171717"}]'::jsonb,
+      now()
+    );
+    RAISE EXCEPTION 'A v2 Encompass write preview without an exact target was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END
+$sync_v2_target_constraint$;
+
 INSERT INTO "encompass_sync_jobs" (
   "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
   "expectedLoanVersion", "idempotencyKey", "correlationId",
-  "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields", "updatedAt"
+  "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields",
+  "writeTargetIntegrationMode", "writeTargetLenderId", "writeTargetDeploymentId",
+  "writeTargetEncompassGuid", "updatedAt"
 ) VALUES (
   '31313131-3131-4131-8131-313131313131',
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -440,8 +467,9 @@ INSERT INTO "encompass_sync_jobs" (
   '17171717-1717-4171-8171-171717171717',
   'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   2, 'sync-preview-sql-key-01', 'sync-preview-request',
-  'encompass-write-preview-v1', repeat('b', 64),
+  'encompass-write-preview-v2', repeat('b', 64),
   '[{"fieldName":"CX.FREEFLOW.APPROVAL.ID","value":"17171717-1717-4171-8171-171717171717"}]'::jsonb,
+  'CUSTOM_CONNECTOR', 'synthetic-lender', 'synthetic-deployment', 'synthetic-encompass-guid',
   now()
 );
 

@@ -2,11 +2,11 @@ import type { Prisma } from '@prisma/client';
 import {
   buildEncompassWritePreview,
   type EncompassFieldWrite,
-  type EncompassWritePreview,
 } from '@mortgage-pos/encompass-connector-contract';
 import type { RequestContext } from '../../auth/requestContext';
 import { AUDIT_ACTIONS } from '../../audit/appendEvent';
 import { ApiError } from '../../http/apiError';
+import { hashCanonical } from '../../http/canonical';
 import { hasCurrentCalculationExtractions } from '../../income/extractionFreshness';
 import { approvedHostFields } from './hostWrite';
 import {
@@ -16,8 +16,23 @@ import {
   type LenderFieldMappingConfiguration,
 } from './lenderFieldMapping';
 
-export const ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION = 'encompass-write-preview-v1' as const;
+export const ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION = 'encompass-write-preview-v2' as const;
 const SHA_256 = /^[0-9a-f]{64}$/;
+
+export type EncompassSyncTarget = Readonly<{
+  integrationMode: 'CUSTOM_CONNECTOR';
+  lenderId: string;
+  deploymentId: string;
+  encompassLoanGuid: string;
+}>;
+
+export type EncompassSyncPreview = Readonly<{
+  schemaVersion: typeof ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION;
+  approvalEventId: string;
+  target: EncompassSyncTarget;
+  previewHash: string;
+  fields: ReadonlyArray<EncompassFieldWrite>;
+}>;
 
 export type SyncPreviewConfiguration = Readonly<{
   appOrigin: string;
@@ -56,13 +71,16 @@ export async function loadApprovedEncompassSyncPreview(
   context: RequestContext,
   input: Readonly<{ loanId: string; approvalEventId: string; expectedLoanVersion: number }>,
   configuration: SyncPreviewConfiguration,
-): Promise<EncompassWritePreview> {
+): Promise<EncompassSyncPreview> {
   const loan = await transaction.loanApplication.findFirst({
     where: { id: input.loanId, tenantId: context.tenantId },
-    select: { id: true, version: true, encompassGuid: true },
+    select: { id: true, version: true, encompassGuid: true, encompassIntegrationMode: true },
   });
   if (!loan) throw new ApiError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
   if (loan.version !== input.expectedLoanVersion) throw new ApiError(409, 'STALE_APPROVAL', 'The approved loan state is stale.');
+  if (loan.encompassIntegrationMode !== 'CUSTOM_CONNECTOR') {
+    throw new ApiError(422, 'ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED', 'The loan is not authorized for custom connector synchronization.');
+  }
   if (!loan.encompassGuid) throw new ApiError(422, 'ENCOMPASS_LOAN_NOT_LINKED', 'The loan is not linked to Encompass.');
 
   const configurationRow = await transaction.tenantConfiguration.findFirst({
@@ -156,9 +174,42 @@ export async function loadApprovedEncompassSyncPreview(
     borrowerIncome: calculation.borrowerIncome,
     auditUrl: `${configuration.appOrigin}/audit/${approval.id}`,
   }, { fieldMapOverrides });
-  return buildEncompassWritePreview({
+  return buildTargetBoundEncompassSyncPreview({
     approvalEventId: approval.id,
     fields: Object.entries(fieldMap).map(([fieldName, value]) => ({ fieldName, value })),
+    target: {
+      integrationMode: 'CUSTOM_CONNECTOR',
+      lenderId: binding.lenderId,
+      deploymentId: binding.deploymentId,
+      encompassLoanGuid: loan.encompassGuid,
+    },
+  });
+}
+
+/**
+ * Binds reviewer approval to both the exact sorted field set and the exact
+ * server-authoritative Encompass target. The v1 connector-contract preview is
+ * used for field validation and canonical ordering only.
+ */
+export function buildTargetBoundEncompassSyncPreview(input: Readonly<{
+  approvalEventId: string;
+  fields: ReadonlyArray<EncompassFieldWrite>;
+  target: EncompassSyncTarget;
+}>): EncompassSyncPreview {
+  const fieldPreview = buildEncompassWritePreview({
+    approvalEventId: input.approvalEventId,
+    fields: input.fields,
+  });
+  const target = validateTarget(input.target);
+  const canonical = {
+    schemaVersion: ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION,
+    approvalEventId: fieldPreview.approvalEventId,
+    target,
+    fields: fieldPreview.fields,
+  };
+  return Object.freeze({
+    ...canonical,
+    previewHash: hashCanonical(canonical),
   });
 }
 
@@ -168,7 +219,13 @@ export function restorePersistedEncompassSyncPreview(input: Readonly<{
   previewHash: string | null;
   approvalEventId: string;
   fields: unknown;
-}>): EncompassWritePreview | null {
+  target: Readonly<{
+    integrationMode: string | null;
+    lenderId: string | null;
+    deploymentId: string | null;
+    encompassLoanGuid: string | null;
+  }>;
+}>): EncompassSyncPreview | null {
   if (
     input.schemaVersion !== ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION
     || typeof input.previewHash !== 'string'
@@ -183,11 +240,39 @@ export function restorePersistedEncompassSyncPreview(input: Readonly<{
       }
       return { fieldName: field.fieldName, value: field.value };
     });
-    const rebuilt = buildEncompassWritePreview({ approvalEventId: input.approvalEventId, fields });
+    if (input.target.integrationMode !== 'CUSTOM_CONNECTOR'
+      || !input.target.lenderId || !input.target.deploymentId || !input.target.encompassLoanGuid) return null;
+    const rebuilt = buildTargetBoundEncompassSyncPreview({
+      approvalEventId: input.approvalEventId,
+      fields,
+      target: {
+        integrationMode: input.target.integrationMode,
+        lenderId: input.target.lenderId,
+        deploymentId: input.target.deploymentId,
+        encompassLoanGuid: input.target.encompassLoanGuid,
+      },
+    });
     return rebuilt.previewHash === input.previewHash ? rebuilt : null;
   } catch {
     return null;
   }
+}
+
+function validateTarget(target: EncompassSyncTarget): EncompassSyncTarget {
+  if (target.integrationMode !== 'CUSTOM_CONNECTOR') {
+    throw new Error('Invalid Encompass write target.');
+  }
+  if ([target.lenderId, target.deploymentId, target.encompassLoanGuid].some(
+    (value) => typeof value !== 'string' || value.length < 1 || value.length > 255 || value.trim() !== value,
+  )) {
+    throw new Error('Invalid Encompass write target.');
+  }
+  return Object.freeze({
+    integrationMode: target.integrationMode,
+    lenderId: target.lenderId,
+    deploymentId: target.deploymentId,
+    encompassLoanGuid: target.encompassLoanGuid,
+  });
 }
 
 function numberOrUndefined(value: Prisma.Decimal | null): number | undefined { return value?.toNumber(); }

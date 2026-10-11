@@ -22,7 +22,7 @@ function dependencies(overrides: Partial<SyncWorkerDependencies> = {}): SyncWork
     claim: async () => claimed,
     apply: async () => ({}),
     readFields: async (job) => Object.fromEntries(job.fields.map((field) => [field.fieldName, field.value])),
-    succeed: async () => {},
+    succeed: async () => true,
     retry: async () => {},
     reconcile: async () => {},
     fail: async () => {},
@@ -49,11 +49,22 @@ test('successful apply records one external effect and final success', async () 
       succeeded += 1;
       assert.equal(revision, 'revision');
       assert.equal(readback.allSucceeded, true);
+      return true;
     },
   }));
   assert.equal(result, 'SUCCEEDED');
   assert.equal(writes, 1);
   assert.equal(succeeded, 1);
+});
+
+test('a post-effect freshness rejection is reported as failed, never successful', async () => {
+  let writes = 0;
+  const result = await runEncompassSyncJob(message, dependencies({
+    apply: async () => { writes += 1; return {}; },
+    succeed: async () => false,
+  }));
+  assert.equal(writes, 1);
+  assert.equal(result, 'FAILED');
 });
 
 test('provider 5xx enters reconciliation while validation 4xx is terminal', async () => {

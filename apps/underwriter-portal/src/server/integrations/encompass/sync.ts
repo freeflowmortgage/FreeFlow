@@ -6,6 +6,7 @@ import { resolveIdempotencyKey, storeIdempotencyResult } from '../../audit/idemp
 import { ApiError } from '../../http/apiError';
 import { hashCanonical } from '../../http/canonical';
 import {
+  ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION,
   loadApprovedEncompassSyncPreview,
   type SyncPreviewConfiguration,
 } from './syncPreview';
@@ -45,13 +46,29 @@ export async function createEncompassSyncJob(
       where: { id: idempotency.stored.responseReference, tenantId: context.tenantId, loanId: input.loanId },
       select: {
         id: true, status: true, expectedLoanVersion: true, correlationId: true,
-        writePreviewHash: true,
+        writePreviewSchemaVersion: true, writePreviewHash: true,
+        writeTargetIntegrationMode: true, writeTargetLenderId: true,
+        writeTargetDeploymentId: true, writeTargetEncompassGuid: true,
       },
     });
-    if (!existing || existing.writePreviewHash !== input.previewHash) {
+    if (!existing
+      || existing.writePreviewSchemaVersion !== ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION
+      || existing.writePreviewHash !== input.previewHash
+      || existing.writeTargetIntegrationMode !== 'CUSTOM_CONNECTOR'
+      || !existing.writeTargetLenderId
+      || !existing.writeTargetDeploymentId
+      || !existing.writeTargetEncompassGuid) {
       throw new ApiError(409, 'IDEMPOTENCY_STATE_INVALID', 'The stored sync state is unavailable.');
     }
-    const { writePreviewHash: _writePreviewHash, ...safeExisting } = existing;
+    const {
+      writePreviewSchemaVersion: _writePreviewSchemaVersion,
+      writePreviewHash: _writePreviewHash,
+      writeTargetIntegrationMode: _writeTargetIntegrationMode,
+      writeTargetLenderId: _writeTargetLenderId,
+      writeTargetDeploymentId: _writeTargetDeploymentId,
+      writeTargetEncompassGuid: _writeTargetEncompassGuid,
+      ...safeExisting
+    } = existing;
     return { ...safeExisting, replayed: true };
   }
 
@@ -72,6 +89,10 @@ export async function createEncompassSyncJob(
       writePreviewSchemaVersion: preview.schemaVersion,
       writePreviewHash: preview.previewHash,
       writePreviewFields: preview.fields as unknown as Prisma.InputJsonValue,
+      writeTargetIntegrationMode: preview.target.integrationMode,
+      writeTargetLenderId: preview.target.lenderId,
+      writeTargetDeploymentId: preview.target.deploymentId,
+      writeTargetEncompassGuid: preview.target.encompassLoanGuid,
     },
     select: { id: true, status: true, expectedLoanVersion: true, correlationId: true },
   });

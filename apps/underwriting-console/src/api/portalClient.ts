@@ -64,7 +64,10 @@ export const portalClient = {
     request(`/api/v1/loans/${encodeURIComponent(loanId)}/income-approvals`, { method: 'POST', body, idempotencyKey }),
   previewSync: (loanId: string, body: { approvalEventId: string; expectedLoanVersion: number }) =>
     request<{
-      schemaVersion: 'encompass-write-preview-v1'; approvalEventId: string; previewHash: string;
+      schemaVersion: 'encompass-write-preview-v2'; approvalEventId: string; previewHash: string;
+      target: Readonly<{
+        integrationMode: 'CUSTOM_CONNECTOR'; lenderId: string; deploymentId: string; encompassLoanGuid: string;
+      }>;
       fields: ReadonlyArray<{ fieldName: string; value: string }>;
     }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-sync-preview`, { method: 'POST', body }),
   createSync: (loanId: string, body: { approvalEventId: string; expectedLoanVersion: number; previewHash: string }, idempotencyKey: string) =>

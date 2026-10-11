@@ -611,6 +611,12 @@ model EncompassSyncJob {
   writePreviewSchemaVersion String?        @db.VarChar(64)
   writePreviewHash          String?        @db.Char(64)
   writePreviewFields        Json?
+  // Exact server-authoritative target approved with the v2 preview. Legacy v1
+  // rows remain null and are rejected by the worker rather than retargeted.
+  writeTargetIntegrationMode EncompassIntegrationMode?
+  writeTargetLenderId        String?        @db.VarChar(255)
+  writeTargetDeploymentId    String?        @db.VarChar(255)
+  writeTargetEncompassGuid   String?        @db.VarChar(255)
   // Allowlisted field IDs and closed status/reason codes only; no field values or value-derived hashes.
   // Raw LOS field values and provider messages are forbidden.
   fieldReadback       Json?

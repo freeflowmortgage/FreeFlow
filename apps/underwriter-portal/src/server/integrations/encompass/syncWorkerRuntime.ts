@@ -1,5 +1,5 @@
 import { ChangeMessageVisibilityCommand, DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
-import { Prisma } from '@prisma/client';
+import { Prisma, type EncompassSyncStatus } from '@prisma/client';
 import {
   CustomConnectorAdapter,
   type EncompassConnector,
@@ -13,20 +13,25 @@ import type { EncompassSyncQueueMessage } from './sync';
 import { runEncompassSyncJob, type ClaimedSync, type SyncWorkerDependencies } from './syncWorker';
 import { emitOperationalEvent } from '../../observability/operationalEvents';
 import { sanitizeFieldReadback } from './fieldReadback';
-import { restorePersistedEncompassSyncPreview } from './syncPreview';
+import { restorePersistedEncompassSyncPreview, type EncompassSyncTarget } from './syncPreview';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
 const MAX_ATTEMPTS = 5;
 const MAX_RECONCILIATIONS = 5;
+export const STALE_SYNC_CLAIM_MS = 15 * 60_000;
+export const SYNC_MESSAGE_VISIBILITY_SECONDS = 20 * 60;
 
 type RuntimeClaim = ClaimedSync & Readonly<{
   encompassLoanGuid: string;
   requestedByUserId: string;
   correlationId: string;
   expectedLoanVersion: number;
+  target: EncompassSyncTarget;
   connector: EncompassConnector;
 }>;
+
+type ClaimFailure = Readonly<{ kind: 'FAILED'; safeErrorCode: string }>;
 
 export type SyncRuntimeInfrastructure = Readonly<{
   withTransaction<T>(operation: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T>;
@@ -61,9 +66,10 @@ export function createSyncRuntimeDependencies(
   const signingKey = required(environment.ENCOMPASS_CONNECTOR_SIGNING_KEY, 'ENCOMPASS_CONNECTOR_SIGNING_KEY');
 
   return {
-    claim: async (message) => infrastructure.withTransaction(async (transaction) => {
-      await infrastructure.setTenantContext(transaction, { tenantId: message.tenantId, principalId: WORKER_PRINCIPAL_ID });
-      const record = await transaction.encompassSyncJob.findFirst({
+    claim: async (message) => {
+      const outcome = await infrastructure.withTransaction<RuntimeClaim | ClaimFailure | null>(async (transaction) => {
+        await infrastructure.setTenantContext(transaction, { tenantId: message.tenantId, principalId: WORKER_PRINCIPAL_ID });
+        const record = await transaction.encompassSyncJob.findFirst({
         where: {
           id: message.jobId, tenantId: message.tenantId, loanId: message.loanId,
           approvalEventId: message.approvalEventId, expectedLoanVersion: message.expectedLoanVersion,
@@ -76,7 +82,9 @@ export function createSyncRuntimeDependencies(
           requestedByUserId: true, correlationId: true,
           expectedLoanVersion: true,
           writePreviewSchemaVersion: true, writePreviewHash: true, writePreviewFields: true,
-          loanApplication: { select: { version: true, encompassGuid: true } },
+          writeTargetIntegrationMode: true, writeTargetLenderId: true,
+          writeTargetDeploymentId: true, writeTargetEncompassGuid: true,
+          loanApplication: { select: { version: true, encompassGuid: true, encompassIntegrationMode: true } },
           approvalEvent: { select: { action: true, entityType: true, entityId: true, expectedLoanVersion: true } },
           tenant: { select: {
             configurations: { select: { enableEncompassSync: true } },
@@ -86,38 +94,40 @@ export function createSyncRuntimeDependencies(
       });
       if (!record) return null;
       const staleInProgress = record.status === 'IN_PROGRESS'
-        && Boolean(record.startedAt && record.startedAt.getTime() < Date.now() - 15 * 60_000);
+        && Boolean(record.startedAt && record.startedAt.getTime() < Date.now() - STALE_SYNC_CLAIM_MS);
       if (record.status === 'IN_PROGRESS' && !staleInProgress) return null;
       if (record.loanApplication.version !== message.expectedLoanVersion
         || record.approvalEvent.expectedLoanVersion + 1 !== message.expectedLoanVersion
         || record.approvalEvent.entityType !== 'FORM_1084_AUDIT'
         || !['INCOME_APPROVED', 'INCOME_OVERRIDE'].includes(record.approvalEvent.action)) {
-        await transaction.encompassSyncJob.updateMany({
-          where: { id: record.id, tenantId: record.tenantId },
-          data: { status: 'FAILED', safeErrorCode: 'STALE_APPROVAL', completedAt: new Date() },
-        });
-        return null;
+        return failClaim(transaction, record, 'STALE_APPROVAL');
+      }
+      if (record.loanApplication.encompassIntegrationMode !== 'CUSTOM_CONNECTOR') {
+        return failClaim(transaction, record, 'ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED');
       }
       const binding = record.tenant.encompassConnectorBinding;
       if (!record.tenant.configurations?.enableEncompassSync || !binding?.isEnabled || !record.loanApplication.encompassGuid) {
-        await transaction.encompassSyncJob.updateMany({
-          where: { id: record.id, tenantId: record.tenantId },
-          data: { status: 'FAILED', safeErrorCode: 'ENCOMPASS_BINDING_UNAVAILABLE', completedAt: new Date() },
-        });
-        return null;
+        return failClaim(transaction, record, 'ENCOMPASS_BINDING_UNAVAILABLE');
       }
       const preview = restorePersistedEncompassSyncPreview({
         schemaVersion: record.writePreviewSchemaVersion,
         previewHash: record.writePreviewHash,
         approvalEventId: record.approvalEventId,
         fields: record.writePreviewFields,
+        target: {
+          integrationMode: record.writeTargetIntegrationMode,
+          lenderId: record.writeTargetLenderId,
+          deploymentId: record.writeTargetDeploymentId,
+          encompassLoanGuid: record.writeTargetEncompassGuid,
+        },
       });
       if (!preview) {
-        await transaction.encompassSyncJob.updateMany({
-          where: { id: record.id, tenantId: record.tenantId },
-          data: { status: 'FAILED', safeErrorCode: 'ENCOMPASS_WRITE_PREVIEW_INVALID', completedAt: new Date() },
-        });
-        return null;
+        return failClaim(transaction, record, 'ENCOMPASS_WRITE_PREVIEW_INVALID');
+      }
+      if (preview.target.lenderId !== binding.lenderId
+        || preview.target.deploymentId !== binding.deploymentId
+        || preview.target.encompassLoanGuid !== record.loanApplication.encompassGuid) {
+        return failClaim(transaction, record, 'ENCOMPASS_WRITE_TARGET_CHANGED');
       }
       const calculation = await transaction.form1084Audit.findFirst({
         where: {
@@ -138,30 +148,18 @@ export function createSyncRuntimeDependencies(
         },
       });
       if (!calculation || !hasCurrentCalculationExtractions(calculation.extractionBindings)) {
-        await transaction.encompassSyncJob.updateMany({
-          where: { id: record.id, tenantId: record.tenantId },
-          data: {
-            status: 'FAILED',
-            safeErrorCode: calculation ? 'STALE_APPROVAL_EXTRACTION' : 'APPROVED_CALCULATION_UNAVAILABLE',
-            completedAt: new Date(),
-          },
-        });
-        return null;
+        return failClaim(
+          transaction,
+          record,
+          calculation ? 'STALE_APPROVAL_EXTRACTION' : 'APPROVED_CALCULATION_UNAVAILABLE',
+        );
       }
       const mode = record.status === 'RECONCILING' || staleInProgress ? 'RECONCILE' : 'APPLY';
       if (mode === 'APPLY' && record.attemptCount >= MAX_ATTEMPTS) {
-        await transaction.encompassSyncJob.updateMany({
-          where: { id: record.id, tenantId: record.tenantId },
-          data: { status: 'FAILED', safeErrorCode: 'SYNC_RETRY_LIMIT_REACHED', completedAt: new Date() },
-        });
-        return null;
+        return failClaim(transaction, record, 'SYNC_RETRY_LIMIT_REACHED');
       }
       if (mode === 'RECONCILE' && record.reconciliationCount >= MAX_RECONCILIATIONS) {
-        await transaction.encompassSyncJob.updateMany({
-          where: { id: record.id, tenantId: record.tenantId },
-          data: { status: 'FAILED', safeErrorCode: 'SYNC_RECONCILIATION_LIMIT_REACHED', completedAt: new Date() },
-        });
-        return null;
+        return failClaim(transaction, record, 'SYNC_RECONCILIATION_LIMIT_REACHED');
       }
       const claimed = await transaction.encompassSyncJob.updateMany({
         where: { id: record.id, tenantId: record.tenantId, status: record.status },
@@ -173,18 +171,26 @@ export function createSyncRuntimeDependencies(
       return {
         jobId: record.id, tenantId: record.tenantId, loanId: record.loanId,
         approvalEventId: record.approvalEventId, mode, fields: preview.fields,
-        encompassLoanGuid: record.loanApplication.encompassGuid,
+        encompassLoanGuid: preview.target.encompassLoanGuid,
         requestedByUserId: record.requestedByUserId, correlationId: record.correlationId,
         expectedLoanVersion: record.expectedLoanVersion,
+        target: preview.target,
         connector: infrastructure.createConnector({
-          lenderId: binding.lenderId,
-          deploymentId: binding.deploymentId,
+          lenderId: preview.target.lenderId,
+          deploymentId: preview.target.deploymentId,
           serviceBaseUrl,
           serviceId,
           signingKey,
         }),
       } satisfies RuntimeClaim;
-    }),
+      });
+      if (!outcome) return null;
+      if ('kind' in outcome) {
+        emitOperationalEvent('sync_failure', outcome.safeErrorCode);
+        return null;
+      }
+      return outcome;
+    },
     apply: async (job) => {
       const runtime = job as RuntimeClaim;
       return runtime.connector.applyApprovedIncomeUpdate(contextFor(runtime), runtime.encompassLoanGuid, {
@@ -210,14 +216,16 @@ export function createSyncRuntimeDependencies(
     ),
     retry: async (job, safeCode) => updateState(job as RuntimeClaim, 'RETRYABLE_FAILURE', safeCode, infrastructure),
     reconcile: async (job, safeCode) => updateState(job as RuntimeClaim, 'RECONCILING', safeCode, infrastructure),
-    fail: async (job, safeCode, readback) => finalize(
-      job as RuntimeClaim,
-      infrastructure,
-      'FAILED',
-      safeCode,
-      undefined,
-      readback,
-    ),
+    fail: async (job, safeCode, readback) => {
+      await finalize(
+        job as RuntimeClaim,
+        infrastructure,
+        'FAILED',
+        safeCode,
+        undefined,
+        readback,
+      );
+    },
   };
 }
 
@@ -230,7 +238,8 @@ export async function runSyncQueueWorker(environment: NodeJS.ProcessEnv = proces
   process.once('SIGINT', () => { stopping = true; });
   while (!stopping) {
     const response = await sqs.send(new ReceiveMessageCommand({
-      QueueUrl: queueUrl, MaxNumberOfMessages: 1, WaitTimeSeconds: 20, VisibilityTimeout: 300,
+      QueueUrl: queueUrl, MaxNumberOfMessages: 1, WaitTimeSeconds: 20,
+      VisibilityTimeout: SYNC_MESSAGE_VISIBILITY_SECONDS,
       MessageSystemAttributeNames: ['ApproximateReceiveCount'],
     }));
     for (const item of response.Messages ?? []) {
@@ -271,6 +280,45 @@ function parseMessage(body: string): EncompassSyncQueueMessage {
   return value as EncompassSyncQueueMessage;
 }
 
+async function failClaim(
+  transaction: Prisma.TransactionClient,
+  record: Readonly<{
+    id: string;
+    tenantId: string;
+    loanId: string;
+    approvalEventId: string;
+    requestedByUserId: string;
+    correlationId: string;
+    expectedLoanVersion: number;
+    status: EncompassSyncStatus;
+  }>,
+  safeErrorCode: string,
+): Promise<ClaimFailure | null> {
+  const failed = await transaction.encompassSyncJob.updateMany({
+    where: { id: record.id, tenantId: record.tenantId, status: record.status },
+    data: { status: 'FAILED', safeErrorCode, completedAt: new Date() },
+  });
+  if (failed.count !== 1) return null;
+  const context = workerContext(record);
+  await appendAuditEvent(transaction, context, {
+    loanId: record.loanId,
+    entityType: 'ENCOMPASS_SYNC_JOB',
+    entityId: record.id,
+    expectedLoanVersion: record.expectedLoanVersion,
+    action: AUDIT_ACTIONS.ENCOMPASS_SYNC_FAILED,
+    reasonCode: safeErrorCode,
+    ruleVersion: 'encompass-sync-v1',
+    schemaVersion: 'audit-event-v1',
+    resultHash: hashAuditResult({
+      jobId: record.id,
+      approvalEventId: record.approvalEventId,
+      status: 'FAILED',
+      safeErrorCode,
+    }),
+  });
+  return { kind: 'FAILED', safeErrorCode };
+}
+
 async function updateState(
   job: RuntimeClaim,
   status: 'RETRYABLE_FAILURE' | 'RECONCILING',
@@ -294,54 +342,109 @@ async function finalize(
   safeErrorCode?: string,
   providerRevision?: string,
   readback?: EncompassFieldReadbackReport,
-) {
+): Promise<boolean> {
   const fieldReadback = readback ? sanitizeFieldReadback(readback, {
     allowedFieldNames: new Set(job.fields.map((field) => field.fieldName)),
     expectedOutcome: status,
   }) : undefined;
-  await infrastructure.withTransaction(async (transaction) => {
+  const outcome = await infrastructure.withTransaction(async (transaction) => {
     await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+    let finalStatus = status;
+    let finalSafeErrorCode = safeErrorCode;
+
+    if (status === 'SUCCEEDED') {
+      const configuration = await transaction.tenantConfiguration.findFirst({
+        where: { tenantId: job.tenantId },
+        select: { enableEncompassSync: true },
+      });
+      const binding = await transaction.encompassConnectorBinding.findFirst({
+        where: {
+          tenantId: job.tenantId,
+          isEnabled: true,
+          lenderId: job.target.lenderId,
+          deploymentId: job.target.deploymentId,
+        },
+        select: { id: true },
+      });
+      if (!configuration?.enableEncompassSync || !binding) {
+        finalStatus = 'FAILED';
+        finalSafeErrorCode = 'ENCOMPASS_WRITE_TARGET_CHANGED_AFTER_WRITE';
+      } else {
+        // This conditional UPDATE is the freshness check and row lock. A loan
+        // mutation committed before or racing this statement makes count zero.
+        const loanUpdated = await transaction.loanApplication.updateMany({
+          where: {
+            id: job.loanId,
+            tenantId: job.tenantId,
+            version: job.expectedLoanVersion,
+            encompassGuid: job.target.encompassLoanGuid,
+            encompassIntegrationMode: job.target.integrationMode,
+          },
+          data: { status: 'EXPORTED_TO_LOS' },
+        });
+        if (loanUpdated.count !== 1) {
+          finalStatus = 'FAILED';
+          finalSafeErrorCode = 'STALE_APPROVAL_AFTER_WRITE';
+        }
+      }
+    }
+
     const updated = await transaction.encompassSyncJob.updateMany({
       where: { id: job.jobId, tenantId: job.tenantId, status: { in: ['IN_PROGRESS', 'RECONCILING'] } },
       data: {
-        status,
-        safeErrorCode: safeErrorCode ?? null,
+        status: finalStatus,
+        safeErrorCode: finalSafeErrorCode ?? null,
         providerRevision,
         ...(fieldReadback ? { fieldReadback: fieldReadback as Prisma.InputJsonValue } : {}),
         completedAt: new Date(),
       },
     });
-    if (updated.count !== 1) return;
-    const context: RequestContext = Object.freeze({
-      requestId: job.correlationId, subject: 'encompass-sync-worker', tenantId: job.tenantId,
-      membershipId: job.requestedByUserId, permissions: ['encompass:sync'] as const, authTime: new Date(),
-    });
+    if (updated.count !== 1) {
+      // Roll back a preceding loan status update instead of committing an
+      // unowned terminal transition.
+      if (status === 'SUCCEEDED' && finalStatus === 'SUCCEEDED') throw new Error('SYNC_FINAL_STATE_CONFLICT');
+      return { transitioned: false, status: finalStatus, safeErrorCode: finalSafeErrorCode };
+    }
+    const context = workerContext(job);
     await appendAuditEvent(transaction, context, {
       loanId: job.loanId, entityType: 'ENCOMPASS_SYNC_JOB', entityId: job.jobId,
       expectedLoanVersion: job.expectedLoanVersion,
-      action: status === 'SUCCEEDED' ? AUDIT_ACTIONS.ENCOMPASS_SYNC_SUCCEEDED : AUDIT_ACTIONS.ENCOMPASS_SYNC_FAILED,
-      reasonCode: status === 'SUCCEEDED' ? 'PROVIDER_WRITE_CONFIRMED' : (safeErrorCode ?? 'SYNC_FAILED'),
+      action: finalStatus === 'SUCCEEDED' ? AUDIT_ACTIONS.ENCOMPASS_SYNC_SUCCEEDED : AUDIT_ACTIONS.ENCOMPASS_SYNC_FAILED,
+      reasonCode: finalStatus === 'SUCCEEDED' ? 'PROVIDER_WRITE_CONFIRMED' : (finalSafeErrorCode ?? 'SYNC_FAILED'),
       ruleVersion: 'encompass-sync-v1', schemaVersion: 'audit-event-v1',
       resultHash: hashAuditResult({
         jobId: job.jobId,
         approvalEventId: job.approvalEventId,
-        status,
-        safeErrorCode: safeErrorCode ?? null,
+        status: finalStatus,
+        safeErrorCode: finalSafeErrorCode ?? null,
         fieldReadback: fieldReadback ?? null,
       }),
     });
-    if (status === 'SUCCEEDED') {
-      await transaction.loanApplication.updateMany({
-        where: { id: job.loanId, tenantId: job.tenantId, version: job.expectedLoanVersion },
-        data: { status: 'EXPORTED_TO_LOS' },
-      });
-    }
+    return { transitioned: true, status: finalStatus, safeErrorCode: finalSafeErrorCode };
   });
-  if (status === 'FAILED') emitOperationalEvent('sync_failure', safeErrorCode ?? 'SYNC_FAILED');
+  if (outcome.transitioned && outcome.status === 'FAILED') {
+    emitOperationalEvent('sync_failure', outcome.safeErrorCode ?? 'SYNC_FAILED');
+  }
+  return outcome.transitioned && outcome.status === 'SUCCEEDED';
 }
 
 function contextFor(job: RuntimeClaim) {
   return { tenantId: job.tenantId, loanId: job.loanId, correlationId: job.correlationId };
+}
+
+function workerContext(job: Readonly<{
+  correlationId: string;
+  tenantId: string;
+  requestedByUserId: string;
+}>): RequestContext {
+  return Object.freeze({
+    requestId: job.correlationId,
+    subject: 'encompass-sync-worker',
+    tenantId: job.tenantId,
+    membershipId: job.requestedByUserId,
+    permissions: ['encompass:sync'] as const,
+    authTime: new Date(),
+  });
 }
 
 function required(value: string | undefined, name: string): string {

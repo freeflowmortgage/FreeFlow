@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { buildEncompassWritePreview } from '@mortgage-pos/encompass-connector-contract';
 import type { RequestContext } from '../../auth/requestContext';
 import { parseLenderFieldMappingConfiguration } from './lenderFieldMapping';
+import { buildTargetBoundEncompassSyncPreview } from './syncPreview';
 import { createEncompassSyncPreviewHandler } from './syncPreviewRoute';
 
 const TENANT = '00000000-0000-4000-8000-000000000100';
@@ -33,7 +33,7 @@ test('preview route returns the exact tenant-bound full field set without cachin
   const transaction = {
     loanApplication: { findFirst: async ({ where }: any) => {
       loanTenantScope = where.tenantId;
-      return { id: LOAN, version: 2, encompassGuid: 'synthetic-guid' };
+      return { id: LOAN, version: 2, encompassGuid: 'synthetic-guid', encompassIntegrationMode: 'CUSTOM_CONNECTOR' };
     } },
     tenantConfiguration: { findFirst: async () => ({ enableEncompassSync: true }) },
     encompassConnectorBinding: { findFirst: async () => ({ lenderId: 'lender-a', deploymentId: 'deployment-a' }) },
@@ -75,7 +75,16 @@ test('preview route returns the exact tenant-bound full field set without cachin
   assert.equal(body.approvalEventId, APPROVAL);
   assert.match(body.previewHash, /^[0-9a-f]{64}$/);
   assert.deepEqual(body, {
-    ...buildEncompassWritePreview({ approvalEventId: APPROVAL, fields: body.fields }),
+    ...buildTargetBoundEncompassSyncPreview({
+      approvalEventId: APPROVAL,
+      fields: body.fields,
+      target: {
+        integrationMode: 'CUSTOM_CONNECTOR',
+        lenderId: 'lender-a',
+        deploymentId: 'deployment-a',
+        encompassLoanGuid: 'synthetic-guid',
+      },
+    }),
     requestId: context.requestId,
   });
   const fields = Object.fromEntries(body.fields.map((field: any) => [field.fieldName, field.value]));
@@ -84,6 +93,51 @@ test('preview route returns the exact tenant-bound full field set without cachin
   assert.equal(fields['CX.FREEFLOW.BORROWER.1.INCOME'], '6000.00');
   assert.equal(fields['CX.FREEFLOW.BORROWER.2.INCOME'], '3000.00');
   assert.equal(fields['CX.FREEFLOW.APPROVAL.ID'], APPROVAL);
+});
+
+test('preview route rejects a loan that is not explicitly bound to the custom connector mode', async () => {
+  const transaction = {
+    loanApplication: { findFirst: async () => ({
+      id: LOAN, version: 2, encompassGuid: 'synthetic-guid', encompassIntegrationMode: 'ENCOMPASS_HOSTED',
+    }) },
+  };
+  const handler = createEncompassSyncPreviewHandler({
+    withTenantTransaction: (async (_scope, operation) => operation(transaction as never)) as never,
+    previewConfiguration: () => ({ appOrigin: 'https://freeflow.example' }),
+  });
+  const request = {
+    method: 'POST', query: { loanId: LOAN },
+    body: { approvalEventId: APPROVAL, expectedLoanVersion: 2 },
+  } as unknown as NextApiRequest;
+  const { response, state } = responseRecorder();
+  await handler(request, response, context);
+
+  assert.equal(state.status, 422);
+  assert.equal((state.body as any).error.code, 'ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED');
+});
+
+test('preview hash changes with every authoritative target identity component', () => {
+  const fields = [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: APPROVAL }];
+  const baseTarget = {
+    integrationMode: 'CUSTOM_CONNECTOR' as const,
+    lenderId: 'lender-a',
+    deploymentId: 'deployment-a',
+    encompassLoanGuid: 'synthetic-guid-a',
+  };
+  const base = buildTargetBoundEncompassSyncPreview({ approvalEventId: APPROVAL, fields, target: baseTarget });
+  const hashes = [
+    buildTargetBoundEncompassSyncPreview({
+      approvalEventId: APPROVAL, fields, target: { ...baseTarget, lenderId: 'lender-b' },
+    }).previewHash,
+    buildTargetBoundEncompassSyncPreview({
+      approvalEventId: APPROVAL, fields, target: { ...baseTarget, deploymentId: 'deployment-b' },
+    }).previewHash,
+    buildTargetBoundEncompassSyncPreview({
+      approvalEventId: APPROVAL, fields, target: { ...baseTarget, encompassLoanGuid: 'synthetic-guid-b' },
+    }).previewHash,
+  ];
+
+  assert.equal(new Set([base.previewHash, ...hashes]).size, 4);
 });
 
 function responseRecorder() {
