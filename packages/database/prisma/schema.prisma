@@ -605,6 +605,9 @@ model EncompassSyncJob {
   reconciliationCount Int                 @default(0)
   safeErrorCode       String?             @db.VarChar(100)
   providerRevision    String?             @db.VarChar(100)
+  // Allowlisted field IDs, closed status/reason codes, and value hashes only.
+  // Raw LOS field values and provider messages are forbidden.
+  fieldReadback       Json?
   startedAt           DateTime?           @db.Timestamptz
   completedAt         DateTime?           @db.Timestamptz
   createdAt           DateTime            @default(now()) @db.Timestamptz

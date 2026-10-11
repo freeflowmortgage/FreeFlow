@@ -1,6 +1,11 @@
 import { ChangeMessageVisibilityCommand, DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { Prisma } from '@prisma/client';
-import { CustomConnectorAdapter, EncompassConnectorError, type EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
+import {
+  CustomConnectorAdapter,
+  EncompassConnectorError,
+  type EncompassConnector,
+  type EncompassFieldReadbackReport,
+} from '@mortgage-pos/encompass-connector-contract';
 import { buildEncompassFieldUpdatePayload } from '@mortgage-pos/mortgage-engine';
 import { prisma, setTenantContext } from '../../database/client';
 import { appendAuditEvent, AUDIT_ACTIONS, hashAuditResult } from '../../audit/appendEvent';
@@ -9,6 +14,12 @@ import { hasCurrentCalculationExtractions } from '../../income/extractionFreshne
 import type { EncompassSyncQueueMessage } from './sync';
 import { runEncompassSyncJob, type ClaimedSync, type SyncWorkerDependencies } from './syncWorker';
 import { emitOperationalEvent } from '../../observability/operationalEvents';
+import {
+  LenderFieldMappingConfigurationError,
+  fieldMapForAuthoritativeBinding,
+  parseLenderFieldMappingConfiguration,
+} from './lenderFieldMapping';
+import { sanitizeFieldReadback } from './fieldReadback';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
@@ -28,6 +39,9 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
   const serviceId = required(environment.ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID, 'ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID');
   const signingKey = required(environment.ENCOMPASS_CONNECTOR_SIGNING_KEY, 'ENCOMPASS_CONNECTOR_SIGNING_KEY');
   const appOrigin = required(environment.APP_ORIGIN, 'APP_ORIGIN').replace(/\/$/, '');
+  const lenderFieldMappings = parseLenderFieldMappingConfiguration(
+    environment.ENCOMPASS_LENDER_FIELD_MAPPINGS_JSON,
+  );
 
   return {
     claim: async (message) => prisma.$transaction(async (transaction) => {
@@ -73,6 +87,19 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
         });
         return null;
       }
+      let fieldMapOverrides: ReturnType<typeof fieldMapForAuthoritativeBinding>;
+      try {
+        fieldMapOverrides = fieldMapForAuthoritativeBinding(lenderFieldMappings, binding);
+      } catch (error) {
+        const safeCode = error instanceof LenderFieldMappingConfigurationError
+          ? error.safeCode
+          : 'ENCOMPASS_LENDER_FIELD_MAPPING_INVALID';
+        await transaction.encompassSyncJob.updateMany({
+          where: { id: record.id, tenantId: record.tenantId },
+          data: { status: 'FAILED', safeErrorCode: safeCode, completedAt: new Date() },
+        });
+        return null;
+      }
       const calculation = await transaction.form1084Audit.findFirst({
         where: {
           id: record.approvalEvent.entityId, tenantId: record.tenantId, loanId: record.loanId,
@@ -82,7 +109,7 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
           qualifyingMonthlyIncome: true, trendingResult: true, yearsAnalyzed: true,
           scheduleCMonthlyTotal: true, form1120SMonthlyTotal: true,
           form1065MonthlyTotal: true, form1120MonthlyTotal: true,
-          w2BaseMonthly: true, rentalMonthly: true,
+          w2BaseMonthly: true, w2VariableMonthly: true, assetIncomeMonthly: true, rentalMonthly: true,
           extractionBindings: { select: {
             extractionId: true, extractionHash: true, sourceDocumentId: true,
             sourceDocumentVersion: true, sourceContentHash: true,
@@ -130,10 +157,12 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
         form1065_MonthlyTotal: numberOrUndefined(calculation.form1065MonthlyTotal),
         form1120_MonthlyTotal: numberOrUndefined(calculation.form1120MonthlyTotal),
         w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
+        w2VariableMonthly: numberOrUndefined(calculation.w2VariableMonthly),
+        assetIncomeMonthly: numberOrUndefined(calculation.assetIncomeMonthly),
         rentalMonthly: numberOrUndefined(calculation.rentalMonthly),
         auditUrl: `${appOrigin}/audit/${record.approvalEventId}`,
-      });
-      const fields = [...mapped.customFields.filter((field) => field.fieldName !== 'CX.FREEFLOW.SYNCED.AT'),
+      }, { fieldMapOverrides, includeSyncedAt: false });
+      const fields = [...mapped.customFields,
         { fieldName: APPROVAL_FIELD, value: record.approvalEventId }];
       return {
         jobId: record.id, tenantId: record.tenantId, loanId: record.loanId,
@@ -154,15 +183,30 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
         fields: runtime.fields,
       });
     },
-    readApprovalMarker: async (job) => {
+    readFields: async (job) => {
       const runtime = job as RuntimeClaim;
-      const fields = await runtime.connector.readFields(contextFor(runtime), runtime.encompassLoanGuid, [APPROVAL_FIELD]);
-      return fields[APPROVAL_FIELD];
+      return runtime.connector.readFields(
+        contextFor(runtime),
+        runtime.encompassLoanGuid,
+        runtime.fields.map((field) => field.fieldName),
+      );
     },
-    succeed: async (job, providerRevision) => finalize(job as RuntimeClaim, 'SUCCEEDED', undefined, providerRevision),
+    succeed: async (job, providerRevision, readback) => finalize(
+      job as RuntimeClaim,
+      'SUCCEEDED',
+      undefined,
+      providerRevision,
+      readback,
+    ),
     retry: async (job, safeCode) => updateState(job as RuntimeClaim, 'RETRYABLE_FAILURE', safeCode),
     reconcile: async (job, safeCode) => updateState(job as RuntimeClaim, 'RECONCILING', safeCode),
-    fail: async (job, safeCode) => finalize(job as RuntimeClaim, 'FAILED', safeCode),
+    fail: async (job, safeCode, readback) => finalize(
+      job as RuntimeClaim,
+      'FAILED',
+      safeCode,
+      undefined,
+      readback,
+    ),
   };
 }
 
@@ -227,12 +271,28 @@ async function updateState(job: RuntimeClaim, status: 'RETRYABLE_FAILURE' | 'REC
   emitOperationalEvent(status === 'RETRYABLE_FAILURE' ? 'sync_retry' : 'sync_reconciliation', safeErrorCode);
 }
 
-async function finalize(job: RuntimeClaim, status: 'SUCCEEDED' | 'FAILED', safeErrorCode?: string, providerRevision?: string) {
+async function finalize(
+  job: RuntimeClaim,
+  status: 'SUCCEEDED' | 'FAILED',
+  safeErrorCode?: string,
+  providerRevision?: string,
+  readback?: EncompassFieldReadbackReport,
+) {
+  const fieldReadback = readback ? sanitizeFieldReadback(readback, {
+    allowedFieldNames: new Set(job.fields.map((field) => field.fieldName)),
+    expectedOutcome: status,
+  }) : undefined;
   await prisma.$transaction(async (transaction) => {
     await setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
     const updated = await transaction.encompassSyncJob.updateMany({
       where: { id: job.jobId, tenantId: job.tenantId, status: { in: ['IN_PROGRESS', 'RECONCILING'] } },
-      data: { status, safeErrorCode: safeErrorCode ?? null, providerRevision, completedAt: new Date() },
+      data: {
+        status,
+        safeErrorCode: safeErrorCode ?? null,
+        providerRevision,
+        ...(fieldReadback ? { fieldReadback: fieldReadback as Prisma.InputJsonValue } : {}),
+        completedAt: new Date(),
+      },
     });
     if (updated.count !== 1) return;
     const context: RequestContext = Object.freeze({
@@ -245,7 +305,13 @@ async function finalize(job: RuntimeClaim, status: 'SUCCEEDED' | 'FAILED', safeE
       action: status === 'SUCCEEDED' ? AUDIT_ACTIONS.ENCOMPASS_SYNC_SUCCEEDED : AUDIT_ACTIONS.ENCOMPASS_SYNC_FAILED,
       reasonCode: status === 'SUCCEEDED' ? 'PROVIDER_WRITE_CONFIRMED' : (safeErrorCode ?? 'SYNC_FAILED'),
       ruleVersion: 'encompass-sync-v1', schemaVersion: 'audit-event-v1',
-      resultHash: hashAuditResult({ jobId: job.jobId, approvalEventId: job.approvalEventId, status, safeErrorCode: safeErrorCode ?? null }),
+      resultHash: hashAuditResult({
+        jobId: job.jobId,
+        approvalEventId: job.approvalEventId,
+        status,
+        safeErrorCode: safeErrorCode ?? null,
+        fieldReadback: fieldReadback ?? null,
+      }),
     });
     if (status === 'SUCCEEDED') {
       await transaction.loanApplication.updateMany({
@@ -260,6 +326,7 @@ async function finalize(job: RuntimeClaim, status: 'SUCCEEDED' | 'FAILED', safeE
 function contextFor(job: RuntimeClaim) {
   return { tenantId: job.tenantId, loanId: job.loanId, correlationId: job.correlationId };
 }
+
 function numberOrUndefined(value: Prisma.Decimal | null): number | undefined { return value?.toNumber(); }
 function required(value: string | undefined, name: string): string {
   if (!value?.trim()) throw new Error(`${name} is required.`);

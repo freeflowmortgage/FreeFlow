@@ -5,6 +5,16 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
+  buildEncompassWritePreview,
+  executeApprovedIncomeRoundTrip,
+} from '@mortgage-pos/encompass-connector-contract';
+import {
+  SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+  SYNTHETIC_FREEFLOW_DEV_MORNING_PACK,
+  SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  SyntheticFreeflowDevConnector,
+} from '../../../services/encompass-connector/src/connector/syntheticFreeflowDevConnector';
+import {
   CERTIFICATION_BOUNDARY,
   certificationFixtureManifest,
   runEncompassCertification,
@@ -20,10 +30,12 @@ const defaultOutput = path.join(
 );
 const outputDirectory = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : defaultOutput;
 
+async function main(): Promise<void> {
 const integrated = runEncompassCertification('INTEGRATED_POST_PARSE_PROJECTION');
 const standalone = runEncompassCertification('STANDALONE_POST_PARSE_PROJECTION');
 const fixture = certificationFixtureManifest();
-const executableValidation = validateExecutableClaims(integrated, standalone, fixture);
+const simulatedRoundTrip = await runSyntheticRoundTrip(integrated, fixture);
+const executableValidation = validateExecutableClaims(integrated, standalone, fixture, simulatedRoundTrip);
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' }).trim();
 const sourceRevision = {
   baseCommit: commit,
@@ -33,6 +45,8 @@ const sourceRevision = {
     sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness.ts'),
     sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/encompassCertification.test.ts'),
     sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/fixtures/encompass-certification-v1.json'),
+    sourceFingerprint('services/encompass-connector/src/connector/syntheticFreeflowDevConnector.ts'),
+    sourceFingerprint('packages/encompass-connector-contract/src/roundTrip.ts'),
   ],
 };
 mkdirSync(outputDirectory, { recursive: true });
@@ -49,6 +63,7 @@ const artifacts = new Map<string, string>([
     fields: integrated.encompassFields,
   })],
   ['encompass-in-memory-field-projection.json', json(integrated.beforeAfter)],
+  ['simulated-encompass-round-trip.json', json(simulatedRoundTrip)],
   ['mismo-validation.json', json({
     boundary: CERTIFICATION_BOUNDARY,
     status: 'NOT_IMPLEMENTED',
@@ -66,7 +81,12 @@ const artifacts = new Map<string, string>([
     sourceRevision,
     results: {
       ...executableValidation.results,
-      realEncompassRetrieval: 'BLOCKED',
+      simulatedEncompassLoanRetrieval: 'PASS',
+      simulatedEncompassDocumentRetrieval: 'PASS',
+      simulatedEncompassApprovedWriteReadback: 'PASS',
+      simulatedEncompassPerFieldStatuses: 'PASS',
+      realEncompassLoanRetrieval: 'NOT_IMPLEMENTED',
+      realEncompassDocumentRetrieval: 'BLOCKED',
       realEncompassWriteReadBack: 'BLOCKED',
       approvedCalculationMismoExport: 'NOT_IMPLEMENTED',
       protectedApprovedSummaryExport: 'NOT_IMPLEMENTED',
@@ -78,6 +98,9 @@ const artifacts = new Map<string, string>([
       'PASS results in this artifact are simulator or in-process component results only.',
       'The harness starts with deterministic post-parse, persisted-extraction-shaped data. It links no PDF bytes and does not execute pull, upload, parsing, persistence, or review boundaries.',
       'The in-memory field projection is not connector writeback, readback, or an Encompass installation.',
+      'The simulated connector round trip is deterministic local evidence only and is not verified interoperability with a real Encompass installation.',
+      'The real connector deliberately rejects full-loan retrieval because no lender-approved provider schema/field contract has been implemented.',
+      'The protected sync API remains approval-event gated but does not yet expose a separate reviewer confirmation bound to the exact preview hash.',
       'Executed worker tests showed that arbitrary provider error text can reach operational logs; log redaction is not certified.',
     ],
   })],
@@ -103,6 +126,12 @@ const manifest = {
 writeFileSync(path.join(outputDirectory, 'artifact-manifest.json'), json(manifest), 'utf8');
 assertNoUnexpectedOutputEntries(outputDirectory, allowedOutputNames);
 process.stdout.write(`SIMULATOR_CERTIFICATION_ARTIFACTS=${outputDirectory}\n`);
+}
+
+void main().catch((error: unknown) => {
+  process.stderr.write(`SIMULATOR_CERTIFICATION_FAILED=${error instanceof Error ? error.message : 'unknown'}\n`);
+  process.exitCode = 1;
+});
 
 function json(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -137,6 +166,7 @@ function validateExecutableClaims(
   integrated: ReturnType<typeof runEncompassCertification>,
   standalone: ReturnType<typeof runEncompassCertification>,
   fixture: ReturnType<typeof certificationFixtureManifest>,
+  simulatedRoundTrip: Awaited<ReturnType<typeof runSyntheticRoundTrip>>,
 ) {
   assert.equal(integrated.boundary, CERTIFICATION_BOUNDARY);
   assert.equal(standalone.boundary, CERTIFICATION_BOUNDARY);
@@ -160,6 +190,8 @@ function validateExecutableClaims(
     'CX.FREEFLOW.SCH.C': '8000.00',
     'CX.FREEFLOW.FORM.1065': '5000.00',
     'CX.FREEFLOW.W2.BASE': '4000.00',
+    'CX.FREEFLOW.W2.VARIABLE': '1600.00',
+    'CX.FREEFLOW.ASSET.INCOME': '1000.00',
     'CX.FREEFLOW.RENTAL': '2000.00',
     'CX.FREEFLOW.BORROWER.1.INCOME': '5600.00',
     'CX.FREEFLOW.BORROWER.2.INCOME': '16000.00',
@@ -167,6 +199,17 @@ function validateExecutableClaims(
   });
   assert.equal(integrated.beforeAfter.projectionMatched, true);
   assert.equal(integrated.beforeAfter.after['CX.CUSTOMER.UNRELATED'], 'preserved');
+  assert.equal(simulatedRoundTrip.classification, 'SYNTHETIC_CONNECTOR_SIMULATOR_ONLY');
+  assert.equal(simulatedRoundTrip.loanProjection.simulated, true);
+  assert.equal(simulatedRoundTrip.documentRetrieval.attachments.length, 14);
+  assert.equal(simulatedRoundTrip.documentRetrieval.buffersErased, true);
+  assert.equal(simulatedRoundTrip.documentRetrieval.attachments.every((attachment) => /^[0-9a-f]{64}$/.test(attachment.sha256)), true);
+  assert.equal(simulatedRoundTrip.writeReadback.allSucceeded, true);
+  assert.equal(simulatedRoundTrip.writeReadback.fields.every((field) => field.status === 'SUCCESS'), true);
+  assert.deepEqual(
+    [...new Set(simulatedRoundTrip.fieldStatusCoverage.fields.map((field) => field.status))].sort(),
+    ['CONFLICT', 'REJECTED', 'SUCCESS', 'UNAVAILABLE'],
+  );
 
   const requiredIncomeFields = [
     { fieldName: 'CX.FREEFLOW.W2.VARIABLE', expectedValue: money(integrated.financialResult.mapperMonthly.w2Variable) },
@@ -189,6 +232,107 @@ function validateExecutableClaims(
     } as const,
     mappingGaps,
   };
+}
+
+async function runSyntheticRoundTrip(
+  integrated: ReturnType<typeof runEncompassCertification>,
+  fixture: ReturnType<typeof certificationFixtureManifest>,
+) {
+  const connector = new SyntheticFreeflowDevConnector();
+  const context = {
+    tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+    loanId: fixture.loan.loanId,
+    correlationId: 'encompass-certification-simulator',
+  };
+  const snapshot = await connector.retrieveLoanSnapshot(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
+  const attachments = await connector.listActiveAttachments(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
+  const expectedPackHashes = new Map(SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => [
+    attachment.id,
+    attachment.sha256,
+  ]));
+  let buffersErased = true;
+  const retrievedAttachments: Array<{ attachmentId: string; sha256: string; bytes: number }> = [];
+  for (const attachment of attachments) {
+    const downloaded = await connector.downloadOriginalAttachment(
+      context,
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      attachment.id,
+    );
+    try {
+      assert.equal(new TextDecoder().decode(downloaded.bytes.subarray(0, 5)), '%PDF-');
+      assert.equal(createHash('sha256').update(downloaded.bytes).digest('hex'), downloaded.sha256);
+      const expectedHash = expectedPackHashes.get(attachment.id as typeof SYNTHETIC_FREEFLOW_DEV_MORNING_PACK[number]['id']);
+      if (expectedHash) assert.equal(downloaded.sha256, expectedHash);
+      retrievedAttachments.push({
+        attachmentId: attachment.id,
+        sha256: downloaded.sha256,
+        bytes: downloaded.bytes.byteLength,
+      });
+    } finally {
+      downloaded.bytes.fill(0);
+      buffersErased = buffersErased && downloaded.bytes.every((value) => value === 0);
+    }
+  }
+  const fields = Object.entries(integrated.encompassFields).map(([fieldName, value]) => ({ fieldName, value }));
+  const preview = buildEncompassWritePreview({
+    approvalEventId: fixture.expected.approvalId,
+    fields,
+  });
+  const result = await executeApprovedIncomeRoundTrip({
+    connector,
+    context,
+    loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    preview,
+    reviewerApproval: {
+      approvalEventId: fixture.expected.approvalId,
+      previewHash: preview.previewHash,
+    },
+  });
+  const statusConnector = new SyntheticFreeflowDevConnector({
+    fieldBehaviors: {
+      'CX.FREEFLOW.W2.BASE': 'REJECTED',
+      'CX.FREEFLOW.W2.VARIABLE': 'CONFLICT',
+      'CX.FREEFLOW.ASSET.INCOME': 'UNAVAILABLE',
+    },
+  });
+  const statusResult = await executeApprovedIncomeRoundTrip({
+    connector: statusConnector,
+    context,
+    loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    preview,
+    reviewerApproval: {
+      approvalEventId: fixture.expected.approvalId,
+      previewHash: preview.previewHash,
+    },
+  });
+  return {
+    schemaVersion: 'freeflow-simulated-encompass-round-trip-v1',
+    classification: 'SYNTHETIC_CONNECTOR_SIMULATOR_ONLY',
+    realEncompassInteroperability: 'NOT_CLAIMED',
+    loanProjection: {
+      schemaVersion: snapshot.schemaVersion,
+      simulated: snapshot.simulated,
+      loanProgram: snapshot.loan.loanProgram,
+      loanPurpose: snapshot.loan.loanPurpose,
+      borrowerCount: snapshot.borrowers.length,
+      employmentCounts: snapshot.borrowers.map((borrower) => borrower.employment.length),
+    },
+    documentRetrieval: {
+      rawDocumentBytesPersisted: false,
+      buffersErased,
+      attachments: retrievedAttachments,
+    },
+    approvedPreview: {
+      schemaVersion: preview.schemaVersion,
+      approvalEventId: preview.approvalEventId,
+      previewHash: preview.previewHash,
+      fieldNames: preview.fields.map((field) => field.fieldName),
+    },
+    providerRevision: result.providerRevision,
+    writeReadback: result.readback,
+    fieldStatusCoverage: statusResult.readback,
+    mutationCount: connector.mutationCount,
+  } as const;
 }
 
 function money(value: number): string {
