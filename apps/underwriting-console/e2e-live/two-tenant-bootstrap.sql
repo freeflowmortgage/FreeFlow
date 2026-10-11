@@ -57,3 +57,34 @@ ON CONFLICT (id) DO UPDATE SET
   "isActive" = true,
   role = 'UNDERWRITER',
   "updatedAt" = now();
+
+DO $verification$
+BEGIN
+  IF (
+    SELECT count(*)
+    FROM tenant_configurations
+    WHERE "tenantId" IN (
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222'
+    )
+      AND "encompassIntegrationMode" = 'NONE'
+      AND NOT "enableEncompassSync"
+      AND NOT "enableEncompassDocumentPull"
+  ) <> 2 THEN
+    RAISE EXCEPTION 'Synthetic live tenants must have every LOS connection disabled';
+  END IF;
+
+  IF (
+    SELECT count(*)
+    FROM users
+    WHERE id IN (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    )
+      AND "isActive"
+      AND role = 'UNDERWRITER'
+  ) <> 2 THEN
+    RAISE EXCEPTION 'Synthetic live underwriter identities were not created';
+  END IF;
+END
+$verification$;
