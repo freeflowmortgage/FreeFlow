@@ -20,6 +20,11 @@ import {
   runEncompassCertification,
 } from '../src/server/integrations/encompass/encompassCertificationHarness';
 import { normalizeEncompassLoanSnapshot } from '../src/server/integrations/encompass/normalizeImportedLoan';
+import {
+  MISMO_APPROVED_INCOME_PROFILE,
+  MISMO_OFFICIAL_XSD_VALIDATION_STATUS,
+  MISMO_REFERENCE_MODEL_IDENTIFIER,
+} from '../src/server/exports/approvedIncomeExports';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const defaultOutput = path.join(
@@ -50,6 +55,9 @@ const sourceRevision = {
     sourceFingerprint('packages/encompass-connector-contract/src/roundTrip.ts'),
     sourceFingerprint('packages/mortgage-engine/src/normalizedLoan.ts'),
     sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/normalizeImportedLoan.ts'),
+    sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/syncPreview.ts'),
+    sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/syncWorker.ts'),
+    sourceFingerprint('apps/underwriter-portal/src/server/exports/approvedIncomeExports.ts'),
   ],
 };
 mkdirSync(outputDirectory, { recursive: true });
@@ -69,13 +77,16 @@ const artifacts = new Map<string, string>([
   ['simulated-encompass-round-trip.json', json(simulatedRoundTrip)],
   ['mismo-validation.json', json({
     boundary: CERTIFICATION_BOUNDARY,
-    status: 'NOT_IMPLEMENTED',
-    capability: 'Approved income-analysis MISMO export',
+    status: 'PASS',
+    capability: 'Approved income-analysis FreeFlow MISMO implementation-profile export',
+    selectedSchema: MISMO_REFERENCE_MODEL_IDENTIFIER,
+    selectedImplementationRequirements: MISMO_APPROVED_INCOME_PROFILE,
+    freeFlowProfileValidation: 'PASS',
     officialSchemaValidation: 'BLOCKED',
-    selectedSchema: null,
-    selectedImplementationRequirements: null,
-    explanation: 'Existing MISMO generators are disconnected from the protected approved-calculation workflow and use inconsistent 3.4 identifiers. No official XSD validation is wired into the repository.',
-    xmlArtifactProduced: false,
+    officialXsdValidationStatus: MISMO_OFFICIAL_XSD_VALIDATION_STATUS,
+    explanation: 'The protected approved-export service generates and validates the declared FreeFlow profile. The official MISMO XSD and implementation-requirement bundle is not present, so official schema validation was not performed.',
+    xmlArtifactProducedInThisSimulatorBundle: false,
+    approvedXmlEvidence: '../standalone-approved-income-exports-2026-10-11/approved-income.mismo.xml',
   })],
   ['processing-validation-report.json', json({
     schemaVersion: 'freeflow-encompass-certification-report-v1',
@@ -91,10 +102,17 @@ const artifacts = new Map<string, string>([
       realEncompassLoanRetrieval: 'NOT_IMPLEMENTED',
       realEncompassDocumentRetrieval: 'BLOCKED',
       realEncompassWriteReadBack: 'BLOCKED',
-      approvedCalculationMismoExport: 'NOT_IMPLEMENTED',
-      protectedApprovedSummaryExport: 'NOT_IMPLEMENTED',
-      customerStandaloneLoanCreation: 'NOT_IMPLEMENTED',
-      providerErrorLogRedaction: 'FAIL',
+      integratedApplicationImportOrchestration: 'NOT_IMPLEMENTED',
+      serverAuthoritativeWritePreview: 'PASS',
+      immutablePreviewBoundSync: 'PASS',
+      ambiguousWriteReadOnlyReconciliation: 'PASS',
+      approvedCalculationJsonExport: 'PASS',
+      approvedCalculationMismoProfileExport: 'PASS',
+      officialMismoXsdValidation: 'BLOCKED',
+      protectedApprovedSummaryExport: 'PASS',
+      customerStandaloneLoanCreation: 'PASS',
+      providerErrorLogRedaction: 'PASS',
+      hostedFullFieldReadback: 'NOT_IMPLEMENTED',
     },
     mappingGaps: executableValidation.mappingGaps,
     warnings: [
@@ -103,8 +121,10 @@ const artifacts = new Map<string, string>([
       'The in-memory field projection is not connector writeback, readback, or an Encompass installation.',
       'The simulated connector round trip is deterministic local evidence only and is not verified interoperability with a real Encompass installation.',
       'The real connector deliberately rejects full-loan retrieval because no lender-approved provider schema/field contract has been implemented.',
-      'The protected sync API remains approval-event gated but does not yet expose a separate reviewer confirmation bound to the exact preview hash.',
-      'Executed worker tests showed that arbitrary provider error text can reach operational logs; log redaction is not certified.',
+      'The preview, immutable persistence, and ambiguous-outcome reconciliation PASS results are in-process and database-contract results; no provider write occurred.',
+      'Standalone approved exports use the shared production export service, but official MISMO XSD validation remains blocked because the official schema bundle is absent.',
+      'The hosted browser bridge still confirms only the approval marker and is not full-field independent readback.',
+      'The authenticated Encompass loan snapshot normalizer is exercised only by the simulator; no application import orchestration invokes it in production.',
     ],
   })],
 ]);
