@@ -1,5 +1,8 @@
 import type { Prisma } from '@prisma/client';
-import { buildEncompassFieldUpdatePayload } from '@mortgage-pos/mortgage-engine';
+import {
+  buildEncompassFieldUpdatePayload,
+  type EncompassIncomeFieldMapOverrides,
+} from '@mortgage-pos/mortgage-engine';
 import type { RequestContext } from '../../auth/requestContext';
 import { appendAuditEvent, AUDIT_ACTIONS, hashAuditResult } from '../../audit/appendEvent';
 import { resolveIdempotencyKey, storeIdempotencyResult } from '../../audit/idempotency';
@@ -167,7 +170,9 @@ export function approvedHostFields(input: Readonly<{
   rentalMonthly?: number;
   borrowerIncome: unknown;
   auditUrl: string;
-}>): Record<string, string> {
+}>, options: Readonly<{
+  fieldMapOverrides?: EncompassIncomeFieldMapOverrides;
+}> = {}): Record<string, string> {
   const lines = readBorrowerIncome(input.borrowerIncome);
   const mapped = buildEncompassFieldUpdatePayload(input.loanId, {
     qualifyingMonthlyIncome: input.qualifyingMonthlyIncome,
@@ -183,7 +188,7 @@ export function approvedHostFields(input: Readonly<{
     rentalMonthly: input.rentalMonthly,
     borrowerMonthlyIncome: lines.map((line) => ({ ordinal: line.ordinal, qualifyingMonthlyIncome: Number(line.qualifyingMonthlyIncome) })),
     auditUrl: input.auditUrl,
-  }, { includeSyncedAt: false });
+  }, { fieldMapOverrides: options.fieldMapOverrides, includeSyncedAt: false });
   const borrowerFields = borrowerIncomeFields(lines);
   return Object.fromEntries([
     ...mapped.customFields,

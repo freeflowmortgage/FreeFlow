@@ -62,7 +62,12 @@ export const portalClient = {
   calculateIncome: (body: { loanId: string; extractionIds: string[] }) => request('/api/income/calculate', { method: 'POST', body }),
   approveIncome: (loanId: string, body: unknown, idempotencyKey: string) =>
     request(`/api/v1/loans/${encodeURIComponent(loanId)}/income-approvals`, { method: 'POST', body, idempotencyKey }),
-  createSync: (loanId: string, body: unknown, idempotencyKey: string) =>
+  previewSync: (loanId: string, body: { approvalEventId: string; expectedLoanVersion: number }) =>
+    request<{
+      schemaVersion: 'encompass-write-preview-v1'; approvalEventId: string; previewHash: string;
+      fields: ReadonlyArray<{ fieldName: string; value: string }>;
+    }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-sync-preview`, { method: 'POST', body }),
+  createSync: (loanId: string, body: { approvalEventId: string; expectedLoanVersion: number; previewHash: string }, idempotencyKey: string) =>
     request<{ jobId: string; status: string }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-syncs`, { method: 'POST', body, idempotencyKey }),
   getSync: (jobId: string) => request<{ id: string; status: string }>(`/api/v1/encompass-syncs/${encodeURIComponent(jobId)}`),
   approvedIncomeExportUrl: (loanId: string, format: 'json' | 'mismo' | 'summary') =>

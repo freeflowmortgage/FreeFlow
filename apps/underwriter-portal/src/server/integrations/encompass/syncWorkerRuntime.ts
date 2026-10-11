@@ -2,11 +2,9 @@ import { ChangeMessageVisibilityCommand, DeleteMessageCommand, ReceiveMessageCom
 import { Prisma } from '@prisma/client';
 import {
   CustomConnectorAdapter,
-  EncompassConnectorError,
   type EncompassConnector,
   type EncompassFieldReadbackReport,
 } from '@mortgage-pos/encompass-connector-contract';
-import { buildEncompassFieldUpdatePayload } from '@mortgage-pos/mortgage-engine';
 import { prisma, setTenantContext } from '../../database/client';
 import { appendAuditEvent, AUDIT_ACTIONS, hashAuditResult } from '../../audit/appendEvent';
 import type { RequestContext } from '../../auth/requestContext';
@@ -14,17 +12,13 @@ import { hasCurrentCalculationExtractions } from '../../income/extractionFreshne
 import type { EncompassSyncQueueMessage } from './sync';
 import { runEncompassSyncJob, type ClaimedSync, type SyncWorkerDependencies } from './syncWorker';
 import { emitOperationalEvent } from '../../observability/operationalEvents';
-import {
-  LenderFieldMappingConfigurationError,
-  fieldMapForAuthoritativeBinding,
-  parseLenderFieldMappingConfiguration,
-} from './lenderFieldMapping';
 import { sanitizeFieldReadback } from './fieldReadback';
+import { restorePersistedEncompassSyncPreview } from './syncPreview';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
-const APPROVAL_FIELD = 'CX.FREEFLOW.APPROVAL.ID';
 const MAX_ATTEMPTS = 5;
+const MAX_RECONCILIATIONS = 5;
 
 type RuntimeClaim = ClaimedSync & Readonly<{
   encompassLoanGuid: string;
@@ -34,18 +28,41 @@ type RuntimeClaim = ClaimedSync & Readonly<{
   connector: EncompassConnector;
 }>;
 
-export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = process.env): SyncWorkerDependencies {
+export type SyncRuntimeInfrastructure = Readonly<{
+  withTransaction<T>(operation: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  setTenantContext: typeof setTenantContext;
+  createConnector(input: Readonly<{
+    serviceBaseUrl: string;
+    serviceId: string;
+    signingKey: string;
+    lenderId: string;
+    deploymentId: string;
+  }>): EncompassConnector;
+}>;
+
+const defaultRuntimeInfrastructure: SyncRuntimeInfrastructure = {
+  withTransaction: (operation) => prisma.$transaction(operation),
+  setTenantContext,
+  createConnector: (input) => new CustomConnectorAdapter({
+    binding: {
+      kind: 'custom', lenderId: input.lenderId, deploymentId: input.deploymentId,
+      serviceBaseUrl: input.serviceBaseUrl,
+    },
+    serviceAuth: { kind: 'signed-hmac', serviceId: input.serviceId, signingKey: input.signingKey },
+  }),
+};
+
+export function createSyncRuntimeDependencies(
+  environment: NodeJS.ProcessEnv = process.env,
+  infrastructure: SyncRuntimeInfrastructure = defaultRuntimeInfrastructure,
+): SyncWorkerDependencies {
   const serviceBaseUrl = required(environment.ENCOMPASS_CONNECTOR_SERVICE_URL, 'ENCOMPASS_CONNECTOR_SERVICE_URL');
   const serviceId = required(environment.ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID, 'ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID');
   const signingKey = required(environment.ENCOMPASS_CONNECTOR_SIGNING_KEY, 'ENCOMPASS_CONNECTOR_SIGNING_KEY');
-  const appOrigin = required(environment.APP_ORIGIN, 'APP_ORIGIN').replace(/\/$/, '');
-  const lenderFieldMappings = parseLenderFieldMappingConfiguration(
-    environment.ENCOMPASS_LENDER_FIELD_MAPPINGS_JSON,
-  );
 
   return {
-    claim: async (message) => prisma.$transaction(async (transaction) => {
-      await setTenantContext(transaction, { tenantId: message.tenantId, principalId: WORKER_PRINCIPAL_ID });
+    claim: async (message) => infrastructure.withTransaction(async (transaction) => {
+      await infrastructure.setTenantContext(transaction, { tenantId: message.tenantId, principalId: WORKER_PRINCIPAL_ID });
       const record = await transaction.encompassSyncJob.findFirst({
         where: {
           id: message.jobId, tenantId: message.tenantId, loanId: message.loanId,
@@ -55,8 +72,10 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
         },
         select: {
           id: true, tenantId: true, loanId: true, approvalEventId: true, status: true,
-          attemptCount: true, startedAt: true, requestedByUserId: true, correlationId: true,
+          attemptCount: true, reconciliationCount: true, startedAt: true,
+          requestedByUserId: true, correlationId: true,
           expectedLoanVersion: true,
+          writePreviewSchemaVersion: true, writePreviewHash: true, writePreviewFields: true,
           loanApplication: { select: { version: true, encompassGuid: true } },
           approvalEvent: { select: { action: true, entityType: true, entityId: true, expectedLoanVersion: true } },
           tenant: { select: {
@@ -87,16 +106,16 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
         });
         return null;
       }
-      let fieldMapOverrides: ReturnType<typeof fieldMapForAuthoritativeBinding>;
-      try {
-        fieldMapOverrides = fieldMapForAuthoritativeBinding(lenderFieldMappings, binding);
-      } catch (error) {
-        const safeCode = error instanceof LenderFieldMappingConfigurationError
-          ? error.safeCode
-          : 'ENCOMPASS_LENDER_FIELD_MAPPING_INVALID';
+      const preview = restorePersistedEncompassSyncPreview({
+        schemaVersion: record.writePreviewSchemaVersion,
+        previewHash: record.writePreviewHash,
+        approvalEventId: record.approvalEventId,
+        fields: record.writePreviewFields,
+      });
+      if (!preview) {
         await transaction.encompassSyncJob.updateMany({
           where: { id: record.id, tenantId: record.tenantId },
-          data: { status: 'FAILED', safeErrorCode: safeCode, completedAt: new Date() },
+          data: { status: 'FAILED', safeErrorCode: 'ENCOMPASS_WRITE_PREVIEW_INVALID', completedAt: new Date() },
         });
         return null;
       }
@@ -106,10 +125,6 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
           isHumanVerified: true, calculatedLoanVersion: record.approvalEvent.expectedLoanVersion,
         },
         select: {
-          qualifyingMonthlyIncome: true, trendingResult: true, yearsAnalyzed: true,
-          scheduleCMonthlyTotal: true, form1120SMonthlyTotal: true,
-          form1065MonthlyTotal: true, form1120MonthlyTotal: true,
-          w2BaseMonthly: true, w2VariableMonthly: true, assetIncomeMonthly: true, rentalMonthly: true,
           extractionBindings: { select: {
             extractionId: true, extractionHash: true, sourceDocumentId: true,
             sourceDocumentVersion: true, sourceContentHash: true,
@@ -141,6 +156,13 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
         });
         return null;
       }
+      if (mode === 'RECONCILE' && record.reconciliationCount >= MAX_RECONCILIATIONS) {
+        await transaction.encompassSyncJob.updateMany({
+          where: { id: record.id, tenantId: record.tenantId },
+          data: { status: 'FAILED', safeErrorCode: 'SYNC_RECONCILIATION_LIMIT_REACHED', completedAt: new Date() },
+        });
+        return null;
+      }
       const claimed = await transaction.encompassSyncJob.updateMany({
         where: { id: record.id, tenantId: record.tenantId, status: record.status },
         data: mode === 'APPLY'
@@ -148,31 +170,18 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
           : { status: 'RECONCILING', reconciliationCount: { increment: 1 }, safeErrorCode: null },
       });
       if (claimed.count !== 1) return null;
-      const mapped = buildEncompassFieldUpdatePayload(record.loanId, {
-        qualifyingMonthlyIncome: calculation.qualifyingMonthlyIncome.toNumber(),
-        trendingAnalysis: calculation.trendingResult,
-        yearsAnalyzed: calculation.yearsAnalyzed,
-        scheduleC_MonthlyTotal: numberOrUndefined(calculation.scheduleCMonthlyTotal),
-        form1120S_MonthlyTotal: numberOrUndefined(calculation.form1120SMonthlyTotal),
-        form1065_MonthlyTotal: numberOrUndefined(calculation.form1065MonthlyTotal),
-        form1120_MonthlyTotal: numberOrUndefined(calculation.form1120MonthlyTotal),
-        w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
-        w2VariableMonthly: numberOrUndefined(calculation.w2VariableMonthly),
-        assetIncomeMonthly: numberOrUndefined(calculation.assetIncomeMonthly),
-        rentalMonthly: numberOrUndefined(calculation.rentalMonthly),
-        auditUrl: `${appOrigin}/audit/${record.approvalEventId}`,
-      }, { fieldMapOverrides, includeSyncedAt: false });
-      const fields = [...mapped.customFields,
-        { fieldName: APPROVAL_FIELD, value: record.approvalEventId }];
       return {
         jobId: record.id, tenantId: record.tenantId, loanId: record.loanId,
-        approvalEventId: record.approvalEventId, mode, fields,
+        approvalEventId: record.approvalEventId, mode, fields: preview.fields,
         encompassLoanGuid: record.loanApplication.encompassGuid,
         requestedByUserId: record.requestedByUserId, correlationId: record.correlationId,
         expectedLoanVersion: record.expectedLoanVersion,
-        connector: new CustomConnectorAdapter({
-          binding: { kind: 'custom', lenderId: binding.lenderId, deploymentId: binding.deploymentId, serviceBaseUrl },
-          serviceAuth: { kind: 'signed-hmac', serviceId, signingKey },
+        connector: infrastructure.createConnector({
+          lenderId: binding.lenderId,
+          deploymentId: binding.deploymentId,
+          serviceBaseUrl,
+          serviceId,
+          signingKey,
         }),
       } satisfies RuntimeClaim;
     }),
@@ -193,15 +202,17 @@ export function createSyncRuntimeDependencies(environment: NodeJS.ProcessEnv = p
     },
     succeed: async (job, providerRevision, readback) => finalize(
       job as RuntimeClaim,
+      infrastructure,
       'SUCCEEDED',
       undefined,
       providerRevision,
       readback,
     ),
-    retry: async (job, safeCode) => updateState(job as RuntimeClaim, 'RETRYABLE_FAILURE', safeCode),
-    reconcile: async (job, safeCode) => updateState(job as RuntimeClaim, 'RECONCILING', safeCode),
+    retry: async (job, safeCode) => updateState(job as RuntimeClaim, 'RETRYABLE_FAILURE', safeCode, infrastructure),
+    reconcile: async (job, safeCode) => updateState(job as RuntimeClaim, 'RECONCILING', safeCode, infrastructure),
     fail: async (job, safeCode, readback) => finalize(
       job as RuntimeClaim,
+      infrastructure,
       'FAILED',
       safeCode,
       undefined,
@@ -260,9 +271,14 @@ function parseMessage(body: string): EncompassSyncQueueMessage {
   return value as EncompassSyncQueueMessage;
 }
 
-async function updateState(job: RuntimeClaim, status: 'RETRYABLE_FAILURE' | 'RECONCILING', safeErrorCode: string) {
-  await prisma.$transaction(async (transaction) => {
-    await setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+async function updateState(
+  job: RuntimeClaim,
+  status: 'RETRYABLE_FAILURE' | 'RECONCILING',
+  safeErrorCode: string,
+  infrastructure: SyncRuntimeInfrastructure,
+) {
+  await infrastructure.withTransaction(async (transaction) => {
+    await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
     await transaction.encompassSyncJob.updateMany({
       where: { id: job.jobId, tenantId: job.tenantId, status: { in: ['IN_PROGRESS', 'RECONCILING'] } },
       data: { status, safeErrorCode },
@@ -273,6 +289,7 @@ async function updateState(job: RuntimeClaim, status: 'RETRYABLE_FAILURE' | 'REC
 
 async function finalize(
   job: RuntimeClaim,
+  infrastructure: SyncRuntimeInfrastructure,
   status: 'SUCCEEDED' | 'FAILED',
   safeErrorCode?: string,
   providerRevision?: string,
@@ -282,8 +299,8 @@ async function finalize(
     allowedFieldNames: new Set(job.fields.map((field) => field.fieldName)),
     expectedOutcome: status,
   }) : undefined;
-  await prisma.$transaction(async (transaction) => {
-    await setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+  await infrastructure.withTransaction(async (transaction) => {
+    await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
     const updated = await transaction.encompassSyncJob.updateMany({
       where: { id: job.jobId, tenantId: job.tenantId, status: { in: ['IN_PROGRESS', 'RECONCILING'] } },
       data: {
@@ -327,7 +344,6 @@ function contextFor(job: RuntimeClaim) {
   return { tenantId: job.tenantId, loanId: job.loanId, correlationId: job.correlationId };
 }
 
-function numberOrUndefined(value: Prisma.Decimal | null): number | undefined { return value?.toNumber(); }
 function required(value: string | undefined, name: string): string {
   if (!value?.trim()) throw new Error(`${name} is required.`);
   return value.trim();

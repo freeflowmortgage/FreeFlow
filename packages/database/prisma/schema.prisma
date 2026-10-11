@@ -605,6 +605,12 @@ model EncompassSyncJob {
   reconciliationCount Int                 @default(0)
   safeErrorCode       String?             @db.VarChar(100)
   providerRevision    String?             @db.VarChar(100)
+  // Immutable reviewer-confirmed write snapshot. Existing pre-migration jobs
+  // remain nullable and fail closed in the worker because they cannot prove an
+  // exact field-level approval.
+  writePreviewSchemaVersion String?        @db.VarChar(64)
+  writePreviewHash          String?        @db.Char(64)
+  writePreviewFields        Json?
   // Allowlisted field IDs, closed status/reason codes, and value hashes only.
   // Raw LOS field values and provider messages are forbidden.
   fieldReadback       Json?

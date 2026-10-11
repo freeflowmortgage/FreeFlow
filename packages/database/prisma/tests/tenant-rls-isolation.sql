@@ -406,6 +406,45 @@ INSERT INTO "encompass_host_writes" (
   2, 'host-write-sql-key-01', 'host-write-request', repeat('a', 64), now()
 );
 
+DO $sync_preview_constraint$
+BEGIN
+  BEGIN
+    INSERT INTO "encompass_sync_jobs" (
+      "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+      "expectedLoanVersion", "idempotencyKey", "correlationId",
+      "writePreviewSchemaVersion", "updatedAt"
+    ) VALUES (
+      '31313131-3131-4131-8131-313131313131',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      '17171717-1717-4171-8171-171717171717',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      2, 'sync-preview-invalid-01', 'sync-preview-invalid',
+      'encompass-write-preview-v1', now()
+    );
+    RAISE EXCEPTION 'A partial approved Encompass write preview was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END
+$sync_preview_constraint$;
+
+INSERT INTO "encompass_sync_jobs" (
+  "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+  "expectedLoanVersion", "idempotencyKey", "correlationId",
+  "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields", "updatedAt"
+) VALUES (
+  '31313131-3131-4131-8131-313131313131',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '17171717-1717-4171-8171-171717171717',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  2, 'sync-preview-sql-key-01', 'sync-preview-request',
+  'encompass-write-preview-v1', repeat('b', 64),
+  '[{"fieldName":"CX.FREEFLOW.APPROVAL.ID","value":"17171717-1717-4171-8171-171717171717"}]'::jsonb,
+  now()
+);
+
 INSERT INTO "income_extraction_metadata_reviews" (
   "id", "tenantId", "loanId", "extractionId", "sourceDocumentId", "sourceDocumentVersion",
   "sourceContentHash", "extractionHash", "metadataVersion", "assignments", "source", "reasonCode",
@@ -483,12 +522,14 @@ DECLARE
   visible_keys integer;
   visible_metadata integer;
   visible_host_writes integer;
+  visible_sync_jobs integer;
   visible_loans integer;
 BEGIN
   SELECT count(*) INTO visible_events FROM "audit_events";
   SELECT count(*) INTO visible_keys FROM "api_idempotency_keys";
   SELECT count(*) INTO visible_metadata FROM "income_extraction_metadata_reviews";
   SELECT count(*) INTO visible_host_writes FROM "encompass_host_writes";
+  SELECT count(*) INTO visible_sync_jobs FROM "encompass_sync_jobs";
   SELECT count(*) INTO visible_loans FROM "loan_applications";
   IF visible_events <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A audit events';
@@ -501,6 +542,9 @@ BEGIN
   END IF;
   IF visible_host_writes <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A hosted writes';
+  END IF;
+  IF visible_sync_jobs <> 0 THEN
+    RAISE EXCEPTION 'Tenant B observed Tenant A approved Encompass sync previews';
   END IF;
   IF visible_loans <> 1 THEN
     RAISE EXCEPTION 'Tenant B observed a cross-tenant identity-only host binding';
