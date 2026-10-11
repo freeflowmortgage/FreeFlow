@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EncompassApiError } from './encompassApi';
 import { runDocumentPullJob, validateAggregateDocumentLimits, type DocumentPullWorkerDependencies } from './documentPullWorker';
-import { classifyDocumentPullFailure, redactOperationalMessage } from './documentPullFailure';
+import { classifyDocumentPullFailure } from './documentPullFailure';
 
 const message = { jobId: 'job', tenantId: 'tenant', loanId: 'loan', expectedLoanVersion: 1, correlationId: 'request' };
 const job = {
@@ -39,19 +39,43 @@ test('processes documents serially, persists metadata only, and erases buffers',
   assert.deepEqual(buffers.map((buffer) => [...buffer]), [[0, 0], [0, 0]]);
 });
 
-test('classifies throttling as retryable without exposing provider details', async () => {
+test('classifies throttling and logs only allowlisted diagnostics', async () => {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (line?: unknown) => { lines.push(String(line)); };
   let failure: unknown;
   const deps: DocumentPullWorkerDependencies = {
     claim: async () => job,
-    listAttachments: async () => { throw new EncompassApiError('ENCOMPASS_API_FAILED_429', 'sensitive provider response', true); },
+    listAttachments: async () => {
+      throw new EncompassApiError(
+        'ENCOMPASS_API_FAILED_429',
+        'SYNTHETIC_PROVIDER_BODY borrower=Example Authorization: Bearer SYNTHETIC_TOKEN SSN=000-00-0000',
+        true,
+      );
+    },
     download: async () => assert.fail(),
     parse: async () => assert.fail(),
     saveResult: async () => assert.fail(),
     succeed: async () => assert.fail(),
     fail: async (_job, safeCode, retryable) => { failure = { safeCode, retryable }; },
   };
-  assert.equal(await runDocumentPullJob(message, deps), 'RETRYABLE_FAILURE');
+  try {
+    assert.equal(await runDocumentPullJob(message, deps), 'RETRYABLE_FAILURE');
+  } finally {
+    console.error = original;
+  }
   assert.deepEqual(failure, { safeCode: 'ENCOMPASS_API_FAILED_429', retryable: true });
+  assert.equal(lines.length, 1);
+  const logged = JSON.parse(lines[0]!) as Record<string, unknown>;
+  assert.deepEqual(logged, {
+    source: 'freeflow',
+    event: 'document_pull_error',
+    category: 'UPSTREAM_DEPENDENCY',
+    diagnosticId: 'UPSTREAM_API_ERROR',
+    safeCode: 'ENCOMPASS_API_FAILED_429',
+    retryable: true,
+  });
+  assertNoSensitiveLogText(lines[0]!);
 });
 
 test('processes only the explicitly selected active attachments', async () => {
@@ -88,7 +112,7 @@ test('fails closed when a selected attachment is not active', async () => {
   assert.deepEqual(failure, { safeCode: 'ENCOMPASS_ATTACHMENT_NOT_AVAILABLE', retryable: false });
 });
 
-test('catch logs a redacted diagnostic and maps Prisma conflicts off the catch-all', async () => {
+test('catch logs allowlisted database diagnostics and maps Prisma conflicts off the catch-all', async () => {
   const lines: string[] = [];
   const original = console.error;
   console.error = (line?: unknown) => { lines.push(String(line)); };
@@ -118,22 +142,19 @@ test('catch logs a redacted diagnostic and maps Prisma conflicts off the catch-a
   assert.deepEqual(failure, { safeCode: 'DOCUMENT_PULL_DB_CONFLICT', retryable: true });
   assert.equal(lines.length, 1);
   const logged = JSON.parse(lines[0]!) as Record<string, unknown>;
-  assert.equal(logged.source, 'freeflow');
-  assert.equal(logged.event, 'document_pull_error');
-  assert.equal(logged.errorName, 'PrismaClientKnownRequestError');
-  assert.equal(logged.prismaCode, 'P2002');
-  assert.equal(logged.safeCode, 'DOCUMENT_PULL_DB_CONFLICT');
-  assert.equal(logged.message, 'Invalid `prisma.loanDocument.upsert()` invocation: Unique constraint failed on the fields: (`tenantId`,`loanId`,`sourceAttachmentId`)');
-  const serialized = lines[0]!;
-  assert.equal(serialized.includes('Jane Doe'), false);
-  assert.equal(serialized.includes('%PDF'), false);
-  assert.equal(serialized.includes('Bearer'), false);
-  assert.equal(serialized.includes('secret'), false);
-  assert.equal(serialized.includes('documentPullWorkerRuntime.ts'), false);
-  assert.equal(serialized.includes('DATABASE_URL'), false);
+  assert.deepEqual(logged, {
+    source: 'freeflow',
+    event: 'document_pull_error',
+    category: 'DATABASE',
+    diagnosticId: 'PRISMA_ERROR',
+    prismaCode: 'P2002',
+    safeCode: 'DOCUMENT_PULL_DB_CONFLICT',
+    retryable: true,
+  });
+  assertNoSensitiveLogText(lines[0]!);
 });
 
-test('untyped throws stay DOCUMENT_PULL_UNEXPECTED and still log a safe name', async () => {
+test('untyped throws stay DOCUMENT_PULL_UNEXPECTED and log only a safe diagnostic id', async () => {
   const lines: string[] = [];
   const original = console.error;
   console.error = (line?: unknown) => { lines.push(String(line)); };
@@ -142,7 +163,9 @@ test('untyped throws stay DOCUMENT_PULL_UNEXPECTED and still log a safe name', a
     claim: async () => job,
     listAttachments: async () => [{ id: 'one' }, { id: 'two' }],
     download: async () => ({ bytes: new Uint8Array([1]), sha256: 'a'.repeat(64) }),
-    parse: async () => { throw new TypeError('Cannot read properties of undefined reading box1 jane@example.com'); },
+    parse: async () => {
+      throw new TypeError('SYNTHETIC_PROVIDER_BODY box1 borrower@example.invalid token=SYNTHETIC_TOKEN SSN=000-00-0000');
+    },
     saveResult: async () => assert.fail(),
     succeed: async () => assert.fail(),
     fail: async (_job, safeCode, retryable) => { failure = { safeCode, retryable }; },
@@ -154,10 +177,15 @@ test('untyped throws stay DOCUMENT_PULL_UNEXPECTED and still log a safe name', a
   }
   assert.deepEqual(failure, { safeCode: 'DOCUMENT_PULL_UNEXPECTED', retryable: true });
   const logged = JSON.parse(lines[0]!) as Record<string, unknown>;
-  assert.equal(logged.errorName, 'TypeError');
-  assert.equal(logged.safeCode, 'DOCUMENT_PULL_UNEXPECTED');
-  assert.equal(String(logged.message).includes('jane@example.com'), false);
-  assert.equal(String(logged.message).includes('box1'), true);
+  assert.deepEqual(logged, {
+    source: 'freeflow',
+    event: 'document_pull_error',
+    category: 'APPLICATION',
+    diagnosticId: 'TYPE_ERROR',
+    safeCode: 'DOCUMENT_PULL_UNEXPECTED',
+    retryable: true,
+  });
+  assertNoSensitiveLogText(lines[0]!);
 });
 
 test('postgres conflict-target and check failures are not retryable catch-alls', () => {
@@ -167,7 +195,6 @@ test('postgres conflict-target and check failures are not retryable catch-alls',
   const check = new Error('new row for relation "income_extractions" violates check constraint "income_extractions_confidence_range"');
   (check as Error & { meta: { code: string } }).meta = { code: '23514' };
   assert.deepEqual(classifyDocumentPullFailure(check), { safeCode: 'DOCUMENT_PULL_DB_CHECK', retryable: false });
-  assert.equal(redactOperationalMessage('DATABASE_URL=postgres://user:secret@db/app %PDF-1.4').includes('secret'), false);
 });
 
 test('aggregate document limits are bounded and typed', () => {
@@ -188,3 +215,21 @@ test('aggregate document limits are bounded and typed', () => {
     (error: unknown) => error instanceof Error && 'safeCode' in error && error.safeCode === 'DOCUMENT_PULL_TIME_LIMIT',
   );
 });
+
+function assertNoSensitiveLogText(serialized: string): void {
+  for (const forbidden of [
+    'SYNTHETIC_PROVIDER_BODY',
+    'SYNTHETIC_TOKEN',
+    '000-00-0000',
+    'Jane Doe',
+    '%PDF',
+    'Bearer',
+    'secret',
+    'borrower@example.invalid',
+    'documentPullWorkerRuntime.ts',
+    'DATABASE_URL',
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `log contained forbidden text: ${forbidden}`);
+  }
+  assert.equal(Object.hasOwn(JSON.parse(serialized) as object, 'message'), false);
+}

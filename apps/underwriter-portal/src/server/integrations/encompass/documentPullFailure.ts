@@ -4,8 +4,25 @@ import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contr
 const SAFE_CODE = /^[A-Z][A-Z0-9_]{0,99}$/;
 const PRISMA_CODE = /^P[0-9]{4}$/;
 const POSTGRES_CODE = /^[0-9]{2}[0-9A-Z]{3}$/;
-const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,80}$/;
-const REDACTED = '[redacted]';
+
+export type DocumentPullDiagnosticCategory =
+  | 'UPSTREAM_DEPENDENCY'
+  | 'CONNECTOR'
+  | 'DATABASE'
+  | 'APPLICATION'
+  | 'UNKNOWN';
+
+export type DocumentPullDiagnosticId =
+  | 'UPSTREAM_API_ERROR'
+  | 'CONNECTOR_ERROR'
+  | 'PRISMA_ERROR'
+  | 'PRISMA_VALIDATION_ERROR'
+  | 'PRISMA_INITIALIZATION_ERROR'
+  | 'POSTGRES_ERROR'
+  | 'TYPE_ERROR'
+  | 'APPLICATION_ERROR'
+  | 'NON_ERROR_THROW'
+  | 'DIAGNOSTIC_BUILD_FAILED';
 
 export type ClassifiedDocumentPullFailure = Readonly<{
   safeCode: string;
@@ -97,29 +114,30 @@ export function isUniqueViolation(error: unknown): boolean {
   return readPrismaCode(error) === 'P2002' || readPostgresCode(error) === '23505';
 }
 
-/**
- * Safe diagnostic for the document-pull catch. The message is the first line
- * only, with secrets, document bytes, and contact data removed. Stacks are omitted.
+/** Emit only closed-set diagnostics. Exception messages and stacks may contain
+ * provider bodies, credentials, OCR text, or borrower data and are never logged.
  */
 export function logDocumentPullFailure(error: unknown, classified: ClassifiedDocumentPullFailure): void {
   try {
-    const detail = describeDocumentPullError(error);
+    const diagnostic = describeDocumentPullDiagnostic(error);
     console.error(JSON.stringify({
       source: 'freeflow',
       event: 'document_pull_error',
-      errorName: detail.errorName,
-      ...(detail.prismaCode ? { prismaCode: detail.prismaCode } : {}),
-      ...(detail.postgresCode ? { postgresCode: detail.postgresCode } : {}),
-      safeCode: classified.safeCode,
+      category: diagnostic.category,
+      diagnosticId: diagnostic.diagnosticId,
+      ...(diagnostic.prismaCode ? { prismaCode: diagnostic.prismaCode } : {}),
+      ...(diagnostic.postgresCode ? { postgresCode: diagnostic.postgresCode } : {}),
+      safeCode: safeOperationalCode(classified.safeCode),
       retryable: classified.retryable,
-      message: detail.message,
     }));
   } catch {
     console.error(JSON.stringify({
       source: 'freeflow',
       event: 'document_pull_error',
-      errorName: 'UnknownError',
-      safeCode: classified.safeCode,
+      category: 'UNKNOWN',
+      diagnosticId: 'DIAGNOSTIC_BUILD_FAILED',
+      safeCode: safeOperationalCode(classified.safeCode),
+      retryable: classified.retryable,
     }));
   }
 }
@@ -140,42 +158,49 @@ export function logDocumentPullPersistRecovery(error: unknown): void {
   }
 }
 
-export function describeDocumentPullError(error: unknown): Readonly<{
-  errorName: string;
+export function describeDocumentPullDiagnostic(error: unknown): Readonly<{
+  category: DocumentPullDiagnosticCategory;
+  diagnosticId: DocumentPullDiagnosticId;
   prismaCode?: string;
   postgresCode?: string;
-  message: string;
 }> {
-  const errorName = error instanceof Error && ERROR_NAME.test(error.name) ? error.name : 'UnknownError';
-  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
-  return {
-    errorName,
-    ...(readPrismaCode(error) ? { prismaCode: readPrismaCode(error) } : {}),
-    ...(readPostgresCode(error) ? { postgresCode: readPostgresCode(error) } : {}),
-    message: redactOperationalMessage(raw),
-  };
+  if (error instanceof EncompassApiError) {
+    return { category: 'UPSTREAM_DEPENDENCY', diagnosticId: 'UPSTREAM_API_ERROR' };
+  }
+  if (error instanceof EncompassConnectorError) {
+    return { category: 'CONNECTOR', diagnosticId: 'CONNECTOR_ERROR' };
+  }
+
+  const prismaCode = readPrismaCode(error);
+  const postgresCode = readPostgresCode(error);
+  if (prismaCode) {
+    return {
+      category: 'DATABASE',
+      diagnosticId: 'PRISMA_ERROR',
+      prismaCode,
+      ...(postgresCode ? { postgresCode } : {}),
+    };
+  }
+  if (error instanceof Error && error.name === 'PrismaClientValidationError') {
+    return { category: 'DATABASE', diagnosticId: 'PRISMA_VALIDATION_ERROR' };
+  }
+  if (error instanceof Error && error.name === 'PrismaClientInitializationError') {
+    return { category: 'DATABASE', diagnosticId: 'PRISMA_INITIALIZATION_ERROR' };
+  }
+  if (postgresCode) {
+    return { category: 'DATABASE', diagnosticId: 'POSTGRES_ERROR', postgresCode };
+  }
+  if (error instanceof TypeError) {
+    return { category: 'APPLICATION', diagnosticId: 'TYPE_ERROR' };
+  }
+  if (error instanceof Error) {
+    return { category: 'APPLICATION', diagnosticId: 'APPLICATION_ERROR' };
+  }
+  return { category: 'UNKNOWN', diagnosticId: 'NON_ERROR_THROW' };
 }
 
-export function redactOperationalMessage(value: string): string {
-  // Prisma dumps the query arguments between the invocation line and the
-  // short driver summary. Keep the summary lines and drop payload lines.
-  const lines = value.split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !isPayloadLine(line))
-    .slice(0, 3);
-  let text = lines.join(' ').slice(0, 400);
-  text = text.replace(/%PDF[\s\S]*/g, REDACTED);
-  text = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED);
-  text = text.replace(/\b\d{3}-\d{2}-\d{4}\b/g, REDACTED);
-  text = text.replace(/\b(?:Bearer|Basic)\s+\S+/gi, REDACTED);
-  text = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, REDACTED);
-  text = text.replace(/\b[A-Z][A-Z0-9_]{2,}=\S+/g, REDACTED);
-  text = text.replace(/(?:password|secret|token|authorization|api[_-]?key|signature)\s*[:=]\s*\S+/gi, REDACTED);
-  text = text.replace(/\b[0-9a-f]{32,}\b/gi, REDACTED);
-  text = text.replace(/"(?:[^"\\]|\\.)*"/g, '"[redacted]"');
-  text = text.replace(/'(?:[^'\\]|\\.)*'/g, "'[redacted]'");
-  text = text.replace(/\s+/g, ' ').trim();
-  return text.slice(0, 240);
+function safeOperationalCode(value: string): string {
+  return SAFE_CODE.test(value) ? value : 'DOCUMENT_PULL_UNEXPECTED';
 }
 
 function readPrismaCode(error: unknown, depth = 0): string | undefined {
@@ -194,16 +219,6 @@ function readPostgresCode(error: unknown, depth = 0): string | undefined {
     if (match && POSTGRES_CODE.test(match[1]!)) return match[1];
   }
   return readPostgresCode(error.cause, depth + 1);
-}
-
-function isPayloadLine(line: string): boolean {
-  return line.startsWith('{')
-    || line.startsWith('}')
-    || line.startsWith('[')
-    || line.startsWith(']')
-    || line.startsWith('"')
-    || line.startsWith("'")
-    || line.startsWith('at ');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
