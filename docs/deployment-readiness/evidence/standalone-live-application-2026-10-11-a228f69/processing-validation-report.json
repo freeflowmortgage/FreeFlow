@@ -1,0 +1,76 @@
+{
+  "evidenceSchemaVersion": "freeflow-live-acceptance-evidence-v1",
+  "runId": "20261011-live-a228f69-01",
+  "sourceRevision": "a228f69f045157b2a5b50c9bc25997288e369eba",
+  "loanIdentifierClassification": "SYNTHETIC_TEST_ONLY",
+  "fixture": {
+    "kind": "SYNTHETIC_SCANNED_PAYSTUB",
+    "sha256": "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf",
+    "rawDocumentPersisted": false,
+    "rawOcrPersisted": false
+  },
+  "expected": {
+    "baseMonthly": "4896.67",
+    "variableMonthly": "825.00",
+    "qualifyingMonthly": "5721.67",
+    "annual": "68660.04"
+  },
+  "context": {
+    "loan": {
+      "version": 4,
+      "program": "CONVENTIONAL"
+    },
+    "borrowers": {
+      "count": 1,
+      "roles": [
+        "PRIMARY"
+      ]
+    },
+    "attachments": {
+      "count": 1,
+      "categories": [
+        "Paystub"
+      ],
+      "versions": [
+        1
+      ],
+      "pageCounts": [
+        1
+      ],
+      "parserVersions": [
+        "income-parser-v6"
+      ]
+    },
+    "extractions": {
+      "count": 1,
+      "statuses": [
+        "ACTIVE"
+      ],
+      "parserVersions": [
+        "income-parser-v6"
+      ],
+      "schemaVersions": [
+        "income-extraction-v2"
+      ],
+      "warningCounts": [
+        2
+      ],
+      "metadataVersions": [
+        1
+      ]
+    },
+    "calculationPresent": true,
+    "approvalCurrent": true,
+    "hostWritePresent": false
+  },
+  "apiAudit": {
+    "responseCount": 19,
+    "responsesByMethodAndStatus": {
+      "POST:201": 5,
+      "GET:200": 13,
+      "POST:200": 1
+    },
+    "failureCount": 0,
+    "encompassRequestCount": 0
+  }
+}

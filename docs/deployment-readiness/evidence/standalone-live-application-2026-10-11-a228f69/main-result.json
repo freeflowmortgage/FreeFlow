@@ -1,0 +1,18 @@
+{
+  "evidenceSchemaVersion": "freeflow-live-acceptance-result-v1",
+  "runId": "20261011-live-a228f69-01",
+  "sourceRevision": "a228f69f045157b2a5b50c9bc25997288e369eba",
+  "status": "PASS",
+  "scope": "STANDALONE_LIVE_APPLICATION_BOUNDARY",
+  "loanId": "d6b93b2a-a288-400f-b37d-c6185b6f0781",
+  "loanIdentifierClassification": "SYNTHETIC_TEST_ONLY",
+  "loanVersion": 4,
+  "snapshotHash": "334eefb4c15cde7bfd2983dd53d0dc7cc07166c71a421c768e1dceba47c638e4",
+  "exports": {
+    "jsonSha256": "573f6a5672995cd29f545c2e06376e977f5271e19f974cccb82d206a88809da6",
+    "mismoSha256": "67771e36477cdb2f84ebf767991bebbfc811ff06a90951f2cf7ece65527359b9",
+    "summarySha256": "ea0a74c0cbbfd2070dcbfae742abd6f8be8d573a66b1af6ea30cda0767a53474"
+  },
+  "officialMismoXsdValidation": "NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED",
+  "businessApiMocked": false
+}

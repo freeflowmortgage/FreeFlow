@@ -6,8 +6,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 3160,
-      "sha256": "5412a2fed4fc560a1ae6401acd27136b043a94b13aeacac11aa8e39417e28d08"
+      "bytes": 3793,
+      "sha256": "da59b0f150f608b40a1a4b3dd7ee4952c3741f798182e97b4e4d6e9a18ba7b21"
     },
     {
       "path": "database-security-gate.json",
@@ -16,8 +16,8 @@
     },
     {
       "path": "execution-report.json",
-      "bytes": 7607,
-      "sha256": "2d7988e85d7079b653057bc87bb44ba0f3b404ccfc5270c66d9ccac7655e3c94"
+      "bytes": 8548,
+      "sha256": "a1c2c4a25ff006eb26c58429ecda29ab733319696777d9641a88cef4387d0b21"
     },
     {
       "path": "standalone-live-cli-playwright.json",
@@ -26,19 +26,28 @@
     },
     {
       "path": "test-suite-summary.json",
-      "bytes": 5895,
-      "sha256": "05d8e3b574e09327ea0570000b3748485384bc6d7dd9968e81b8cd495e081d8c"
+      "bytes": 6235,
+      "sha256": "1f4348bf747c1b76fdf3a2957217d021046c70eb8070507682c40ad7577d8453"
     }
   ],
   "completionReport": {
     "path": "../../SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md",
-    "bytes": 41661,
-    "sha256": "e7fcac4ff4664a11da46b456162b80027991ac16ee7b4376c5813fafa7f4d8fb"
+    "bytes": 43935,
+    "sha256": "40513eca34a457a57833ab7c7794f9e83ce84a9afc5590b74e2d876b9aeb4ead"
   },
   "linkedEvidenceManifests": [
     {
-      "path": "../standalone-live-application-2026-10-11-e4c9e79/artifact-manifest.json",
+      "path": "../standalone-live-application-2026-10-11-a228f69/artifact-manifest.json",
       "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_LATEST_RETAINED",
+      "bytes": 2222,
+      "sha256": "b7a9f82acdb7fdc2985f4a1097ed059ec67dfef0a82789e9205d5f18eea95180",
+      "readmePath": "../standalone-live-application-2026-10-11-a228f69/README.md",
+      "readmeBytes": 1600,
+      "readmeSha256": "5f3de94f8523c17ba20daaf5d52cdb2ebc4fee0ac5e0066861af67eebde6b3fa"
+    },
+    {
+      "path": "../standalone-live-application-2026-10-11-e4c9e79/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_PRIOR_RETAINED",
       "bytes": 2222,
       "sha256": "b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca",
       "readmePath": "../standalone-live-application-2026-10-11-e4c9e79/README.md",
@@ -47,7 +56,7 @@
     },
     {
       "path": "../standalone-live-application-2026-10-11/artifact-manifest.json",
-      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_PRIOR_RETAINED",
+      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_EARLIER_RETAINED",
       "bytes": 2222,
       "sha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
       "readmePath": "../standalone-live-application-2026-10-11/README.md",

@@ -4,7 +4,7 @@ Assessment date: 2026-10-11
 Repository: `freeflowmortgage/FreeFlow`
 Branch: `test/encompass-certification-20261011`
 Implementation revision: `646201800446b250c089c782f6f9871b9c6f28d7`
-Latest retained live standalone source revision: `e4c9e7935eb474aa425d7bb4991e3c4861745615`; the subsequent implementation commits are confined to Encompass connector transport, document-pull fencing/audit, database immutability, and their tests.
+Latest executed source revision: `a228f69f045157b2a5b50c9bc25997288e369eba` (the implementation revision plus documentation/evidence only).
 Deployment status: **NOT DEPLOYED**
 Production approval: **NOT GRANTED**
 
@@ -52,7 +52,7 @@ This task performed no production deployment or mutation and used no real borrow
 | Manual loan creation through the application | **PASS** | Live CLI Chromium created a one-borrower Conventional loan through the real portal route. The route is tenant-scoped, versioned, audited, and idempotent. |
 | Supported JSON loan-file import | **PASS — ROUTE/UI CONTRACT** | The console reads `freeflow-standalone-loan-v1` JSON and submits the same protected create route. The committed browser test is explicitly an intercepted-API UI contract; the live run used manual creation. |
 | No LOS dependency | **PASS** | The live loan persisted with integration mode `NONE`; no Encompass/ICE environment was supplied. |
-| Direct document upload | **PASS** | A synthetic scanned paystub was uploaded through the real route. PDF media/content/size checks, content-addressed identity, and buffer clearing executed. |
+| Direct document upload | **PASS** | A synthetic scanned paystub was uploaded through the real route. PDF media/content/size checks, content-addressed identity, and clearing of request-owned chunks plus the aggregate upload buffer executed. The parser client's `Buffer.from` request copy is RAM-only but is not explicitly wiped. |
 | Actual parser/OCR | **PASS** | The hardened parser processed the uploaded scan. This was not a post-parse-only test. |
 | Review and reconciliation | **PASS** | The UI completed required metadata review before calculation. |
 | Shared income calculation | **PASS** | The live result was `$5,721.67` monthly and `$68,660.04` annual. |
@@ -65,7 +65,7 @@ This task performed no production deployment or mutation and used no real borrow
 | Duplicate upload/export idempotency | **PASS** | Re-uploading the same PDF retained one document and one extraction; repeated exports were byte-identical. |
 | Uncertain create retry idempotency | **PASS — UI CONTRACT** | After a simulated connection reset, the protected console retried the same create payload with the same UUID idempotency key. This intercepted-API branch was not exercised by the live lifecycle. |
 | Malformed document handling | **PASS — COMPONENT** | Bounded upload tests reject unsupported media types, empty/non-PDF/malformed and oversized content, scrub buffers, and map parser failures safely. These cases were not rerun in the live browser. |
-| Conflicting document values | **NOT EXECUTED** | No semantic conflicting-document-values test was identified. Database uniqueness, idempotency, and writeback-field conflict tests do not establish this behavior. |
+| Conflicting document values | **NOT IMPLEMENTED — CERTIFICATION TEST** | No semantic conflicting-document-values test or deterministic conflict policy was identified. Database uniqueness, idempotency, and writeback-field conflict tests do not establish this behavior. |
 | Tenant isolation | **PASS** | A second tenant received non-disclosing `404 LOAN_NOT_FOUND` for the first tenant's export. RLS and app-role suites also passed. |
 | Browser anonymous/expired-token cases | **PASS — COMPONENT; NOT RUN LIVE** | Auth/session tests pass in the portal suite. The live browser used a synthetic development-auth boundary and did not execute anonymous or expired-token browser cases. |
 | Multi-borrower override exports/writeback | **FAIL** | An override can change the loan total while retaining old borrower totals, so the snapshot correctly fails closed. Override binding copy also omits metadata-review provenance. Standard approval passes. |
@@ -84,21 +84,21 @@ This task performed no production deployment or mutation and used no real borrow
 | Production application import orchestration | **NOT IMPLEMENTED** | `normalizeEncompassLoanSnapshot` is called only by simulator/test code, not by a customer portal workflow. |
 | Authoritative loan program import | **NOT IMPLEMENTED** | Hosted launch imports only GUID/mode; a new record otherwise defaults to Conventional. FHA/VA calculation cannot be certified. |
 | Borrower/employment/income import | **NOT IMPLEMENTED** | Normal hosted launch does not import an authoritative roster or employment/income application payload. |
-| Attachment list/download | **PASS — SIMULATOR/FAKE HTTP; REAL BLOCKED** | V3 list and original-download behavior, bounds, hashing, and buffer scrubbing pass locally. Production attachment listing requires `CUSTOM_CONNECTOR`, the tenant document-pull flag, an enabled authoritative binding, and a linked GUID. Its opaque selection binding is revalidated at enqueue and the exact mode/lender/deployment/GUID plus sorted attachment selection are persisted. Hosted loans cannot reach connector document reads. Real provider retrieval is blocked. |
-| Document-pull recovery and terminalization | **PASS — COMPONENT** | Queue visibility is 15 minutes versus a 14-minute stale threshold. Claim/reclaim is fenced by token and the durable progress snapshot; partial redelivery resumes only unprocessed attachments, five-attempt exhaustion becomes a safe terminal failure, exact target authorization is rechecked before connector reads and inside each persistence transaction, and connector-client cache state is cleared on success/failure. Terminal status and immutable audit are atomic; the corresponding operational event is best-effort after commit. |
-| Document parser/persistence/review through integrated path | **NOT IMPLEMENTED end-to-end** | The `$21,600` parity fixture begins post-parse; the simulator's 14 downloaded PDFs are not sent through the production parser/persistence/review chain. |
+| Attachment list/download | **PASS — SIMULATOR/FAKE HTTP; REAL BLOCKED** | V3 list and original-download behavior, bounds, hashing, and buffer scrubbing pass locally. Production attachment listing requires `CUSTOM_CONNECTOR`, the tenant document-pull flag, an enabled authoritative binding, and a linked GUID. The opaque browser token binds the connector target and is revalidated at enqueue; a separate persisted selection hash binds the sorted attachment IDs. The exact mode/lender/deployment/GUID and sorted selection are persisted. Hosted loans cannot reach connector document reads. Real provider retrieval is blocked. |
+| Document-pull recovery and terminalization | **PASS — COMPONENT** | Queue visibility is 15 minutes versus a 14-minute stale threshold. Claim/reclaim is fenced by token and the durable progress snapshot; partial redelivery resumes only unprocessed attachments, and five-attempt exhaustion becomes a safe terminal failure. Authorization is checked before connector reads and again before persistence; detected target drift rolls back writes, but concurrent revocation after the final check is not atomically fenced. Connector-client cache state is cleared on success/failure. Terminal status and immutable audit are atomic; the corresponding operational event is best-effort after commit. |
+| Document parser/persistence/review through integrated path | **NOT IMPLEMENTED** | No end-to-end implementation exists. The `$21,600` parity fixture begins post-parse; the simulator's 14 downloaded PDFs are not sent through the production parser/persistence/review chain. |
 | Exact current mapper | **PASS — SIMULATOR** | Thirteen approved custom fields, including W-2 variable, asset, and borrower totals, matched the independent expected map. |
 | Lender-specific mapping | **PASS — COMPONENT** | A server-authoritative JSON override is validated against the lender/deployment binding and fails closed on missing/invalid mappings. Real lender provisioning is unverified. |
 | Reviewer preview bound to exact fields and target | **PASS — COMPONENT** | Preview v2 hashes approval ID, sorted fields, `CUSTOM_CONNECTOR` mode, lender ID, deployment ID, and Encompass GUID. Those values are persisted and database-immutable to app/worker roles; worker claim revalidates current mode/binding/GUID and uses the persisted approved target. Legacy v1 jobs fail closed. |
 | Connector transport ambiguity | **PASS — COMPONENT** | Raw write transport failures become a safe retryable `ENCOMPASS_WRITE_OUTCOME_UNKNOWN`; raw readback transport failures become safe retryable service-unavailable errors. Raw messages/causes are discarded and the worker enters read-only reconciliation instead of falsely terminalizing an uncertain write. |
 | Direct connector full-field readback | **PASS — LOCAL COMPONENT; REAL BLOCKED** | Worker compares every intended field, returns SUCCESS/REJECTED/UNAVAILABLE/CONFLICT, and reconciles ambiguous PATCH outcomes with read-only retries. Queue visibility is 20 minutes versus a 15-minute stale threshold; stale reclaim is read-only reconciliation rather than a repeated PATCH. |
-| Post-readback finalization | **PASS — COMPONENT** | A successful provider readback is not finalized unless sync remains enabled and loan version, mode, GUID, lender, and deployment still match. Changed state becomes a safe failure instead of false success. Claim-time terminal failures emit one immutable audit record and one safe operational event. |
+| Post-readback finalization | **PASS — COMPONENT** | Immediately before finalization, the worker checks that sync remains enabled and loan version, mode, GUID, lender, and deployment still match; detected changes become a safe failure instead of false success. Concurrent revocation after that read is not atomically fenced. Claim-time terminal failures atomically persist one terminal state and immutable audit record; a safe operational event is attempted best-effort after commit. |
 | Readback metadata minimization | **PASS** | Value comparison occurs in memory. Persistence/status retain only allowlisted field name, status, and reason code; raw values and low-entropy value hashes are omitted. |
 | Direct custom-sync customer UI | **NOT IMPLEMENTED** | API client methods exist, but the protected UI does not display the exact preview or invoke the direct create/status flow. |
 | Hosted full-field bridge comparison | **PASS — COMPONENT ONLY** | The bridge now rereads and strictly compares every approved field after commit. |
-| Hosted authoritative completion | **NOT IMPLEMENTED / DISABLED** | Production HTTP authorization/completion return `503 ENCOMPASS_HOST_WRITEBACK_NOT_CERTIFIED`; a client claim cannot set `SUCCEEDED`; the UI is disabled. Legacy client-reported rows are exposed as `certified:false`, `current:false`. |
+| Hosted authoritative completion | **NOT IMPLEMENTED** | Disabled: production HTTP authorization/completion return `503 ENCOMPASS_HOST_WRITEBACK_NOT_CERTIFIED`; a client claim cannot set `SUCCEEDED`; the UI is disabled. Legacy client-reported rows are exposed as `certified:false`, `current:false`. |
 | Hosted launch provider identity attestation | **NOT IMPLEMENTED** | The GUID originates in the browser-host bridge and is submitted in the request body. The server validates syntax, authenticated tenant, and hosted mode, but receives no provider-signed or service-attested loan identity. This is not real Encompass interoperability evidence. |
-| Hosted custom-connector document retrieval | **NOT IMPLEMENTED / DISABLED** | Secured attachment and pull APIs reject `ENCOMPASS_HOSTED` loans with `ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED`, even if the hosted UI can display a pull action. |
+| Hosted custom-connector document retrieval | **NOT IMPLEMENTED** | Disabled: secured attachment and pull APIs reject `ENCOMPASS_HOSTED` loans with `ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED`, even if the hosted UI can display a pull action. |
 | Integrated JSON/XML/PDF workflow | **NOT IMPLEMENTED** | Normal hosted launch lacks authoritative program/roster data required by the approved snapshot, and there is no real custom-import orchestration. |
 | Simulated write/readback | **PASS — SIMULATOR** | One synthetic mutation and independent full-field readback passed; separate behavior produced all four supported per-field statuses. |
 | Real write/readback | **BLOCKED** | No authorized lender test tenant, provisioned fields, or written authorization was available. |
@@ -109,7 +109,7 @@ This task performed no production deployment or mutation and used no real borrow
 ### Standalone flow
 
 1. `POST /api/v1/loans` validates `freeflow-standalone-loan-v1`, program, one-to-four stable borrower keys/roles, idempotency, tenant ownership, and audit creation.
-2. Direct upload accepts a bounded PDF, validates signature/media type, derives `upload-sha256-{contentHash}`, calls the parser in memory, and clears all buffers on success and failure.
+2. Direct upload accepts a bounded PDF, validates signature/media type, derives `upload-sha256-{contentHash}`, calls the parser in memory, and clears request-owned chunks plus the aggregate upload buffer on success and failure. The parser client's temporary `Buffer.from` request copy is not explicitly wiped.
 3. Metadata review, calculation, and approval reuse the existing protected application services and mortgage engine.
 4. The approved snapshot verifies calculation freshness and that borrower totals reconcile to the loan total.
 5. Protected JSON, XML, and PDF routes serialize the same snapshot.
@@ -118,9 +118,9 @@ This task performed no production deployment or mutation and used no real borrow
 
 The architectural direction is lender-scoped routing, but the current runtime shape is a single-bound-tenant connector with one Encompass credential set. Production multi-tenant routing and credential resolution are not implemented. Binding checks fail closed for non-bound tenants. The provider adapter implements OAuth, V3 attachment list/download, bounded custom-field PATCH, and field reads; it intentionally does not implement a guessed full-loan schema.
 
-Direct sync uses a target-bound v2 preview, persists the exact fields and target under tenant RLS, rejects changed mode/binding/GUID at claim, and revalidates target and loan freshness after readback. Queue visibility is 20 minutes versus a 15-minute stale threshold; stale reclaim is read-only reconciliation. Ambiguous network/408/429/5xx outcomes also enter read-only reconciliation rather than repeating PATCH. Claim-time terminal failures emit one immutable audit record and one safe operational event.
+Direct sync uses a target-bound v2 preview, persists the exact fields and target under tenant RLS, rejects changed mode/binding/GUID at claim, and checks target and loan freshness after readback. Queue visibility is 20 minutes versus a 15-minute stale threshold; stale reclaim is read-only reconciliation. Ambiguous network/408/429/5xx outcomes also enter read-only reconciliation rather than repeating PATCH. Claim-time terminal failures atomically persist one terminal state and immutable audit record; a safe operational event is attempted best-effort after commit. Configuration reads are not locked or enforced by a conditional finalization predicate, so concurrent revocation after the final read remains a production blocker.
 
-Document pulls use a separate target-bound selection contract. Jobs persist only attachment identifiers and sanitized progress metadata, never document bytes. Each connector read and each persistence transaction revalidates the exact enabled target; claim tokens plus durable attachment/version counters fence stale workers and allow safe partial redelivery without duplicates. Terminal status and immutable audit commit together.
+Document pulls use a separate target-bound selection contract. Jobs persist only attachment identifiers and sanitized progress metadata, never document bytes. Authorization is checked before connector reads and again before persistence; claim tokens plus durable attachment/version counters fence stale workers and allow safe partial redelivery without duplicates. Detected target drift rolls back writes, but configuration reads are not locked or enforced by a conditional persistence predicate, so a concurrent revocation after the final check is not atomically fenced. Terminal status and immutable audit commit together.
 
 The hosted browser bridge can compare every field locally, but its launch identity is browser-supplied and it cannot provide server-verifiable provider evidence. Hosted writeback HTTP remains disabled, and hosted loans are barred from custom-connector document reads.
 
@@ -148,11 +148,11 @@ Simulator field-only contract preview hash (`encompass-write-preview-v1`; not th
 
 ## Live standalone acceptance
 
-The strongest retained standalone result was a CLI Playwright run against live local services. It is not the committed intercepted-API UI contract test. Its sanitized output bundle is retained at [`evidence/standalone-live-application-2026-10-11-e4c9e79`](evidence/standalone-live-application-2026-10-11-e4c9e79/).
+The strongest retained standalone result was a clean-source CLI Playwright run against live local services. It is not the committed intercepted-API UI contract test. Its sanitized output bundle is retained at [`evidence/standalone-live-application-2026-10-11-a228f69`](evidence/standalone-live-application-2026-10-11-a228f69/).
 
 ### Boundaries
 
-- Full-live source revision: `e4c9e7935eb474aa425d7bb4991e3c4861745615`; run ID `20261011-live-e4c9e79-01`.
+- Full-live source revision: `a228f69f045157b2a5b50c9bc25997288e369eba`; run ID `20261011-live-a228f69-01`.
 - Synthetic development authentication: stubbed.
 - `/runtime-config.json`: stubbed.
 - Every `/api/*` request: forwarded unchanged to the live portal.
@@ -182,17 +182,19 @@ The current run retained only its sanitized JSON/XML/PDF exports and aggregate e
 | Item | SHA-256 |
 |---|---|
 | Synthetic scanned input fixture | `0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf` |
-| Approved snapshot | `b26193d348f4eb0f9503a6ade17d475497859aa22a567c79966195510fa5b2cc` |
-| JSON export | `38872e523c5b948e5e03abe439a50b90efa82d22150bcf3395b71269465f3989` |
-| MISMO XML export | `662ef768d0c2926fff2aa1ebb60e16a17070449ccf69b30580a0cc158b8266d2` |
-| Summary PDF export | `2aa3b097cdda43683d71010fe9e555a8631a4b28523fd3c293d937a9c3c88e63` |
-| Generated artifact manifest | `b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca` |
+| Approved snapshot | `334eefb4c15cde7bfd2983dd53d0dc7cc07166c71a421c768e1dceba47c638e4` |
+| JSON export | `573f6a5672995cd29f545c2e06376e977f5271e19f974cccb82d206a88809da6` |
+| MISMO XML export | `67771e36477cdb2f84ebf767991bebbfc811ff06a90951f2cf7ece65527359b9` |
+| Summary PDF export | `ea0a74c0cbbfd2070dcbfae742abd6f8be8d573a66b1af6ea30cda0767a53474` |
+| Generated artifact manifest | `b7a9f82acdb7fdc2985f4a1097ed059ec67dfef0a82789e9205d5f18eea95180` |
 
 Final persistence: one document, one active extraction, one calculation, and one approval. The loan was version 4 with loan status `VERIFIED`; extraction status was `ACTIVE`.
 
 ### Historical live run
 
-The prior retained run `20261011-live-d7f7a43-01` at `d7f7a432bed0292bc6d800ec05800d2105ceba95` also passed and remains rehashable at [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/), manifest SHA-256 `8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8`.
+The prior retained run `20261011-live-e4c9e79-01` at `e4c9e7935eb474aa425d7bb4991e3c4861745615` also passed and remains rehashable at [`evidence/standalone-live-application-2026-10-11-e4c9e79`](evidence/standalone-live-application-2026-10-11-e4c9e79/), manifest SHA-256 `b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca`.
+
+The earlier retained run `20261011-live-d7f7a43-01` at `d7f7a432bed0292bc6d800ec05800d2105ceba95` remains rehashable at [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/), manifest SHA-256 `8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8`.
 
 The original run at `d72c1fad75b08361859b4665d834fc4b6b755266` passed the scoped lifecycle, but its input and output bytes were intentionally destroyed during cleanup. Its observed fixture, snapshot, JSON, XML, and PDF hashes were respectively `335fb87ed412e0850533561451391db8968e25acd8ab4d983a42c027bb4af077`, `637e72028503599e9901d28627368faac1c7d3b9c2fb6c2c9cb1a3a66a9a58ce`, `5c4dfc1b2228037a7fbd8f73130214f4e909670f29ddf85a73061c62d86cf581`, `19ed0689d51463fd61702c7bcde431924d74f366abb69d66e41001c769500486`, and `b47bb5e4a0fbd5101803fdb711f6a6bf8f6aa0f129c0f8c9890d8a01f4112622`. These are historical execution metadata, not independently rehashable retained artifacts.
 
@@ -215,7 +217,7 @@ The repository contains no official `.xsd`, Schematron, or selected business imp
 - No raw document `bytea` column exists in the document/extraction tables.
 - The current retained bundle passed its exact generated-file allowlist, artifact/source-fingerprint rehash, and forbidden-fixture-token scan. No source PDF, raw OCR, trace, screenshot, video, HAR, cookie, token, or customer data is retained. This does not replace broader semantic PII scanning, which remains a P1.
 - Provider failures are reduced to allowlisted safe codes and identifiers; arbitrary provider messages are not logged.
-- Upload/download buffers are cleared on success and failure paths.
+- Direct-upload request chunks and aggregate buffers, worker-owned downloaded buffers, and connector-owned read buffers are cleared on success and failure paths. The parser client's temporary `Buffer.from` request copy is RAM-only but is not explicitly wiped.
 - Tenant-scoped queries, RLS, binding enforcement, and cross-tenant denial passed. This verifies fail-closed isolation for the configured binding; it does not implement or certify production multi-tenant connector routing.
 - Exact write-preview fields are stored tenant-scoped under RLS because the worker must consume the reviewer-approved immutable set. They must receive normal production database encryption, backup, and access controls.
 - Field readback persistence/API output contains only field name, status, and reason code—no raw values or deterministic hashes of low-entropy income values.
@@ -223,7 +225,7 @@ The repository contains no official `.xsd`, Schematron, or selected business imp
 - Hosted loans cannot invoke custom-connector document reads, and custom sync requires `CUSTOM_CONNECTOR` mode.
 - Preview v2 binds the approved fields to mode, lender, deployment, and GUID; legacy v1 jobs fail closed, and successful readback is revalidated against current target state before finalization.
 - App and worker database roles cannot mutate approved sync preview/target facts after insertion. Document-pull identity/target is likewise immutable; worker updates are limited to fenced progress and terminal state.
-- Document-pull target drift rolls back document/extraction/progress/version writes. A revocation after the last pre-read check can leave an already-started network request in flight, but its bytes cannot be persisted after drift.
+- Detected document-pull target drift rolls back document/extraction/progress/version writes. Authorization is checked before connector reads and again before persistence, but atomic revocation during an in-flight transaction is not proven; configuration reads are not locked or enforced by a conditional persistence predicate.
 
 ## Tests and reproduction
 
@@ -261,8 +263,8 @@ The reusable live suite is intentionally separate and must point at a disposable
 $env:LIVE_APP_URL='http://127.0.0.1:3014'
 $env:LIVE_PHASE='main'
 $env:LIVE_FIXTURE_IMAGE='<locally-built-parser-image>'
-$env:LIVE_SOURCE_REVISION='e4c9e7935eb474aa425d7bb4991e3c4861745615'
-$env:LIVE_EVIDENCE_RUN_ID='20261011-live-e4c9e79-01'
+$env:LIVE_SOURCE_REVISION='a228f69f045157b2a5b50c9bc25997288e369eba'
+$env:LIVE_EVIDENCE_RUN_ID='20261011-live-a228f69-01'
 $env:LIVE_EVIDENCE_DIR='<empty-local-evidence-directory>'
 corepack pnpm --dir apps/underwriting-console run test:e2e:live
 
@@ -305,14 +307,15 @@ corepack pnpm --filter @mortgage-pos/encompass-connector test:database-bindings
 
 ### Browser boundary
 
-The committed `test:e2e:standalone` suite is an explicitly labeled UI contract with intercepted APIs. The separate two-phase live CLI harness in `apps/underwriting-console/e2e-live/standalone-live.spec.ts` executed at revision `e4c9e7935eb474aa425d7bb4991e3c4861745615` against the reconstructed disposable stack with no mocked business API. The main and cross-tenant phases both passed; the deterministic fixture SHA-256 was `0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf`. This local synthetic-development-auth execution is the retained live acceptance record; it is not production identity, AWS, official MISMO, or real-Encompass evidence.
+The committed `test:e2e:standalone` suite is an explicitly labeled UI contract with intercepted APIs. The separate two-phase live CLI harness in `apps/underwriting-console/e2e-live/standalone-live.spec.ts` executed at clean revision `a228f69f045157b2a5b50c9bc25997288e369eba` against the reconstructed disposable stack with all 22 migrations and no mocked business API. The main and cross-tenant phases both passed; the deterministic fixture SHA-256 was `0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf`. This local synthetic-development-auth execution is the retained live acceptance record; it is not production identity, AWS, official MISMO, or real-Encompass evidence.
 
 ## Evidence inventory
 
 | Evidence | Classification | Contents |
 |---|---|---|
-| [`evidence/standalone-live-application-2026-10-11-e4c9e79`](evidence/standalone-live-application-2026-10-11-e4c9e79/) | Sanitized synthetic live application execution | Latest retained JSON/XML/PDF, aggregate processing/main/cross-tenant results, immutable generated manifest, and explanatory README. One borrower, `$5,721.67`; no source PDF or raw OCR retained. |
-| [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/) | Prior retained synthetic live execution | Earlier rehashable `d7f7a43` JSON/XML/PDF and execution records. |
+| [`evidence/standalone-live-application-2026-10-11-a228f69`](evidence/standalone-live-application-2026-10-11-a228f69/) | Sanitized synthetic live application execution | Final clean-source retained JSON/XML/PDF, aggregate processing/main/cross-tenant results, immutable generated manifest, and explanatory README. One borrower, `$5,721.67`; no source PDF or raw OCR retained. |
+| [`evidence/standalone-live-application-2026-10-11-e4c9e79`](evidence/standalone-live-application-2026-10-11-e4c9e79/) | Prior retained synthetic live execution | Earlier rehashable `e4c9e79` JSON/XML/PDF and execution records. |
+| [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/) | Earlier retained synthetic live execution | Rehashable `d7f7a43` JSON/XML/PDF and execution records. |
 | [`evidence/standalone-approved-income-exports-2026-10-11`](evidence/standalone-approved-income-exports-2026-10-11/) | Sanitized synthetic component execution | Approved snapshot, JSON, XML, PDF, FreeFlow-profile validation, execution report, byte/hash manifest. One borrower, `$8,000`; distinct from the live browser fixture. |
 | [`evidence/encompass-certification-2026-10-11`](evidence/encompass-certification-2026-10-11/) | Post-parse and connector simulator only | Two normalized projections, `$21,600` calculator result, intended fields, simulated loan/docs/write/readback, MISMO limitation record, manifest. No XML is produced for this fixture. |
 | [`evidence/same-day-certification-2026-10-11`](evidence/same-day-certification-2026-10-11/) | Sanitized execution consolidation | Strict status report, live CLI Playwright result, database/security result, test summary, and manifest binding the other evidence manifests. |
@@ -354,12 +357,13 @@ Do not enable production Encompass import or writeback yet. For a future control
 1. Define and implement the lender-approved real loan snapshot contract, including authoritative program, borrower roster, employment, and income fields; connect it to the portal import workflow.
 2. Design and implement authoritative per-tenant connector endpoint, service-principal, and lender-scoped credential resolution; test two tenants with separate endpoints/credentials and swapped bindings.
 3. Replace process-local replay claims with a shared atomic TTL store that fails closed when unavailable and covers restart, rolling-overlap, and concurrent-process replay.
-4. Add a protected customer UI for direct custom-connector exact preview, explicit confirmation, job status, and per-field readback.
-5. Keep hosted writeback disabled unless trusted service-to-service/provider attestation makes loan identity and full-field readback independently verifiable server-side.
-6. Inventory any historical `EncompassHostWrite=SUCCEEDED`/`EXPORTED_TO_LOS` records from prior deployments and treat them as unverified. Console-context API output now marks legacy rows uncertified/non-current, but the underlying status, loan state, and immutable audit rows are not migrated.
-7. Obtain the official MISMO 3.4 schema plus the selected implementation requirements, add licensed CI validation, and resolve every validation error.
-8. Correct override semantics so loan and borrower totals reconcile and metadata-review provenance is retained; add multi-borrower override export/write tests.
-9. Execute real authorized non-production Encompass auth, loan import, document retrieval, exact preview, one approved write, independent full-field readback, retry/idempotency, and sanitized evidence capture.
+4. Atomically fence connector authorization revocation at document persistence and sync finalization, using locked authoritative rows, a monotonic authorization generation, or equivalent conditional database predicates; add deterministic concurrent-revocation tests.
+5. Add a protected customer UI for direct custom-connector exact preview, explicit confirmation, job status, and per-field readback.
+6. Keep hosted writeback disabled unless trusted service-to-service/provider attestation makes loan identity and full-field readback independently verifiable server-side.
+7. Inventory any historical `EncompassHostWrite=SUCCEEDED`/`EXPORTED_TO_LOS` records from prior deployments and treat them as unverified. Console-context API output now marks legacy rows uncertified/non-current, but the underlying status, loan state, and immutable audit rows are not migrated.
+8. Obtain the official MISMO 3.4 schema plus the selected implementation requirements, add licensed CI validation, and resolve every validation error.
+9. Correct override semantics so loan and borrower totals reconcile and metadata-review provenance is retained; add multi-borrower override export/write tests.
+10. Execute real authorized non-production Encompass auth, loan import, document retrieval, exact preview, one approved write, independent full-field readback, retry/idempotency, and sanitized evidence capture.
 
 ### P1 — required for production-quality standalone assurance
 
@@ -368,6 +372,7 @@ Do not enable production Encompass import or writeback yet. For a future control
 3. Run the JSON file-import path against the live backend, not only the UI contract.
 4. Expand semantic PII/evidence scanning beyond exact forbidden strings.
 5. Add automated CI PDF rendering and visual regression; the retained current-run PDF received only a post-run human visual inspection.
+6. Explicitly own and wipe the parser-request byte copy after `fetch` completes; the current `Buffer.from` body remains RAM-only but is left to runtime reclamation.
 
 ### P2 — operational hardening
 
@@ -375,7 +380,7 @@ Do not enable production Encompass import or writeback yet. For a future control
 2. Add dashboards/alarms for reconciliation exhaustion, RLS denials, parser failures, and disabled hosted-write attempts without logging mortgage data.
 3. Re-run restore, rollback, multi-task replay, and connector blast-radius exercises before production approval.
 4. Add a transactional outbox for document-pull operational events. Terminal status and immutable audit are atomic today, but a crash after commit can omit the best-effort metric/event.
-5. Define connector-revocation semantics for already-started requests. Authorization is checked immediately before every connector read and again before persistence, so drift persists no data, but revocation cannot cancel a network request already in flight.
+5. Define connector-revocation semantics for already-started network requests after the P0 atomic persistence/finalization fence is implemented; a revocation cannot cancel connector I/O already in flight.
 6. Persist the standalone create idempotency key across a tab refresh/crash without retaining borrower data; current uncertain retry reuse lasts for the mounted console session.
 
 ## Final deployment decision
@@ -383,5 +388,5 @@ Do not enable production Encompass import or writeback yet. For a future control
 - Standalone development/customer demonstration: the one-borrower Conventional standard-approval path is **functionally executable with synthetic data**; JSON file import lacks a live run, multi-borrower override fails closed, and the XML must not be marketed as officially MISMO validated.
 - Standalone production approval: **BLOCKED** pending official MISMO validation and the remaining production-readiness program outside this bounded task.
 - Encompass customer demonstration: **BLOCKED**. The deterministic simulator is engineering evidence only and must not be presented as a customer workflow or ICE interoperability.
-- Encompass production: **NOT IMPLEMENTED/BLOCKED** as detailed above.
+- Encompass production capability: **NOT IMPLEMENTED** as detailed above; production release remains **BLOCKED**.
 - AWS deployment performed by this task: **none**.

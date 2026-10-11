@@ -112,24 +112,31 @@
     "containersAndNetworksRemoved": true
   },
   "latestRetainedLiveExecution": {
-    "sourceRevision": "e4c9e7935eb474aa425d7bb4991e3c4861745615",
-    "runId": "20261011-live-e4c9e79-01",
+    "sourceRevision": "a228f69f045157b2a5b50c9bc25997288e369eba",
+    "runId": "20261011-live-a228f69-01",
     "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
     "boundary": "CLI_PLAYWRIGHT_ACTUAL_UI_BACKEND_POSTGRESQL_PARSER_TWO_SYNTHETIC_TENANTS_NO_BUSINESS_API_MOCKS",
     "mainTestsPassed": 1,
     "crossTenantTestsPassed": 1,
     "httpCrossTenantStatus": 404,
     "crossTenantErrorCode": "LOAN_NOT_FOUND",
+    "migrationsAppliedFromZero": 22,
     "apiResponses": 19,
     "apiFailures": 0,
     "encompassRequests": 0,
     "monthlyIncome": "5721.67",
     "annualIncome": "68660.04",
-    "manifestSha256": "b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca",
+    "manifestSha256": "b7a9f82acdb7fdc2985f4a1097ed059ec67dfef0a82789e9205d5f18eea95180",
     "pdfVisualInspection": "PASS_ONE_PAGE_LEGIBLE_NO_CLIPPING_OR_OVERLAP",
     "sanitizedExportsRetained": true
   },
   "priorRetainedLiveExecution": {
+    "sourceRevision": "e4c9e7935eb474aa425d7bb4991e3c4861745615",
+    "runId": "20261011-live-e4c9e79-01",
+    "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
+    "manifestSha256": "b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca"
+  },
+  "earlierRetainedLiveExecution": {
     "sourceRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
     "runId": "20261011-live-d7f7a43-01",
     "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
