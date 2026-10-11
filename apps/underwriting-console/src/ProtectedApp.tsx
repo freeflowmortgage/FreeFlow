@@ -442,12 +442,19 @@ function StandaloneLoanIntake({ onCreated, onBack }: {
   const [borrowerCount, setBorrowerCount] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingSubmission = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
 
   const submit = async (payload: StandaloneLoanRequest) => {
     setBusy(true); setError(null);
+    const fingerprint = JSON.stringify(payload);
+    const idempotencyKey = pendingSubmission.current?.fingerprint === fingerprint
+      ? pendingSubmission.current.idempotencyKey
+      : crypto.randomUUID();
+    pendingSubmission.current = { fingerprint, idempotencyKey };
     try {
-      const created = await portalClient.createStandaloneLoan(payload, crypto.randomUUID());
+      const created = await portalClient.createStandaloneLoan(payload, idempotencyKey);
       await onCreated(created.loanId);
+      pendingSubmission.current = null;
     } catch (cause) {
       setError(describeError(cause, 'The standalone loan could not be created.'));
     } finally {

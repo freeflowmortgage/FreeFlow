@@ -56,6 +56,35 @@ test.describe('UI contract only - intercepted portal boundary', () => {
     await page.getByTestId('authoritative-workflow-tab').click();
     await assertApprovedDownloads(page);
   });
+
+  test('an uncertain create retry reuses its idempotency key', async ({ page }) => {
+    const idempotencyKeys: string[] = [];
+    let createAttempts = 0;
+    await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === '/api/v1/loans' && request.method() === 'POST') {
+        createAttempts += 1;
+        idempotencyKeys.push(request.headers()['idempotency-key'] ?? '');
+        if (createAttempts === 1) return route.abort('connectionreset');
+        return route.fulfill({ status: 201, json: { loanId: LOAN, loanVersion: 1, integrationMode: 'NONE' } });
+      }
+      if (path === `/api/v1/loans/${LOAN}/console-context`) {
+        return route.fulfill({ json: approvedContext() });
+      }
+      return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_UI_CONTRACT_ROUTE' } } });
+    });
+
+    await page.goto('/workspace?product=split');
+    await page.getByTestId('create-standalone-loan').click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await page.getByTestId('create-standalone-loan').click();
+
+    await expect(page.getByTestId('protected-workflow')).toBeVisible();
+    expect(createAttempts).toBe(2);
+    expect(idempotencyKeys[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+  });
 });
 
 async function interceptApprovedStandalone(page: import('@playwright/test').Page) {
