@@ -1,0 +1,306 @@
+{
+  "schemaVersion": "freeflow-simulated-encompass-round-trip-v1",
+  "classification": "SYNTHETIC_CONNECTOR_SIMULATOR_ONLY",
+  "realEncompassInteroperability": "NOT_CLAIMED",
+  "loanProjection": {
+    "schemaVersion": "encompass-loan-snapshot-v1",
+    "simulated": true,
+    "loanProgram": "CONVENTIONAL",
+    "loanPurpose": "PURCHASE",
+    "borrowerCount": 2,
+    "employmentCounts": [
+      1,
+      0
+    ]
+  },
+  "documentRetrieval": {
+    "rawDocumentBytesPersisted": false,
+    "buffersErased": true,
+    "attachments": [
+      {
+        "attachmentId": "synthetic-income-document-1",
+        "sha256": "50eb5ac04498465000f569680a030df85c44dac939ba117411b43588e3a2ba2b",
+        "bytes": 807
+      },
+      {
+        "attachmentId": "synthetic-pack-form-1065-2025",
+        "sha256": "4f7b1ea6d86cfc087de9c6657afefb774830cec93f2fc37b68866cbe927e32ee",
+        "bytes": 979320
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-k1-1065-2025",
+        "sha256": "c7a0cb7ac7aecd75fd262afbbc8bcd363790653bb8a6616fbddcdc230cadfe90",
+        "bytes": 270367
+      },
+      {
+        "attachmentId": "synthetic-pack-paystub-usb-nates",
+        "sha256": "cb1e8465f79cd24e4d323ceec58d51016d37f8dc79bbdd50483b866c6f5995fd",
+        "bytes": 303949
+      },
+      {
+        "attachmentId": "synthetic-pack-w2-2021-nates",
+        "sha256": "0678ea430c4716a478e5367f1df565223dc3a64d15f0e4c3f0c6a03e0862b18e",
+        "bytes": 745178
+      },
+      {
+        "attachmentId": "synthetic-pack-w2-2021-coborrower",
+        "sha256": "0678ea430c4716a478e5367f1df565223dc3a64d15f0e4c3f0c6a03e0862b18e",
+        "bytes": 745178
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-e-2025",
+        "sha256": "ff14337f558406d5c5a8c533c4693be380de5d611d53d825fc4b5ccdbf5029f1",
+        "bytes": 195354
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-b-2025",
+        "sha256": "cd1af5599d84c66ea13adf2f6227811acfd83164391d0673274e5cb98c249dd7",
+        "bytes": 748
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-c-2025",
+        "sha256": "2fdb9af27e95e41b2ad283bb62c1940abe95a2118aba0d1c06e23bd17bcf72a7",
+        "bytes": 901
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-f-2025",
+        "sha256": "18b25453cef9d37c54e653fa2fd344f1d9b82194f396a80b57b1c863816047d9",
+        "bytes": 895
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-d-2025",
+        "sha256": "5a642705c53137707c5b098caec4a67a111544f031380da5336c7a85935c4194",
+        "bytes": 748
+      },
+      {
+        "attachmentId": "synthetic-pack-form-1120s-2025",
+        "sha256": "59fbd49915f2a5ea455e0a3b3bf284ba31ed422303a45e09ae36b72084b71be2",
+        "bytes": 1015
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-k1-1120s-2025",
+        "sha256": "b4ef854471dcdba0d2cab631b9f0f5ee80db6965d924735d0d79e4058b2c79b6",
+        "bytes": 966
+      },
+      {
+        "attachmentId": "synthetic-pack-form-1120-2025",
+        "sha256": "e9999553c366ae583a0c239df80cdd1eb841e065fe3d214d7db460e48e8863aa",
+        "bytes": 971
+      }
+    ]
+  },
+  "approvedPreview": {
+    "schemaVersion": "encompass-write-preview-v1",
+    "approvalEventId": "00000000-0000-4000-8000-000000000901",
+    "previewHash": "cfb826e94ff15f15a7f977a80285eb6f0bea820dfddee50a9d6959fa35687447",
+    "fieldNames": [
+      "CX.FREEFLOW.APPROVAL.ID",
+      "CX.FREEFLOW.ASSET.INCOME",
+      "CX.FREEFLOW.AUDIT.URL",
+      "CX.FREEFLOW.BORROWER.1.INCOME",
+      "CX.FREEFLOW.BORROWER.2.INCOME",
+      "CX.FREEFLOW.FORM.1065",
+      "CX.FREEFLOW.INCOME",
+      "CX.FREEFLOW.RENTAL",
+      "CX.FREEFLOW.SCH.C",
+      "CX.FREEFLOW.TRENDING",
+      "CX.FREEFLOW.W2.BASE",
+      "CX.FREEFLOW.W2.VARIABLE",
+      "CX.FREEFLOW.YEARS"
+    ]
+  },
+  "providerRevision": "synthetic-9778b4ebaa933c93",
+  "writeReadback": {
+    "schemaVersion": "encompass-field-readback-v1",
+    "allSucceeded": true,
+    "fields": [
+      {
+        "fieldName": "CX.FREEFLOW.APPROVAL.ID",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "46de918f54468f0a11259edcc5ff1015ca4ef49fdad68b68d65b23f46eafc8f3",
+        "actualValueSha256": "46de918f54468f0a11259edcc5ff1015ca4ef49fdad68b68d65b23f46eafc8f3"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.ASSET.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "78a5d5c839a39e879c781d4657add719b76dc1e375f826d30ad7b55bbeecdb75",
+        "actualValueSha256": "78a5d5c839a39e879c781d4657add719b76dc1e375f826d30ad7b55bbeecdb75"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.AUDIT.URL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "77b94330cf88ec6532ddb5080447ffe98ec0dc79f12f3b32bd11719932e34396",
+        "actualValueSha256": "77b94330cf88ec6532ddb5080447ffe98ec0dc79f12f3b32bd11719932e34396"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.1.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "2e1768b31ef9230188a825a64f3785f0d7176a1ce45f51cdc33d1b01b5e039ad",
+        "actualValueSha256": "2e1768b31ef9230188a825a64f3785f0d7176a1ce45f51cdc33d1b01b5e039ad"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.2.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "36900821799bc317c4e440856f2af54b930fb2b8b8419fa640b28ed2af12f77c",
+        "actualValueSha256": "36900821799bc317c4e440856f2af54b930fb2b8b8419fa640b28ed2af12f77c"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.FORM.1065",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "444464ef296a8260615de5e5a86913eff363220dc7b716c739ddd27cff018ca1",
+        "actualValueSha256": "444464ef296a8260615de5e5a86913eff363220dc7b716c739ddd27cff018ca1"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "00fe20155ea5ba9ab8bfecb7cf2c53ea17246231e57baaa82c57458f80e50809",
+        "actualValueSha256": "00fe20155ea5ba9ab8bfecb7cf2c53ea17246231e57baaa82c57458f80e50809"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.RENTAL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "13acecdae0ca92569392dee59d8180b0c7f68a72ea30911188ca07c1518616a9",
+        "actualValueSha256": "13acecdae0ca92569392dee59d8180b0c7f68a72ea30911188ca07c1518616a9"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.SCH.C",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "ccc076aa61bb19e7c82fc85114fe9a3efb613d5190c371270de07f32c34258eb",
+        "actualValueSha256": "ccc076aa61bb19e7c82fc85114fe9a3efb613d5190c371270de07f32c34258eb"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.TRENDING",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "203c2367ee94c8b300103f3410b9122ffdd9db9e27c87adb05e1f0bc27e7f470",
+        "actualValueSha256": "203c2367ee94c8b300103f3410b9122ffdd9db9e27c87adb05e1f0bc27e7f470"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.BASE",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "571cfae5013b5511c6cfd4261417111735dffa5ed044f041ac0b1706cc90322f",
+        "actualValueSha256": "571cfae5013b5511c6cfd4261417111735dffa5ed044f041ac0b1706cc90322f"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.VARIABLE",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "d0ce0e44707d2a84a0b50c74ac391f81e60170875120f821d7ebe12c1697f9a9",
+        "actualValueSha256": "d0ce0e44707d2a84a0b50c74ac391f81e60170875120f821d7ebe12c1697f9a9"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.YEARS",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "b2b2f104d32c638903e151a9b20d6e27b41d8c0c84cf8458738f83ca2f1dd744",
+        "actualValueSha256": "b2b2f104d32c638903e151a9b20d6e27b41d8c0c84cf8458738f83ca2f1dd744"
+      }
+    ]
+  },
+  "fieldStatusCoverage": {
+    "schemaVersion": "encompass-field-readback-v1",
+    "allSucceeded": false,
+    "fields": [
+      {
+        "fieldName": "CX.FREEFLOW.APPROVAL.ID",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "46de918f54468f0a11259edcc5ff1015ca4ef49fdad68b68d65b23f46eafc8f3",
+        "actualValueSha256": "46de918f54468f0a11259edcc5ff1015ca4ef49fdad68b68d65b23f46eafc8f3"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.ASSET.INCOME",
+        "status": "UNAVAILABLE",
+        "reasonCode": "FIELD_UNAVAILABLE",
+        "expectedValueSha256": "78a5d5c839a39e879c781d4657add719b76dc1e375f826d30ad7b55bbeecdb75"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.AUDIT.URL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "77b94330cf88ec6532ddb5080447ffe98ec0dc79f12f3b32bd11719932e34396",
+        "actualValueSha256": "77b94330cf88ec6532ddb5080447ffe98ec0dc79f12f3b32bd11719932e34396"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.1.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "2e1768b31ef9230188a825a64f3785f0d7176a1ce45f51cdc33d1b01b5e039ad",
+        "actualValueSha256": "2e1768b31ef9230188a825a64f3785f0d7176a1ce45f51cdc33d1b01b5e039ad"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.2.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "36900821799bc317c4e440856f2af54b930fb2b8b8419fa640b28ed2af12f77c",
+        "actualValueSha256": "36900821799bc317c4e440856f2af54b930fb2b8b8419fa640b28ed2af12f77c"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.FORM.1065",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "444464ef296a8260615de5e5a86913eff363220dc7b716c739ddd27cff018ca1",
+        "actualValueSha256": "444464ef296a8260615de5e5a86913eff363220dc7b716c739ddd27cff018ca1"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "00fe20155ea5ba9ab8bfecb7cf2c53ea17246231e57baaa82c57458f80e50809",
+        "actualValueSha256": "00fe20155ea5ba9ab8bfecb7cf2c53ea17246231e57baaa82c57458f80e50809"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.RENTAL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "13acecdae0ca92569392dee59d8180b0c7f68a72ea30911188ca07c1518616a9",
+        "actualValueSha256": "13acecdae0ca92569392dee59d8180b0c7f68a72ea30911188ca07c1518616a9"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.SCH.C",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "ccc076aa61bb19e7c82fc85114fe9a3efb613d5190c371270de07f32c34258eb",
+        "actualValueSha256": "ccc076aa61bb19e7c82fc85114fe9a3efb613d5190c371270de07f32c34258eb"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.TRENDING",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "203c2367ee94c8b300103f3410b9122ffdd9db9e27c87adb05e1f0bc27e7f470",
+        "actualValueSha256": "203c2367ee94c8b300103f3410b9122ffdd9db9e27c87adb05e1f0bc27e7f470"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.BASE",
+        "status": "REJECTED",
+        "reasonCode": "PROVIDER_REJECTED",
+        "expectedValueSha256": "571cfae5013b5511c6cfd4261417111735dffa5ed044f041ac0b1706cc90322f"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.VARIABLE",
+        "status": "CONFLICT",
+        "reasonCode": "VALUE_CONFLICT",
+        "expectedValueSha256": "d0ce0e44707d2a84a0b50c74ac391f81e60170875120f821d7ebe12c1697f9a9",
+        "actualValueSha256": "ba4df7b1c596ddf184df47e4c09806594a0d53c8f2be814a9f951c1a04dc6d2a"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.YEARS",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED",
+        "expectedValueSha256": "b2b2f104d32c638903e151a9b20d6e27b41d8c0c84cf8458738f83ca2f1dd744",
+        "actualValueSha256": "b2b2f104d32c638903e151a9b20d6e27b41d8c0c84cf8458738f83ca2f1dd744"
+      }
+    ]
+  },
+  "mutationCount": 1
+}

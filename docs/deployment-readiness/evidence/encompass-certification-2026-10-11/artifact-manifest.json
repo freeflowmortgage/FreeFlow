@@ -3,24 +3,32 @@
   "boundary": "POST_PARSE_SIMULATOR",
   "fixtureVersion": "encompass-certification-v1",
   "sourceRevision": {
-    "baseCommit": "6d7261af55d3590aa931ebfa11fa54ca898b0f77",
+    "baseCommit": "e525c11867d0c0e185218f4598455cce79a0e5c8",
     "executionSource": "CURRENT_WORKTREE",
     "workingTreeInputs": [
       {
         "path": "apps/underwriter-portal/scripts/encompass-certification.ts",
-        "sha256": "e9bc7c5ba5352eaa9df7d71548fd2939f92457595e15582e3480586d18a38a6f"
+        "sha256": "7158aeefe39578f8cc9994e7d237fc427a05861d1c30967f21744b2469321194"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness.ts",
-        "sha256": "a496ad4ff8031a2fcdd6bd17701bc0db43faab5cb6ef8ff5a9cb874b169ca200"
+        "sha256": "657a45043a8245ed8ab7c3660042e293dd755c5e32dd1286479339700dca9cff"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertification.test.ts",
-        "sha256": "cc0e44ce96fe2ebf6463e8f298272bc3887789c7d08678eba529e2c074f620a8"
+        "sha256": "89ba106208d84850647aa751d383a9c844990992b0cfe24fc5ca7280862ac230"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/fixtures/encompass-certification-v1.json",
-        "sha256": "a5d5a9209cce554c75ef929d29b1599979bdf23478d12f1bfd45193a951e41f1"
+        "sha256": "b6b1404e31e4e3780ae7204df4b1f9895c966eb1b995036b9b44a50e74c4d706"
+      },
+      {
+        "path": "services/encompass-connector/src/connector/syntheticFreeflowDevConnector.ts",
+        "sha256": "fd255fadb924c45815a461762e139394e3d9409b338051387e098a42a0c6e271"
+      },
+      {
+        "path": "packages/encompass-connector-contract/src/roundTrip.ts",
+        "sha256": "e39d39162882212d1075905a2d91ef03deb8827cdc7ef5dd861cf95f7dc70b02"
       }
     ]
   },
@@ -53,13 +61,18 @@
     },
     {
       "name": "encompass-intended-fields.json",
-      "sha256": "b3069e01659f5282d4f50426eb9b6f14d0e25f8479210b589fad11e01896a144",
-      "bytes": 650
+      "sha256": "156ecf41334ce9c6d3752e577bef387ee1385bdddea3339ef6afd66ac203bf62",
+      "bytes": 735
     },
     {
       "name": "encompass-in-memory-field-projection.json",
-      "sha256": "0d5844f64d31c96beaca9a5db527fa0f69c56cebfdad4610ce56b03b9abca884",
-      "bytes": 1763
+      "sha256": "ff4b4329005aacd4bfd2ce4663f6027776522e8a6b76d9b81e82bd217055145d",
+      "bytes": 1996
+    },
+    {
+      "name": "simulated-encompass-round-trip.json",
+      "sha256": "23318897a40bb746f7f007f670021a5260fc049dc80dd14ce55c89ddc930ca69",
+      "bytes": 12466
     },
     {
       "name": "mismo-validation.json",
@@ -68,8 +81,8 @@
     },
     {
       "name": "processing-validation-report.json",
-      "sha256": "e885d7df0a74368958c4f21ab45385d28136d9ac94304e44efb363af840d91c0",
-      "bytes": 2564
+      "sha256": "0e23c69d1482f9407f1d70e4626662dcfa367ac5e2ddbe52fa02fa490d49a167",
+      "bytes": 3462
     }
   ]
 }
