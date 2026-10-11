@@ -31,3 +31,9 @@ regexes = [
   '''^type BreakdownKey = 'w2EmployerBreakdown' \| 'scheduleCBreakdown' \| 'form1065Breakdown'\s*$''',
   '''^\s*\| 'scheduleEPropertiesBreakdown' \| 'assetIncomeBreakdown';\s*$''',
 ]
+
+[[allowlists]]
+description = "Audited historical type-label false positive"
+condition = "AND"
+commits = ["fb119c6434ade6168baa9ff1c6a403f9815de514"]
+paths = ['''^apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness\.ts$''']
