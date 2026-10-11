@@ -7,6 +7,7 @@ import {
   type EncompassConnectorContext,
   type EncompassApprovedIncomeUpdate,
   type EncompassWriteResult,
+  type EncompassLoanSnapshot,
 } from '@mortgage-pos/encompass-connector-contract';
 
 export const MAX_ENCOMPASS_ATTACHMENT_BYTES = 40 * 1024 * 1024;
@@ -34,6 +35,20 @@ export class EncompassV3Connector implements EncompassConnector {
     private readonly credentials: EncompassRuntimeCredentials,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
+
+  async retrieveLoanSnapshot(
+    _context: EncompassConnectorContext,
+    _loanGuid: string,
+  ): Promise<EncompassLoanSnapshot> {
+    // No production loan-read contract is asserted here until a lender-approved
+    // provider schema/field set is configured and certified. Do not guess an
+    // Encompass endpoint or silently return a partial loan.
+    throw new EncompassConnectorError(
+      'ENCOMPASS_LOAN_RETRIEVAL_NOT_IMPLEMENTED',
+      'Encompass loan retrieval is not implemented for the real connector.',
+      false,
+    );
+  }
 
   async listActiveAttachments(
     _context: EncompassConnectorContext,

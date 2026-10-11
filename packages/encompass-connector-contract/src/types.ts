@@ -24,6 +24,35 @@ export type ConnectorDeploymentBinding = Readonly<{
 
 export type EncompassAttachmentRef = Readonly<{ id: string }>;
 
+/**
+ * Versioned provider-boundary projection used by integrated import. It is not
+ * the core calculation model and deliberately excludes SSNs and credentials.
+ */
+export type EncompassLoanSnapshot = Readonly<{
+  schemaVersion: 'encompass-loan-snapshot-v1';
+  sourceSystem: 'ENCOMPASS';
+  simulated: boolean;
+  loanGuid: string;
+  loan: Readonly<{
+    loanProgram: 'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA' | 'OTHER';
+    loanPurpose: 'PURCHASE' | 'REFINANCE' | 'OTHER';
+    requestedAmount?: number;
+  }>;
+  borrowers: ReadonlyArray<Readonly<{
+    providerBorrowerId: string;
+    role: 'BORROWER' | 'COBORROWER';
+    givenName: string;
+    familyName: string;
+    employment: ReadonlyArray<Readonly<{
+      providerEmploymentId: string;
+      employerName: string;
+      status: 'CURRENT' | 'PREVIOUS';
+      baseMonthlyIncome?: number;
+      variableMonthlyIncome?: number;
+    }>>;
+  }>>;
+}>;
+
 export type DownloadedEncompassAttachment = Readonly<{
   bytes: Uint8Array;
   sha256: string;
@@ -36,8 +65,42 @@ export type EncompassApprovedIncomeUpdate = Readonly<{
   fields: ReadonlyArray<EncompassFieldWrite>;
 }>;
 
+export type EncompassProviderFieldDisposition = Readonly<{
+  fieldName: string;
+  status: 'APPLIED' | 'REJECTED' | 'UNAVAILABLE';
+}>;
+
 export type EncompassWriteResult = Readonly<{
   providerRevision?: string;
+  fieldResults?: ReadonlyArray<EncompassProviderFieldDisposition>;
+}>;
+
+export type EncompassFieldReadbackStatus = 'SUCCESS' | 'REJECTED' | 'UNAVAILABLE' | 'CONFLICT';
+export type EncompassFieldReadbackReason =
+  | 'VALUE_CONFIRMED'
+  | 'PROVIDER_REJECTED'
+  | 'FIELD_UNAVAILABLE'
+  | 'VALUE_CONFLICT';
+
+export type EncompassFieldReadback = Readonly<{
+  fieldName: string;
+  status: EncompassFieldReadbackStatus;
+  reasonCode: EncompassFieldReadbackReason;
+  expectedValueSha256: string;
+  actualValueSha256?: string;
+}>;
+
+export type EncompassFieldReadbackReport = Readonly<{
+  schemaVersion: 'encompass-field-readback-v1';
+  allSucceeded: boolean;
+  fields: ReadonlyArray<EncompassFieldReadback>;
+}>;
+
+export type EncompassWritePreview = Readonly<{
+  schemaVersion: 'encompass-write-preview-v1';
+  approvalEventId: string;
+  previewHash: string;
+  fields: ReadonlyArray<EncompassFieldWrite>;
 }>;
 
 /** Service-to-service auth for the connector ECS process. Never LOS credentials. */
@@ -60,6 +123,7 @@ export type ConnectorServiceAuth = BearerConnectorServiceAuth | SignedConnectorS
  * The adapter wraps this client; it does not take secrets itself.
  */
 export type DeveloperConnectClient = {
+  retrieveLoanSnapshot?(loanGuid: string): Promise<EncompassLoanSnapshot>;
   listActiveAttachments(loanGuid: string): Promise<ReadonlyArray<EncompassAttachmentRef>>;
   downloadOriginalAttachment(
     loanGuid: string,

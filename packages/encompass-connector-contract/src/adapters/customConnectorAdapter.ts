@@ -15,6 +15,8 @@ import type {
   EncompassConnectorContext,
   EncompassApprovedIncomeUpdate,
   EncompassWriteResult,
+  EncompassLoanSnapshot,
+  EncompassProviderFieldDisposition,
 } from '../types';
 
 export const MAX_CONNECTOR_PDF_BYTES = 40 * 1024 * 1024;
@@ -45,6 +47,18 @@ export class CustomConnectorAdapter implements EncompassConnector {
       );
     }
     this.origin = normalizeServiceOrigin(options.binding.serviceBaseUrl, 'kind' in options.serviceAuth);
+  }
+
+  async retrieveLoanSnapshot(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+  ): Promise<EncompassLoanSnapshot> {
+    const response = await this.serviceFetch(
+      CONNECTOR_SERVICE_CONTRACT.retrieveLoanPath,
+      this.requestBody(context, loanGuid),
+      REQUEST_TIMEOUT_MS,
+    );
+    return parseLoanSnapshot(await readJson(response, 'CONNECTOR_LOAN_INVALID'), loanGuid);
   }
 
   async listActiveAttachments(
@@ -106,9 +120,16 @@ export class CustomConnectorAdapter implements EncompassConnector {
     if (!isRecord(value) || value.applied !== true) {
       throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
     }
-    return typeof value.providerRevision === 'string'
-      ? { providerRevision: value.providerRevision.slice(0, 100) }
-      : {};
+    const providerRevision = typeof value.providerRevision === 'string'
+      ? value.providerRevision.slice(0, 100)
+      : undefined;
+    const fieldResults = value.fieldResults === undefined
+      ? undefined
+      : parseProviderFieldResults(value.fieldResults, new Set(update.fields.map((field) => field.fieldName)));
+    return {
+      ...(providerRevision ? { providerRevision } : {}),
+      ...(fieldResults ? { fieldResults } : {}),
+    };
   }
 
   async readFields(
@@ -179,7 +200,123 @@ export class CustomConnectorAdapter implements EncompassConnector {
   }
 }
 
-const FIELD_NAME = /^(?:CX\.FREEFLOW\.[A-Z0-9.]+|10[1-7])$/;
+const FIELD_NAME = /^(?:CX\.[A-Z0-9][A-Z0-9._-]{0,99}|10[1-7])$/;
+
+function parseProviderFieldResults(
+  value: unknown,
+  requested: ReadonlySet<string>,
+): ReadonlyArray<EncompassProviderFieldDisposition> {
+  if (!Array.isArray(value) || value.length > requested.size) {
+    throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+  }
+  const parsed: EncompassProviderFieldDisposition[] = [];
+  for (const item of value) {
+    if (!isRecord(item)
+      || typeof item.fieldName !== 'string'
+      || !requested.has(item.fieldName)
+      || !['APPLIED', 'REJECTED', 'UNAVAILABLE'].includes(String(item.status))) {
+      throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+    }
+    parsed.push({
+      fieldName: item.fieldName,
+      status: item.status as EncompassProviderFieldDisposition['status'],
+    });
+  }
+  if (new Set(parsed.map((item) => item.fieldName)).size !== parsed.length) {
+    throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+  }
+  return parsed;
+}
+
+function parseLoanSnapshot(value: unknown, requestedLoanGuid: string): EncompassLoanSnapshot {
+  if (!isRecord(value)
+    || value.schemaVersion !== 'encompass-loan-snapshot-v1'
+    || value.sourceSystem !== 'ENCOMPASS'
+    || typeof value.simulated !== 'boolean'
+    || value.loanGuid !== requestedLoanGuid
+    || !isRecord(value.loan)
+    || !Array.isArray(value.borrowers)
+    || value.borrowers.length < 1
+    || value.borrowers.length > 8) {
+    throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+  }
+  const program = value.loan.loanProgram;
+  const purpose = value.loan.loanPurpose;
+  const requestedAmount = optionalFiniteNumber(value.loan.requestedAmount);
+  if (!['CONVENTIONAL', 'FHA', 'VA', 'USDA', 'OTHER'].includes(String(program))
+    || !['PURCHASE', 'REFINANCE', 'OTHER'].includes(String(purpose))
+    || (value.loan.requestedAmount !== undefined && requestedAmount === undefined)) {
+    throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+  }
+
+  const borrowers = value.borrowers.map((item) => {
+    if (!isRecord(item)
+      || !safeText(item.providerBorrowerId, 100)
+      || !['BORROWER', 'COBORROWER'].includes(String(item.role))
+      || !safeText(item.givenName, 100)
+      || !safeText(item.familyName, 100)
+      || !Array.isArray(item.employment)
+      || item.employment.length > 16) {
+      throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+    }
+    const employment = item.employment.map((job) => {
+      if (!isRecord(job)
+        || !safeText(job.providerEmploymentId, 100)
+        || !safeText(job.employerName, 200)
+        || !['CURRENT', 'PREVIOUS'].includes(String(job.status))) {
+        throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+      }
+      const base = optionalFiniteNumber(job.baseMonthlyIncome);
+      const variable = optionalFiniteNumber(job.variableMonthlyIncome);
+      if ((job.baseMonthlyIncome !== undefined && base === undefined)
+        || (job.variableMonthlyIncome !== undefined && variable === undefined)) {
+        throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+      }
+      return {
+        providerEmploymentId: String(job.providerEmploymentId),
+        employerName: String(job.employerName),
+        status: job.status as 'CURRENT' | 'PREVIOUS',
+        ...(base !== undefined ? { baseMonthlyIncome: base } : {}),
+        ...(variable !== undefined ? { variableMonthlyIncome: variable } : {}),
+      };
+    });
+    return {
+      providerBorrowerId: String(item.providerBorrowerId),
+      role: item.role as 'BORROWER' | 'COBORROWER',
+      givenName: String(item.givenName),
+      familyName: String(item.familyName),
+      employment,
+    };
+  });
+  if (new Set(borrowers.map((borrower) => borrower.providerBorrowerId)).size !== borrowers.length) {
+    throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+  }
+  return {
+    schemaVersion: 'encompass-loan-snapshot-v1',
+    sourceSystem: 'ENCOMPASS',
+    simulated: value.simulated,
+    loanGuid: requestedLoanGuid,
+    loan: {
+      loanProgram: program as EncompassLoanSnapshot['loan']['loanProgram'],
+      loanPurpose: purpose as EncompassLoanSnapshot['loan']['loanPurpose'],
+      ...(requestedAmount !== undefined ? { requestedAmount } : {}),
+    },
+    borrowers,
+  };
+}
+
+function safeText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string'
+    && value.trim().length > 0
+    && value.length <= maximum
+    && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000
+    ? value
+    : undefined;
+}
 
 function validateFieldNames(fieldNames: ReadonlyArray<string>): void {
   if (fieldNames.length < 1 || fieldNames.length > 32 || fieldNames.some((name) => !FIELD_NAME.test(name))) {

@@ -7,6 +7,10 @@ import {
   type EncompassAttachmentRef,
   type EncompassConnector,
   type EncompassConnectorContext,
+  type EncompassApprovedIncomeUpdate,
+  type EncompassLoanSnapshot,
+  type EncompassProviderFieldDisposition,
+  type EncompassWriteResult,
 } from '@mortgage-pos/encompass-connector-contract';
 
 export const SYNTHETIC_FREEFLOW_DEV_MODE = 'synthetic-freeflow-dev' as const;
@@ -138,6 +142,13 @@ export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS: readonly [
   SYNTHETIC_PACK_FORM_1120_2025_ATTACHMENT_ID,
 ];
 
+export type SyntheticFieldBehavior = 'REJECTED' | 'UNAVAILABLE' | 'CONFLICT';
+export type SyntheticFreeflowDevConnectorOptions = Readonly<{
+  fieldBehaviors?: Readonly<Record<string, SyntheticFieldBehavior>>;
+  readFailuresBeforeSuccess?: number;
+  unknownWriteOutcomeOnce?: boolean;
+}>;
+
 /**
  * Non-production-only deterministic LOS stand-in. The HP-01 W-2 is created in
  * memory for each request. Morning-pack attachments are read from baked
@@ -145,6 +156,63 @@ export const SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS: readonly [
  */
 export class SyntheticFreeflowDevConnector implements EncompassConnector {
   readonly kind = 'custom' as const;
+  private readonly fields = new Map<string, string>();
+  private readonly completedApprovals = new Map<string, Readonly<{
+    fingerprint: string;
+    result: EncompassWriteResult;
+  }>>();
+  private remainingReadFailures: number;
+  private unknownWriteOutcomePending: boolean;
+  private mutationCountValue = 0;
+  private writeAttemptCountValue = 0;
+
+  constructor(private readonly options: SyntheticFreeflowDevConnectorOptions = {}) {
+    this.remainingReadFailures = Math.max(0, Math.floor(options.readFailuresBeforeSuccess ?? 0));
+    this.unknownWriteOutcomePending = options.unknownWriteOutcomeOnce === true;
+  }
+
+  get mutationCount(): number { return this.mutationCountValue; }
+  get writeAttemptCount(): number { return this.writeAttemptCountValue; }
+
+  async retrieveLoanSnapshot(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+  ): Promise<EncompassLoanSnapshot> {
+    assertSyntheticRequest(context, loanGuid);
+    return {
+      schemaVersion: 'encompass-loan-snapshot-v1',
+      sourceSystem: 'ENCOMPASS',
+      simulated: true,
+      loanGuid,
+      loan: {
+        loanProgram: 'CONVENTIONAL',
+        loanPurpose: 'PURCHASE',
+        requestedAmount: 320_000,
+      },
+      borrowers: [
+        {
+          providerBorrowerId: 'synthetic-borrower-1',
+          role: 'BORROWER',
+          givenName: 'Synthetic Primary',
+          familyName: 'Borrower',
+          employment: [{
+            providerEmploymentId: 'synthetic-employment-1',
+            employerName: 'Synthetic Payroll LLC',
+            status: 'CURRENT',
+            baseMonthlyIncome: 4_000,
+            variableMonthlyIncome: 1_600,
+          }],
+        },
+        {
+          providerBorrowerId: 'synthetic-borrower-2',
+          role: 'COBORROWER',
+          givenName: 'Synthetic Co',
+          familyName: 'Borrower',
+          employment: [],
+        },
+      ],
+    };
+  }
 
   async listActiveAttachments(
     context: EncompassConnectorContext,
@@ -178,17 +246,95 @@ export class SyntheticFreeflowDevConnector implements EncompassConnector {
     return { bytes, sha256: sha256Hex(bytes) };
   }
 
-  async applyApprovedIncomeUpdate(): Promise<Readonly<{ providerRevision?: string }>> {
-    throw new EncompassConnectorError('SYNTHETIC_WRITE_DISABLED', 'Synthetic connector writes are disabled.', false);
+  async applyApprovedIncomeUpdate(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+    update: EncompassApprovedIncomeUpdate,
+  ): Promise<EncompassWriteResult> {
+    assertSyntheticRequest(context, loanGuid);
+    this.writeAttemptCountValue += 1;
+    const marker = update.fields.find((field) => field.fieldName === 'CX.FREEFLOW.APPROVAL.ID');
+    if (!marker || marker.value !== update.approvalEventId) {
+      throw new EncompassConnectorError(
+        'SYNTHETIC_APPROVAL_MISMATCH',
+        'Synthetic write approval does not match its marker.',
+        false,
+      );
+    }
+    const fingerprint = sha256Text(JSON.stringify([...update.fields]
+      .map((field) => ({ fieldName: field.fieldName, value: field.value }))
+      .sort((left, right) => left.fieldName.localeCompare(right.fieldName))));
+    const completed = this.completedApprovals.get(update.approvalEventId);
+    if (completed) {
+      if (completed.fingerprint !== fingerprint) {
+        throw new EncompassConnectorError(
+          'SYNTHETIC_IDEMPOTENCY_CONFLICT',
+          'Synthetic approval was already used for a different update.',
+          false,
+        );
+      }
+      return completed.result;
+    }
+
+    const fieldResults: EncompassProviderFieldDisposition[] = [];
+    for (const field of update.fields) {
+      const behavior = this.options.fieldBehaviors?.[field.fieldName];
+      if (behavior === 'REJECTED' || behavior === 'UNAVAILABLE') {
+        fieldResults.push({ fieldName: field.fieldName, status: behavior });
+        continue;
+      }
+      this.fields.set(
+        field.fieldName,
+        behavior === 'CONFLICT' ? `SIMULATED_CONFLICT_${sha256Text(field.value).slice(0, 12)}` : field.value,
+      );
+      fieldResults.push({ fieldName: field.fieldName, status: 'APPLIED' });
+    }
+    const result = Object.freeze({
+      providerRevision: `synthetic-${sha256Text(`${update.approvalEventId}:${fingerprint}`).slice(0, 16)}`,
+      fieldResults: Object.freeze(fieldResults),
+    });
+    this.completedApprovals.set(update.approvalEventId, { fingerprint, result });
+    this.mutationCountValue += 1;
+
+    if (this.unknownWriteOutcomePending) {
+      this.unknownWriteOutcomePending = false;
+      throw new EncompassConnectorError(
+        'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+        'Synthetic write outcome is unknown and requires reconciliation.',
+        false,
+      );
+    }
+    return result;
   }
 
-  async readFields(): Promise<Readonly<Record<string, string>>> {
-    return {};
+  async readFields(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+    fieldNames: ReadonlyArray<string>,
+  ): Promise<Readonly<Record<string, string>>> {
+    assertSyntheticRequest(context, loanGuid);
+    if (this.remainingReadFailures > 0) {
+      this.remainingReadFailures -= 1;
+      throw new EncompassConnectorError(
+        'SYNTHETIC_READ_TIMEOUT',
+        'Synthetic field read timed out.',
+        true,
+      );
+    }
+    return Object.fromEntries(fieldNames.flatMap((fieldName) => {
+      if (this.options.fieldBehaviors?.[fieldName] === 'UNAVAILABLE') return [];
+      const value = this.fields.get(fieldName);
+      return value === undefined ? [] : [[fieldName, value]];
+    }));
   }
 }
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function sha256Text(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 function resolveMorningPackDirectory(): string {

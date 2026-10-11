@@ -13,6 +13,17 @@ function connector(fetchImpl: typeof fetch) {
   }, fetchImpl);
 }
 
+test('real connector does not guess an uncertified provider loan-retrieval endpoint', async () => {
+  let calls = 0;
+  const client = connector((async () => { calls += 1; return Response.json({}); }) as typeof fetch);
+  await assert.rejects(
+    () => client.retrieveLoanSnapshot(context, 'loan-guid'),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'ENCOMPASS_LOAN_RETRIEVAL_NOT_IMPLEMENTED',
+  );
+  assert.equal(calls, 0);
+});
+
 test('real connector uses V3 list and short-lived download URLs without exposing credentials', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = connector((async (url, init) => {

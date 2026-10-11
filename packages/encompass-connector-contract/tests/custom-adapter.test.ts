@@ -120,3 +120,40 @@ test('signed service authentication permits only private Cloud Map HTTP origins'
     serviceAuth: { kind: 'signed-hmac', serviceId: 'smoke', signingKey: 'test-key' },
   }), (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_SERVICE_URL_INVALID');
 });
+
+test('loan snapshot parser rejects negative money and control characters from the provider boundary', async () => {
+  const base = {
+    schemaVersion: 'encompass-loan-snapshot-v1',
+    sourceSystem: 'ENCOMPASS',
+    simulated: true,
+    loanGuid: 'loan-guid',
+    loan: { loanProgram: 'CONVENTIONAL', loanPurpose: 'PURCHASE', requestedAmount: 0 },
+    borrowers: [{
+      providerBorrowerId: 'borrower-1', role: 'BORROWER', givenName: 'Synthetic', familyName: 'Borrower',
+      employment: [{
+        providerEmploymentId: 'employment-1', employerName: 'Synthetic Employer', status: 'CURRENT',
+        baseMonthlyIncome: 0, variableMonthlyIncome: 0,
+      }],
+    }],
+  };
+  const adapterFor = (body: unknown) => new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => Response.json(body)) as typeof fetch,
+  });
+  assert.equal((await adapterFor(base).retrieveLoanSnapshot(context, 'loan-guid')).loan.requestedAmount, 0);
+  for (const invalid of [
+    { ...base, loan: { ...base.loan, requestedAmount: -1 } },
+    { ...base, borrowers: [{ ...base.borrowers[0], givenName: 'Synthetic\nInjected' }] },
+    { ...base, borrowers: [{
+      ...base.borrowers[0],
+      employment: [{ ...base.borrowers[0].employment[0], variableMonthlyIncome: -0.01 }],
+    }] },
+  ]) {
+    await assert.rejects(
+      () => adapterFor(invalid).retrieveLoanSnapshot(context, 'loan-guid'),
+      (error: unknown) => error instanceof EncompassConnectorError
+        && error.safeCode === 'CONNECTOR_LOAN_INVALID',
+    );
+  }
+});
