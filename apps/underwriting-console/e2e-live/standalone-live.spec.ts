@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -426,6 +426,7 @@ async function writeMainEvidence(
   const evidenceDirectory = process.env.LIVE_EVIDENCE_DIR?.trim();
   if (!evidenceDirectory) return;
   const sourceRevision = evidenceSourceRevision();
+  const runId = evidenceRunId();
   await mkdir(resolve(evidenceDirectory), { recursive: true });
 
   // The source document and raw OCR text are deliberately excluded. These
@@ -436,6 +437,7 @@ async function writeMainEvidence(
   await writeEvidenceFile(evidenceDirectory, 'approved-income-summary.pdf', exported.summary);
   await writeEvidenceJson(evidenceDirectory, 'processing-context.json', {
     evidenceSchemaVersion: 'freeflow-live-acceptance-evidence-v1',
+    runId,
     sourceRevision,
     fixture: {
       kind: 'SYNTHETIC_SCANNED_PAYSTUB',
@@ -449,11 +451,12 @@ async function writeMainEvidence(
       qualifyingMonthly: EXPECTED_QUALIFYING_MONTHLY,
       annual: EXPECTED_ANNUAL,
     },
-    context: contextIdentity(context),
-    apiAudit,
+    context: evidenceContext(context),
+    apiAudit: evidenceApiAudit(apiAudit),
   });
   await writeEvidenceJson(evidenceDirectory, 'main-result.json', {
     evidenceSchemaVersion: 'freeflow-live-acceptance-result-v1',
+    runId,
     sourceRevision,
     ...result,
   });
@@ -465,8 +468,96 @@ async function writeCrossTenantEvidence(result: Readonly<Record<string, unknown>
   await mkdir(resolve(evidenceDirectory), { recursive: true });
   await writeEvidenceJson(evidenceDirectory, 'cross-tenant-result.json', {
     evidenceSchemaVersion: 'freeflow-live-acceptance-result-v1',
+    runId: evidenceRunId(),
     sourceRevision: evidenceSourceRevision(),
     ...result,
+  });
+  await writeEvidenceManifest(evidenceDirectory);
+}
+
+function evidenceContext(context: ConsoleContext): unknown {
+  return {
+    loan: { version: context.loan.version, program: context.loan.program },
+    borrowers: {
+      count: context.borrowers.length,
+      roles: context.borrowers.map((borrower) => borrower.role),
+    },
+    attachments: {
+      count: context.attachments.length,
+      categories: context.attachments.map((attachment) => attachment.category),
+      versions: context.attachments.map((attachment) => attachment.version),
+      pageCounts: context.attachments.map((attachment) => attachment.pageCount),
+      parserVersions: context.attachments.map((attachment) => attachment.parserVersion),
+    },
+    extractions: {
+      count: context.extractions.length,
+      statuses: context.extractions.map((extraction) => extraction.status),
+      parserVersions: context.extractions.map((extraction) => extraction.parserVersion),
+      schemaVersions: context.extractions.map((extraction) => extraction.schemaVersion),
+      warningCounts: context.extractions.map((extraction) => extraction.warnings.length),
+      metadataVersions: context.extractions.map((extraction) => extraction.metadataReview?.metadataVersion ?? null),
+    },
+    calculationPresent: context.calculation !== null,
+    approvalCurrent: context.approval?.current ?? false,
+    hostWritePresent: context.hostWrite !== null,
+  };
+}
+
+function evidenceApiAudit(apiAudit: ReturnType<typeof observeApiTraffic>): unknown {
+  const responsesByMethodAndStatus: Record<string, number> = {};
+  for (const response of apiAudit.responses) {
+    const key = `${response.method}:${response.status}`;
+    responsesByMethodAndStatus[key] = (responsesByMethodAndStatus[key] ?? 0) + 1;
+  }
+  return {
+    responseCount: apiAudit.responses.length,
+    responsesByMethodAndStatus,
+    failureCount: apiAudit.failures.length,
+    encompassRequestCount: apiAudit.responses.filter((response) => response.path.toLowerCase().includes('encompass')).length,
+  };
+}
+
+async function writeEvidenceManifest(directory: string): Promise<void> {
+  const expectedArtifacts = [
+    'approved-income.json',
+    'approved-income.mismo.xml',
+    'approved-income-summary.pdf',
+    'cross-tenant-result.json',
+    'main-result.json',
+    'processing-context.json',
+  ] as const;
+  const actualArtifacts = (await readdir(resolve(directory))).sort();
+  expect(actualArtifacts).toEqual([...expectedArtifacts].sort());
+
+  const artifacts = await Promise.all(expectedArtifacts.map(async (name) => {
+    const bytes = await readFile(resolve(directory, name));
+    try {
+      return { name, bytes: bytes.length, sha256: digest(bytes) };
+    } finally {
+      bytes.fill(0);
+    }
+  }));
+  const sourceFiles = [
+    ['liveSpec', fileURLToPath(import.meta.url)],
+    ['playwrightConfig', fileURLToPath(new URL('../playwright.live.config.ts', import.meta.url))],
+    ['localGateway', fileURLToPath(new URL('./local-live-gateway.mjs', import.meta.url))],
+    ['tenantBootstrap', fileURLToPath(new URL('./two-tenant-bootstrap.sql', import.meta.url))],
+  ] as const;
+  const sourceFingerprints = Object.fromEntries(await Promise.all(sourceFiles.map(async ([name, path]) => {
+    const bytes = await readFile(path);
+    return [name, { sha256: digest(bytes), bytes: bytes.length }];
+  })));
+
+  await writeEvidenceJson(directory, 'artifact-manifest.json', {
+    evidenceSchemaVersion: 'freeflow-live-acceptance-manifest-v1',
+    runId: evidenceRunId(),
+    sourceRevision: evidenceSourceRevision(),
+    fixtureSha256: SYNTHETIC_PAYSTUB_SHA256,
+    businessApiMocked: false,
+    rawDocumentPersisted: false,
+    rawOcrPersisted: false,
+    artifacts,
+    sourceFingerprints,
   });
 }
 
@@ -489,6 +580,14 @@ function evidenceSourceRevision(): string {
     throw new Error('LIVE_SOURCE_REVISION must be a lowercase 40-character Git commit SHA.');
   }
   return revision;
+}
+
+function evidenceRunId(): string {
+  const runId = requiredEnvironment('LIVE_EVIDENCE_RUN_ID');
+  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(runId)) {
+    throw new Error('LIVE_EVIDENCE_RUN_ID must contain only letters, numbers, dot, underscore, or hyphen.');
+  }
+  return runId;
 }
 
 function requiredEnvironment(name: string): string {
