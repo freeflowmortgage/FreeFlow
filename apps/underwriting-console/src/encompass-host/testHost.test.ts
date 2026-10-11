@@ -11,7 +11,7 @@ const FIELDS = {
   'CX.FREEFLOW.APPROVAL.ID': 'approval-1',
 };
 
-test('deterministic host writes, calculates, commits, and reads back the approval marker', async () => {
+test('deterministic host writes, calculates, commits, and reads back every approved field', async () => {
   const host = createDeterministicTestHost(GUID);
   assert.equal((await host.bridge.activeLoan()).loanGuid, GUID);
   await host.bridge.writeApprovedResult(GUID, FIELDS);

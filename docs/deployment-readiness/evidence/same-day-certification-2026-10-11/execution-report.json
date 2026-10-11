@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "freeflow-same-day-certification-report-v3",
+  "assessmentDate": "2026-10-11",
+  "implementationRevision": "646201800446b250c089c782f6f9871b9c6f28d7",
+  "branch": "test/encompass-certification-20261011",
+  "deploymentPerformed": false,
+  "productionApproved": false,
+  "latestRetainedLiveEvidence": {
+    "runId": "20261011-live-a228f69-01",
+    "sourceRevision": "a228f69f045157b2a5b50c9bc25997288e369eba",
+    "manifestPath": "../standalone-live-application-2026-10-11-a228f69/artifact-manifest.json",
+    "manifestSha256": "b7a9f82acdb7fdc2985f4a1097ed059ec67dfef0a82789e9205d5f18eea95180",
+    "retainedExportsRehashable": true,
+    "businessApiMocked": false
+  },
+  "results": {
+    "standaloneOneBorrowerConventionalManualLifecycle": {
+      "status": "PASS",
+      "boundary": "Run 20261011-live-a228f69-01 at clean source a228f69 with all 22 migrations; CLI Chromium, actual protected UI/backend/PostgreSQL/parser, two server-side synthetic development-auth tenants, fixed loopback gateways, retained sanitized exports, no business API mocks"
+    },
+    "standaloneJsonFileImportRouteAndUiContract": {
+      "status": "PASS",
+      "executionStatus": "NOT_EXECUTED_LIVE",
+      "boundary": "Intercepted UI contract plus route/component coverage only"
+    },
+    "standaloneWithoutLos": {
+      "status": "PASS",
+      "boundary": "Live loan integration mode NONE; no Encompass request"
+    },
+    "standaloneDocumentToIncomeAndApproval": {
+      "status": "PASS",
+      "boundary": "One synthetic scanned paystub through live OCR, metadata review, shared calculator, standard approval, reopen, and duplicate upload"
+    },
+    "standaloneThreeProtectedDownloads": {
+      "status": "PASS",
+      "boundary": "Live JSON, FreeFlow-profile XML, and visually inspected PDF from one approved snapshot"
+    },
+    "standaloneOfficialMismoValidation": {
+      "status": "BLOCKED",
+      "boundary": "Official MISMO 3.4 XSD and selected implementation-requirement package absent"
+    },
+    "standaloneCrossTenantExportDenial": {
+      "status": "PASS",
+      "boundary": "Separately authenticated synthetic Tenant B received 404 LOAN_NOT_FOUND"
+    },
+    "standaloneAuthSessionComponentCases": {
+      "status": "PASS",
+      "executionStatus": "NOT_EXECUTED_LIVE",
+      "boundary": "Component auth/session tests pass; no live browser negative-auth run"
+    },
+    "standaloneCreateUncertainRetryIdempotency": {
+      "status": "PASS",
+      "boundary": "Intercepted UI contract only; connection-reset retry reused the same UUID key during the mounted session"
+    },
+    "standaloneMultiBorrowerOverrideExport": {
+      "status": "FAIL",
+      "boundary": "Override loan total can retain unreconciled borrower totals; approved snapshot fails closed"
+    },
+    "malformedDocumentHandling": {
+      "status": "PASS",
+      "boundary": "Component coverage; not rerun as live browser cases"
+    },
+    "conflictingDocumentValues": {
+      "status": "NOT_IMPLEMENTED",
+      "executionStatus": "NOT_EXECUTED",
+      "boundary": "No semantic conflicting-document-values certification test or deterministic conflict policy was identified"
+    },
+    "encompassPostParseParity": {
+      "status": "PASS",
+      "boundary": "Post-parse simulator only; not full import/parser/persistence/export parity"
+    },
+    "encompassLoanDocumentWriteReadbackSimulator": {
+      "status": "PASS",
+      "boundary": "Deterministic local provider simulator only"
+    },
+    "encompassTargetBoundPreviewV2": {
+      "status": "PASS",
+      "boundary": "Component and database gates; exact fields/mode/lender/deployment/GUID persisted immutably and legacy v1 fails closed"
+    },
+    "encompassSyncRecoveryAndFinalization": {
+      "status": "PASS",
+      "boundary": "Component; ambiguous writes reconcile read-only and final success checks loan/target state immediately before finalization; concurrent revocation after that read is not atomically fenced"
+    },
+    "encompassDocumentPullTargetProgressAndRecovery": {
+      "status": "PASS",
+      "boundary": "Component and database gates; exact target selection, per-attachment durable progress, stale-worker fencing, target checks before reads and persistence, terminal audit, and stateful partial redelivery; concurrent revocation after the final read is not atomically fenced"
+    },
+    "encompassCustomConnectorModeGuards": {
+      "status": "PASS",
+      "boundary": "Component; sync and document reads reject non-CUSTOM_CONNECTOR loans"
+    },
+    "encompassProductionApplicationImport": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "No lender-approved full-loan provider contract or customer portal orchestration"
+    },
+    "encompassIntegratedThreeExportWorkflow": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "Normal hosted launch lacks authoritative program/borrower/employment data"
+    },
+    "encompassDirectSyncCustomerUi": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "Backend APIs exist; protected customer preview/confirm/status UI does not"
+    },
+    "encompassHostedAuthoritativeWriteback": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "Production HTTP routes intentionally disabled with 503"
+    },
+    "encompassHostedLaunchProviderIdentityAttestation": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "Hosted GUID is browser-supplied, not provider-signed or service-attested"
+    },
+    "encompassHostedCustomConnectorDocumentReads": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "Disabled: secured APIs reject ENCOMPASS_HOSTED with ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED"
+    },
+    "encompassProductionMultiTenantRouting": {
+      "status": "NOT_IMPLEMENTED",
+      "priority": "P0",
+      "boundary": "Current runtime is one bound tenant/principal and one Encompass credential/instance set"
+    },
+    "encompassDistributedReplayProtection": {
+      "status": "NOT_IMPLEMENTED",
+      "priority": "P0",
+      "boundary": "Signed request nonce store is process-local"
+    },
+    "encompassAtomicAuthorizationRevocationFence": {
+      "status": "NOT_IMPLEMENTED",
+      "priority": "P0",
+      "boundary": "Configuration and binding reads are rechecked but not locked or enforced by conditional persistence/finalization predicates; concurrent revocation after the final read is not atomically fenced"
+    },
+    "realEncompassAuthenticationDocumentsWriteReadback": {
+      "status": "BLOCKED",
+      "boundary": "No customer-authorized non-production Encompass connection or provisioned field set"
+    },
+    "productionRelease": {
+      "status": "BLOCKED",
+      "boundary": "See ordered P0/P1 gates in the completion report"
+    }
+  },
+  "hardSafetyOutcomes": {
+    "hostedWritebackProductionHttpStatus": "DISABLED_503",
+    "hostedClientSuccessAccepted": false,
+    "customSyncRequiresCustomConnectorMode": true,
+    "customDocumentReadsRequireCustomConnectorMode": true,
+    "documentPullFeatureFlagRequired": true,
+    "previewBindsExactTarget": true,
+    "previewAndTargetDatabaseImmutableToAppAndWorker": true,
+    "legacyV1SyncJobsExecutable": false,
+    "legacyTargetlessDocumentPullJobsExecutable": false,
+    "successFinalizationRevalidatesTarget": true,
+    "successFinalizationAtomicAgainstConcurrentRevocation": false,
+    "documentPullPersistenceRevalidatesTarget": true,
+    "documentPullPersistenceAtomicAgainstConcurrentRevocation": false,
+    "documentPullTerminalStatusAndAuditAtomic": true,
+    "documentPullOperationalEventOutboxImplemented": false,
+    "parserRequestByteCopyExplicitlyWiped": false,
+    "inFlightConnectorRequestCancellationOnRevocationImplemented": false,
+    "hostedLaunchIdentityProviderAttested": false,
+    "productionMultiTenantConnectorRoutingImplemented": false,
+    "distributedReplayStoreImplemented": false,
+    "fieldReadbackRawValuesPersisted": false,
+    "fieldReadbackValueHashesPersisted": false,
+    "customerDataIncluded": false,
+    "rawDocumentBytesIncluded": false,
+    "realEncompassInteroperabilityClaimed": false
+  },
+  "fixtureSeparation": [
+    {
+      "name": "standalone-component-export",
+      "monthlyIncome": "8000.00",
+      "boundary": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION"
+    },
+    {
+      "name": "standalone-live-application-latest-retained",
+      "monthlyIncome": "5721.67",
+      "boundary": "SOURCE_A228F69_ACTUAL_UI_BACKEND_DATABASE_PARSER_RETAINED_SANITIZED_EXPORTS"
+    },
+    {
+      "name": "encompass-certification",
+      "monthlyIncome": "21600.00",
+      "boundary": "POST_PARSE_AND_CONNECTOR_SIMULATOR"
+    }
+  ]
+}

@@ -25,6 +25,41 @@ INSERT INTO "income_extractions" (
   ('22222222-2222-4222-8222-222222222222', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '20202020-2020-4020-8020-202020202020', 'attachment-a', 1, repeat('a', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-a","employerName":"Synthetic Employer A","year":2025,"annualWages":97481.4,"box5Wages":97481.4}]}', '{"fields":[]}', repeat('c', 64)),
   ('23232323-2323-4232-8232-232323232323', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ffffffff-ffff-4fff-8fff-ffffffffffff', '21212121-2121-4121-8121-212121212121', 'attachment-b', 1, repeat('b', 64), 'income-parser-v5', 'income-extraction-v2', '{"w2Records":[{"entityId":"synthetic-w2-b","employerName":"Synthetic Employer B","year":2025,"annualWages":84000,"box5Wages":84000}]}', '{"fields":[]}', repeat('d', 64));
 
+-- Committed synthetic fixture used to prove the worker role cannot mutate an
+-- approved preview or its exact connector destination.
+INSERT INTO "audit_events" (
+  "id", "tenantId", "loanId", "actorUserId", "action", "entityType", "entityId",
+  "expectedLoanVersion", "reasonCode", "ruleVersion", "schemaVersion", "requestId",
+  "resultHash", "eventHash"
+) VALUES (
+  '41414141-4141-4141-8141-414141414141',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'INCOME_APPROVED', 'FORM_1084_AUDIT', '43434343-4343-4343-8343-434343434343',
+  1, 'UNDERWRITER_CONFIRMED', 'form-1084-v9', 'audit-event-v1', 'worker-sync-immutability',
+  repeat('1', 64), repeat('2', 64)
+);
+
+INSERT INTO "encompass_sync_jobs" (
+  "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+  "expectedLoanVersion", "idempotencyKey", "correlationId",
+  "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields",
+  "writeTargetIntegrationMode", "writeTargetLenderId", "writeTargetDeploymentId",
+  "writeTargetEncompassGuid", "updatedAt"
+) VALUES (
+  '42424242-4242-4242-8242-424242424242',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '41414141-4141-4141-8141-414141414141',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  2, 'worker-sync-immutable-01', 'worker-sync-immutable',
+  'encompass-write-preview-v2', repeat('3', 64),
+  '[{"fieldName":"CX.FREEFLOW.APPROVAL.ID","value":"41414141-4141-4141-8141-414141414141"}]'::jsonb,
+  'CUSTOM_CONNECTOR', 'synthetic-lender', 'synthetic-deployment', 'synthetic-encompass-guid',
+  now()
+);
+
 DO $role_assertions$
 DECLARE
   unsafe_roles integer;
@@ -112,6 +147,24 @@ BEGIN
     OR NOT has_table_privilege('freeflow_worker', 'income_extractions', 'UPDATE')
     OR has_table_privilege('freeflow_worker', 'income_extractions', 'DELETE') THEN
     RAISE EXCEPTION 'freeflow_worker extraction grants are not least privilege';
+  END IF;
+  IF has_table_privilege('freeflow_worker', 'encompass_sync_jobs', 'INSERT')
+    OR has_column_privilege('freeflow_worker', 'encompass_sync_jobs', 'writePreviewHash', 'UPDATE')
+    OR has_column_privilege('freeflow_worker', 'encompass_sync_jobs', 'writeTargetEncompassGuid', 'UPDATE')
+    OR NOT has_column_privilege('freeflow_worker', 'encompass_sync_jobs', 'status', 'UPDATE') THEN
+    RAISE EXCEPTION 'freeflow_worker sync-job grants are not least privilege';
+  END IF;
+  IF has_column_privilege('freeflow_app', 'encompass_sync_jobs', 'writePreviewHash', 'UPDATE')
+    OR has_column_privilege('freeflow_app', 'encompass_sync_jobs', 'writeTargetEncompassGuid', 'UPDATE')
+    OR NOT has_column_privilege('freeflow_app', 'encompass_sync_jobs', 'status', 'UPDATE') THEN
+    RAISE EXCEPTION 'freeflow_app sync-job grants permit approval mutation';
+  END IF;
+  IF has_column_privilege('freeflow_app', 'encompass_document_pull_jobs', 'workingLoanVersion', 'UPDATE')
+    OR has_column_privilege('freeflow_app', 'encompass_document_pull_jobs', 'processedAttachmentIds', 'UPDATE')
+    OR NOT has_column_privilege('freeflow_app', 'encompass_document_pull_jobs', 'status', 'UPDATE')
+    OR has_column_privilege('freeflow_worker', 'encompass_document_pull_jobs', 'selectionHash', 'UPDATE')
+    OR NOT has_column_privilege('freeflow_worker', 'encompass_document_pull_jobs', 'processedAttachmentIds', 'UPDATE') THEN
+    RAISE EXCEPTION 'document-pull job grants do not isolate immutable identity from worker progress';
   END IF;
   IF has_table_privilege('freeflow_worker', 'income_calculation_extractions', 'INSERT')
     OR has_table_privilege('freeflow_worker', 'income_calculation_extractions', 'UPDATE')
@@ -406,6 +459,185 @@ INSERT INTO "encompass_host_writes" (
   2, 'host-write-sql-key-01', 'host-write-request', repeat('a', 64), now()
 );
 
+DO $sync_preview_constraint$
+BEGIN
+  BEGIN
+    INSERT INTO "encompass_sync_jobs" (
+      "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+      "expectedLoanVersion", "idempotencyKey", "correlationId",
+      "writePreviewSchemaVersion", "updatedAt"
+    ) VALUES (
+      '31313131-3131-4131-8131-313131313131',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      '17171717-1717-4171-8171-171717171717',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      2, 'sync-preview-invalid-01', 'sync-preview-invalid',
+      'encompass-write-preview-v1', now()
+    );
+    RAISE EXCEPTION 'A partial approved Encompass write preview was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END
+$sync_preview_constraint$;
+
+DO $sync_v2_target_constraint$
+BEGIN
+  BEGIN
+    INSERT INTO "encompass_sync_jobs" (
+      "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+      "expectedLoanVersion", "idempotencyKey", "correlationId",
+      "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields", "updatedAt"
+    ) VALUES (
+      '31313131-3131-4131-8131-313131313131',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      '17171717-1717-4171-8171-171717171717',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      2, 'sync-target-invalid-01', 'sync-target-invalid',
+      'encompass-write-preview-v2', repeat('b', 64),
+      '[{"fieldName":"CX.FREEFLOW.APPROVAL.ID","value":"17171717-1717-4171-8171-171717171717"}]'::jsonb,
+      now()
+    );
+    RAISE EXCEPTION 'A v2 Encompass write preview without an exact target was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END
+$sync_v2_target_constraint$;
+
+INSERT INTO "encompass_sync_jobs" (
+  "id", "tenantId", "loanId", "approvalEventId", "requestedByUserId",
+  "expectedLoanVersion", "idempotencyKey", "correlationId",
+  "writePreviewSchemaVersion", "writePreviewHash", "writePreviewFields",
+  "writeTargetIntegrationMode", "writeTargetLenderId", "writeTargetDeploymentId",
+  "writeTargetEncompassGuid", "updatedAt"
+) VALUES (
+  '31313131-3131-4131-8131-313131313131',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '17171717-1717-4171-8171-171717171717',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  2, 'sync-preview-sql-key-01', 'sync-preview-request',
+  'encompass-write-preview-v2', repeat('b', 64),
+  '[{"fieldName":"CX.FREEFLOW.APPROVAL.ID","value":"17171717-1717-4171-8171-171717171717"}]'::jsonb,
+  'CUSTOM_CONNECTOR', 'synthetic-lender', 'synthetic-deployment', 'synthetic-encompass-guid',
+  now()
+);
+
+DO $app_sync_approval_immutable$
+DECLARE
+  changed_rows integer;
+BEGIN
+  BEGIN
+    UPDATE "encompass_sync_jobs"
+    SET "writePreviewHash" = repeat('c', 64)
+    WHERE "id" = '31313131-3131-4131-8131-313131313131';
+    RAISE EXCEPTION 'freeflow_app mutated an approved Encompass write preview';
+  EXCEPTION WHEN object_not_in_prerequisite_state OR insufficient_privilege THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE "encompass_sync_jobs"
+    SET "writeTargetEncompassGuid" = 'retargeted-guid'
+    WHERE "id" = '31313131-3131-4131-8131-313131313131';
+    RAISE EXCEPTION 'freeflow_app retargeted an approved Encompass write';
+  EXCEPTION WHEN object_not_in_prerequisite_state OR insufficient_privilege THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE "encompass_sync_jobs"
+    SET "status" = 'RETRYABLE_FAILURE', "safeErrorCode" = NULL
+    WHERE "id" = '31313131-3131-4131-8131-313131313131';
+    RAISE EXCEPTION 'freeflow_app recorded a sync queue failure without the required safe error code';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+
+  UPDATE "encompass_sync_jobs"
+  SET "status" = 'RETRYABLE_FAILURE', "safeErrorCode" = 'QUEUE_PUBLISH_FAILED'
+  WHERE "id" = '31313131-3131-4131-8131-313131313131';
+  GET DIAGNOSTICS changed_rows = ROW_COUNT;
+  IF changed_rows <> 1 THEN
+    RAISE EXCEPTION 'freeflow_app could not record an authorized sync queue failure';
+  END IF;
+END
+$app_sync_approval_immutable$;
+
+DO $document_pull_selection_constraint$
+BEGIN
+  BEGIN
+    INSERT INTO "encompass_document_pull_jobs" (
+      "id", "tenantId", "loanId", "requestedByUserId", "expectedLoanVersion",
+      "selectedAttachmentIds", "selectionSchemaVersion", "selectionHash",
+      "idempotencyKey", "correlationId", "updatedAt"
+    ) VALUES (
+      '44444444-4444-4444-8444-444444444444',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 1,
+      ARRAY['attachment-1'], 'encompass-document-pull-selection-v1', repeat('4', 64),
+      'document-pull-invalid-01', 'document-pull-invalid', now()
+    );
+    RAISE EXCEPTION 'A targetless document pull selection was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END
+$document_pull_selection_constraint$;
+
+INSERT INTO "encompass_document_pull_jobs" (
+  "id", "tenantId", "loanId", "requestedByUserId", "expectedLoanVersion",
+  "selectedAttachmentIds", "selectionSchemaVersion", "selectionHash",
+  "selectionTargetIntegrationMode", "selectionTargetLenderId",
+  "selectionTargetDeploymentId", "selectionTargetEncompassGuid", "workingLoanVersion",
+  "idempotencyKey", "correlationId", "updatedAt"
+) VALUES (
+  '44444444-4444-4444-8444-444444444444',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 1,
+  ARRAY['attachment-1', 'attachment-2'],
+  'encompass-document-pull-selection-v1', repeat('4', 64),
+  'CUSTOM_CONNECTOR', 'synthetic-lender', 'synthetic-deployment', 'synthetic-encompass-guid', 1,
+  'document-pull-valid-01', 'document-pull-valid', now()
+);
+
+DO $app_document_pull_identity_immutable$
+DECLARE
+  changed_rows integer;
+BEGIN
+  BEGIN
+    UPDATE "encompass_document_pull_jobs"
+    SET "selectionTargetLenderId" = 'retargeted-lender'
+    WHERE "id" = '44444444-4444-4444-8444-444444444444';
+    RAISE EXCEPTION 'freeflow_app retargeted an Encompass document pull';
+  EXCEPTION WHEN object_not_in_prerequisite_state OR insufficient_privilege THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE "encompass_document_pull_jobs"
+    SET "status" = 'RETRYABLE_FAILURE', "safeErrorCode" = NULL
+    WHERE "id" = '44444444-4444-4444-8444-444444444444';
+    RAISE EXCEPTION 'freeflow_app recorded a document queue failure without the required safe error code';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+
+  UPDATE "encompass_document_pull_jobs"
+  SET "status" = 'RETRYABLE_FAILURE', "safeErrorCode" = 'QUEUE_PUBLISH_FAILED'
+  WHERE "id" = '44444444-4444-4444-8444-444444444444';
+  GET DIAGNOSTICS changed_rows = ROW_COUNT;
+  IF changed_rows <> 1 THEN
+    RAISE EXCEPTION 'freeflow_app could not record an authorized document queue failure';
+  END IF;
+END
+$app_document_pull_identity_immutable$;
+
 INSERT INTO "income_extraction_metadata_reviews" (
   "id", "tenantId", "loanId", "extractionId", "sourceDocumentId", "sourceDocumentVersion",
   "sourceContentHash", "extractionHash", "metadataVersion", "assignments", "source", "reasonCode",
@@ -483,12 +715,14 @@ DECLARE
   visible_keys integer;
   visible_metadata integer;
   visible_host_writes integer;
+  visible_sync_jobs integer;
   visible_loans integer;
 BEGIN
   SELECT count(*) INTO visible_events FROM "audit_events";
   SELECT count(*) INTO visible_keys FROM "api_idempotency_keys";
   SELECT count(*) INTO visible_metadata FROM "income_extraction_metadata_reviews";
   SELECT count(*) INTO visible_host_writes FROM "encompass_host_writes";
+  SELECT count(*) INTO visible_sync_jobs FROM "encompass_sync_jobs";
   SELECT count(*) INTO visible_loans FROM "loan_applications";
   IF visible_events <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A audit events';
@@ -501,6 +735,9 @@ BEGIN
   END IF;
   IF visible_host_writes <> 0 THEN
     RAISE EXCEPTION 'Tenant B observed Tenant A hosted writes';
+  END IF;
+  IF visible_sync_jobs <> 0 THEN
+    RAISE EXCEPTION 'Tenant B observed Tenant A approved Encompass sync previews';
   END IF;
   IF visible_loans <> 1 THEN
     RAISE EXCEPTION 'Tenant B observed a cross-tenant identity-only host binding';
@@ -616,6 +853,28 @@ BEGIN
   END;
 END
 $worker_extraction_isolation$;
+
+DO $worker_sync_approval_immutable$
+BEGIN
+  BEGIN
+    UPDATE "encompass_sync_jobs"
+    SET "writePreviewHash" = repeat('5', 64)
+    WHERE "id" = '42424242-4242-4242-8242-424242424242';
+    RAISE EXCEPTION 'freeflow_worker mutated an approved Encompass write preview';
+  EXCEPTION WHEN object_not_in_prerequisite_state OR insufficient_privilege THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE "encompass_sync_jobs"
+    SET "writeTargetDeploymentId" = 'retargeted-deployment'
+    WHERE "id" = '42424242-4242-4242-8242-424242424242';
+    RAISE EXCEPTION 'freeflow_worker retargeted an approved Encompass write';
+  EXCEPTION WHEN object_not_in_prerequisite_state OR insufficient_privilege THEN
+    NULL;
+  END;
+END
+$worker_sync_approval_immutable$;
 ROLLBACK;
 RESET ROLE;
 

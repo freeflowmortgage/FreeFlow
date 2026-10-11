@@ -5,6 +5,7 @@
 export const CONNECTOR_SERVICE_CONTRACT = {
   version: 'encompass-connector-service-v1',
   healthPath: '/health',
+  retrieveLoanPath: '/v1/loan/retrieve',
   listPath: '/v1/attachments/list',
   downloadPath: '/v1/attachments/download',
   applyUpdatePath: '/v1/approved-income/apply',
@@ -20,6 +21,8 @@ export type ConnectorServiceListRequest = Readonly<{
   loanGuid: string;
   correlationId: string;
 }>;
+
+export type ConnectorServiceRetrieveLoanRequest = ConnectorServiceListRequest;
 
 export type ConnectorServiceDownloadRequest = ConnectorServiceListRequest & Readonly<{
   attachmentId: string;

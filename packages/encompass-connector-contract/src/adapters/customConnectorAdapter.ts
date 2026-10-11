@@ -15,6 +15,8 @@ import type {
   EncompassConnectorContext,
   EncompassApprovedIncomeUpdate,
   EncompassWriteResult,
+  EncompassLoanSnapshot,
+  EncompassProviderFieldDisposition,
 } from '../types';
 
 export const MAX_CONNECTOR_PDF_BYTES = 40 * 1024 * 1024;
@@ -45,6 +47,18 @@ export class CustomConnectorAdapter implements EncompassConnector {
       );
     }
     this.origin = normalizeServiceOrigin(options.binding.serviceBaseUrl, 'kind' in options.serviceAuth);
+  }
+
+  async retrieveLoanSnapshot(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+  ): Promise<EncompassLoanSnapshot> {
+    const response = await this.serviceFetch(
+      CONNECTOR_SERVICE_CONTRACT.retrieveLoanPath,
+      this.requestBody(context, loanGuid),
+      REQUEST_TIMEOUT_MS,
+    );
+    return parseLoanSnapshot(await readJson(response, 'CONNECTOR_LOAN_INVALID'), loanGuid);
   }
 
   async listActiveAttachments(
@@ -80,18 +94,24 @@ export class CustomConnectorAdapter implements EncompassConnector {
     const response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.downloadPath, body, DOWNLOAD_TIMEOUT_MS);
     const declaredLength = Number(response.headers.get('content-length') ?? '0');
     if (Number.isFinite(declaredLength) && declaredLength > MAX_CONNECTOR_PDF_BYTES) {
+      try { await response.body?.cancel(); } catch { /* Nothing was retained locally. */ }
       throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the parser size limit.', false);
     }
     const bytes = await readBounded(response, MAX_CONNECTOR_PDF_BYTES);
-    if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
-      throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_NOT_PDF', 'Attachment is not a PDF.', false);
+    try {
+      if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
+        throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_NOT_PDF', 'Attachment is not a PDF.', false);
+      }
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const declaredHash = response.headers.get('x-content-sha256')?.trim().toLowerCase();
+      if (declaredHash && declaredHash !== sha256) {
+        throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_HASH_MISMATCH', 'Attachment digest did not match the service contract.', false);
+      }
+      return { bytes, sha256 };
+    } catch (error) {
+      bytes.fill(0);
+      throw error;
     }
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    const declaredHash = response.headers.get('x-content-sha256')?.trim().toLowerCase();
-    if (declaredHash && declaredHash !== sha256) {
-      throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_HASH_MISMATCH', 'Attachment digest did not match the service contract.', false);
-    }
-    return { bytes, sha256 };
   }
 
   async applyApprovedIncomeUpdate(
@@ -101,14 +121,31 @@ export class CustomConnectorAdapter implements EncompassConnector {
   ): Promise<EncompassWriteResult> {
     validateUpdate(update);
     const body = { ...this.requestBody(context, loanGuid), ...update };
-    const response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.applyUpdatePath, body, REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.applyUpdatePath, body, REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof EncompassConnectorError) throw error;
+      throw new EncompassConnectorError(
+        'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+        'Connector write outcome is unknown and requires reconciliation.',
+        false,
+      );
+    }
     const value = await readJson(response, 'CONNECTOR_WRITE_INVALID');
     if (!isRecord(value) || value.applied !== true) {
       throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
     }
-    return typeof value.providerRevision === 'string'
-      ? { providerRevision: value.providerRevision.slice(0, 100) }
-      : {};
+    const providerRevision = typeof value.providerRevision === 'string'
+      ? value.providerRevision.slice(0, 100)
+      : undefined;
+    const fieldResults = value.fieldResults === undefined
+      ? undefined
+      : parseProviderFieldResults(value.fieldResults, new Set(update.fields.map((field) => field.fieldName)));
+    return {
+      ...(providerRevision ? { providerRevision } : {}),
+      ...(fieldResults ? { fieldResults } : {}),
+    };
   }
 
   async readFields(
@@ -147,17 +184,29 @@ export class CustomConnectorAdapter implements EncompassConnector {
     assertNoLosCredentials(body);
     const fetchImpl = this.options.fetch ?? fetch;
     const bodyText = JSON.stringify(body);
-    const response = await fetchImpl(`${this.origin}${path}`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        accept: 'application/json, application/pdf',
-        'content-type': 'application/json',
-        ...serviceAuthHeaders(this.options.serviceAuth!, 'POST', path, bodyText),
-      },
-      body: bodyText,
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(`${this.origin}${path}`, {
+        method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          accept: 'application/json, application/pdf',
+          'content-type': 'application/json',
+          ...serviceAuthHeaders(this.options.serviceAuth!, 'POST', path, bodyText),
+        },
+        body: bodyText,
+      });
+    } catch {
+      const writeOutcomeUnknown = path === CONNECTOR_SERVICE_CONTRACT.applyUpdatePath;
+      throw new EncompassConnectorError(
+        writeOutcomeUnknown ? 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN' : 'CONNECTOR_SERVICE_UNAVAILABLE',
+        writeOutcomeUnknown
+          ? 'Connector write outcome is unknown and requires reconciliation.'
+          : 'Connector service is temporarily unavailable.',
+        true,
+      );
+    }
     if (!response.ok) {
       let safeCode = `CONNECTOR_SERVICE_FAILED_${response.status}`;
       try {
@@ -179,7 +228,123 @@ export class CustomConnectorAdapter implements EncompassConnector {
   }
 }
 
-const FIELD_NAME = /^(?:CX\.FREEFLOW\.[A-Z0-9.]+|10[1-7])$/;
+const FIELD_NAME = /^(?:CX\.[A-Z0-9][A-Z0-9._-]{0,99}|10[1-7])$/;
+
+function parseProviderFieldResults(
+  value: unknown,
+  requested: ReadonlySet<string>,
+): ReadonlyArray<EncompassProviderFieldDisposition> {
+  if (!Array.isArray(value) || value.length > requested.size) {
+    throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+  }
+  const parsed: EncompassProviderFieldDisposition[] = [];
+  for (const item of value) {
+    if (!isRecord(item)
+      || typeof item.fieldName !== 'string'
+      || !requested.has(item.fieldName)
+      || !['APPLIED', 'REJECTED', 'UNAVAILABLE'].includes(String(item.status))) {
+      throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+    }
+    parsed.push({
+      fieldName: item.fieldName,
+      status: item.status as EncompassProviderFieldDisposition['status'],
+    });
+  }
+  if (new Set(parsed.map((item) => item.fieldName)).size !== parsed.length) {
+    throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
+  }
+  return parsed;
+}
+
+function parseLoanSnapshot(value: unknown, requestedLoanGuid: string): EncompassLoanSnapshot {
+  if (!isRecord(value)
+    || value.schemaVersion !== 'encompass-loan-snapshot-v1'
+    || value.sourceSystem !== 'ENCOMPASS'
+    || typeof value.simulated !== 'boolean'
+    || value.loanGuid !== requestedLoanGuid
+    || !isRecord(value.loan)
+    || !Array.isArray(value.borrowers)
+    || value.borrowers.length < 1
+    || value.borrowers.length > 8) {
+    throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+  }
+  const program = value.loan.loanProgram;
+  const purpose = value.loan.loanPurpose;
+  const requestedAmount = optionalFiniteNumber(value.loan.requestedAmount);
+  if (!['CONVENTIONAL', 'FHA', 'VA', 'USDA', 'OTHER'].includes(String(program))
+    || !['PURCHASE', 'REFINANCE', 'OTHER'].includes(String(purpose))
+    || (value.loan.requestedAmount !== undefined && requestedAmount === undefined)) {
+    throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+  }
+
+  const borrowers = value.borrowers.map((item) => {
+    if (!isRecord(item)
+      || !safeText(item.providerBorrowerId, 100)
+      || !['BORROWER', 'COBORROWER'].includes(String(item.role))
+      || !safeText(item.givenName, 100)
+      || !safeText(item.familyName, 100)
+      || !Array.isArray(item.employment)
+      || item.employment.length > 16) {
+      throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+    }
+    const employment = item.employment.map((job) => {
+      if (!isRecord(job)
+        || !safeText(job.providerEmploymentId, 100)
+        || !safeText(job.employerName, 200)
+        || !['CURRENT', 'PREVIOUS'].includes(String(job.status))) {
+        throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+      }
+      const base = optionalFiniteNumber(job.baseMonthlyIncome);
+      const variable = optionalFiniteNumber(job.variableMonthlyIncome);
+      if ((job.baseMonthlyIncome !== undefined && base === undefined)
+        || (job.variableMonthlyIncome !== undefined && variable === undefined)) {
+        throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+      }
+      return {
+        providerEmploymentId: String(job.providerEmploymentId),
+        employerName: String(job.employerName),
+        status: job.status as 'CURRENT' | 'PREVIOUS',
+        ...(base !== undefined ? { baseMonthlyIncome: base } : {}),
+        ...(variable !== undefined ? { variableMonthlyIncome: variable } : {}),
+      };
+    });
+    return {
+      providerBorrowerId: String(item.providerBorrowerId),
+      role: item.role as 'BORROWER' | 'COBORROWER',
+      givenName: String(item.givenName),
+      familyName: String(item.familyName),
+      employment,
+    };
+  });
+  if (new Set(borrowers.map((borrower) => borrower.providerBorrowerId)).size !== borrowers.length) {
+    throw new EncompassConnectorError('CONNECTOR_LOAN_INVALID', 'Unexpected connector loan response.', false);
+  }
+  return {
+    schemaVersion: 'encompass-loan-snapshot-v1',
+    sourceSystem: 'ENCOMPASS',
+    simulated: value.simulated,
+    loanGuid: requestedLoanGuid,
+    loan: {
+      loanProgram: program as EncompassLoanSnapshot['loan']['loanProgram'],
+      loanPurpose: purpose as EncompassLoanSnapshot['loan']['loanPurpose'],
+      ...(requestedAmount !== undefined ? { requestedAmount } : {}),
+    },
+    borrowers,
+  };
+}
+
+function safeText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string'
+    && value.trim().length > 0
+    && value.length <= maximum
+    && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000
+    ? value
+    : undefined;
+}
 
 function validateFieldNames(fieldNames: ReadonlyArray<string>): void {
   if (fieldNames.length < 1 || fieldNames.length > 32 || fieldNames.some((name) => !FIELD_NAME.test(name))) {
@@ -249,20 +414,22 @@ async function readBounded(response: Response, maximum: number): Promise<Uint8Ar
       if (done) break;
       length += value.length;
       if (length > maximum) {
+        value.fill(0);
         throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the parser size limit.', false);
       }
       chunks.push(value);
     }
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return result;
   } finally {
+    for (const chunk of chunks) chunk.fill(0);
     reader.releaseLock();
   }
-  const result = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
 }
 
 async function readJson(response: Response, safeCode: string): Promise<unknown> {

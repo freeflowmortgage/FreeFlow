@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "freeflow-database-security-gate-v3",
+  "classification": "SANITIZED_SYNTHETIC_DISPOSABLE_EXECUTION",
+  "executionDate": "2026-10-11",
+  "finalDatabaseGate": {
+    "executionRevision": "646201800446b250c089c782f6f9871b9c6f28d7",
+    "environment": "FRESH_DISPOSABLE_POSTGRESQL_16_TMPFS",
+    "results": {
+      "prismaSchemaValidation": "PASS",
+      "capabilityRoleBootstrap": "PASS",
+      "forbiddenCapabilityGuards": 1,
+      "restrictedLoginVerificationQueries": 2,
+      "migrationsApplied": "PASS",
+      "migrationCount": 22,
+      "latestMigration": "20261011131000_encompass_sync_preview_immutability",
+      "migrationStatus": "DATABASE_UP_TO_DATE",
+      "migrationDiff": "NO_DIFFERENCE_DETECTED",
+      "localMigrationDirectories": 22,
+      "databaseMigrationRows": 22,
+      "distinctDatabaseMigrationNames": 22,
+      "incompleteOrRolledBackMigrations": 0,
+      "checksumMismatches": 0,
+      "prismaClientGeneration": "PASS_5.22.0",
+      "tenantRlsAndImmutabilitySql": "PASS",
+      "tenantRlsAssertionBlocks": 22,
+      "tenantRlsFailureGuards": 60,
+      "connectorBindingSql": "PASS",
+      "connectorBindingAssertionBlocks": 4,
+      "connectorBindingFailureGuards": 11,
+      "appRoleDatabaseIntegration": "PASS",
+      "appRoleTestsPassed": 7,
+      "workerRoleBindingIntegration": "PASS",
+      "workerRoleTestsPassed": 3,
+      "failures": 0,
+      "skips": 0
+    },
+    "immutabilityCoverage": {
+      "appCannotMutateApprovedSyncPreviewOrTarget": true,
+      "workerCannotMutateApprovedSyncPreviewOrTarget": true,
+      "appCannotRetargetDocumentPull": true,
+      "nullSafeQueueFailureDenials": true,
+      "exactQueuePublishFailureTransitionAllowed": true
+    },
+    "cleanup": {
+      "postgresqlStorage": "TMPFS_1G_NOEXEC_NOSUID",
+      "databaseContainersRemoved": true,
+      "databaseNetworksRemoved": true,
+      "databaseResourcesRemaining": 0,
+      "persistentDatabaseChanged": false
+    }
+  },
+  "historicalLiveRuntimeObservations": {
+    "executionRevision": "d72c1fad75b08361859b4665d834fc4b6b755266",
+    "evidenceBoundary": "OBSERVED_DURING_ORIGINAL_ONE_OFF_LIVE_RUN_RAW_LOGS_AND_ARTIFACTS_NOT_RETAINED",
+    "parserUidGid": "8888:8888",
+    "parserReadOnlyRoot": true,
+    "parserCapabilitiesDropped": true,
+    "parserNoNewPrivileges": true,
+    "parserTmpfs": true
+  },
+  "note": "The final database gate and historical live-runtime observations are separate executions and must not be combined into one runtime claim."
+}

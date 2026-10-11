@@ -7,20 +7,28 @@ the lender-scoped LOS credential secret.
 ## Implemented
 
 - Authenticated service contract: `GET /health`, attachment list/download,
-  bounded approved-income PATCH, and allowlisted field reads for reconciliation.
+  a versioned loan-snapshot boundary, bounded approved-income PATCH, and
+  allowlisted field reads for reconciliation.
 - Server-authoritative tenant/lender/deployment binding through
   `PrismaBindingStore` with forced RLS.
 - Non-production Bearer S2S stub. `NODE_ENV=production` refuses to boot it.
 - Real mode uses ICE client credentials inside this service and does not expose
   credentials to portal or worker request bodies.
-- Explicit `synthetic-freeflow-dev` mode returns one deterministic attachment
-  and constructs a deterministic PDF in memory.
+- Explicit `synthetic-freeflow-dev` mode returns deterministic synthetic loan
+  metadata and attachments, and supports idempotent approved write/readback
+  simulation with closed per-field statuses.
 - Compiled Node runtime, UID 1001, read-only-root compatibility, and health.
 
 The synthetic implementation is selected only when `NODE_ENV`,
 `FREEFLOW_RUNTIME_ENV`, `CONNECTOR_MODE`, and `CONNECTOR_BOUND_TENANT_ID` all
 match the freeflow-dev development configuration. It performs no Encompass or
 Developer Connect calls.
+
+Real-mode full-loan retrieval is deliberately `NOT IMPLEMENTED`: the service
+fails closed until an authorized lender supplies and certifies the provider
+schema/field contract. The code does not guess an Encompass endpoint or field
+set. Real attachment APIs and approved field write/readback remain separate
+capabilities and require customer-authorized certification.
 
 ## Security boundaries
 

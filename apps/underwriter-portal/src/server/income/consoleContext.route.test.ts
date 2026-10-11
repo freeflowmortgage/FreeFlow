@@ -15,7 +15,9 @@ test('returns only authoritative tenant-scoped context and marks current state',
   assert.deepEqual(res.body.extractions[0].normalizedInput, loan.incomeExtractions[0].normalizedInput);
   assert.deepEqual(res.body.extractions[0].evidence, loan.incomeExtractions[0].evidence);
   assert.equal(res.body.hostWrite.status, 'SUCCEEDED');
-  assert.equal(res.body.hostWrite.current, true);
+  assert.equal(res.body.hostWrite.certified, false);
+  assert.equal(res.body.hostWrite.readbackCertification, 'NOT_SERVER_VERIFIED');
+  assert.equal(res.body.hostWrite.current, false);
 });
 
 test('marks prior calculation, approval, and host write stale after the loan version advances', async () => {

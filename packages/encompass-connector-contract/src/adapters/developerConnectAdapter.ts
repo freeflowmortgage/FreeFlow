@@ -1,4 +1,5 @@
 import type { EncompassConnector } from '../connector';
+import { EncompassConnectorError } from '../errors';
 import type {
   DeveloperConnectClient,
   DownloadedEncompassAttachment,
@@ -6,6 +7,7 @@ import type {
   EncompassConnectorContext,
   EncompassApprovedIncomeUpdate,
   EncompassWriteResult,
+  EncompassLoanSnapshot,
 } from '../types';
 
 /**
@@ -17,6 +19,20 @@ export class DeveloperConnectAdapter implements EncompassConnector {
   readonly kind = 'developer-connect' as const;
 
   constructor(private readonly client: DeveloperConnectClient) {}
+
+  retrieveLoanSnapshot(
+    _context: EncompassConnectorContext,
+    loanGuid: string,
+  ): Promise<EncompassLoanSnapshot> {
+    if (!this.client.retrieveLoanSnapshot) {
+      throw new EncompassConnectorError(
+        'DEVELOPER_CONNECT_LOAN_RETRIEVAL_UNAVAILABLE',
+        'Developer Connect loan retrieval is unavailable.',
+        false,
+      );
+    }
+    return this.client.retrieveLoanSnapshot(loanGuid);
+  }
 
   listActiveAttachments(
     _context: EncompassConnectorContext,

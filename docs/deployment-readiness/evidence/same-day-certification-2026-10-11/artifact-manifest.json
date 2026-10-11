@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "freeflow-same-day-artifact-manifest-v2",
+  "assessmentDate": "2026-10-11",
+  "implementationRevision": "646201800446b250c089c782f6f9871b9c6f28d7",
+  "hashAlgorithm": "SHA-256",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3793,
+      "sha256": "da59b0f150f608b40a1a4b3dd7ee4952c3741f798182e97b4e4d6e9a18ba7b21"
+    },
+    {
+      "path": "database-security-gate.json",
+      "bytes": 2491,
+      "sha256": "62b4cdd3f132756350e9e6a98a3668c018be2bd160baa5f7c0b203b941a89f7b"
+    },
+    {
+      "path": "execution-report.json",
+      "bytes": 8548,
+      "sha256": "a1c2c4a25ff006eb26c58429ecda29ab733319696777d9641a88cef4387d0b21"
+    },
+    {
+      "path": "standalone-live-cli-playwright.json",
+      "bytes": 3312,
+      "sha256": "ce56934d0782b2a30e719bd952e47a75b1de963e540eb11d9f3bc0d786808b48"
+    },
+    {
+      "path": "test-suite-summary.json",
+      "bytes": 6235,
+      "sha256": "1f4348bf747c1b76fdf3a2957217d021046c70eb8070507682c40ad7577d8453"
+    }
+  ],
+  "completionReport": {
+    "path": "../../SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md",
+    "bytes": 43935,
+    "sha256": "40513eca34a457a57833ab7c7794f9e83ce84a9afc5590b74e2d876b9aeb4ead"
+  },
+  "linkedEvidenceManifests": [
+    {
+      "path": "../standalone-live-application-2026-10-11-a228f69/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_LATEST_RETAINED",
+      "bytes": 2222,
+      "sha256": "b7a9f82acdb7fdc2985f4a1097ed059ec67dfef0a82789e9205d5f18eea95180",
+      "readmePath": "../standalone-live-application-2026-10-11-a228f69/README.md",
+      "readmeBytes": 1600,
+      "readmeSha256": "5f3de94f8523c17ba20daaf5d52cdb2ebc4fee0ac5e0066861af67eebde6b3fa"
+    },
+    {
+      "path": "../standalone-live-application-2026-10-11-e4c9e79/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_PRIOR_RETAINED",
+      "bytes": 2222,
+      "sha256": "b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca",
+      "readmePath": "../standalone-live-application-2026-10-11-e4c9e79/README.md",
+      "readmeBytes": 1480,
+      "readmeSha256": "823e1c846833bfb58569786d9624185d164acf416573b5e5fae4bea8b5555f42"
+    },
+    {
+      "path": "../standalone-live-application-2026-10-11/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION_EARLIER_RETAINED",
+      "bytes": 2222,
+      "sha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
+      "readmePath": "../standalone-live-application-2026-10-11/README.md",
+      "readmeBytes": 1736,
+      "readmeSha256": "c43481550bca225dcfcf2c134cf4e6751d30de11714e30cc1db87b3349955191"
+    },
+    {
+      "path": "../encompass-certification-2026-10-11/artifact-manifest.json",
+      "boundary": "POST_PARSE_AND_CONNECTOR_SIMULATOR",
+      "bytes": 4647,
+      "sha256": "5394255df3ed507767ea26edbe9195b6ace1c9ed19c2db3b8bd3993fab5b29dd"
+    },
+    {
+      "path": "../standalone-approved-income-exports-2026-10-11/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_COMPONENT_EXPORT",
+      "bytes": 3783,
+      "sha256": "0b14043f9199de4cfd68206e5634e20e19ba95aa502d95fe30c1ff0e4a4f83e3"
+    }
+  ],
+  "limitations": [
+    "The live source PDF and raw OCR were deliberately not retained; sanitized JSON, XML, PDF, and aggregate result records are retained and rehashable.",
+    "The original d72c1fad run remains non-rehashable because its artifacts were destroyed during cleanup.",
+    "Live runs used synthetic development authentication and manually orchestrated local services/gateways, not production identity or AWS.",
+    "No official MISMO XSD or implementation-requirement validation was performed.",
+    "No real Encompass interoperability was performed.",
+    "Production multi-tenant connector routing and distributed replay protection are not implemented."
+  ]
+}

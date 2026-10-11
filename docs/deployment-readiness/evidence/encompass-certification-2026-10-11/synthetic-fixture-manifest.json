@@ -1,0 +1,255 @@
+{
+  "fixtureVersion": "encompass-certification-v1",
+  "classification": "SYNTHETIC_POST_PARSE_SIMULATOR_ONLY",
+  "boundary": "POST_PARSE_PERSISTED_EXTRACTION_SHAPE",
+  "documentBytesIncluded": false,
+  "loan": {
+    "loanId": "00000000-0000-4000-8000-000000000200",
+    "loanProgram": "CONVENTIONAL",
+    "borrowers": [
+      {
+        "borrowerKey": "borrower-1",
+        "ordinal": 0,
+        "role": "PRIMARY",
+        "displayName": "Synthetic Primary Borrower"
+      },
+      {
+        "borrowerKey": "borrower-2",
+        "ordinal": 1,
+        "role": "CO_BORROWER",
+        "displayName": "Synthetic Co-Borrower"
+      }
+    ]
+  },
+  "documents": [
+    {
+      "fixtureKey": "primary-paystub",
+      "integratedSourceReference": "post-parse-integrated-paystub-1",
+      "standaloneSourceReference": "post-parse-standalone-paystub-1",
+      "normalizedInput": {
+        "formRecords": [
+          {
+            "entityId": "paystub-1",
+            "form": "Paystub",
+            "pageIndex": 0,
+            "fields": [
+              {
+                "sourceFieldId": "ps-employer-name",
+                "value": "Northwind Labs"
+              },
+              {
+                "sourceFieldId": "ps-base-ytd",
+                "numericValue": 30000
+              },
+              {
+                "sourceFieldId": "ps-ot-ytd",
+                "numericValue": 7500
+              },
+              {
+                "sourceFieldId": "ps-bonus-ytd",
+                "numericValue": 1500
+              },
+              {
+                "sourceFieldId": "ps-commission-ytd",
+                "numericValue": 750
+              },
+              {
+                "sourceFieldId": "ps-tips-ytd",
+                "numericValue": 300
+              },
+              {
+                "sourceFieldId": "ps-rsu-ytd",
+                "numericValue": 1500
+              },
+              {
+                "sourceFieldId": "ps-other-ytd",
+                "numericValue": 450
+              }
+            ]
+          }
+        ]
+      },
+      "metadataAssignments": [
+        {
+          "entityId": "paystub-1",
+          "employmentRole": "CURRENT",
+          "taxYear": 2025,
+          "borrowerKey": "borrower-1",
+          "elapsedMonths": 7.5,
+          "baseIncomeMethod": "ytd"
+        }
+      ]
+    },
+    {
+      "fixtureKey": "primary-duplicate-w2",
+      "integratedSourceReference": "post-parse-integrated-w2-1",
+      "standaloneSourceReference": "post-parse-standalone-w2-1",
+      "normalizedInput": {
+        "w2Records": [
+          {
+            "entityId": "w2-b1",
+            "employerName": "Northwind Labs",
+            "year": 2025,
+            "annualWages": 96000,
+            "box5Wages": 96000
+          }
+        ]
+      },
+      "metadataAssignments": [
+        {
+          "entityId": "w2-b1",
+          "employmentRole": "CURRENT",
+          "borrowerKey": "borrower-1"
+        }
+      ]
+    },
+    {
+      "fixtureKey": "coborrower-schedule-c",
+      "integratedSourceReference": "post-parse-integrated-schedule-c-1",
+      "standaloneSourceReference": "post-parse-standalone-schedule-c-1",
+      "normalizedInput": {
+        "formRecords": [
+          {
+            "entityId": "schedule-c-1",
+            "form": "Schedule C",
+            "pageIndex": 0,
+            "fields": [
+              {
+                "sourceFieldId": "ent1-name",
+                "value": "Synthetic Consulting"
+              },
+              {
+                "sourceFieldId": "ent1-net",
+                "numericValue": 96000
+              }
+            ]
+          }
+        ]
+      },
+      "metadataAssignments": [
+        {
+          "entityId": "schedule-c-1",
+          "taxYear": 2025,
+          "borrowerKey": "borrower-2"
+        }
+      ]
+    },
+    {
+      "fixtureKey": "coborrower-form-1065",
+      "integratedSourceReference": "post-parse-integrated-form-1065-1",
+      "standaloneSourceReference": "post-parse-standalone-form-1065-1",
+      "normalizedInput": {
+        "formRecords": [
+          {
+            "entityId": "partnership-1",
+            "form": "Form 1065",
+            "pageIndex": 0,
+            "fields": [
+              {
+                "sourceFieldId": "pt-name",
+                "value": "Synthetic Partnership"
+              },
+              {
+                "sourceFieldId": "pt-ord",
+                "numericValue": 60000
+              },
+              {
+                "sourceFieldId": "pt-dist",
+                "numericValue": 60000
+              },
+              {
+                "sourceFieldId": "pt-profit-pct",
+                "numericValue": 100
+              }
+            ]
+          }
+        ]
+      },
+      "metadataAssignments": [
+        {
+          "entityId": "partnership-1",
+          "taxYear": 2025,
+          "borrowerKey": "borrower-2",
+          "hasStableDistributions": false
+        }
+      ]
+    },
+    {
+      "fixtureKey": "coborrower-schedule-e",
+      "integratedSourceReference": "post-parse-integrated-schedule-e-1",
+      "standaloneSourceReference": "post-parse-standalone-schedule-e-1",
+      "normalizedInput": {
+        "scheduleEProperties": [
+          {
+            "year": 2025,
+            "propertyAddress": "200 Synthetic Rental Road",
+            "propertyType": "RENTAL",
+            "netIncomeLoss": 24000
+          }
+        ]
+      },
+      "metadataAssignments": [
+        {
+          "entityId": "schedule-e-0",
+          "borrowerKey": "borrower-2"
+        }
+      ]
+    },
+    {
+      "fixtureKey": "coborrower-schedule-b",
+      "integratedSourceReference": "post-parse-integrated-schedule-b-1",
+      "standaloneSourceReference": "post-parse-standalone-schedule-b-1",
+      "normalizedInput": {
+        "formRecords": [
+          {
+            "entityId": "asset-1",
+            "form": "Schedule B",
+            "pageIndex": 0,
+            "fields": [
+              {
+                "sourceFieldId": "schedule-b-interest",
+                "numericValue": 12000
+              }
+            ]
+          }
+        ]
+      },
+      "metadataAssignments": [
+        {
+          "entityId": "asset-1",
+          "taxYear": 2025,
+          "borrowerKey": "borrower-2",
+          "includeInQualifyingIncome": true,
+          "hasThreeYearAssetSupport": true
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "basis": [
+      "Primary paystub: (48000 base + 19200 variable) / 12 = 5600 monthly; matching W-2 is a duplicate.",
+      "Co-borrower Schedule C: 96000 / 12 = 8000 monthly.",
+      "Co-borrower Form 1065: 60000 / 12 = 5000 monthly.",
+      "Co-borrower Schedule E: 24000 / 12 = 2000 monthly.",
+      "Co-borrower elected Schedule B: 12000 / 12 = 1000 monthly."
+    ],
+    "qualifyingMonthlyIncome": 21600,
+    "borrowerIncome": {
+      "borrower-1": "5600.00",
+      "borrower-2": "16000.00"
+    },
+    "trendingResult": "SINGLE_YEAR",
+    "yearsAnalyzed": [
+      2025
+    ],
+    "mapperMonthly": {
+      "w2Base": 4000,
+      "w2Variable": 1600,
+      "scheduleC": 8000,
+      "form1065": 5000,
+      "rental": 2000,
+      "asset": 1000
+    },
+    "approvalId": "00000000-0000-4000-8000-000000000901"
+  }
+}

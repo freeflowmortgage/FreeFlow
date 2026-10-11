@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "implementationProfile": "freeflow-approved-income-mismo-3.4-profile-v1",
+  "referenceModelIdentifier": "3.4.0",
+  "officialXsdValidation": "NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED",
+  "declaredReferenceModel": "3.4.0",
+  "declaredImplementationProfile": "freeflow-approved-income-mismo-3.4-profile-v1",
+  "officialSchemaValidation": "BLOCKED",
+  "explanation": "The official MISMO XSD and implementation-requirement bundle is not included in this repository."
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "freeflow-standalone-export-evidence-report-v1",
+  "classification": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION",
+  "snapshotHash": "0719f460abc4c4c4f24f61e86330107a05b9770d29f5c45e8588edb725131fb5",
+  "results": {
+    "approvedSnapshotToJson": "PASS",
+    "approvedSnapshotToMismoProfileXml": "PASS",
+    "approvedSnapshotToHumanReadablePdf": "PASS",
+    "freeFlowMismoImplementationProfileValidation": "PASS",
+    "doubleGenerationByteIdentity": "PASS",
+    "officialMismoXsdValidation": "BLOCKED",
+    "databaseBackedLifecycle": "NOT_EXECUTED",
+    "browserToBackendLifecycle": "NOT_EXECUTED",
+    "realEncompassInteroperability": "NOT_EXECUTED"
+  },
+  "boundaries": {
+    "sourceDocumentBytesIncluded": false,
+    "customerDataIncluded": false,
+    "officialSchemaBundlePresent": false,
+    "officialXsdValidationStatus": "NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED",
+    "statement": "A PASS here proves deterministic component generation and the declared FreeFlow MISMO profile only."
+  }
+}

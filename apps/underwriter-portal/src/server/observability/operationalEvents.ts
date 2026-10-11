@@ -4,6 +4,7 @@ export type OperationalEvent =
   | 'stale_provenance_rejected'
   | 'document_pull_failure'
   | 'document_pull_retry'
+  | 'document_pull_success'
   | 'sync_failure'
   | 'sync_retry'
   | 'sync_reconciliation';

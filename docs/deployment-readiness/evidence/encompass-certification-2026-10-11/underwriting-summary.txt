@@ -1,0 +1,10 @@
+FREEFLOW SYNTHETIC CERTIFICATION SUMMARY
+Boundary: POST_PARSE_SIMULATOR
+Simulator evidence only; not a customer-facing approved export.
+Fixture: encompass-certification-v1
+Program: CONVENTIONAL
+Qualifying monthly income: $21600.00
+Trend: SINGLE_YEAR
+Years analyzed: 2025
+borrower-1: $5600.00 monthly
+borrower-2: $16000.00 monthly

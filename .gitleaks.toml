@@ -22,3 +22,18 @@ commits = [
   "0087d07dc8a9779e13d4d6f5b620a47ff555a4f8",
 ]
 paths = ['''(?i)^\.env\.development$''']
+
+[[allowlists]]
+description = "Verified synthetic Encompass fixture identifiers"
+regexTarget = "line"
+regexes = [
+  '''^\s*"fixtureKey":\s*"primary-duplicate-w2",\s*$''',
+  '''^type BreakdownKey = 'w2EmployerBreakdown' \| 'scheduleCBreakdown' \| 'form1065Breakdown'\s*$''',
+  '''^\s*\| 'scheduleEPropertiesBreakdown' \| 'assetIncomeBreakdown';\s*$''',
+]
+
+[[allowlists]]
+description = "Audited historical type-label false positive"
+condition = "AND"
+commits = ["fb119c6434ade6168baa9ff1c6a403f9815de514"]
+paths = ['''^apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness\.ts$''']
