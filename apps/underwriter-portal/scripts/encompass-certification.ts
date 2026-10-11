@@ -77,19 +77,18 @@ const artifacts = new Map<string, string>([
   ['simulated-encompass-round-trip.json', json(simulatedRoundTrip)],
   ['mismo-validation.json', json({
     boundary: CERTIFICATION_BOUNDARY,
-    status: 'PASS',
-    capability: 'Approved income-analysis FreeFlow MISMO implementation-profile export',
+    status: 'NOT_IMPLEMENTED',
+    capability: 'MISMO export for the Encompass post-parse simulator fixture',
     selectedSchema: MISMO_REFERENCE_MODEL_IDENTIFIER,
     selectedImplementationRequirements: MISMO_APPROVED_INCOME_PROFILE,
-    freeFlowProfileValidation: 'PASS',
+    freeFlowProfileValidation: 'NOT_EXECUTED_FOR_THIS_FIXTURE',
     officialSchemaValidation: 'BLOCKED',
     officialXsdValidationStatus: MISMO_OFFICIAL_XSD_VALIDATION_STATUS,
-    explanation: 'The protected approved-export service generates and validates the declared FreeFlow profile. The official MISMO XSD and implementation-requirement bundle is not present, so official schema validation was not performed.',
+    explanation: 'This simulator does not create or validate a MISMO XML artifact for its two-borrower, $21,600 fixture. The separately generated standalone XML uses a different one-borrower fixture and is intentionally not cited as fixture-level evidence here. Official XSD validation is also blocked because the official schema and implementation-requirement bundle is not present.',
     xmlArtifactProducedInThisSimulatorBundle: false,
-    approvedXmlEvidence: '../standalone-approved-income-exports-2026-10-11/approved-income.mismo.xml',
   })],
   ['processing-validation-report.json', json({
-    schemaVersion: 'freeflow-encompass-certification-report-v1',
+    schemaVersion: 'freeflow-encompass-certification-report-v2',
     boundary: CERTIFICATION_BOUNDARY,
     fixtureVersion: integrated.fixtureVersion,
     sourceRevision,
@@ -99,32 +98,25 @@ const artifacts = new Map<string, string>([
       simulatedEncompassDocumentRetrieval: 'PASS',
       simulatedEncompassApprovedWriteReadback: 'PASS',
       simulatedEncompassPerFieldStatuses: 'PASS',
-      realEncompassLoanRetrieval: 'NOT_IMPLEMENTED',
-      realEncompassDocumentRetrieval: 'BLOCKED',
-      realEncompassWriteReadBack: 'BLOCKED',
-      integratedApplicationImportOrchestration: 'NOT_IMPLEMENTED',
-      serverAuthoritativeWritePreview: 'PASS',
-      immutablePreviewBoundSync: 'PASS',
-      ambiguousWriteReadOnlyReconciliation: 'PASS',
-      approvedCalculationJsonExport: 'PASS',
-      approvedCalculationMismoProfileExport: 'PASS',
-      officialMismoXsdValidation: 'BLOCKED',
-      protectedApprovedSummaryExport: 'PASS',
-      customerStandaloneLoanCreation: 'PASS',
-      providerErrorLogRedaction: 'PASS',
-      hostedFullFieldReadback: 'NOT_IMPLEMENTED',
     },
     mappingGaps: executableValidation.mappingGaps,
+    capabilitiesOutsideHarness: [
+      'real Encompass authentication, retrieval, document download, writeback, and readback',
+      'production application import orchestration',
+      'server-authoritative database-backed write preview and immutable sync persistence',
+      'ambiguous provider-write reconciliation',
+      'customer standalone loan creation and approved export routes',
+      'MISMO XML generation or profile/XSD validation',
+      'provider error-log redaction',
+      'hosted full-field readback',
+    ],
     warnings: [
-      'PASS results in this artifact are simulator or in-process component results only.',
+      'PASS results in this artifact are operations asserted during this simulator execution only.',
       'The harness starts with deterministic post-parse, persisted-extraction-shaped data. It links no PDF bytes and does not execute pull, upload, parsing, persistence, or review boundaries.',
       'The in-memory field projection is not connector writeback, readback, or an Encompass installation.',
       'The simulated connector round trip is deterministic local evidence only and is not verified interoperability with a real Encompass installation.',
-      'The real connector deliberately rejects full-loan retrieval because no lender-approved provider schema/field contract has been implemented.',
-      'The preview, immutable persistence, and ambiguous-outcome reconciliation PASS results are in-process and database-contract results; no provider write occurred.',
-      'Standalone approved exports use the shared production export service, but official MISMO XSD validation remains blocked because the official schema bundle is absent.',
-      'The hosted browser bridge still confirms only the approval marker and is not full-field independent readback.',
-      'The authenticated Encompass loan snapshot normalizer is exercised only by the simulator; no application import orchestration invokes it in production.',
+      'Capabilities listed outside the harness require their own test or inspection evidence and receive no PASS status from this generator.',
+      'No MISMO XML artifact is produced for this fixture; a standalone XML generated from a different fixture cannot establish this fixture\'s XML consistency.',
     ],
   })],
 ]);
@@ -152,7 +144,8 @@ process.stdout.write(`SIMULATOR_CERTIFICATION_ARTIFACTS=${outputDirectory}\n`);
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`SIMULATOR_CERTIFICATION_FAILED=${error instanceof Error ? error.message : 'unknown'}\n`);
+  void error;
+  process.stderr.write('SIMULATOR_CERTIFICATION_FAILED=UNEXPECTED_ERROR\n');
   process.exitCode = 1;
 });
 
@@ -161,10 +154,12 @@ function json(value: unknown): string {
 }
 
 function sourceFingerprint(relativePath: string) {
-  const bytes = readFileSync(path.join(repositoryRoot, relativePath));
+  const canonicalText = readFileSync(path.join(repositoryRoot, relativePath), 'utf8')
+    .replace(/\r\n?/g, '\n');
   return {
     path: relativePath,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
+    canonicalization: 'UTF8_LF',
+    sha256: createHash('sha256').update(canonicalText, 'utf8').digest('hex'),
   };
 }
 

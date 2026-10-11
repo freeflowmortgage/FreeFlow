@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -88,7 +89,8 @@ const core = {
 } satisfies Omit<ApprovedIncomeSnapshot, 'snapshotHash'>;
 const snapshot: ApprovedIncomeSnapshot = Object.freeze({ ...core, snapshotHash: hashCanonical(core) });
 void main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : 'Standalone evidence generation failed.'}\n`);
+  void error;
+  process.stderr.write('STANDALONE_EVIDENCE_GENERATION_FAILED=UNEXPECTED_ERROR\n');
   process.exitCode = 1;
 });
 
@@ -96,6 +98,10 @@ async function main(): Promise<void> {
   const artifacts = await generateArtifactSet(snapshot);
   const repeatedArtifacts = await generateArtifactSet(snapshot);
   const reproducibility = assertByteIdentical(artifacts, repeatedArtifacts);
+  const sourceRevision = {
+    baseCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' }).trim(),
+    executionSource: 'CURRENT_WORKTREE',
+  } as const;
 
   assertSanitized(artifacts);
   const allowedNames = new Set([...artifacts.keys(), 'artifact-manifest.json']);
@@ -104,6 +110,7 @@ async function main(): Promise<void> {
   const manifest = {
     schemaVersion: 'freeflow-standalone-export-artifact-manifest-v1',
     classification: 'SANITIZED_SYNTHETIC_COMPONENT_EXECUTION',
+    sourceRevision,
     snapshotHash: snapshot.snapshotHash,
     reproducibility: {
       generations: 2,
@@ -199,8 +206,9 @@ function assertByteIdentical(first: ReadonlyMap<string, Buffer>, second: Readonl
 }
 
 function sourceFingerprint(relativePath: string) {
-  const bytes = readFileSync(path.join(repositoryRoot, relativePath));
-  return { path: relativePath, sha256: sha256(bytes) };
+  const canonicalText = readFileSync(path.join(repositoryRoot, relativePath), 'utf8')
+    .replace(/\r\n?/g, '\n');
+  return { path: relativePath, canonicalization: 'UTF8_LF', sha256: sha256(Buffer.from(canonicalText, 'utf8')) };
 }
 
 function assertSanitized(files: ReadonlyMap<string, Buffer>): void {
