@@ -27,6 +27,10 @@ const EXPECTED_QUALIFYING_MONTHLY = money(
 const EXPECTED_ANNUAL = money(Number(EXPECTED_QUALIFYING_MONTHLY) * 12);
 
 test.describe('live standalone lifecycle - no business API mocks', () => {
+  test.beforeAll(async () => {
+    await verifyEvidenceBoundary();
+  });
+
   test('creates, processes, approves, exports, reloads, and deduplicates one synthetic loan', async ({ page }) => {
     test.skip(PHASE !== 'main', 'Run with LIVE_PHASE=main.');
 
@@ -127,6 +131,7 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
         status: 'PASS',
         scope: 'STANDALONE_LIVE_APPLICATION_BOUNDARY',
         loanId,
+        loanIdentifierClassification: 'SYNTHETIC_TEST_ONLY',
         loanVersion: 4,
         snapshotHash: approved.snapshotHash,
         exports: {
@@ -158,6 +163,7 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
     const result = {
       status: 'PASS',
       loanId,
+      loanIdentifierClassification: 'SYNTHETIC_TEST_ONLY',
       httpStatus: 404,
       errorCode: 'LOAN_NOT_FOUND',
     } as const;
@@ -435,10 +441,11 @@ async function writeMainEvidence(
   await writeEvidenceFile(evidenceDirectory, 'approved-income.json', exported.json);
   await writeEvidenceFile(evidenceDirectory, 'approved-income.mismo.xml', exported.mismo);
   await writeEvidenceFile(evidenceDirectory, 'approved-income-summary.pdf', exported.summary);
-  await writeEvidenceJson(evidenceDirectory, 'processing-context.json', {
+  await writeEvidenceJson(evidenceDirectory, 'processing-validation-report.json', {
     evidenceSchemaVersion: 'freeflow-live-acceptance-evidence-v1',
     runId,
     sourceRevision,
+    loanIdentifierClassification: 'SYNTHETIC_TEST_ONLY',
     fixture: {
       kind: 'SYNTHETIC_SCANNED_PAYSTUB',
       sha256: SYNTHETIC_PAYSTUB_SHA256,
@@ -524,7 +531,7 @@ async function writeEvidenceManifest(directory: string): Promise<void> {
     'approved-income-summary.pdf',
     'cross-tenant-result.json',
     'main-result.json',
-    'processing-context.json',
+    'processing-validation-report.json',
   ] as const;
   const actualArtifacts = (await readdir(resolve(directory))).sort();
   expect(actualArtifacts).toEqual([...expectedArtifacts].sort());
@@ -542,6 +549,8 @@ async function writeEvidenceManifest(directory: string): Promise<void> {
     ['playwrightConfig', fileURLToPath(new URL('../playwright.live.config.ts', import.meta.url))],
     ['localGateway', fileURLToPath(new URL('./local-live-gateway.mjs', import.meta.url))],
     ['tenantBootstrap', fileURLToPath(new URL('./two-tenant-bootstrap.sql', import.meta.url))],
+    ['fixtureGenerator', fileURLToPath(new URL('../../../services/doc-parser/tests/paystub_fixtures.py', import.meta.url))],
+    ['dependencyLock', fileURLToPath(new URL('../../../pnpm-lock.yaml', import.meta.url))],
   ] as const;
   const sourceFingerprints = Object.fromEntries(await Promise.all(sourceFiles.map(async ([name, path]) => {
     const bytes = await readFile(path);
@@ -553,12 +562,52 @@ async function writeEvidenceManifest(directory: string): Promise<void> {
     runId: evidenceRunId(),
     sourceRevision: evidenceSourceRevision(),
     fixtureSha256: SYNTHETIC_PAYSTUB_SHA256,
+    loanIdentifierClassification: 'SYNTHETIC_TEST_ONLY',
     businessApiMocked: false,
     rawDocumentPersisted: false,
     rawOcrPersisted: false,
     artifacts,
     sourceFingerprints,
   });
+}
+
+async function verifyEvidenceBoundary(): Promise<void> {
+  const evidenceDirectory = process.env.LIVE_EVIDENCE_DIR?.trim();
+  if (!evidenceDirectory) return;
+
+  const sourceRevision = evidenceSourceRevision();
+  const head = gitOutput(['rev-parse', 'HEAD']);
+  if (head !== sourceRevision) {
+    throw new Error(`LIVE_SOURCE_REVISION does not match local HEAD (${head}).`);
+  }
+  const status = gitOutput(['status', '--porcelain=v1', '--untracked-files=all']);
+  if (status) throw new Error('Live evidence requires a clean Git worktree.');
+
+  const directory = resolve(evidenceDirectory);
+  await mkdir(directory, { recursive: true });
+  const actual = (await readdir(directory)).sort();
+  const expected = PHASE === 'cross-tenant'
+    ? [
+        'approved-income.json',
+        'approved-income.mismo.xml',
+        'approved-income-summary.pdf',
+        'main-result.json',
+        'processing-validation-report.json',
+      ].sort()
+    : [];
+  expect(actual).toEqual(expected);
+}
+
+function gitOutput(arguments_: string[]): string {
+  const result = spawnSync('git', arguments_, {
+    cwd: fileURLToPath(new URL('../../..', import.meta.url)),
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error('Unable to verify the Git source boundary for live evidence.');
+  }
+  return String(result.stdout).trim();
 }
 
 async function writeEvidenceJson(directory: string, name: string, value: unknown): Promise<void> {
