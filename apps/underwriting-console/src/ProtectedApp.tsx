@@ -84,7 +84,7 @@ function ProtectedWorkflowApp() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
   const [zoomScale, setZoomScale] = useState(1);
-  const [busy, setBusy] = useState<'UPLOAD' | 'PULL' | 'REVIEW' | 'CALCULATE' | 'APPROVE' | 'WRITE' | null>(null);
+  const [busy, setBusy] = useState<'UPLOAD' | 'PULL' | 'REVIEW' | 'CALCULATE' | 'APPROVE' | null>(null);
   const [calculationWarnings, setCalculationWarnings] = useState<string[]>([]);
   const [contextError, setContextError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -266,26 +266,6 @@ function ProtectedWorkflowApp() {
     }, 'The current calculation could not be approved.');
   };
 
-  const writeApprovedResult = async () => {
-    if (!contextState?.approval?.current || !hostLoanGuid || !hostBridge) return;
-    let authorization: Awaited<ReturnType<typeof portalClient.authorizeHostWrite>> | null = null;
-    await runAction('WRITE', async () => {
-      authorization = await portalClient.authorizeHostWrite(contextState.loan.id, {
-        approvalEventId: contextState.approval!.id, expectedLoanVersion: contextState.loan.version,
-      }, crypto.randomUUID());
-      if (authorization.status !== 'SUCCEEDED') {
-        if (authorization.encompassLoanGuid !== hostLoanGuid) throw new EncompassHostError('ENCOMPASS_LOAN_CONTEXT_CHANGED', 'The active host loan no longer matches this workflow.');
-        await hostBridge.writeApprovedResult(hostLoanGuid, authorization.fields);
-        await portalClient.completeHostWrite(authorization.writeId, { fieldMapHash: authorization.fieldMapHash, outcome: 'SUCCEEDED' }, crypto.randomUUID());
-      }
-      await refreshContext(contextState.loan.id);
-    }, 'The host write was not durably confirmed.', async () => {
-      if (authorization && authorization.status === 'AUTHORIZED') {
-        await portalClient.completeHostWrite(authorization.writeId, { fieldMapHash: authorization.fieldMapHash, outcome: 'FAILED' }, crypto.randomUUID()).catch(() => undefined);
-      }
-    });
-  };
-
   const runAction = async (operation: NonNullable<typeof busy>, action: () => Promise<void>, fallback: string, onFailure?: () => Promise<void>) => {
     setBusy(operation); setActionError(null);
     try { await action(); }
@@ -342,8 +322,6 @@ function ProtectedWorkflowApp() {
   }
   const canCalculate = Boolean(contextState && requirements?.length === 0 && contextState.extractions.some((item) => item.status === 'ACTIVE'));
   const canApprove = Boolean(contextState?.calculation?.current && !contextState.approval?.current);
-  const failedCurrentWrite = contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'FAILED';
-  const canWrite = Boolean(consoleRuntime.hosted && contextState?.approval?.current && hostBridge && hostLoanGuid && !failedCurrentWrite);
 
   return (
     <main className="mx-auto max-w-[1500px] px-4 py-5 md:px-6" data-testid="protected-workflow">
@@ -445,7 +423,7 @@ function ProtectedWorkflowApp() {
               {contextState?.approval?.current ? <div data-testid="approved-income-exports" className="mt-3 rounded border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-bold text-emerald-900">Approved calculation downloads</p><div className="mt-2 flex flex-wrap gap-2"><a data-testid="download-approved-json" download href={portalClient.approvedIncomeExportUrl(contextState.loan.id, 'json')} className="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">JSON</a><a data-testid="download-approved-mismo" download href={portalClient.approvedIncomeExportUrl(contextState.loan.id, 'mismo')} className="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">MISMO XML</a><a data-testid="download-approved-summary" download href={portalClient.approvedIncomeExportUrl(contextState.loan.id, 'summary')} className="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">Summary PDF</a></div><p className="mt-2 text-[11px] text-emerald-900">All three files come from the same approved snapshot. MISMO uses the declared FreeFlow 3.4 implementation profile; official MISMO XSD validation is not performed because the official schema bundle is not included.</p></div> : null}
             </div>
 
-            {consoleRuntime.hosted ? <div className="rounded-lg border border-slate-200 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-slate-500">Explicitly writes only the backend-approved field map, then calculates, commits, and reads back the approval marker.</p><button data-testid="write-host" type="button" disabled={!canWrite || busy !== null || (contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'SUCCEEDED')} onClick={() => void writeApprovedResult()} className="mt-3 rounded bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'WRITE' ? 'Writing...' : contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'SUCCEEDED' ? 'Durably written' : 'Write approved result'}</button>{failedCurrentWrite ? <p className="mt-2 text-xs font-medium text-red-700">The prior host write failed. A new approval is required before retrying.</p> : null}</div> : null}
+            {consoleRuntime.hosted ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-amber-900">Hosted writeback is disabled until FreeFlow can independently verify every written field server-side. Existing client-reported completion records are not treated as certified readback.</p><button data-testid="write-host" type="button" disabled className="mt-3 rounded bg-slate-500 px-3.5 py-2 text-xs font-bold text-white opacity-60">Writeback unavailable</button></div> : null}
           </section>
         </div>
         )}

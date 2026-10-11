@@ -7,11 +7,21 @@ import { authorizeHostWrite, completeHostWrite } from './hostWrite';
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._~-]{16,128}$/;
 const SHA_256 = /^[0-9a-f]{64}$/;
+const HOST_WRITEBACK_UNAVAILABLE = new ApiError(
+  503,
+  'ENCOMPASS_HOST_WRITEBACK_NOT_CERTIFIED',
+  'Hosted writeback is unavailable until server-verifiable full-field readback is implemented.',
+);
 
-export function createHostFieldMapHandler(dependencies = { withTenantTransaction, appOrigin: process.env.APP_ORIGIN }) {
+export function createHostFieldMapHandler(dependencies: Readonly<{
+  withTenantTransaction: typeof withTenantTransaction;
+  appOrigin?: string;
+  certifiedHostWriteback?: boolean;
+}> = { withTenantTransaction, appOrigin: process.env.APP_ORIGIN, certifiedHostWriteback: false }) {
   return async (req: NextApiRequest, res: NextApiResponse, context: RequestContext) => {
     if (req.method !== 'POST') return methodNotAllowed(res);
     try {
+      if (dependencies.certifiedHostWriteback !== true) throw HOST_WRITEBACK_UNAVAILABLE;
       const loanId = typeof req.query.loanId === 'string' && isUuid(req.query.loanId) ? req.query.loanId : '';
       const approvalEventId = typeof req.body?.approvalEventId === 'string' && isUuid(req.body.approvalEventId) ? req.body.approvalEventId : '';
       const expectedLoanVersion = Number(req.body?.expectedLoanVersion);
@@ -24,10 +34,14 @@ export function createHostFieldMapHandler(dependencies = { withTenantTransaction
   };
 }
 
-export function createHostWriteCompletionHandler(dependencies = { withTenantTransaction }) {
+export function createHostWriteCompletionHandler(dependencies: Readonly<{
+  withTenantTransaction: typeof withTenantTransaction;
+  certifiedHostWriteback?: boolean;
+}> = { withTenantTransaction, certifiedHostWriteback: false }) {
   return async (req: NextApiRequest, res: NextApiResponse, context: RequestContext) => {
     if (req.method !== 'POST') return methodNotAllowed(res);
     try {
+      if (dependencies.certifiedHostWriteback !== true) throw HOST_WRITEBACK_UNAVAILABLE;
       const writeId = typeof req.query.writeId === 'string' && isUuid(req.query.writeId) ? req.query.writeId : '';
       const fieldMapHash = typeof req.body?.fieldMapHash === 'string' && SHA_256.test(req.body.fieldMapHash) ? req.body.fieldMapHash : '';
       const outcome = req.body?.outcome === 'SUCCEEDED' || req.body?.outcome === 'FAILED' ? req.body.outcome : '';

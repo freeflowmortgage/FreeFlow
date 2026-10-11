@@ -65,6 +65,13 @@ export async function authorizeHostWrite(transaction: Prisma.TransactionClient, 
 }
 
 export async function completeHostWrite(transaction: Prisma.TransactionClient, context: RequestContext, input: CompletionInput) {
+  if (input.outcome === 'SUCCEEDED') {
+    throw new ApiError(
+      503,
+      'HOST_WRITE_SERVER_VERIFICATION_REQUIRED',
+      'Hosted writeback cannot be marked successful without server-verifiable full-field readback.',
+    );
+  }
   const requestHash = hashCanonical({ writeId: input.writeId, fieldMapHash: input.fieldMapHash, outcome: input.outcome });
   const decision = await resolveIdempotencyKey(transaction, context, { operation: HOST_WRITE_COMPLETION_OPERATION, key: input.idempotencyKey, requestHash });
   const write = await transaction.encompassHostWrite.findFirst({

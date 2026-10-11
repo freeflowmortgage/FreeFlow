@@ -611,7 +611,7 @@ model EncompassSyncJob {
   writePreviewSchemaVersion String?        @db.VarChar(64)
   writePreviewHash          String?        @db.Char(64)
   writePreviewFields        Json?
-  // Allowlisted field IDs, closed status/reason codes, and value hashes only.
+  // Allowlisted field IDs and closed status/reason codes only; no field values or value-derived hashes.
   // Raw LOS field values and provider messages are forbidden.
   fieldReadback       Json?
   startedAt           DateTime?           @db.Timestamptz
