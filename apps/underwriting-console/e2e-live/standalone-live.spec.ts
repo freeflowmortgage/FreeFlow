@@ -110,7 +110,8 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
       ), { timeout: 240_000 });
       await page.getByTestId('upload-pdf').click();
       expect((await duplicateUpload).status()).toBe(201);
-      await expect(page.getByTestId('upload-pdf')).toBeEnabled();
+      await expect(page.getByTestId('upload-pdf')).toHaveText('Upload and extract');
+      await expect(page.getByTestId('upload-pdf')).toBeDisabled();
       await expect(page.getByTestId('approved-income-exports')).toBeVisible();
 
       const second = await downloadAllExports(page);
