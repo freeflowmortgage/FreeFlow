@@ -117,7 +117,7 @@ async function loadApprovedFieldMap(transaction: Prisma.TransactionClient, conte
     select: {
       qualifyingMonthlyIncome: true, trendingResult: true, yearsAnalyzed: true, scheduleCMonthlyTotal: true,
       form1120SMonthlyTotal: true, form1065MonthlyTotal: true, form1120MonthlyTotal: true, w2BaseMonthly: true,
-      rentalMonthly: true, borrowerIncome: true,
+      w2VariableMonthly: true, assetIncomeMonthly: true, rentalMonthly: true, borrowerIncome: true,
       extractionBindings: { select: {
         extractionId: true, extractionHash: true, sourceDocumentId: true, sourceDocumentVersion: true,
         sourceContentHash: true, metadataReviewId: true, metadataReviewVersion: true, metadataReviewHash: true,
@@ -141,6 +141,8 @@ async function loadApprovedFieldMap(transaction: Prisma.TransactionClient, conte
     form1065MonthlyTotal: numberOrUndefined(calculation.form1065MonthlyTotal),
     form1120MonthlyTotal: numberOrUndefined(calculation.form1120MonthlyTotal),
     w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
+    w2VariableMonthly: numberOrUndefined(calculation.w2VariableMonthly),
+    assetIncomeMonthly: numberOrUndefined(calculation.assetIncomeMonthly),
     rentalMonthly: numberOrUndefined(calculation.rentalMonthly),
     borrowerIncome: calculation.borrowerIncome,
     auditUrl: `${input.appOrigin.replace(/\/$/, '')}/audit/${approval.id}`,
@@ -160,6 +162,8 @@ export function approvedHostFields(input: Readonly<{
   form1065MonthlyTotal?: number;
   form1120MonthlyTotal?: number;
   w2BaseMonthly?: number;
+  w2VariableMonthly?: number;
+  assetIncomeMonthly?: number;
   rentalMonthly?: number;
   borrowerIncome: unknown;
   auditUrl: string;
@@ -174,13 +178,15 @@ export function approvedHostFields(input: Readonly<{
     form1065_MonthlyTotal: input.form1065MonthlyTotal,
     form1120_MonthlyTotal: input.form1120MonthlyTotal,
     w2BaseMonthly: input.w2BaseMonthly,
+    w2VariableMonthly: input.w2VariableMonthly,
+    assetIncomeMonthly: input.assetIncomeMonthly,
     rentalMonthly: input.rentalMonthly,
     borrowerMonthlyIncome: lines.map((line) => ({ ordinal: line.ordinal, qualifyingMonthlyIncome: Number(line.qualifyingMonthlyIncome) })),
     auditUrl: input.auditUrl,
-  });
+  }, { includeSyncedAt: false });
   const borrowerFields = borrowerIncomeFields(lines);
   return Object.fromEntries([
-    ...mapped.customFields.filter((field) => field.fieldName !== 'CX.FREEFLOW.SYNCED.AT'),
+    ...mapped.customFields,
     ...Object.entries(borrowerFields).map(([fieldName, value]) => ({ fieldName, value })),
     { fieldName: APPROVAL_FIELD, value: input.approvalId },
   ].map((field) => [field.fieldName, field.value]));

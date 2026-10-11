@@ -91,6 +91,8 @@ test('the actual approved field mapper yields the exact current in-memory projec
     'CX.FREEFLOW.SCH.C': '8000.00',
     'CX.FREEFLOW.FORM.1065': '5000.00',
     'CX.FREEFLOW.W2.BASE': '4000.00',
+    'CX.FREEFLOW.W2.VARIABLE': '1600.00',
+    'CX.FREEFLOW.ASSET.INCOME': '1000.00',
     'CX.FREEFLOW.RENTAL': '2000.00',
     'CX.FREEFLOW.BORROWER.1.INCOME': '5600.00',
     'CX.FREEFLOW.BORROWER.2.INCOME': '16000.00',
@@ -103,12 +105,12 @@ test('the actual approved field mapper yields the exact current in-memory projec
   assert.equal(new Set(run.beforeAfter.changedFields).size, Object.keys(run.encompassFields).length);
 });
 
-test('current approved mapper completeness gaps are explicit', () => {
+test('approved mapper includes every calculated certification income category', () => {
   const run = runEncompassCertification('INTEGRATED_POST_PARSE_PROJECTION');
   assert.equal(run.financialResult.mapperMonthly.w2Variable, 1600);
   assert.equal(run.financialResult.mapperMonthly.asset, 1000);
-  assert.equal(Object.hasOwn(run.encompassFields, 'CX.FREEFLOW.W2.VARIABLE'), false);
-  assert.equal(Object.hasOwn(run.encompassFields, 'CX.FREEFLOW.ASSET.INCOME'), false);
+  assert.equal(run.encompassFields['CX.FREEFLOW.W2.VARIABLE'], '1600.00');
+  assert.equal(run.encompassFields['CX.FREEFLOW.ASSET.INCOME'], '1000.00');
 });
 
 test('borrower assignment remains fail-closed before either workflow can calculate', () => {

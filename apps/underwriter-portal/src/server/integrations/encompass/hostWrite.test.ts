@@ -28,7 +28,7 @@ function transaction(overrides: Record<string, unknown> = {}) {
     form1084Audit: { findFirst: async () => ({
       qualifyingMonthlyIncome: decimal(8125.5), trendingResult: 'CONVENTIONAL_STABLE_OR_INCREASING', yearsAnalyzed: [2025, 2024],
       scheduleCMonthlyTotal: null, form1120SMonthlyTotal: null, form1065MonthlyTotal: null, form1120MonthlyTotal: null,
-      w2BaseMonthly: decimal(8000), w2VariableMonthly: null, scheduleFMonthlyTotal: null, assetIncomeMonthly: null,
+      w2BaseMonthly: decimal(7600), w2VariableMonthly: decimal(400), scheduleFMonthlyTotal: null, assetIncomeMonthly: decimal(125.5),
       rentalMonthly: null, rentalLiabilityMonthly: null, housingExpenseAdjustment: null,
       extractionBindings: [{ extractionId: 'e', extractionHash: 'a'.repeat(64), sourceDocumentId: 'd', sourceDocumentVersion: 1, sourceContentHash: 'b'.repeat(64), metadataReviewId: null, metadataReviewVersion: null, metadataReviewHash: null, extraction: { status: 'ACTIVE', canonicalHash: 'a'.repeat(64), sourceDocumentVersion: 1, sourceContentHash: 'b'.repeat(64), sourceDocument: { version: 1, sourceContentHash: 'b'.repeat(64) }, metadataReviews: [] } }],
     }) },
@@ -51,6 +51,8 @@ test('approved host map is durable and stores no borrower identity or field valu
   const result = await authorizeHostWrite(state.tx as never, context, input);
   assert.equal(result.writeId, WRITE);
   assert.equal(result.fields['CX.FREEFLOW.APPROVAL.ID'], APPROVAL);
+  assert.equal(result.fields['CX.FREEFLOW.W2.VARIABLE'], '400.00');
+  assert.equal(result.fields['CX.FREEFLOW.ASSET.INCOME'], '125.50');
   assert.match(result.fieldMapHash, /^[0-9a-f]{64}$/);
   const persisted = state.getWrite() ?? {};
   assert.equal('fields' in persisted, false);

@@ -107,6 +107,8 @@ export function runEncompassCertification(workflow: CertificationWorkflow): Cert
     scheduleCMonthlyTotal: mapperMonthly.scheduleC,
     form1065MonthlyTotal: mapperMonthly.form1065,
     w2BaseMonthly: mapperMonthly.w2Base,
+    w2VariableMonthly: mapperMonthly.w2Variable,
+    assetIncomeMonthly: mapperMonthly.asset,
     rentalMonthly: mapperMonthly.rental,
     borrowerIncome: calculated.borrowerIncome,
     auditUrl: `https://certification.invalid/audit/${certificationFixture.expected.approvalId}`,
