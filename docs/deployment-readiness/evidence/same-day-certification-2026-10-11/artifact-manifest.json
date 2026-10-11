@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "freeflow-same-day-artifact-manifest-v1",
+  "assessmentDate": "2026-10-11",
+  "implementationRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+  "hashAlgorithm": "SHA-256",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2373,
+      "sha256": "d590b40ef7147dd504a4d9f2cc0f092ab1dc708c4cb8fdd1d8f1ce0cd98d7aad"
+    },
+    {
+      "path": "database-security-gate.json",
+      "bytes": 2040,
+      "sha256": "5a268430928ede844c0faf036c86fc647283751d5e3f01a05bb6d326e8297710"
+    },
+    {
+      "path": "execution-report.json",
+      "bytes": 5288,
+      "sha256": "3ad079d2ba947285fd9a48c370d4583be0f09d43d19646dee097f514c62ac10b"
+    },
+    {
+      "path": "standalone-live-cli-playwright.json",
+      "bytes": 3362,
+      "sha256": "7cd83e0b18d30addb290b7875adcb4522e3529a329cbff75a109752f4ca01b89"
+    },
+    {
+      "path": "test-suite-summary.json",
+      "bytes": 5355,
+      "sha256": "1cb5df93b8b39d8b92b620d73d4e7278dbfba8f9dd00fbe788a39b6bf1240b0a"
+    }
+  ],
+  "completionReport": {
+    "path": "../../SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md",
+    "bytes": 30364,
+    "sha256": "9910504a78a82c621435be2ffb113848323798553d21e8a3b12a94aee63f8877"
+  },
+  "linkedEvidenceManifests": [
+    {
+      "path": "../encompass-certification-2026-10-11/artifact-manifest.json",
+      "boundary": "POST_PARSE_AND_CONNECTOR_SIMULATOR",
+      "bytes": 4647,
+      "sha256": "e2b9e1f88f3af9da4fdc335bde3c1ff47ef712bd52942e37e563a88913ae5dd4"
+    },
+    {
+      "path": "../standalone-approved-income-exports-2026-10-11/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_COMPONENT_EXPORT",
+      "bytes": 3783,
+      "sha256": "1b2b266792c3e31e951dee2655e20ae816a362ba9ebbfea9c243a587f648aeb7"
+    }
+  ],
+  "limitations": [
+    "The original live standalone input and downloads were erased; their observed hashes cannot be rehashed from this bundle.",
+    "The committed live harness lacks environment-specific server-side authentication bootstrap and was not rerun through the disposed full stack.",
+    "No official MISMO XSD or implementation-requirement validation was performed.",
+    "No real Encompass interoperability was performed."
+  ]
+}

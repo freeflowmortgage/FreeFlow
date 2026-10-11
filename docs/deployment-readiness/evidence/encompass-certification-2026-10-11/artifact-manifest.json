@@ -3,40 +3,63 @@
   "boundary": "POST_PARSE_SIMULATOR",
   "fixtureVersion": "encompass-certification-v1",
   "sourceRevision": {
-    "baseCommit": "a258b969e3f95aa62f6893cf7c9c27ba781ae7eb",
+    "baseCommit": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
     "executionSource": "CURRENT_WORKTREE",
     "workingTreeInputs": [
       {
         "path": "apps/underwriter-portal/scripts/encompass-certification.ts",
-        "sha256": "115d2c0dbec0f864a4754ea1e0b0d4911fee583f2843ffa75048d82144b0133d"
+        "canonicalization": "UTF8_LF",
+        "sha256": "94f34c8c476ebab82d9f5acf69d1bbea603dd9b98bd04d803839abf9389cb9c8"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness.ts",
-        "sha256": "657a45043a8245ed8ab7c3660042e293dd755c5e32dd1286479339700dca9cff"
+        "canonicalization": "UTF8_LF",
+        "sha256": "04339fcf4f7bbdc14f006da74b08e2d6fe7f1623ceba0c9de9c03eedd5baba9e"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertification.test.ts",
-        "sha256": "89ba106208d84850647aa751d383a9c844990992b0cfe24fc5ca7280862ac230"
+        "canonicalization": "UTF8_LF",
+        "sha256": "41442dd0bcc4719414fe31798771c656232eb6050a7316b950a035970ae03464"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/fixtures/encompass-certification-v1.json",
-        "sha256": "b6b1404e31e4e3780ae7204df4b1f9895c966eb1b995036b9b44a50e74c4d706"
+        "canonicalization": "UTF8_LF",
+        "sha256": "a5d5a9209cce554c75ef929d29b1599979bdf23478d12f1bfd45193a951e41f1"
       },
       {
         "path": "services/encompass-connector/src/connector/syntheticFreeflowDevConnector.ts",
-        "sha256": "fd255fadb924c45815a461762e139394e3d9409b338051387e098a42a0c6e271"
+        "canonicalization": "UTF8_LF",
+        "sha256": "0f6c5375af8db1527877fbb0a5a96e89d3c957cc67c65b3d27993064841e1d18"
       },
       {
         "path": "packages/encompass-connector-contract/src/roundTrip.ts",
-        "sha256": "e39d39162882212d1075905a2d91ef03deb8827cdc7ef5dd861cf95f7dc70b02"
+        "canonicalization": "UTF8_LF",
+        "sha256": "7631886e457d56d0904e1f46670f2bb2e5997af82261efc4bf44be85e71ca634"
       },
       {
         "path": "packages/mortgage-engine/src/normalizedLoan.ts",
-        "sha256": "3ba95f3c4a708defa09faf0d0d24f774fe7d286c5e805f9368fd9f4b412f3e8c"
+        "canonicalization": "UTF8_LF",
+        "sha256": "c2125c18a8ffc9ea00132c19aa72f7945dfe661afe94aeefb9df66cee8254d37"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/normalizeImportedLoan.ts",
+        "canonicalization": "UTF8_LF",
         "sha256": "85db577c92d3c7b7c5a4deb5a399ea43083a61fce97ee66a33e2f2102c431c69"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/syncPreview.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "6ab2a255fbba395013fad78440d30fab96b97f03a141815380e7f9efef938b07"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/syncWorker.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "d95e33477d88009f42854551ef961773e497701186875a49cfe86538b25bad3a"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/exports/approvedIncomeExports.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "97d22e78775da2345fcfd650006217491de12466246edd139c1b798e5eb889c1"
       }
     ]
   },
@@ -79,18 +102,18 @@
     },
     {
       "name": "simulated-encompass-round-trip.json",
-      "sha256": "7fb58407c27fe5eaeda997e52d5a311a57b3366ab5e433b31336401119207625",
-      "bytes": 12850
+      "sha256": "3d929169a9efc60805edbea5363432e75c0c72405f2b8ad7eef7e4bafeb241a4",
+      "bytes": 7948
     },
     {
       "name": "mismo-validation.json",
-      "sha256": "ca8ffdb2d85b28063a50d35ddb8d300efe245755d7398d0d7efb6ab6b988a3de",
-      "bytes": 481
+      "sha256": "b42651690783228b93198db1e611cce214d71e2cdf52541fa4f295e73506f81d",
+      "bytes": 888
     },
     {
       "name": "processing-validation-report.json",
-      "sha256": "f2423d46d1d24dce69ff1aa91c59e8a7bc75c4da960e3e88f35e5d4debc02cdb",
-      "bytes": 3834
+      "sha256": "69185bf943c9dc45120d6e47dc61463375ed71b6edb58c5f9d880c56fd099f1c",
+      "bytes": 4873
     }
   ]
 }

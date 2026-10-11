@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "freeflow-test-suite-summary-v1",
+  "executionDate": "2026-10-11",
+  "implementationRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+  "result": "PASS_WITH_EXPLICIT_BLOCKERS",
+  "finalRevisionChecks": [
+    {
+      "command": "corepack pnpm --filter web test",
+      "status": "PASS",
+      "results": { "configurationChecks": 8, "typescriptTests": 213 }
+    },
+    {
+      "command": "corepack pnpm --filter web exec tsc --noEmit",
+      "status": "PASS"
+    },
+    {
+      "command": "corepack pnpm --filter web build",
+      "status": "PASS",
+      "results": { "productionRoutesVerified": 29 }
+    },
+    {
+      "command": "corepack pnpm --filter @mortgage-pos/mortgage-engine test",
+      "status": "PASS",
+      "results": { "suites": 24, "tests": 198 }
+    },
+    {
+      "command": "corepack pnpm --filter @mortgage-pos/mortgage-engine build",
+      "status": "PASS"
+    },
+    {
+      "command": "corepack pnpm --filter @mortgage-pos/encompass-connector-contract test",
+      "status": "PASS",
+      "results": { "tests": 37 }
+    },
+    {
+      "command": "corepack pnpm --filter @mortgage-pos/encompass-connector-contract build",
+      "status": "PASS"
+    },
+    {
+      "command": "corepack pnpm --filter @mortgage-pos/encompass-connector test",
+      "status": "PASS",
+      "results": { "tests": 52 }
+    },
+    {
+      "command": "corepack pnpm --filter @mortgage-pos/encompass-connector build",
+      "status": "PASS"
+    },
+    {
+      "command": "corepack pnpm --filter underwriting-console test:runtime",
+      "status": "PASS",
+      "results": { "tests": 31 }
+    },
+    {
+      "command": "$env:VITE_FREEFLOW_RUNTIME_MODE='protected-web'; corepack pnpm --filter underwriting-console build",
+      "status": "PASS"
+    },
+    {
+      "command": "corepack pnpm --filter underwriting-console test:e2e:standalone -- --reporter=line",
+      "status": "PASS_UI_CONTRACT_ONLY",
+      "results": { "playwrightTests": 2, "businessApiIntercepted": true }
+    },
+    {
+      "command": "corepack pnpm --dir apps/underwriting-console exec tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,DOM --types node --typeRoots ../../node_modules/.pnpm/@types+node@24.19.1/node_modules/@types --skipLibCheck e2e-live/standalone-live.spec.ts playwright.live.config.ts",
+      "status": "PASS"
+    },
+    {
+      "command": "$env:LIVE_APP_URL='http://127.0.0.1:3014'; $env:LIVE_PHASE='cross-tenant'; corepack pnpm --dir apps/underwriting-console exec playwright test --config playwright.live.config.ts --list",
+      "status": "PASS_DISCOVERY_ONLY",
+      "results": { "playwrightTestsDiscovered": 2 }
+    },
+    {
+      "command": "$env:LIVE_APP_URL='http://127.0.0.1:65534'; $env:LIVE_PHASE='main'; $env:LIVE_FIXTURE_IMAGE='freeflow-doc-parser-codex-test:latest'; corepack pnpm --dir apps/underwriting-console exec playwright test --config playwright.live.config.ts --project chromium --grep 'creates, processes'",
+      "status": "EXPECTED_CLOSED_PORT_AFTER_FIXTURE_PREFLIGHT",
+      "results": {
+        "fixtureGeneration": "PASS",
+        "fixtureSha256": "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf",
+        "lifecycle": "NOT_EXECUTED",
+        "expectedTerminalError": "ERR_CONNECTION_REFUSED"
+      }
+    },
+    {
+      "command": "$env:LIVE_APP_URL='https://example.invalid'; $env:LIVE_PHASE='main'; Remove-Item Env:LIVE_ALLOW_REMOTE_SYNTHETIC_WRITES -ErrorAction SilentlyContinue; corepack pnpm --dir apps/underwriting-console exec playwright test --config playwright.live.config.ts --list",
+      "status": "PASS_EXPECTED_REJECTION",
+      "results": { "safeError": "Remote main-phase execution requires LIVE_ALLOW_REMOTE_SYNTHETIC_WRITES=1." }
+    },
+    {
+      "command": "corepack pnpm --filter web run certify:encompass (executed twice)",
+      "status": "PASS_BYTE_IDENTICAL",
+      "results": { "manifestSha256": "e2b9e1f88f3af9da4fdc335bde3c1ff47ef712bd52942e37e563a88913ae5dd4" }
+    },
+    {
+      "command": "corepack pnpm --filter web run certify:standalone-exports (executed twice)",
+      "status": "PASS_BYTE_IDENTICAL",
+      "results": { "manifestSha256": "1b2b266792c3e31e951dee2655e20ae816a362ba9ebbfea9c243a587f648aeb7" }
+    },
+    {
+      "command": "database-validation.yml command sequence against a fresh PostgreSQL 16 container",
+      "status": "PASS",
+      "results": {
+        "migrationsAppliedFromZero": 19,
+        "tenantRlsSql": "PASS",
+        "connectorBindingSql": "PASS",
+        "appRoleTests": 7,
+        "workerRoleTests": 3,
+        "containersRemoved": true
+      }
+    }
+  ],
+  "historicalLiveExecution": {
+    "runtimeRevision": "d72c1fad75b08361859b4665d834fc4b6b755266",
+    "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
+    "boundary": "CLI_PLAYWRIGHT_ACTUAL_UI_BACKEND_POSTGRESQL_PARSER_NO_BUSINESS_API_MOCKS",
+    "rawArtifactsRetained": false,
+    "latestRevisionFullLifecycleRerun": false
+  },
+  "notExecutedOrBlocked": [
+    "full live standalone lifecycle at the final implementation revision",
+    "live JSON file-import path",
+    "live browser anonymous or expired-session cases",
+    "official MISMO XSD and implementation-requirement validation",
+    "real Encompass authentication, loan import, document retrieval, writeback, or readback",
+    "production or AWS deployment"
+  ]
+}

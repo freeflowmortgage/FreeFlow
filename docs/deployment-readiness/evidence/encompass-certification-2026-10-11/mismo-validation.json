@@ -1,10 +1,12 @@
 {
   "boundary": "POST_PARSE_SIMULATOR",
   "status": "NOT_IMPLEMENTED",
-  "capability": "Approved income-analysis MISMO export",
+  "capability": "MISMO export for the Encompass post-parse simulator fixture",
+  "selectedSchema": "3.4.0",
+  "selectedImplementationRequirements": "freeflow-approved-income-mismo-3.4-profile-v1",
+  "freeFlowProfileValidation": "NOT_EXECUTED_FOR_THIS_FIXTURE",
   "officialSchemaValidation": "BLOCKED",
-  "selectedSchema": null,
-  "selectedImplementationRequirements": null,
-  "explanation": "Existing MISMO generators are disconnected from the protected approved-calculation workflow and use inconsistent 3.4 identifiers. No official XSD validation is wired into the repository.",
-  "xmlArtifactProduced": false
+  "officialXsdValidationStatus": "NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED",
+  "explanation": "This simulator does not create or validate a MISMO XML artifact for its two-borrower, $21,600 fixture. The separately generated standalone XML uses a different one-borrower fixture and is intentionally not cited as fixture-level evidence here. Official XSD validation is also blocked because the official schema and implementation-requirement bundle is not present.",
+  "xmlArtifactProducedInThisSimulatorBundle": false
 }

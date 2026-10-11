@@ -1,6 +1,10 @@
 {
   "schemaVersion": "freeflow-standalone-export-artifact-manifest-v1",
   "classification": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION",
+  "sourceRevision": {
+    "baseCommit": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+    "executionSource": "CURRENT_WORKTREE"
+  },
   "snapshotHash": "0719f460abc4c4c4f24f61e86330107a05b9770d29f5c45e8588edb725131fb5",
   "reproducibility": {
     "generations": 2,
@@ -47,14 +51,17 @@
   "sourceInputs": [
     {
       "path": "apps/underwriter-portal/scripts/standalone-export-evidence.ts",
-      "sha256": "d3572f9ce025eb2ba61fb2e150c6babd41db8edae10a54d82b728640f9f14ca5"
+      "canonicalization": "UTF8_LF",
+      "sha256": "42c8da5a6d04b1e9adbe06da574bc93448b1049246876a8846934cb0412d4979"
     },
     {
       "path": "apps/underwriter-portal/src/server/exports/approvedIncomeSnapshot.ts",
+      "canonicalization": "UTF8_LF",
       "sha256": "891cd6e7e14b01b008b34a966a3e4607648810abab3bafd5c8a29d9ce9617146"
     },
     {
       "path": "apps/underwriter-portal/src/server/exports/approvedIncomeExports.ts",
+      "canonicalization": "UTF8_LF",
       "sha256": "97d22e78775da2345fcfd650006217491de12466246edd139c1b798e5eb889c1"
     }
   ],
