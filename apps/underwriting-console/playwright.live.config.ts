@@ -1,9 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 
 const liveAppUrl = requiredEnvironment('LIVE_APP_URL');
 const phase = requiredEnvironment('LIVE_PHASE');
 if (phase !== 'main' && phase !== 'cross-tenant') {
   throw new Error('LIVE_PHASE must be either "main" or "cross-tenant".');
+}
+const transientRunId = process.env.LIVE_EVIDENCE_RUN_ID?.trim() || `pid-${process.pid}`;
+if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(transientRunId)) {
+  throw new Error('LIVE_EVIDENCE_RUN_ID contains characters unsafe for the transient output path.');
 }
 
 const parsedUrl = new URL(liveAppUrl);
@@ -24,6 +30,7 @@ if (phase === 'main' && !loopback
 
 export default defineConfig({
   testDir: './e2e-live',
+  outputDir: resolve(tmpdir(), `freeflow-live-playwright-${transientRunId}`),
   fullyParallel: false,
   workers: 1,
   forbidOnly: true,
