@@ -1,10 +1,10 @@
 # FreeFlow Same-Day Standalone and Encompass Completion Report
 
-Assessment date: 2026-10-11  
-Repository: `freeflowmortgage/FreeFlow`  
-Branch: `test/encompass-certification-20261011`  
-Implementation revision: `3a2ec81d9d3a9051f0752328f414a67c7fde0e56`  
-Deployment status: **NOT DEPLOYED**  
+Assessment date: 2026-10-11
+Repository: `freeflowmortgage/FreeFlow`
+Branch: `test/encompass-certification-20261011`
+Implementation revision: `3a2ec81d9d3a9051f0752328f414a67c7fde0e56`
+Deployment status: **NOT DEPLOYED**
 Production approval: **NOT GRANTED**
 
 ## Executive result
