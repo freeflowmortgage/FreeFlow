@@ -52,9 +52,10 @@ test('round trip requires independent full-field readback before success', async
   assert.equal(result.readback.allSucceeded, true);
   assert.equal(result.readback.fields.every((field) => field.status === 'SUCCESS'), true);
   assert.equal(JSON.stringify(result.readback).includes('1600.00'), false);
+  assert.doesNotMatch(JSON.stringify(result.readback), /ValueSha256/);
 });
 
-test('readback classification uses closed statuses and hashes only', () => {
+test('readback classification uses closed statuses without value-derived digests', () => {
   const report = compareEncompassFieldReadback(
     [
       ...FIELDS,
@@ -73,7 +74,12 @@ test('readback classification uses closed statuses and hashes only', () => {
   ]);
   assert.equal(report.allSucceeded, false);
   assert.equal(JSON.stringify(report).includes('1599.99'), false);
-  assert.equal(report.fields.every((field) => /^[0-9a-f]{64}$/.test(field.expectedValueSha256)), true);
+  assert.equal(JSON.stringify(report).includes('1600.00'), false);
+  assert.equal(JSON.stringify(report).includes('1000.00'), false);
+  assert.doesNotMatch(JSON.stringify(report), /ValueSha256/);
+  assert.equal(report.fields.every((field) => (
+    Object.keys(field).sort().join(',') === 'fieldName,reasonCode,status'
+  )), true);
 });
 
 function connector(overrides: Readonly<{

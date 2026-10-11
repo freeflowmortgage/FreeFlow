@@ -11,7 +11,7 @@ const context = {
   requestId: 'request-1', tenantId: TENANT, membershipId: USER,
 } as RequestContext;
 
-test('sync status returns sanitized per-field readback for the current tenant', async () => {
+test('sync status strips legacy value hashes from per-field readback', async () => {
   const fieldReadback = {
     schemaVersion: 'encompass-field-readback-v1',
     allSucceeded: true,
@@ -40,10 +40,19 @@ test('sync status returns sanitized per-field readback for the current tenant', 
   const { response, state } = responseRecorder();
   await handler({ method: 'GET', query: { jobId: JOB } } as unknown as NextApiRequest, response, context);
   assert.equal(state.status, 200);
-  assert.deepEqual((state.body as any).fieldReadback, fieldReadback);
+  assert.deepEqual((state.body as any).fieldReadback, {
+    schemaVersion: 'encompass-field-readback-v1',
+    allSucceeded: true,
+    fields: [{
+      fieldName: 'CX.FREEFLOW.W2.VARIABLE',
+      status: 'SUCCESS',
+      reasonCode: 'VALUE_CONFIRMED',
+    }],
+  });
   assert.equal((query as any).where.tenantId, TENANT);
   assert.equal((query as any).select.fieldReadback, true);
   assert.equal(JSON.stringify(state.body).includes('4000.00'), false);
+  assert.doesNotMatch(JSON.stringify(state.body), /ValueSha256/);
 });
 
 test('sync status never echoes malformed or raw provider content persisted in readback JSON', async () => {

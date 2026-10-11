@@ -71,6 +71,51 @@ test('runtime applies only the immutable persisted preview, including borrower f
   assert.equal(applied?.fields.some((field) => field.fieldName === 'CX.FREEFLOW.BORROWER.2.INCOME'), true);
 });
 
+test('runtime strips legacy value hashes before persisting field readback', async () => {
+  const updates: any[] = [];
+  const transaction = runtimeTransaction({
+    status: 'QUEUED', attemptCount: 0, reconciliationCount: 0,
+  }, updates);
+  const dependencies = createSyncRuntimeDependencies(environment, {
+    withTransaction: async (operation) => operation(transaction as never),
+    setTenantContext: (async () => {}) as never,
+    createConnector: () => ({
+      kind: 'custom',
+      retrieveLoanSnapshot: async () => { throw new Error('not used'); },
+      listActiveAttachments: async () => [],
+      downloadOriginalAttachment: async () => { throw new Error('not used'); },
+      applyApprovedIncomeUpdate: async () => ({}),
+      readFields: async () => ({}),
+    }),
+  });
+  const claimed = await dependencies.claim(message);
+  assert.ok(claimed);
+
+  await dependencies.succeed(claimed, 'revision-1', {
+    schemaVersion: 'encompass-field-readback-v1',
+    allSucceeded: true,
+    fields: preview.fields.map((field) => ({
+      fieldName: field.fieldName,
+      status: 'SUCCESS',
+      reasonCode: 'VALUE_CONFIRMED',
+      expectedValueSha256: 'a'.repeat(64),
+      actualValueSha256: 'a'.repeat(64),
+    })),
+  } as never);
+
+  const persisted = updates.at(-1)?.fieldReadback;
+  assert.deepEqual(persisted, {
+    schemaVersion: 'encompass-field-readback-v1',
+    allSucceeded: true,
+    fields: preview.fields.map((field) => ({
+      fieldName: field.fieldName,
+      status: 'SUCCESS',
+      reasonCode: 'VALUE_CONFIRMED',
+    })),
+  });
+  assert.doesNotMatch(JSON.stringify(persisted), /ValueSha256/);
+});
+
 test('runtime fails closed when the persisted preview is absent or reconciliation is exhausted', async () => {
   for (const scenario of [
     { previewFields: null, status: 'QUEUED', reconciliationCount: 0, safeCode: 'ENCOMPASS_WRITE_PREVIEW_INVALID' },
@@ -115,10 +160,16 @@ function runtimeTransaction(overrides: Record<string, unknown>, updates: any[]) 
     ...overrides,
   };
   return {
+    $executeRaw: async () => 1,
+    auditEvent: {
+      findFirst: async () => null,
+      create: async () => ({}),
+    },
     encompassSyncJob: {
       findFirst: async () => record,
       updateMany: async ({ data }: any) => { updates.push(data); return { count: 1 }; },
     },
     form1084Audit: { findFirst: async () => ({ extractionBindings }) },
+    loanApplication: { updateMany: async () => ({ count: 1 }) },
   };
 }

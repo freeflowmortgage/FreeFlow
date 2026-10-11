@@ -86,8 +86,6 @@ export type EncompassFieldReadback = Readonly<{
   fieldName: string;
   status: EncompassFieldReadbackStatus;
   reasonCode: EncompassFieldReadbackReason;
-  expectedValueSha256: string;
-  actualValueSha256?: string;
 }>;
 
 export type EncompassFieldReadbackReport = Readonly<{

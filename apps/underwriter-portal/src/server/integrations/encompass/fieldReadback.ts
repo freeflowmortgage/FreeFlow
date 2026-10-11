@@ -1,7 +1,7 @@
 import type { EncompassFieldReadbackReport } from '@mortgage-pos/encompass-connector-contract';
 
 const FIELD_NAME = /^(?:CX\.[A-Z0-9][A-Z0-9._-]{0,99}|10[1-7])$/;
-const SHA_256 = /^[0-9a-f]{64}$/;
+const LEGACY_SHA_256 = /^[0-9a-f]{64}$/;
 const REASON_FOR_STATUS = {
   SUCCESS: 'VALUE_CONFIRMED',
   REJECTED: 'PROVIDER_REJECTED',
@@ -18,7 +18,11 @@ export class FieldReadbackValidationError extends Error {
   }
 }
 
-/** Reconstructs a closed, raw-value-free report before persistence or output. */
+/**
+ * Reconstructs a closed, value-free report before persistence or output.
+ * Legacy deterministic value hashes are validated and discarded so existing
+ * records remain readable without exposing low-entropy value digests.
+ */
 export function sanitizeFieldReadback(
   value: unknown,
   options: Readonly<{
@@ -43,21 +47,16 @@ export function sanitizeFieldReadback(
       || !FIELD_NAME.test(field.fieldName)
       || !isStatus(field.status)
       || field.reasonCode !== REASON_FOR_STATUS[field.status]
-      || typeof field.expectedValueSha256 !== 'string'
-      || !SHA_256.test(field.expectedValueSha256)
+      || (field.expectedValueSha256 !== undefined
+        && (typeof field.expectedValueSha256 !== 'string' || !LEGACY_SHA_256.test(field.expectedValueSha256)))
       || (field.actualValueSha256 !== undefined
-        && (typeof field.actualValueSha256 !== 'string' || !SHA_256.test(field.actualValueSha256)))) {
+        && (typeof field.actualValueSha256 !== 'string' || !LEGACY_SHA_256.test(field.actualValueSha256)))) {
       throw new FieldReadbackValidationError();
     }
-    const actualValueSha256 = typeof field.actualValueSha256 === 'string'
-      ? field.actualValueSha256
-      : undefined;
     return {
       fieldName: field.fieldName,
       status: field.status,
       reasonCode: REASON_FOR_STATUS[field.status],
-      expectedValueSha256: field.expectedValueSha256,
-      ...(actualValueSha256 ? { actualValueSha256 } : {}),
     };
   });
   const names = fields.map((field) => field.fieldName);

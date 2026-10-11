@@ -257,6 +257,7 @@ test('explicit preview approval is required and repeated writes are idempotent',
   assert.equal(connector.mutationCount, 1);
   assert.equal(connector.writeAttemptCount, 2);
   assert.equal(JSON.stringify(first.readback).includes('4000.00'), false);
+  assert.doesNotMatch(JSON.stringify(first.readback), /ValueSha256/);
 });
 
 test('simulator reports rejected, unavailable, and conflicting fields independently', async () => {

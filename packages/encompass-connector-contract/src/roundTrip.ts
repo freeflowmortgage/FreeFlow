@@ -34,7 +34,8 @@ export function buildEncompassWritePreview(update: EncompassApprovedIncomeUpdate
 
 /**
  * Compares an independent provider read with the exact approved update. Raw
- * values are intentionally omitted from the durable-safe report.
+ * values and deterministic value digests are intentionally omitted from the
+ * durable-safe report.
  */
 export function compareEncompassFieldReadback(
   expectedFields: ReadonlyArray<EncompassFieldWrite>,
@@ -48,20 +49,16 @@ export function compareEncompassFieldReadback(
   const fields = expectedFields.map((expected) => {
     const providerStatus = dispositions.get(expected.fieldName);
     const actual = actualFields[expected.fieldName];
-    const hashes = {
-      expectedValueSha256: sha256(expected.value),
-      ...(typeof actual === 'string' ? { actualValueSha256: sha256(actual) } : {}),
-    };
     if (providerStatus === 'REJECTED') {
-      return { fieldName: expected.fieldName, status: 'REJECTED', reasonCode: 'PROVIDER_REJECTED', ...hashes } as const;
+      return { fieldName: expected.fieldName, status: 'REJECTED', reasonCode: 'PROVIDER_REJECTED' } as const;
     }
     if (providerStatus === 'UNAVAILABLE' || typeof actual !== 'string') {
-      return { fieldName: expected.fieldName, status: 'UNAVAILABLE', reasonCode: 'FIELD_UNAVAILABLE', ...hashes } as const;
+      return { fieldName: expected.fieldName, status: 'UNAVAILABLE', reasonCode: 'FIELD_UNAVAILABLE' } as const;
     }
     if (actual !== expected.value) {
-      return { fieldName: expected.fieldName, status: 'CONFLICT', reasonCode: 'VALUE_CONFLICT', ...hashes } as const;
+      return { fieldName: expected.fieldName, status: 'CONFLICT', reasonCode: 'VALUE_CONFLICT' } as const;
     }
-    return { fieldName: expected.fieldName, status: 'SUCCESS', reasonCode: 'VALUE_CONFIRMED', ...hashes } as const;
+    return { fieldName: expected.fieldName, status: 'SUCCESS', reasonCode: 'VALUE_CONFIRMED' } as const;
   });
   return Object.freeze({
     schemaVersion: 'encompass-field-readback-v1',
