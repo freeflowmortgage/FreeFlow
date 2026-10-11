@@ -70,13 +70,16 @@ export async function createDocumentPullJob(
 
   const loan = await transaction.loanApplication.findFirst({
     where: { id: input.loanId, tenantId: context.tenantId },
-    select: { id: true, version: true, encompassGuid: true },
+    select: { id: true, version: true, encompassGuid: true, encompassIntegrationMode: true },
   });
   if (!loan) {
     throw new ApiError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
   }
   if (loan.version !== input.expectedLoanVersion) {
     throw new ApiError(409, 'STALE_LOAN_VERSION', 'The loan changed and must be refreshed before documents are pulled.');
+  }
+  if (loan.encompassIntegrationMode !== 'CUSTOM_CONNECTOR') {
+    throw new ApiError(422, 'ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED', 'The loan is not authorized for custom connector document retrieval.');
   }
   if (!loan.encompassGuid) {
     throw new ApiError(422, 'ENCOMPASS_LOAN_NOT_LINKED', 'The loan is not linked to an Encompass loan.');

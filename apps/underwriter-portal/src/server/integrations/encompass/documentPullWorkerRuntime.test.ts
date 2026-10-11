@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { selectPersistableParserExtraction } from './persistedParserExtraction';
-import { persistParsedExtraction } from './documentPullWorkerRuntime';
+import {
+  DOCUMENT_PULL_MAX_ATTEMPTS,
+  DOCUMENT_PULL_STALE_AFTER_MS,
+  DOCUMENT_PULL_VISIBILITY_TIMEOUT_SECONDS,
+  documentPullClaimDecision,
+  persistParsedExtraction,
+} from './documentPullWorkerRuntime';
 
 const job = {
   jobId: 'job', tenantId: '00000000-0000-4000-8000-000000000100',
@@ -19,6 +25,41 @@ const result = {
     },
   },
 };
+
+test('document-pull claim recovery waits for active work and reclaims only after visibility expiry', () => {
+  const now = Date.UTC(2026, 9, 11, 12);
+  assert.equal(documentPullClaimDecision({
+    status: 'IN_PROGRESS', attemptCount: 1, startedAt: new Date(now - DOCUMENT_PULL_STALE_AFTER_MS + 1), encompassIntegrationMode: 'CUSTOM_CONNECTOR',
+  }, now), 'ACTIVE');
+  assert.equal(documentPullClaimDecision({
+    status: 'IN_PROGRESS', attemptCount: 1, startedAt: new Date(now - DOCUMENT_PULL_STALE_AFTER_MS), encompassIntegrationMode: 'CUSTOM_CONNECTOR',
+  }, now), 'CLAIM');
+  assert.ok(DOCUMENT_PULL_VISIBILITY_TIMEOUT_SECONDS * 1_000 > DOCUMENT_PULL_STALE_AFTER_MS);
+});
+
+test('document-pull retry exhaustion becomes terminal instead of remaining retryable forever', () => {
+  const now = Date.UTC(2026, 9, 11, 12);
+  assert.equal(documentPullClaimDecision({
+    status: 'RETRYABLE_FAILURE', attemptCount: DOCUMENT_PULL_MAX_ATTEMPTS, startedAt: null, encompassIntegrationMode: 'CUSTOM_CONNECTOR',
+  }, now), 'EXHAUSTED');
+  assert.equal(documentPullClaimDecision({
+    status: 'IN_PROGRESS', attemptCount: DOCUMENT_PULL_MAX_ATTEMPTS,
+    startedAt: new Date(now - DOCUMENT_PULL_STALE_AFTER_MS), encompassIntegrationMode: 'CUSTOM_CONNECTOR',
+  }, now), 'EXHAUSTED');
+  assert.equal(documentPullClaimDecision({
+    status: 'IN_PROGRESS', attemptCount: 1, startedAt: null, encompassIntegrationMode: 'CUSTOM_CONNECTOR',
+  }, now), 'INVALID');
+});
+
+test('document-pull claim rejects hosted loans before custom connector work can begin', () => {
+  const now = Date.UTC(2026, 9, 11, 12);
+  assert.equal(documentPullClaimDecision({
+    status: 'QUEUED', attemptCount: 0, startedAt: null, encompassIntegrationMode: 'ENCOMPASS_HOSTED',
+  }, now), 'WRONG_INTEGRATION_MODE');
+  assert.equal(documentPullClaimDecision({
+    status: 'IN_PROGRESS', attemptCount: 1, startedAt: new Date(now), encompassIntegrationMode: 'ENCOMPASS_HOSTED',
+  }, now), 'WRONG_INTEGRATION_MODE');
+});
 
 test('repeated parser persistence is idempotent for the same document version and canonical hash', async () => {
   let created = false;

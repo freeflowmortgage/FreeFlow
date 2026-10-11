@@ -72,7 +72,7 @@ function transaction(overrides: Record<string, unknown> = {}) {
       create: async () => ({}),
     },
     loanApplication: {
-      findFirst: async () => ({ id: LOAN_ID, version: 3, encompassGuid: 'encompass-loan-guid' }),
+      findFirst: async () => ({ id: LOAN_ID, version: 3, encompassGuid: 'encompass-loan-guid', encompassIntegrationMode: 'CUSTOM_CONNECTOR' }),
     },
     tenantConfiguration: {
       findFirst: async () => ({
@@ -163,6 +163,33 @@ test('fails closed when the tenant has not enabled document pull', async () => {
   const { res, state } = response();
   await handler(request(), res);
   assert.equal(state.status, 422);
+  assert.equal(published, false);
+});
+
+test('hosted loans cannot queue custom connector document pulls', async () => {
+  let created = false;
+  let published = false;
+  const tx = transaction({
+    loanApplication: {
+      findFirst: async () => ({
+        id: LOAN_ID,
+        version: 3,
+        encompassGuid: 'caller-supplied-host-guid',
+        encompassIntegrationMode: 'ENCOMPASS_HOSTED',
+      }),
+    },
+    encompassDocumentPullJob: {
+      create: async () => { created = true; return { id: JOB_ID }; },
+      findFirst: async () => null,
+      updateMany: async () => ({ count: 1 }),
+    },
+  });
+  const handler = wrapCreate('UNDERWRITER', tx, async () => { published = true; });
+  const { res, state } = response();
+  await handler(request(), res);
+  assert.equal(state.status, 422);
+  assert.equal((state.body as { error: { code: string } }).error.code, 'ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED');
+  assert.equal(created, false);
   assert.equal(published, false);
 });
 
