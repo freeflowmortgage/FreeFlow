@@ -3,12 +3,12 @@
   "boundary": "POST_PARSE_SIMULATOR",
   "fixtureVersion": "encompass-certification-v1",
   "sourceRevision": {
-    "baseCommit": "e525c11867d0c0e185218f4598455cce79a0e5c8",
+    "baseCommit": "a258b969e3f95aa62f6893cf7c9c27ba781ae7eb",
     "executionSource": "CURRENT_WORKTREE",
     "workingTreeInputs": [
       {
         "path": "apps/underwriter-portal/scripts/encompass-certification.ts",
-        "sha256": "7158aeefe39578f8cc9994e7d237fc427a05861d1c30967f21744b2469321194"
+        "sha256": "115d2c0dbec0f864a4754ea1e0b0d4911fee583f2843ffa75048d82144b0133d"
       },
       {
         "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness.ts",
@@ -29,6 +29,14 @@
       {
         "path": "packages/encompass-connector-contract/src/roundTrip.ts",
         "sha256": "e39d39162882212d1075905a2d91ef03deb8827cdc7ef5dd861cf95f7dc70b02"
+      },
+      {
+        "path": "packages/mortgage-engine/src/normalizedLoan.ts",
+        "sha256": "3ba95f3c4a708defa09faf0d0d24f774fe7d286c5e805f9368fd9f4b412f3e8c"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/normalizeImportedLoan.ts",
+        "sha256": "85db577c92d3c7b7c5a4deb5a399ea43083a61fce97ee66a33e2f2102c431c69"
       }
     ]
   },
@@ -71,8 +79,8 @@
     },
     {
       "name": "simulated-encompass-round-trip.json",
-      "sha256": "23318897a40bb746f7f007f670021a5260fc049dc80dd14ce55c89ddc930ca69",
-      "bytes": 12466
+      "sha256": "7fb58407c27fe5eaeda997e52d5a311a57b3366ab5e433b31336401119207625",
+      "bytes": 12850
     },
     {
       "name": "mismo-validation.json",
@@ -81,8 +89,8 @@
     },
     {
       "name": "processing-validation-report.json",
-      "sha256": "0e23c69d1482f9407f1d70e4626662dcfa367ac5e2ddbe52fa02fa490d49a167",
-      "bytes": 3462
+      "sha256": "f2423d46d1d24dce69ff1aa91c59e8a7bc75c4da960e3e88f35e5d4debc02cdb",
+      "bytes": 3834
     }
   ]
 }

@@ -19,6 +19,7 @@ import {
   certificationFixtureManifest,
   runEncompassCertification,
 } from '../src/server/integrations/encompass/encompassCertificationHarness';
+import { normalizeEncompassLoanSnapshot } from '../src/server/integrations/encompass/normalizeImportedLoan';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const defaultOutput = path.join(
@@ -47,6 +48,8 @@ const sourceRevision = {
     sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/fixtures/encompass-certification-v1.json'),
     sourceFingerprint('services/encompass-connector/src/connector/syntheticFreeflowDevConnector.ts'),
     sourceFingerprint('packages/encompass-connector-contract/src/roundTrip.ts'),
+    sourceFingerprint('packages/mortgage-engine/src/normalizedLoan.ts'),
+    sourceFingerprint('apps/underwriter-portal/src/server/integrations/encompass/normalizeImportedLoan.ts'),
   ],
 };
 mkdirSync(outputDirectory, { recursive: true });
@@ -200,7 +203,12 @@ function validateExecutableClaims(
   assert.equal(integrated.beforeAfter.projectionMatched, true);
   assert.equal(integrated.beforeAfter.after['CX.CUSTOMER.UNRELATED'], 'preserved');
   assert.equal(simulatedRoundTrip.classification, 'SYNTHETIC_CONNECTOR_SIMULATOR_ONLY');
-  assert.equal(simulatedRoundTrip.loanProjection.simulated, true);
+  assert.equal(simulatedRoundTrip.simulated, true);
+  assert.equal(simulatedRoundTrip.loanProjection.schemaVersion, 'freeflow-normalized-loan-v1');
+  assert.deepEqual(
+    simulatedRoundTrip.loanProjection.borrowers.map((borrower) => borrower.borrowerKey),
+    ['borrower-1', 'borrower-2'],
+  );
   assert.equal(simulatedRoundTrip.documentRetrieval.attachments.length, 14);
   assert.equal(simulatedRoundTrip.documentRetrieval.buffersErased, true);
   assert.equal(simulatedRoundTrip.documentRetrieval.attachments.every((attachment) => /^[0-9a-f]{64}$/.test(attachment.sha256)), true);
@@ -245,6 +253,7 @@ async function runSyntheticRoundTrip(
     correlationId: 'encompass-certification-simulator',
   };
   const snapshot = await connector.retrieveLoanSnapshot(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
+  const normalizedLoan = normalizeEncompassLoanSnapshot(snapshot);
   const attachments = await connector.listActiveAttachments(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
   const expectedPackHashes = new Map(SYNTHETIC_FREEFLOW_DEV_MORNING_PACK.map((attachment) => [
     attachment.id,
@@ -309,14 +318,9 @@ async function runSyntheticRoundTrip(
     schemaVersion: 'freeflow-simulated-encompass-round-trip-v1',
     classification: 'SYNTHETIC_CONNECTOR_SIMULATOR_ONLY',
     realEncompassInteroperability: 'NOT_CLAIMED',
-    loanProjection: {
-      schemaVersion: snapshot.schemaVersion,
-      simulated: snapshot.simulated,
-      loanProgram: snapshot.loan.loanProgram,
-      loanPurpose: snapshot.loan.loanPurpose,
-      borrowerCount: snapshot.borrowers.length,
-      employmentCounts: snapshot.borrowers.map((borrower) => borrower.employment.length),
-    },
+    sourceSnapshotSchemaVersion: snapshot.schemaVersion,
+    simulated: snapshot.simulated,
+    loanProjection: normalizedLoan,
     documentRetrieval: {
       rawDocumentBytesPersisted: false,
       buffersErased,
