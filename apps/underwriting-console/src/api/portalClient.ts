@@ -32,6 +32,15 @@ export const portalClient = {
     return response.json();
   }),
   launchEncompassHost: (encompassLoanGuid: string, borrowers?: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[]) => request<{ loanId: string; loanVersion: number; borrowers?: readonly { borrowerKey: string; ordinal: number; role: string }[] }>('/api/v1/encompass-host/launch', { method: 'POST', body: borrowers?.length ? { encompassLoanGuid, borrowers } : { encompassLoanGuid } }),
+  createStandaloneLoan: (body: {
+    schemaVersion: 'freeflow-standalone-loan-v1';
+    loanProgram: 'CONVENTIONAL' | 'FHA' | 'VA';
+    borrowers: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[];
+  }, idempotencyKey: string) => request<{
+    loanId: string;
+    loanVersion: number;
+    integrationMode: 'NONE';
+  }>('/api/v1/loans', { method: 'POST', body, idempotencyKey }),
   authorizeHostWrite: (loanId: string, body: { approvalEventId: string; expectedLoanVersion: number }, idempotencyKey: string) =>
     request<{ writeId: string; encompassLoanGuid: string; fieldMapHash: string; fields: Record<string, string>; status: 'AUTHORIZED' | 'SUCCEEDED' }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-host-approval-field-map`, { method: 'POST', body, idempotencyKey }),
   completeHostWrite: (writeId: string, body: { fieldMapHash: string; outcome: 'SUCCEEDED' | 'FAILED' }, idempotencyKey: string) =>
@@ -56,4 +65,6 @@ export const portalClient = {
   createSync: (loanId: string, body: unknown, idempotencyKey: string) =>
     request<{ jobId: string; status: string }>(`/api/v1/loans/${encodeURIComponent(loanId)}/encompass-syncs`, { method: 'POST', body, idempotencyKey }),
   getSync: (jobId: string) => request<{ id: string; status: string }>(`/api/v1/encompass-syncs/${encodeURIComponent(jobId)}`),
+  approvedIncomeExportUrl: (loanId: string, format: 'json' | 'mismo' | 'summary') =>
+    `/api/v1/loans/${encodeURIComponent(loanId)}/approved-income-exports/${format}`,
 };

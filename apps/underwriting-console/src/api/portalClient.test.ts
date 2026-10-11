@@ -52,6 +52,46 @@ test('upload intake uses only the same-origin protected portal route', async () 
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('standalone create/import is versioned, idempotent, and same-origin', async () => {
+  let received: { path: string; method: string; body: unknown; key?: string } | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input, init) => {
+    received = {
+      path: String(input),
+      method: String(init?.method),
+      body: JSON.parse(String(init?.body)),
+      key: (init?.headers as Record<string, string>)?.['Idempotency-Key'],
+    };
+    return new Response(JSON.stringify({ loanId: 'loan-1', loanVersion: 1, integrationMode: 'NONE' }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+  try {
+    await portalClient.createStandaloneLoan({
+      schemaVersion: 'freeflow-standalone-loan-v1',
+      loanProgram: 'CONVENTIONAL',
+      borrowers: [{ borrowerKey: 'borrower-1', role: 'PRIMARY' }],
+    }, 'standalone-client-0001');
+    assert.deepEqual(received, {
+      path: '/api/v1/loans',
+      method: 'POST',
+      body: {
+        schemaVersion: 'freeflow-standalone-loan-v1',
+        loanProgram: 'CONVENTIONAL',
+        borrowers: [{ borrowerKey: 'borrower-1', role: 'PRIMARY' }],
+      },
+      key: 'standalone-client-0001',
+    });
+    assert.equal(
+      portalClient.approvedIncomeExportUrl('loan/1', 'mismo'),
+      '/api/v1/loans/loan%2F1/approved-income-exports/mismo',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('comparison preview uses the authenticated memory-only route', async () => {
   const originalFetch = globalThis.fetch;
   let received: { path: string; init: RequestInit | undefined } | undefined;

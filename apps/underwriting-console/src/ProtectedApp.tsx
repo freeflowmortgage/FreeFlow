@@ -42,6 +42,11 @@ const WORKFLOW_STEPS = ['NO_LOAN_CONTEXT', 'BOUND', 'DOCUMENT_UPLOADED', 'EXTRAC
 
 type LocalDocument = ProtectedLocalDocument & Readonly<{ id: string; url: string }>;
 type IncomeSurface = 'WORKSPACE' | 'AUTHORITATIVE';
+type StandaloneLoanRequest = Readonly<{
+  schemaVersion: 'freeflow-standalone-loan-v1';
+  loanProgram: 'CONVENTIONAL' | 'FHA' | 'VA';
+  borrowers: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[];
+}>;
 
 async function sha256File(file: File): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
@@ -119,7 +124,10 @@ function ProtectedWorkflowApp() {
           return;
         }
         const loanId = new URLSearchParams(window.location.search).get('loanId');
-        if (!loanId) throw new Error('Open this workspace with an authorized loan context.');
+        if (!loanId) {
+          if (!cancelled) setContextError(null);
+          return;
+        }
         await refreshContext(loanId);
       } catch (error) {
         if (!cancelled) setContextError(describeError(error, 'Loan context could not be loaded.'));
@@ -322,6 +330,16 @@ function ProtectedWorkflowApp() {
     );
   }
   if (requestedView !== 'split') return <ProtectedProductUnavailable onBack={() => setRequestedView(null)} />;
+  const requestedLoanId = new URLSearchParams(window.location.search).get('loanId');
+  if (!consoleRuntime.hosted && !contextState && !requestedLoanId && !contextError) {
+    return <StandaloneLoanIntake onBack={backToProducts} onCreated={async (loanId) => {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set('loanId', loanId);
+      nextUrl.searchParams.set('product', 'split');
+      window.history.replaceState(null, '', nextUrl);
+      await refreshContext(loanId);
+    }} />;
+  }
   const canCalculate = Boolean(contextState && requirements?.length === 0 && contextState.extractions.some((item) => item.status === 'ACTIVE'));
   const canApprove = Boolean(contextState?.calculation?.current && !contextState.approval?.current);
   const failedCurrentWrite = contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'FAILED';
@@ -424,6 +442,7 @@ function ProtectedWorkflowApp() {
               <h2 className="text-sm font-bold text-slate-900">4. Calculation and approval</h2>
               <div className="mt-3 flex flex-wrap gap-2"><button data-testid="calculate-income" type="button" disabled={!canCalculate || busy !== null || Boolean(contextState?.calculation?.current)} onClick={() => void calculate()} className="rounded bg-indigo-700 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'CALCULATE' ? 'Calculating...' : 'Calculate'}</button><button data-testid="approve-income" type="button" disabled={!canApprove || busy !== null} onClick={() => void approve()} className="rounded bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'APPROVE' ? 'Approving...' : contextState?.approval?.current ? 'Approved' : 'Approve'}</button></div>
               {contextState?.calculation ? <div className="mt-3 rounded bg-slate-50 p-3 text-xs text-slate-700"><p data-testid="combined-income"><strong>Qualifying monthly income:</strong> {formatCurrency(contextState.calculation.qualifyingMonthlyIncome)}</p>{(contextState.calculation.borrowerIncome ?? []).map((line) => <p key={line.borrowerKey} data-testid={`borrower-income-${line.borrowerKey}`}><strong>{line.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {line.borrowerKey}:</strong> {formatCurrency(line.qualifyingMonthlyIncome)}</p>)}<p><strong>Trend:</strong> {contextState.calculation.trendingResult}</p><p><strong>Years:</strong> {contextState.calculation.yearsAnalyzed.join(', ')}</p>{calculationWarnings.length ? <ul className="mt-2 list-disc pl-4 text-amber-800">{calculationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}{!contextState.calculation.current && !contextState.approval?.current ? <p className="mt-1 font-medium text-red-700">This calculation is stale. Recalculate before approval.</p> : null}</div> : null}
+              {contextState?.approval?.current ? <div data-testid="approved-income-exports" className="mt-3 rounded border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-bold text-emerald-900">Approved calculation downloads</p><div className="mt-2 flex flex-wrap gap-2"><a data-testid="download-approved-json" download href={portalClient.approvedIncomeExportUrl(contextState.loan.id, 'json')} className="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">JSON</a><a data-testid="download-approved-mismo" download href={portalClient.approvedIncomeExportUrl(contextState.loan.id, 'mismo')} className="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">MISMO XML</a><a data-testid="download-approved-summary" download href={portalClient.approvedIncomeExportUrl(contextState.loan.id, 'summary')} className="rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">Summary PDF</a></div><p className="mt-2 text-[11px] text-emerald-900">All three files come from the same approved snapshot. MISMO uses the declared FreeFlow 3.4 implementation profile; official MISMO XSD validation is not performed because the official schema bundle is not included.</p></div> : null}
             </div>
 
             {consoleRuntime.hosted ? <div className="rounded-lg border border-slate-200 p-4"><h2 className="text-sm font-bold text-slate-900">5. Encompass host write</h2><p className="mt-2 text-xs text-slate-500">Explicitly writes only the backend-approved field map, then calculates, commits, and reads back the approval marker.</p><button data-testid="write-host" type="button" disabled={!canWrite || busy !== null || (contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'SUCCEEDED')} onClick={() => void writeApprovedResult()} className="mt-3 rounded bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'WRITE' ? 'Writing...' : contextState?.hostWrite?.current === true && contextState.hostWrite.status === 'SUCCEEDED' ? 'Durably written' : 'Write approved result'}</button>{failedCurrentWrite ? <p className="mt-2 text-xs font-medium text-red-700">The prior host write failed. A new approval is required before retrying.</p> : null}</div> : null}
@@ -435,6 +454,52 @@ function ProtectedWorkflowApp() {
       </div>
     </main>
   );
+}
+
+function StandaloneLoanIntake({ onCreated, onBack }: {
+  onCreated: (loanId: string) => Promise<void>;
+  onBack: () => void;
+}) {
+  const [loanProgram, setLoanProgram] = useState<StandaloneLoanRequest['loanProgram']>('CONVENTIONAL');
+  const [borrowerCount, setBorrowerCount] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (payload: StandaloneLoanRequest) => {
+    setBusy(true); setError(null);
+    try {
+      const created = await portalClient.createStandaloneLoan(payload, crypto.randomUUID());
+      await onCreated(created.loanId);
+    } catch (cause) {
+      setError(describeError(cause, 'The standalone loan could not be created.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const manualPayload = (): StandaloneLoanRequest => ({
+    schemaVersion: 'freeflow-standalone-loan-v1',
+    loanProgram,
+    borrowers: Array.from({ length: borrowerCount }, (_, ordinal) => ({
+      borrowerKey: `borrower-${ordinal + 1}`,
+      role: ordinal === 0 ? 'PRIMARY' : 'CO_BORROWER',
+    })),
+  });
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > 16 * 1024 || (!file.name.toLowerCase().endsWith('.json') && file.type !== 'application/json')) {
+      setError('Use a FreeFlow standalone JSON file up to 16 KiB.');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(await file.text()) as StandaloneLoanRequest;
+      await submit(parsed);
+    } catch (cause) {
+      if (cause instanceof SyntaxError) setError('The standalone loan file is not valid JSON.');
+      else throw cause;
+    }
+  };
+
+  return <main className="mx-auto max-w-3xl px-6 py-12" data-testid="standalone-loan-intake"><div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between gap-3"><div><BrandLogo compact /><h1 className="mt-4 text-xl font-bold text-slate-950">Start a standalone income analysis</h1><p className="mt-2 text-sm text-slate-600">No Encompass, ICE, or external LOS connection is required.</p></div><button type="button" onClick={onBack} className="rounded border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700">Back</button></div>{error ? <div role="alert" className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div> : null}<form className="mt-6 grid gap-4" onSubmit={(event) => { event.preventDefault(); void submit(manualPayload()); }}><label className="text-sm font-medium text-slate-800">Loan program<select data-testid="standalone-program" value={loanProgram} onChange={(event) => setLoanProgram(event.target.value as StandaloneLoanRequest['loanProgram'])} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2"><option value="CONVENTIONAL">Conventional</option><option value="FHA">FHA</option><option value="VA">VA</option></select></label><label className="text-sm font-medium text-slate-800">Borrowers<select data-testid="standalone-borrower-count" value={borrowerCount} onChange={(event) => setBorrowerCount(Number(event.target.value))} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2">{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label><button data-testid="create-standalone-loan" type="submit" disabled={busy} className="rounded bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Creating...' : 'Create loan'}</button></form><div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />or import a supported file<span className="h-px flex-1 bg-slate-200" /></div><label className="block text-sm font-medium text-slate-800">FreeFlow standalone JSON v1<input data-testid="import-standalone-loan" type="file" accept="application/json,.json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void importFile(file); }} className="mt-2 block w-full text-xs" /></label><p className="mt-3 text-xs text-slate-500">The versioned file contains only loan program and stable borrower slots. Add supporting PDFs after the tenant-authorized loan is created.</p></div></main>;
 }
 
 function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' }: { onBack: () => void; fixtureDocumentPrefix?: string }) {
