@@ -1,14 +1,22 @@
 {
   "schemaVersion": "freeflow-same-day-certification-report-v2",
   "assessmentDate": "2026-10-11",
-  "implementationRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+  "implementationRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
   "branch": "test/encompass-certification-20261011",
   "deploymentPerformed": false,
   "productionApproved": false,
+  "currentLiveEvidence": {
+    "runId": "20261011-live-d7f7a43-01",
+    "sourceRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
+    "manifestPath": "../standalone-live-application-2026-10-11/artifact-manifest.json",
+    "manifestSha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
+    "retainedExportsRehashable": true,
+    "businessApiMocked": false
+  },
   "results": {
     "standaloneOneBorrowerConventionalManualLifecycle": {
       "status": "PASS",
-      "boundary": "Runtime d72c1fad75b08361859b4665d834fc4b6b755266; CLI Chromium, actual UI/backend/PostgreSQL/parser, synthetic development auth and runtime-config stub, no business API mocks"
+      "boundary": "Source revision d7f7a432bed0292bc6d800ec05800d2105ceba95, run 20261011-live-d7f7a43-01; CLI Chromium, actual UI/backend/PostgreSQL/parser, two server-side synthetic development-auth tenants, fixed loopback gateways, retained sanitized exports, no business API mocks"
     },
     "standaloneJsonFileImportLive": {
       "status": "NOT_EXECUTED",
@@ -31,8 +39,8 @@
       "boundary": "Official MISMO 3.4 XSD and selected implementation-requirement package absent"
     },
     "standaloneLivePdfVisualInspection": {
-      "status": "NOT_EXECUTED",
-      "boundary": "Live PDF signature/content/hash checked; a separate component PDF was rendered and visually inspected"
+      "status": "PASS",
+      "boundary": "POST_RUN_VISUAL_INSPECTION: retained live PDF rendered as one legible page with no clipping or overlap; monthly 5721.67 and annual 68660.04 matched retained JSON/XML; automated visual regression not executed"
     },
     "standaloneDuplicateUploadAndExport": {
       "status": "PASS",
@@ -121,9 +129,9 @@
       "boundary": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION"
     },
     {
-      "name": "standalone-live-cli-playwright",
+      "name": "standalone-live-application-current",
       "monthlyIncome": "5721.67",
-      "boundary": "RUNTIME_D72_ACTUAL_UI_BACKEND_DATABASE_PARSER_RAW_OUTPUTS_NOT_RETAINED"
+      "boundary": "SOURCE_D7F7A43_ACTUAL_UI_BACKEND_DATABASE_PARSER_RETAINED_SANITIZED_EXPORTS"
     },
     {
       "name": "encompass-certification",

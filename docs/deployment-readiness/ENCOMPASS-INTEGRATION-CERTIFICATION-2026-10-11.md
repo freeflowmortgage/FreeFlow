@@ -4,7 +4,7 @@ This preliminary audit is superseded by [SAME-DAY-STANDALONE-ENCOMPASS-COMPLETIO
 
 Current strict result:
 
-- One-borrower Conventional standalone standard-approval lifecycle: **PASS** at the explicitly identified live runtime revision, with synthetic data through the actual UI, backend, parser, database, calculator, approval, reopen, and three downloads. See the current report for later-revision and test-scope limits.
+- One-borrower Conventional standalone standard-approval lifecycle: **PASS** at current live source revision `d7f7a432bed0292bc6d800ec05800d2105ceba95`, with synthetic data through the actual UI, backend, parser, database, calculator, approval, reopen, and three downloads. The sanitized, rehashable output bundle is retained at [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/); see the current report for test-scope limits.
 - Official MISMO XSD/implementation-requirement validation: **BLOCKED**.
 - Deterministic Encompass connector simulation: **PASS — ENGINEERING SIMULATOR ONLY**.
 - Production integrated customer workflow: **NOT IMPLEMENTED**.

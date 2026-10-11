@@ -1,23 +1,23 @@
 {
   "schemaVersion": "freeflow-same-day-artifact-manifest-v1",
   "assessmentDate": "2026-10-11",
-  "implementationRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
+  "implementationRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
   "hashAlgorithm": "SHA-256",
   "files": [
     {
       "path": "README.md",
-      "bytes": 2373,
-      "sha256": "d590b40ef7147dd504a4d9f2cc0f092ab1dc708c4cb8fdd1d8f1ce0cd98d7aad"
+      "bytes": 3048,
+      "sha256": "5d95c869ddf677541f0306d1a39d539b0343034e897393ba5edf48f4ca0fbc69"
     },
     {
       "path": "database-security-gate.json",
-      "bytes": 2356,
-      "sha256": "901b4fd2e84939be7a9e1c8edff52856525a662b3c4c1c8ca9e9075ee3dcf6da"
+      "bytes": 2369,
+      "sha256": "74cdebf969f1f598c69fce266a96a4e15714a64361c3f990e03c89c8212c3d0f"
     },
     {
       "path": "execution-report.json",
-      "bytes": 5588,
-      "sha256": "12d47410b6a245fed464a38c5f70a5a8fd7102bc3a16606858d5cb8c04b878db"
+      "bytes": 6174,
+      "sha256": "88903e6b63879831f88b0a17f24df653d355973d7884bf26886988e29d380878"
     },
     {
       "path": "standalone-live-cli-playwright.json",
@@ -26,16 +26,25 @@
     },
     {
       "path": "test-suite-summary.json",
-      "bytes": 5408,
-      "sha256": "daa1cf7198e8f225edc61c92f4838efb6217f4bedcfd1f088c7e63ed94feda04"
+      "bytes": 8558,
+      "sha256": "b7239b48269e48c3e983a931b095501c88293eb81347a917578c606d5cb8554c"
     }
   ],
   "completionReport": {
     "path": "../../SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md",
-    "bytes": 30823,
-    "sha256": "0cd4dc57f2842c16d8f3e23796eef7798d58f1102f28f7fa9efae8693e1cef46"
+    "bytes": 32933,
+    "sha256": "90c9858222a54802f01bf3b9d2bad4d7562b8e0a5b696e237407edc3d3fee61c"
   },
   "linkedEvidenceManifests": [
+    {
+      "path": "../standalone-live-application-2026-10-11/artifact-manifest.json",
+      "boundary": "SANITIZED_SYNTHETIC_LIVE_APPLICATION",
+      "bytes": 2222,
+      "sha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
+      "readmePath": "../standalone-live-application-2026-10-11/README.md",
+      "readmeBytes": 1736,
+      "readmeSha256": "c43481550bca225dcfcf2c134cf4e6751d30de11714e30cc1db87b3349955191"
+    },
     {
       "path": "../encompass-certification-2026-10-11/artifact-manifest.json",
       "boundary": "POST_PARSE_AND_CONNECTOR_SIMULATOR",
@@ -50,8 +59,9 @@
     }
   ],
   "limitations": [
-    "The original live standalone input and downloads were erased; their observed hashes cannot be rehashed from this bundle.",
-    "The committed live harness lacks environment-specific server-side authentication bootstrap and was not rerun through the disposed full stack.",
+    "The current live source PDF and raw OCR were deliberately not retained; its sanitized JSON, XML, PDF, and aggregate result records are retained and rehashable.",
+    "The historical d72c1fad live run's observed hashes remain non-rehashable because its artifacts were destroyed during cleanup.",
+    "The current live run used synthetic development authentication and manually orchestrated local services/gateways, not production identity or AWS.",
     "No official MISMO XSD or implementation-requirement validation was performed.",
     "No real Encompass interoperability was performed."
   ]

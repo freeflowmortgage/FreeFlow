@@ -3,7 +3,7 @@
 Assessment date: 2026-10-11
 Repository: `freeflowmortgage/FreeFlow`
 Branch: `test/encompass-certification-20261011`
-Implementation revision: `3a2ec81d9d3a9051f0752328f414a67c7fde0e56`
+Implementation revision: `d7f7a432bed0292bc6d800ec05800d2105ceba95`
 Deployment status: **NOT DEPLOYED**
 Production approval: **NOT GRANTED**
 
@@ -11,9 +11,9 @@ Production approval: **NOT GRANTED**
 
 | Workflow or gate | Strict result | Determination |
 |---|---|---|
-| Workflow A — standalone application lifecycle | **PASS — ONE-BORROWER CONVENTIONAL STANDARD APPROVAL** | A CLI Chromium run used the actual console, portal APIs, PostgreSQL, hardened parser, shared calculator, approval service, and three download routes. Only synthetic development authentication and `/runtime-config.json` were stubbed; no business API response was mocked. JSON file import was not exercised in this live run, and the multi-borrower override path fails closed. |
-| Workflow A — production certification | **BLOCKED** | Official MISMO 3.4 XSD/implementation-requirement validation, repeatable live CI, live auth-negative coverage, live JSON import, multi-borrower override consistency, and live-PDF visual QA remain open. |
-| Workflow B — deterministic local connector simulation | **PASS — SIMULATOR ONLY** | Synthetic loan retrieval, 14 attachment downloads, byte hashing/scrubbing, normalization, approved mapping, one write, full readback, and all four per-field statuses executed successfully. |
+| Workflow A — standalone application lifecycle | **PASS — ONE-BORROWER CONVENTIONAL STANDARD APPROVAL** | A current-source CLI Chromium run used the actual console, portal APIs, PostgreSQL, hardened parser, shared calculator, approval service, and three download routes. The sanitized exports and execution records are retained and independently rehashable. Only synthetic development authentication and local runtime configuration were supplied; no business API response was mocked. JSON file import was not exercised in this live run, and the multi-borrower override path fails closed. |
+| Workflow A — production certification | **BLOCKED** | Official MISMO 3.4 XSD/implementation-requirement validation, repeatable live CI, live auth-negative coverage, live JSON import, multi-borrower override consistency, and automated PDF visual regression remain open. |
+| Workflow B — deterministic local connector simulation | **PASS — ENGINEERING SIMULATOR ONLY** | Synthetic loan retrieval, 14 attachment downloads, byte hashing/scrubbing, normalization, approved mapping, one write, full readback, and all four per-field statuses executed successfully. |
 | Workflow B — customer integrated application workflow | **NOT IMPLEMENTED** | The real connector deliberately has no full-loan retrieval contract, the application does not orchestrate a provider snapshot into a customer loan, the direct custom-sync UI is absent, and integrated exports cannot be completed reliably from a normal hosted launch. |
 | Real Encompass authentication, documents, write, and readback | **BLOCKED** | No customer-authorized non-production Encompass connection or lender-provisioned field set was available. No real provider request was represented as passing. |
 | Production release | **BLOCKED** | Integrated import, authoritative program/borrower data, distributed replay protection, official MISMO validation, override consistency, and real provider certification remain release gates. |
@@ -59,7 +59,7 @@ This task performed no production deployment or mutation and used no real borrow
 | Normalized JSON download | **PASS** | Downloaded through the real protected route and checked against the approved snapshot. |
 | MISMO XML download | **PASS — FREEFLOW PROFILE** | XML was downloaded, was well formed, declared `3.4.0`, and passed `freeflow-approved-income-mismo-3.4-profile-v1`. |
 | Official MISMO XSD/implementation requirements | **BLOCKED** | `NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED`; no official schema or selected business implementation package was available locally. |
-| Human-readable PDF download | **PASS** | Downloaded through the real route; PDF signature, content, shared snapshot, hash, and repeat-byte identity were checked. A separate deterministic PDF was rendered and visually inspected; the live-run PDF itself was not visually rendered. |
+| Human-readable PDF download | **PASS — POST-RUN VISUAL INSPECTION** | Downloaded through the real route; PDF signature, content, shared snapshot, hash, and repeat-byte identity were checked. The retained live PDF was rendered after the run and visually inspected as one legible page with no clipping or overlap; `$5,721.67` monthly and `$68,660.04` annual matched the retained JSON and XML. Automated visual regression remains open. |
 | Reopen consistency | **PASS** | Reloading retained loan, extraction, calculation, approval, and export consistency. |
 | Duplicate upload/export idempotency | **PASS** | Re-uploading the same PDF retained one document and one extraction; repeated exports were byte-identical. |
 | Malformed document handling | **PASS — COMPONENT** | Bounded upload tests reject unsupported media types, empty/non-PDF/malformed and oversized content, scrub buffers, and map parser failures safely. These cases were not rerun in the live browser. |
@@ -138,11 +138,11 @@ Preview hash: `cfb826e94ff15f15a7f977a80285eb6f0bea820dfddee50a9d6959fa35687447`
 
 ## Live standalone acceptance
 
-The strongest standalone result was a CLI Playwright run against live local services. It is not the committed intercepted-API UI contract test.
+The strongest standalone result was a current-source CLI Playwright run against live local services. It is not the committed intercepted-API UI contract test. Its sanitized output bundle is retained at [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/).
 
 ### Boundaries
 
-- Full-live runtime revision: `d72c1fad75b08361859b4665d834fc4b6b755266`; subsequent branch changes were not rerun through the disposed full stack and are covered only by the reported unit/build/component gates.
+- Full-live source revision: `d7f7a432bed0292bc6d800ec05800d2105ceba95`; run ID `20261011-live-d7f7a43-01`.
 - Synthetic development authentication: stubbed.
 - `/runtime-config.json`: stubbed.
 - Every `/api/*` request: forwarded unchanged to the live portal.
@@ -165,19 +165,24 @@ The strongest standalone result was a CLI Playwright run against live local serv
 10. Download again and compare byte identity.
 11. Use Tenant B to request Tenant A's export and verify non-disclosing `404 LOAN_NOT_FOUND`.
 
-### Sanitized observed result hashes
+### Retained current-source result hashes
 
-The original run retained these hashes but intentionally destroyed the live PDF/input/output bytes during cleanup. They are execution metadata, not files that can be independently rehashed from this bundle. The separately committed component-export bundle contains retained synthetic JSON/XML/PDF artifacts.
+The current run retained only its sanitized JSON/XML/PDF exports and aggregate execution records. The synthetic source PDF and raw OCR were not retained. The generated manifest binds the six retained artifacts and records the source fingerprints used by the run; all listed bytes can be independently rehashed from the committed bundle.
 
 | Item | SHA-256 |
 |---|---|
-| Synthetic scanned input fixture | `335fb87ed412e0850533561451391db8968e25acd8ab4d983a42c027bb4af077` |
-| Approved snapshot | `637e72028503599e9901d28627368faac1c7d3b9c2fb6c2c9cb1a3a66a9a58ce` |
-| JSON export | `5c4dfc1b2228037a7fbd8f73130214f4e909670f29ddf85a73061c62d86cf581` |
-| MISMO XML export | `19ed0689d51463fd61702c7bcde431924d74f366abb69d66e41001c769500486` |
-| Summary PDF export | `b47bb5e4a0fbd5101803fdb711f6a6bf8f6aa0f129c0f8c9890d8a01f4112622` |
+| Synthetic scanned input fixture | `0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf` |
+| Approved snapshot | `7fe47c72c93cd1a68e8703021e33847effbda5e1ef59048f5e803c4c62e33ee2` |
+| JSON export | `faa66ddeebf91413b74068a257c24d6278b30b823a864f5a78aec577b3959e10` |
+| MISMO XML export | `4fcc03db68c9ba5740ffcb099c6dafb3e1d024d1ca4ce0cafd3f0d121405e583` |
+| Summary PDF export | `15b3e8e245180b865299b8fa80144fcf9b68aa60a9e0aedb6c952196af84562a` |
+| Generated artifact manifest | `8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8` |
 
 Final persistence: one document, one active extraction, one calculation, and one approval. The loan was version 4 with loan status `VERIFIED`; extraction status was `ACTIVE`.
+
+### Historical live run
+
+An earlier run at `d72c1fad75b08361859b4665d834fc4b6b755266` also passed the scoped lifecycle, but its input and output bytes were intentionally destroyed during cleanup. Its observed fixture, snapshot, JSON, XML, and PDF hashes were respectively `335fb87ed412e0850533561451391db8968e25acd8ab4d983a42c027bb4af077`, `637e72028503599e9901d28627368faac1c7d3b9c2fb6c2c9cb1a3a66a9a58ce`, `5c4dfc1b2228037a7fbd8f73130214f4e909670f29ddf85a73061c62d86cf581`, `19ed0689d51463fd61702c7bcde431924d74f366abb69d66e41001c769500486`, and `b47bb5e4a0fbd5101803fdb711f6a6bf8f6aa0f129c0f8c9890d8a01f4112622`. These are historical execution metadata, not independently rehashable retained artifacts.
 
 ## MISMO determination
 
@@ -196,7 +201,7 @@ The repository contains no official `.xsd`, Schematron, or selected business imp
 - Synthetic data only; no customer documents, credentials, SSNs, or production mortgage data were used.
 - Parser ran as UID/GID `8888`, read-only root, all capabilities dropped, `no-new-privileges`, and tmpfs `/tmp`.
 - No raw document `bytea` column exists in the document/extraction tables.
-- A one-off parser/portal sensitive-content scan reported zero hits during the live run. Its raw logs, exact pattern set, and result digest were not retained, so this observation is not independently reproducible from the bundle.
+- The current retained bundle passed its exact generated-file allowlist, artifact/source-fingerprint rehash, and forbidden-fixture-token scan. No source PDF, raw OCR, trace, screenshot, video, HAR, cookie, token, or customer data is retained. This does not replace broader semantic PII scanning, which remains a P1.
 - Provider failures are reduced to allowlisted safe codes and identifiers; arbitrary provider messages are not logged.
 - Upload/download buffers are cleared on success and failure paths.
 - Tenant-scoped queries, RLS, connector binding, and cross-tenant denial passed.
@@ -232,21 +237,24 @@ corepack pnpm --filter web run certify:encompass
 corepack pnpm --filter web run certify:standalone-exports
 ```
 
-The reusable live suite is intentionally separate and must point at a disposable environment whose server-side development auth/proxy has already been configured for the intended synthetic tenant. The harness creates a fresh browser context and intentionally provides no `storageState`, login bootstrap, or auth injection; it does not mock business APIs:
+The reusable live suite is intentionally separate and must point at a disposable environment whose server-side development auth and local gateways have been configured for the intended synthetic tenants. `two-tenant-bootstrap.sql` supplies the fixed synthetic database identities, while `local-live-gateway.mjs` fixes each gateway to one portal upstream; neither accepts a request-controlled tenant selector. The harness creates a fresh browser context and intentionally provides no `storageState`, login bootstrap, or auth injection. It does not mock business APIs:
 
 ```powershell
 $env:LIVE_APP_URL='http://127.0.0.1:3014'
 $env:LIVE_PHASE='main'
 $env:LIVE_FIXTURE_IMAGE='<locally-built-parser-image>'
+$env:LIVE_SOURCE_REVISION='d7f7a432bed0292bc6d800ec05800d2105ceba95'
+$env:LIVE_EVIDENCE_RUN_ID='20261011-live-d7f7a43-01'
+$env:LIVE_EVIDENCE_DIR='<empty-local-evidence-directory>'
 corepack pnpm --dir apps/underwriting-console run test:e2e:live
 
-# Restart/proxy the server-side synthetic auth boundary as Tenant B first.
+$env:LIVE_APP_URL='http://127.0.0.1:3015'
 $env:LIVE_PHASE='cross-tenant'
 $env:LIVE_LOAN_ID='<synthetic-loan-uuid-created-by-main-phase>'
 corepack pnpm --dir apps/underwriting-console run test:e2e:live
 ```
 
-Non-loopback targets require HTTPS; a remote main phase also requires the explicit `LIVE_ALLOW_REMOTE_SYNTHETIC_WRITES=1` safety acknowledgement. The exact Tenant A/Tenant B server-side auth orchestration used for the original one-off run was removed with its disposable stack and is not encoded in this harness, so these commands alone are not a self-contained reproduction. Use only an authorized non-production environment and synthetic data.
+Non-loopback targets require HTTPS; a remote main phase also requires the explicit `LIVE_ALLOW_REMOTE_SYNTHETIC_WRITES=1` safety acknowledgement. Service image builds, disposable PostgreSQL/parser startup, migrations, and per-portal development-auth configuration remain manual environment orchestration rather than CI automation. The committed bootstrap and gateways preserve the executed two-tenant boundary, but the commands above are not a production-identity or AWS test. Use only an authorized non-production environment and synthetic data.
 
 ### Database commands
 
@@ -279,12 +287,13 @@ corepack pnpm --filter @mortgage-pos/encompass-connector test:database-bindings
 
 ### Browser boundary
 
-The committed `test:e2e:standalone` suite is an explicitly labeled UI contract with intercepted APIs. The separate live CLI run described above used no mocked business API. A reusable two-phase harness is now committed in `apps/underwriting-console/e2e-live/standalone-live.spec.ts`; its TypeScript check and two-test discovery pass, and its deterministic fixture-generation preflight produced SHA-256 `0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf`. The newly committed harness was not rerun through the full disposed service stack, so the earlier live run remains the execution record. Do not substitute discovery, preflight, or the intercepted UI-contract result for a live acceptance pass.
+The committed `test:e2e:standalone` suite is an explicitly labeled UI contract with intercepted APIs. The separate two-phase live CLI harness in `apps/underwriting-console/e2e-live/standalone-live.spec.ts` executed at revision `d7f7a432bed0292bc6d800ec05800d2105ceba95` against the reconstructed disposable stack with no mocked business API. The main and cross-tenant phases both passed; the deterministic fixture SHA-256 was `0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf`. This local synthetic-development-auth execution is the live acceptance record; it is not production identity, AWS, official MISMO, or real-Encompass evidence.
 
 ## Evidence inventory
 
 | Evidence | Classification | Contents |
 |---|---|---|
+| [`evidence/standalone-live-application-2026-10-11`](evidence/standalone-live-application-2026-10-11/) | Sanitized synthetic live application execution | Current-source retained JSON/XML/PDF, aggregate processing/main/cross-tenant results, immutable generated manifest, and explanatory README. One borrower, `$5,721.67`; no source PDF or raw OCR retained. |
 | [`evidence/standalone-approved-income-exports-2026-10-11`](evidence/standalone-approved-income-exports-2026-10-11/) | Sanitized synthetic component execution | Approved snapshot, JSON, XML, PDF, FreeFlow-profile validation, execution report, byte/hash manifest. One borrower, `$8,000`; distinct from the live browser fixture. |
 | [`evidence/encompass-certification-2026-10-11`](evidence/encompass-certification-2026-10-11/) | Post-parse and connector simulator only | Two normalized projections, `$21,600` calculator result, intended fields, simulated loan/docs/write/readback, MISMO limitation record, manifest. No XML is produced for this fixture. |
 | [`evidence/same-day-certification-2026-10-11`](evidence/same-day-certification-2026-10-11/) | Sanitized execution consolidation | Strict status report, live CLI Playwright result, database/security result, test summary, and manifest binding the other evidence manifests. |
@@ -331,11 +340,11 @@ Do not enable production Encompass import or writeback yet. For a future control
 
 ### P1 — required for production-quality standalone assurance
 
-1. Promote the live no-business-API-mock Playwright lifecycle into repeatable CI with disposable PostgreSQL/parser services.
+1. Promote the now-executed no-business-API-mock Playwright lifecycle into repeatable CI with disposable PostgreSQL/parser services and automated service/auth orchestration.
 2. Add live browser anonymous, expired-session, insufficient-role, malformed-file, conflicting-document, and parser/provider-failure cases.
 3. Run the JSON file-import path against the live backend, not only the UI contract.
 4. Expand semantic PII/evidence scanning beyond exact forbidden strings.
-5. Render and visually inspect the live-run summary PDF in CI in addition to signature/content/hash checks.
+5. Add automated CI PDF rendering and visual regression; the retained current-run PDF received only a post-run human visual inspection.
 
 ### P2 — operational hardening
 

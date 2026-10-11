@@ -2,7 +2,7 @@
   "schemaVersion": "freeflow-database-security-gate-v2",
   "classification": "SANITIZED_SYNTHETIC_DISPOSABLE_EXECUTION",
   "executionDate": "2026-10-11",
-  "finalRevisionDatabaseGate": {
+  "databaseGateExecutionAtRevision3a2ec81": {
     "executionRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
     "environment": "FRESH_DISPOSABLE_POSTGRESQL_16",
     "results": {
