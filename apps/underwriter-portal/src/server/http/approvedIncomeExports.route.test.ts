@@ -37,6 +37,11 @@ test('assembles one deterministic current approved snapshot from tenant-scoped p
 
   assert.deepEqual(first, second);
   assert.equal(first.loan.integrationMode, 'NONE');
+  assert.deepEqual(first.normalizedLoan, {
+    schemaVersion: 'freeflow-normalized-loan-v1',
+    loanProgram: 'CONVENTIONAL',
+    borrowers: [{ borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' }],
+  });
   assert.equal(first.approval.eventId, APPROVAL);
   assert.equal(first.calculation.qualifyingMonthlyIncome, '8000.00');
   assert.deepEqual(first.calculation.borrowers, [{
@@ -47,6 +52,19 @@ test('assembles one deterministic current approved snapshot from tenant-scoped p
   assert.deepEqual(tx.state.calculationWhere, {
     id: CALCULATION, tenantId: TENANT, loanId: LOAN, isHumanVerified: true,
   });
+});
+
+test('approved override fails closed when its retained borrower breakdown does not reconcile', async () => {
+  const mismatch = transaction({
+    approvalAction: 'INCOME_OVERRIDE',
+    borrowerIncome: [{
+      borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY', qualifyingMonthlyIncome: '7500.00',
+    }],
+  });
+  await assert.rejects(
+    () => loadApprovedIncomeSnapshot(mismatch as never, context, LOAN),
+    (error: unknown) => error instanceof Error && error.message === 'APPROVED_SNAPSHOT_BORROWER_TOTAL_MISMATCH',
+  );
 });
 
 test('approved snapshot fails closed for a stale loan or cross-tenant lookup', async () => {
@@ -68,6 +86,7 @@ test('JSON, MISMO profile, and PDF summary use the same snapshot values and hash
   const json = JSON.parse(serializeApprovedIncomeJson(snapshot));
   assert.equal(json.exportProfile, 'freeflow-approved-income-json-v1');
   assert.equal(json.snapshotHash, snapshot.snapshotHash);
+  assert.equal(json.normalizedLoan.schemaVersion, 'freeflow-normalized-loan-v1');
   assert.equal(json.calculation.qualifyingMonthlyIncome, '8000.00');
 
   const xml = serializeApprovedIncomeMismo(snapshot);
@@ -79,6 +98,7 @@ test('JSON, MISMO profile, and PDF summary use the same snapshot values and hash
     officialXsdValidation: MISMO_OFFICIAL_XSD_VALIDATION_STATUS,
   });
   assert.match(xml, new RegExp(snapshot.snapshotHash));
+  assert.match(xml, /<FREEFLOW:ApprovalAction>INCOME_APPROVED<\/FREEFLOW:ApprovalAction>/);
   assert.match(xml, /<FREEFLOW:QualifyingMonthlyIncomeAmount>8000\.00<\/FREEFLOW:QualifyingMonthlyIncomeAmount>/);
   assert.match(xml, /NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED/);
   assert.throws(
@@ -148,7 +168,17 @@ function response() {
   return { state, res };
 }
 
-function transaction(options: { loanVersion?: number; loanMissing?: boolean } = {}) {
+function transaction(options: {
+  loanVersion?: number;
+  loanMissing?: boolean;
+  approvalAction?: 'INCOME_APPROVED' | 'INCOME_OVERRIDE';
+  borrowerIncome?: Array<{
+    borrowerKey: string;
+    ordinal: number;
+    role: 'PRIMARY' | 'CO_BORROWER';
+    qualifyingMonthlyIncome: string;
+  }> | null;
+} = {}) {
   const state: {
     loanWhere?: unknown;
     calculationWhere?: unknown;
@@ -163,7 +193,7 @@ function transaction(options: { loanVersion?: number; loanMissing?: boolean } = 
     form1084Audits: [{ id: CALCULATION }],
     auditEvents: [{
       id: APPROVAL,
-      action: 'INCOME_APPROVED',
+      action: options.approvalAction ?? 'INCOME_APPROVED',
       entityId: CALCULATION,
       expectedLoanVersion: 3,
       actorUserId: USER,
@@ -193,7 +223,7 @@ function transaction(options: { loanVersion?: number; loanMissing?: boolean } = 
     rentalMonthly: null,
     rentalLiabilityMonthly: null,
     housingExpenseAdjustment: null,
-    borrowerIncome: null,
+    borrowerIncome: options.borrowerIncome ?? null,
     verifiedAt: APPROVED_AT,
     verifiedByUserId: USER,
     extractionBindings: [{

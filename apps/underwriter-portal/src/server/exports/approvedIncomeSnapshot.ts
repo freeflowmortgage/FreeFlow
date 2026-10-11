@@ -1,4 +1,9 @@
 import { Prisma } from '@prisma/client';
+import {
+  normalizeLoan,
+  type FreeFlowLoanProgram,
+  type FreeFlowNormalizedLoan,
+} from '@mortgage-pos/mortgage-engine';
 import type { RequestContext } from '../auth/requestContext';
 import { ApiError } from '../http/apiError';
 import { hashCanonical } from '../http/canonical';
@@ -9,6 +14,7 @@ export const APPROVED_INCOME_SNAPSHOT_VERSION = 'freeflow-approved-income-snapsh
 export type ApprovedIncomeSnapshot = Readonly<{
   schemaVersion: typeof APPROVED_INCOME_SNAPSHOT_VERSION;
   snapshotHash: string;
+  normalizedLoan: FreeFlowNormalizedLoan;
   loan: Readonly<{
     id: string;
     version: number;
@@ -171,9 +177,10 @@ export async function loadApprovedIncomeSnapshot(
 
   const borrowerIncome = readBorrowerIncome(calculation.borrowerIncome);
   const roster = loan.loanBorrowers as Array<{ borrowerKey: string; ordinal: number; role: 'PRIMARY' | 'CO_BORROWER' }>;
+  const qualifyingMonthlyIncome = requiredMoney(calculation.qualifyingMonthlyIncome);
   let borrowers = borrowerIncome;
   if (roster.length === 1 && borrowerIncome.length === 0) {
-    borrowers = [{ ...roster[0], qualifyingMonthlyIncome: requiredMoney(calculation.qualifyingMonthlyIncome) }];
+    borrowers = [{ ...roster[0], qualifyingMonthlyIncome }];
   }
   if (roster.length > 0 && (borrowers.length !== roster.length || borrowers.some((line, index) => (
     line.borrowerKey !== roster[index]?.borrowerKey
@@ -182,9 +189,22 @@ export async function loadApprovedIncomeSnapshot(
   )))) {
     throw new ApiError(409, 'APPROVED_SNAPSHOT_INCOMPLETE', 'The approved borrower income does not match the current roster.');
   }
+  const borrowerTotal = borrowers.reduce(
+    (total, borrower) => total.plus(borrower.qualifyingMonthlyIncome),
+    new Prisma.Decimal(0),
+  ).toDecimalPlaces(2);
+  if (!borrowerTotal.equals(qualifyingMonthlyIncome)) {
+    throw new ApiError(
+      409,
+      'APPROVED_SNAPSHOT_BORROWER_TOTAL_MISMATCH',
+      'The approved borrower income does not reconcile to the approved loan total.',
+    );
+  }
+  const normalizedLoan = normalizeApprovedLoan(loan.loanProgram, roster);
 
   const core: ApprovedIncomeSnapshotCore = {
     schemaVersion: APPROVED_INCOME_SNAPSHOT_VERSION,
+    normalizedLoan,
     loan: {
       id: loan.id,
       version: loan.version,
@@ -204,7 +224,7 @@ export async function loadApprovedIncomeSnapshot(
       mortgageRuleVersion: calculation.mortgageRuleVersion,
       canonicalInputHash: calculation.canonicalInputHash.trim(),
       sourceDocumentHashes: calculation.sourceDocumentHashes.map((value) => value.trim()).sort(),
-      qualifyingMonthlyIncome: requiredMoney(calculation.qualifyingMonthlyIncome),
+      qualifyingMonthlyIncome,
       totalAnnualCashFlow: requiredMoney(calculation.totalAnnualCashFlow),
       trendingResult: calculation.trendingResult,
       yearsAnalyzed: [...calculation.yearsAnalyzed].sort((left, right) => right - left),
@@ -246,4 +266,23 @@ function requiredMoney(value: Prisma.Decimal | number | string): string {
 
 function optionalMoney(value: Prisma.Decimal | number | string | null): string | null {
   return value == null ? null : requiredMoney(value);
+}
+
+function normalizeApprovedLoan(
+  loanProgram: FreeFlowLoanProgram,
+  roster: readonly Readonly<{ borrowerKey: string; ordinal: number; role: 'PRIMARY' | 'CO_BORROWER' }>[],
+): FreeFlowNormalizedLoan {
+  try {
+    if (roster.some((borrower, ordinal) => borrower.ordinal !== ordinal)) throw new Error('INVALID_BORROWER_ORDINAL');
+    return normalizeLoan({
+      loanProgram,
+      borrowers: roster.map((borrower) => ({ borrowerKey: borrower.borrowerKey, role: borrower.role })),
+    });
+  } catch {
+    throw new ApiError(
+      409,
+      'APPROVED_SNAPSHOT_INCOMPLETE',
+      'The approved borrower roster cannot be projected to the normalized loan model.',
+    );
+  }
 }

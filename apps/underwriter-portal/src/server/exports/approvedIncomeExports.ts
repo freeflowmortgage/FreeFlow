@@ -67,6 +67,7 @@ export function serializeApprovedIncomeMismo(snapshot: ApprovedIncomeSnapshot): 
       <FREEFLOW:LoanIdentifier>${xmlEscape(snapshot.loan.id)}</FREEFLOW:LoanIdentifier>
       <FREEFLOW:LoanVersion>${snapshot.loan.version}</FREEFLOW:LoanVersion>
       <FREEFLOW:ApprovalEventIdentifier>${xmlEscape(snapshot.approval.eventId)}</FREEFLOW:ApprovalEventIdentifier>
+      <FREEFLOW:ApprovalAction>${snapshot.approval.action}</FREEFLOW:ApprovalAction>
       <FREEFLOW:CalculationIdentifier>${xmlEscape(snapshot.approval.calculationId)}</FREEFLOW:CalculationIdentifier>
       <FREEFLOW:QualifyingMonthlyIncomeAmount>${snapshot.calculation.qualifyingMonthlyIncome}</FREEFLOW:QualifyingMonthlyIncomeAmount>
       <FREEFLOW:TotalAnnualCashFlowAmount>${snapshot.calculation.totalAnnualCashFlow}</FREEFLOW:TotalAnnualCashFlowAmount>
@@ -95,6 +96,7 @@ export function validateApprovedIncomeMismoProfile(
     `<FREEFLOW:SnapshotHash>${snapshot.snapshotHash}</FREEFLOW:SnapshotHash>`,
     `<FREEFLOW:LoanIdentifier>${xmlEscape(snapshot.loan.id)}</FREEFLOW:LoanIdentifier>`,
     `<FREEFLOW:ApprovalEventIdentifier>${xmlEscape(snapshot.approval.eventId)}</FREEFLOW:ApprovalEventIdentifier>`,
+    `<FREEFLOW:ApprovalAction>${snapshot.approval.action}</FREEFLOW:ApprovalAction>`,
     `<FREEFLOW:CalculationIdentifier>${xmlEscape(snapshot.approval.calculationId)}</FREEFLOW:CalculationIdentifier>`,
     `<FREEFLOW:QualifyingMonthlyIncomeAmount>${snapshot.calculation.qualifyingMonthlyIncome}</FREEFLOW:QualifyingMonthlyIncomeAmount>`,
   ];
