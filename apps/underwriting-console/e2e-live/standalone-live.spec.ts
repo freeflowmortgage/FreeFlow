@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -122,7 +123,7 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
       expect(apiAudit.responses.filter((response) => response.status >= 400)).toEqual([]);
       expect(apiAudit.responses.some((response) => response.path.toLowerCase().includes('encompass'))).toBe(false);
 
-      console.log(`LIVE_ACCEPTANCE_RESULT=${JSON.stringify({
+      const result = {
         status: 'PASS',
         scope: 'STANDALONE_LIVE_APPLICATION_BOUNDARY',
         loanId,
@@ -135,7 +136,9 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
         },
         officialMismoXsdValidation: 'NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED',
         businessApiMocked: false,
-      })}`);
+      } as const;
+      await writeMainEvidence(first, firstContext, apiAudit, result);
+      console.log(`LIVE_ACCEPTANCE_RESULT=${JSON.stringify(result)}`);
     } finally {
       for (const buffer of buffersToErase) buffer.fill(0);
     }
@@ -152,12 +155,14 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
     const payload = await response.json() as { error?: { code?: string } };
     expect(payload.error?.code).toBe('LOAN_NOT_FOUND');
 
-    console.log(`LIVE_ACCEPTANCE_CROSS_TENANT=${JSON.stringify({
+    const result = {
       status: 'PASS',
       loanId,
       httpStatus: 404,
       errorCode: 'LOAN_NOT_FOUND',
-    })}`);
+    } as const;
+    await writeCrossTenantEvidence(result);
+    console.log(`LIVE_ACCEPTANCE_CROSS_TENANT=${JSON.stringify(result)}`);
   });
 });
 
@@ -410,6 +415,80 @@ function withThousands(value: string): string {
 
 function digest(value: Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+async function writeMainEvidence(
+  exported: { json: Buffer; mismo: Buffer; summary: Buffer },
+  context: ConsoleContext,
+  apiAudit: ReturnType<typeof observeApiTraffic>,
+  result: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  const evidenceDirectory = process.env.LIVE_EVIDENCE_DIR?.trim();
+  if (!evidenceDirectory) return;
+  const sourceRevision = evidenceSourceRevision();
+  await mkdir(resolve(evidenceDirectory), { recursive: true });
+
+  // The source document and raw OCR text are deliberately excluded. These
+  // files are emitted only after validateExports() proves the approved exports
+  // contain none of the fixture's synthetic borrower/employer identifiers.
+  await writeEvidenceFile(evidenceDirectory, 'approved-income.json', exported.json);
+  await writeEvidenceFile(evidenceDirectory, 'approved-income.mismo.xml', exported.mismo);
+  await writeEvidenceFile(evidenceDirectory, 'approved-income-summary.pdf', exported.summary);
+  await writeEvidenceJson(evidenceDirectory, 'processing-context.json', {
+    evidenceSchemaVersion: 'freeflow-live-acceptance-evidence-v1',
+    sourceRevision,
+    fixture: {
+      kind: 'SYNTHETIC_SCANNED_PAYSTUB',
+      sha256: SYNTHETIC_PAYSTUB_SHA256,
+      rawDocumentPersisted: false,
+      rawOcrPersisted: false,
+    },
+    expected: {
+      baseMonthly: EXPECTED_BASE_MONTHLY,
+      variableMonthly: EXPECTED_VARIABLE_MONTHLY,
+      qualifyingMonthly: EXPECTED_QUALIFYING_MONTHLY,
+      annual: EXPECTED_ANNUAL,
+    },
+    context: contextIdentity(context),
+    apiAudit,
+  });
+  await writeEvidenceJson(evidenceDirectory, 'main-result.json', {
+    evidenceSchemaVersion: 'freeflow-live-acceptance-result-v1',
+    sourceRevision,
+    ...result,
+  });
+}
+
+async function writeCrossTenantEvidence(result: Readonly<Record<string, unknown>>): Promise<void> {
+  const evidenceDirectory = process.env.LIVE_EVIDENCE_DIR?.trim();
+  if (!evidenceDirectory) return;
+  await mkdir(resolve(evidenceDirectory), { recursive: true });
+  await writeEvidenceJson(evidenceDirectory, 'cross-tenant-result.json', {
+    evidenceSchemaVersion: 'freeflow-live-acceptance-result-v1',
+    sourceRevision: evidenceSourceRevision(),
+    ...result,
+  });
+}
+
+async function writeEvidenceJson(directory: string, name: string, value: unknown): Promise<void> {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  try {
+    await writeEvidenceFile(directory, name, bytes);
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+async function writeEvidenceFile(directory: string, name: string, bytes: Buffer): Promise<void> {
+  await writeFile(resolve(directory, name), bytes, { flag: 'wx', mode: 0o600 });
+}
+
+function evidenceSourceRevision(): string {
+  const revision = requiredEnvironment('LIVE_SOURCE_REVISION');
+  if (!/^[0-9a-f]{40}$/.test(revision)) {
+    throw new Error('LIVE_SOURCE_REVISION must be a lowercase 40-character Git commit SHA.');
+  }
+  return revision;
 }
 
 function requiredEnvironment(name: string): string {
