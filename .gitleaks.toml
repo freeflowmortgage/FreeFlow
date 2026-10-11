@@ -28,6 +28,6 @@ description = "Verified synthetic Encompass fixture identifiers"
 regexTarget = "line"
 regexes = [
   '''^\s*"fixtureKey":\s*"primary-duplicate-w2",\s*$''',
-  '''^type BreakdownKey = 'w2EmployerBreakdown' \| 'scheduleCBreakdown' \| 'form1065Breakdown'$''',
+  '''^type BreakdownKey = 'w2EmployerBreakdown' \| 'scheduleCBreakdown' \| 'form1065Breakdown'\s*$''',
   '''^\s*\| 'scheduleEPropertiesBreakdown' \| 'assetIncomeBreakdown';\s*$''',
 ]
