@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "freeflow-encompass-certification-report-v1",
+  "boundary": "POST_PARSE_SIMULATOR",
+  "fixtureVersion": "encompass-certification-v1",
+  "sourceRevision": {
+    "baseCommit": "6d7261af55d3590aa931ebfa11fa54ca898b0f77",
+    "executionSource": "CURRENT_WORKTREE",
+    "workingTreeInputs": [
+      {
+        "path": "apps/underwriter-portal/scripts/encompass-certification.ts",
+        "sha256": "e9bc7c5ba5352eaa9df7d71548fd2939f92457595e15582e3480586d18a38a6f"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness.ts",
+        "sha256": "a496ad4ff8031a2fcdd6bd17701bc0db43faab5cb6ef8ff5a9cb874b169ca200"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertification.test.ts",
+        "sha256": "cc0e44ce96fe2ebf6463e8f298272bc3887789c7d08678eba529e2c074f620a8"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/fixtures/encompass-certification-v1.json",
+        "sha256": "a5d5a9209cce554c75ef929d29b1599979bdf23478d12f1bfd45193a951e41f1"
+      }
+    ]
+  },
+  "results": {
+    "integratedPostParseProjectionCalculation": "PASS",
+    "standalonePostParseProjectionCalculation": "PASS",
+    "financialEquivalence": "PASS",
+    "jsonHarnessArtifact": "PASS",
+    "summaryHarnessArtifact": "PASS",
+    "exactCurrentMapperOutput": "PASS",
+    "approvedFieldContractCompleteness": "FAIL",
+    "inMemoryFieldProjectionComparison": "PASS",
+    "realEncompassRetrieval": "BLOCKED",
+    "realEncompassWriteReadBack": "BLOCKED",
+    "approvedCalculationMismoExport": "NOT_IMPLEMENTED",
+    "protectedApprovedSummaryExport": "NOT_IMPLEMENTED",
+    "customerStandaloneLoanCreation": "NOT_IMPLEMENTED",
+    "providerErrorLogRedaction": "FAIL"
+  },
+  "mappingGaps": [
+    {
+      "fieldName": "CX.FREEFLOW.W2.VARIABLE",
+      "expectedValue": "1600.00"
+    },
+    {
+      "fieldName": "CX.FREEFLOW.ASSET.INCOME",
+      "expectedValue": "1000.00"
+    }
+  ],
+  "warnings": [
+    "PASS results in this artifact are simulator or in-process component results only.",
+    "The harness starts with deterministic post-parse, persisted-extraction-shaped data. It links no PDF bytes and does not execute pull, upload, parsing, persistence, or review boundaries.",
+    "The in-memory field projection is not connector writeback, readback, or an Encompass installation.",
+    "Executed worker tests showed that arbitrary provider error text can reach operational logs; log redaction is not certified."
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "boundary": "POST_PARSE_SIMULATOR",
+  "status": "NOT_IMPLEMENTED",
+  "capability": "Approved income-analysis MISMO export",
+  "officialSchemaValidation": "BLOCKED",
+  "selectedSchema": null,
+  "selectedImplementationRequirements": null,
+  "explanation": "Existing MISMO generators are disconnected from the protected approved-calculation workflow and use inconsistent 3.4 identifiers. No official XSD validation is wired into the repository.",
+  "xmlArtifactProduced": false
+}

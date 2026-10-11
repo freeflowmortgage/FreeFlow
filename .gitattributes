@@ -1,1 +1,4 @@
 *.pdf -text
+# Evidence manifests contain byte-level SHA-256 values; keep text bytes stable.
+docs/deployment-readiness/evidence/**/*.json text eol=lf
+docs/deployment-readiness/evidence/**/*.txt text eol=lf
