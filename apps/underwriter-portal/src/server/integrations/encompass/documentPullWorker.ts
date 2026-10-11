@@ -3,8 +3,8 @@ import type { EncompassAttachment, ParsedAttachment } from './encompassApi';
 import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
 import { classifyDocumentPullFailure, logDocumentPullFailure } from './documentPullFailure';
 
-const MAX_AGGREGATE_BYTES = 80 * 1024 * 1024;
-const MAX_AGGREGATE_PAGES = 300;
+export const DOCUMENT_PULL_MAX_AGGREGATE_BYTES = 80 * 1024 * 1024;
+export const DOCUMENT_PULL_MAX_AGGREGATE_PAGES = 300;
 const MAX_ELAPSED_MS = 10 * 60 * 1000;
 const MAX_ATTACHMENTS = 20;
 
@@ -13,9 +13,18 @@ export type ClaimedDocumentPull = Readonly<{
   tenantId: string;
   loanId: string;
   correlationId: string;
+  requestedByUserId: string;
+  expectedLoanVersion: number;
+  claimToken: string;
   encompassLoanGuid: string;
   lenderId: string;
   deploymentId: string;
+  totalAttachmentCount: number;
+  processedCount: number;
+  processedByteCount: number;
+  processedPageCount: number;
+  // Only attachments not durably recorded by a preceding attempt are exposed
+  // to the processing loop.
   selectedAttachmentIds: ReadonlyArray<string>;
 }>;
 
@@ -27,9 +36,10 @@ export type DocumentPullWorkerDependencies = Readonly<{
   saveResult(job: ClaimedDocumentPull, result: Readonly<{
     attachmentId: string;
     sha256: string;
+    byteCount: number;
     parsed: ParsedAttachment;
   }>): Promise<void>;
-  succeed(job: ClaimedDocumentPull, attachmentCount: number, processedCount: number): Promise<void>;
+  succeed(job: ClaimedDocumentPull, attachmentCount: number, processedCount: number): Promise<'SUCCEEDED' | 'FAILED'>;
   fail(job: ClaimedDocumentPull, safeCode: string, retryable: boolean): Promise<void>;
 }>;
 
@@ -44,20 +54,21 @@ export async function runDocumentPullJob(
   const job = await dependencies.claim(message);
   if (!job) return 'SKIPPED';
 
-  let attachmentCount = 0;
-  let processedCount = 0;
-  let aggregateBytes = 0;
-  let aggregatePages = 0;
+  const attachmentCount = job.totalAttachmentCount;
+  let processedCount = job.processedCount;
+  let aggregateBytes = job.processedByteCount;
+  let aggregatePages = job.processedPageCount;
   const startedAt = Date.now();
   try {
-    const available = await dependencies.listAttachments(job);
-    const availableIds = new Set(available.map((attachment) => attachment.id));
-    if (job.selectedAttachmentIds.some((id) => !availableIds.has(id))) {
-      throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_NOT_AVAILABLE', 'A selected attachment is not active or does not exist.', false);
+    validateAggregateDocumentLimits({ attachmentCount, bytes: 0, pages: 0, elapsedMs: 0 });
+    if (job.selectedAttachmentIds.length > 0) {
+      const available = await dependencies.listAttachments(job);
+      const availableIds = new Set(available.map((attachment) => attachment.id));
+      if (job.selectedAttachmentIds.some((id) => !availableIds.has(id))) {
+        throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_NOT_AVAILABLE', 'A selected attachment is not active or does not exist.', false);
+      }
     }
     const attachments = job.selectedAttachmentIds.map((id) => ({ id }));
-    attachmentCount = attachments.length;
-    validateAggregateDocumentLimits({ attachmentCount, bytes: 0, pages: 0, elapsedMs: 0 });
     for (const attachment of attachments) {
       validateAggregateDocumentLimits({ attachmentCount, bytes: aggregateBytes, pages: aggregatePages, elapsedMs: Date.now() - startedAt });
       const downloaded = await dependencies.download(job, attachment.id);
@@ -73,6 +84,7 @@ export async function runDocumentPullJob(
         await dependencies.saveResult(job, {
           attachmentId: attachment.id,
           sha256: downloaded.sha256,
+          byteCount: downloaded.bytes.byteLength,
           parsed,
         });
         processedCount += 1;
@@ -80,8 +92,7 @@ export async function runDocumentPullJob(
         downloaded.bytes.fill(0);
       }
     }
-    await dependencies.succeed(job, attachmentCount, processedCount);
-    return 'SUCCEEDED';
+    return dependencies.succeed(job, attachmentCount, processedCount);
   } catch (error) {
     const classified = classifyDocumentPullFailure(error);
     logDocumentPullFailure(error, classified);
@@ -99,10 +110,10 @@ export function validateAggregateDocumentLimits(input: Readonly<{
   if (input.attachmentCount < 1 || input.attachmentCount > MAX_ATTACHMENTS) {
     throw new EncompassConnectorError('DOCUMENT_PULL_ATTACHMENT_LIMIT', 'The attachment selection exceeds the job limit.', false);
   }
-  if (input.bytes > MAX_AGGREGATE_BYTES) {
+  if (input.bytes > DOCUMENT_PULL_MAX_AGGREGATE_BYTES) {
     throw new EncompassConnectorError('DOCUMENT_PULL_BYTE_LIMIT', 'Selected documents exceed the aggregate size limit.', false);
   }
-  if (input.pages > MAX_AGGREGATE_PAGES) {
+  if (input.pages > DOCUMENT_PULL_MAX_AGGREGATE_PAGES) {
     throw new EncompassConnectorError('DOCUMENT_PULL_PAGE_LIMIT', 'Selected documents exceed the aggregate page limit.', false);
   }
   if (input.elapsedMs > MAX_ELAPSED_MS) {

@@ -5,6 +5,10 @@ import { appendAuditEvent, AUDIT_ACTIONS, hashAuditResult } from '../../audit/ap
 import { hashCanonical } from '../../http/canonical';
 import { ApiError } from '../../http/apiError';
 import { resolveIdempotencyKey, storeIdempotencyResult } from '../../audit/idempotency';
+import {
+  buildDocumentSelectionBindingHash,
+  buildPersistedDocumentPullSelection,
+} from './documentPullSelection';
 
 export const DOCUMENT_PULL_OPERATION = 'encompass-document-pulls';
 
@@ -31,13 +35,15 @@ export async function createDocumentPullJob(
     loanId: string;
     expectedLoanVersion: number;
     attachmentIds: ReadonlyArray<string>;
+    selectionBindingHash: string;
     idempotencyKey: string;
   }>,
 ): Promise<DocumentPullJobResult> {
   const requestHash = hashCanonical({
     loanId: input.loanId,
     expectedLoanVersion: input.expectedLoanVersion,
-    attachmentIds: input.attachmentIds,
+    attachmentIds: [...input.attachmentIds].sort(),
+    selectionBindingHash: input.selectionBindingHash,
   });
   const idempotency = await resolveIdempotencyKey(transaction, context, {
     operation: DOCUMENT_PULL_OPERATION,
@@ -96,9 +102,31 @@ export async function createDocumentPullJob(
   }
   const binding = await transaction.encompassConnectorBinding.findFirst({
     where: { tenantId: context.tenantId, isEnabled: true },
-    select: { id: true },
+    select: { lenderId: true, deploymentId: true },
   });
   if (!binding) {
+    throw new ApiError(422, 'ENCOMPASS_CONFIGURATION_INCOMPLETE', 'The tenant Encompass configuration is incomplete.');
+  }
+
+  let selection: ReturnType<typeof buildPersistedDocumentPullSelection>;
+  try {
+    const target = {
+      integrationMode: 'CUSTOM_CONNECTOR' as const,
+      lenderId: binding.lenderId,
+      deploymentId: binding.deploymentId,
+      encompassLoanGuid: loan.encompassGuid,
+    };
+    if (buildDocumentSelectionBindingHash({ tenantId: context.tenantId, loanId: input.loanId, target }) !== input.selectionBindingHash) {
+      throw new ApiError(409, 'ENCOMPASS_DOCUMENT_SELECTION_STALE', 'The Encompass attachment selection changed and must be refreshed.');
+    }
+    selection = buildPersistedDocumentPullSelection({
+      tenantId: context.tenantId,
+      loanId: input.loanId,
+      target,
+      attachmentIds: input.attachmentIds,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
     throw new ApiError(422, 'ENCOMPASS_CONFIGURATION_INCOMPLETE', 'The tenant Encompass configuration is incomplete.');
   }
 
@@ -108,7 +136,14 @@ export async function createDocumentPullJob(
       loanId: input.loanId,
       requestedByUserId: context.membershipId,
       expectedLoanVersion: input.expectedLoanVersion,
-      selectedAttachmentIds: [...input.attachmentIds],
+      selectedAttachmentIds: [...selection.attachmentIds],
+      selectionSchemaVersion: selection.schemaVersion,
+      selectionHash: selection.hash,
+      selectionTargetIntegrationMode: selection.target.integrationMode,
+      selectionTargetLenderId: selection.target.lenderId,
+      selectionTargetDeploymentId: selection.target.deploymentId,
+      selectionTargetEncompassGuid: selection.target.encompassLoanGuid,
+      workingLoanVersion: input.expectedLoanVersion,
       idempotencyKey: input.idempotencyKey,
       correlationId: context.requestId,
     },

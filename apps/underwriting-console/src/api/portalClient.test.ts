@@ -19,12 +19,21 @@ test('document-pull requests use the protected portal API with same-origin cooki
     return new Response(JSON.stringify({ jobId: 'job-1', status: 'QUEUED' }), { status: 202, headers: { 'Content-Type': 'application/json' } });
   };
   try {
-    await portalClient.createDocumentPull('loan/1', { expectedLoanVersion: 2, attachmentIds: ['attachment-1'] }, 'console-test-1');
+    await portalClient.createDocumentPull('loan/1', {
+      expectedLoanVersion: 2,
+      attachmentIds: ['attachment-1'],
+      selectionBindingHash: 'a'.repeat(64),
+    }, 'console-test-1');
     assert.equal(received?.path, '/api/v1/loans/loan%2F1/encompass-document-pulls');
     assert.equal(received?.init?.credentials, 'same-origin');
     const headers = new Headers(received?.init?.headers);
     assert.equal(headers.get('idempotency-key'), 'console-test-1');
     assert.equal(headers.has('x-tenant-id'), false);
+    assert.deepEqual(JSON.parse(String(received?.init?.body)), {
+      expectedLoanVersion: 2,
+      attachmentIds: ['attachment-1'],
+      selectionBindingHash: 'a'.repeat(64),
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -193,7 +193,11 @@ function ProtectedWorkflowApp() {
       const listing = await portalClient.getEncompassAttachments(contextState.loan.id);
       const attachmentIds = listing.attachments.filter((item) => item.status === 'SELECTABLE').map((item) => item.id);
       if (!attachmentIds.length) throw new Error('No hosted documents are available to pull.');
-      await portalClient.createDocumentPull(contextState.loan.id, { expectedLoanVersion: contextState.loan.version, attachmentIds }, crypto.randomUUID());
+      await portalClient.createDocumentPull(contextState.loan.id, {
+        expectedLoanVersion: contextState.loan.version,
+        attachmentIds,
+        selectionBindingHash: listing.selectionBindingHash,
+      }, crypto.randomUUID());
       await refreshContext(contextState.loan.id);
     }, 'The hosted documents could not be pulled.');
   };

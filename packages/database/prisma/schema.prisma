@@ -564,19 +564,34 @@ model EncompassDocumentPullJob {
   requestedByUserId String          @db.Uuid
   requestedByUser   User            @relation("DocumentPullRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "encompass_document_pull_jobs_requester_fkey")
 
-  expectedLoanVersion   Int
-  selectedAttachmentIds String[]                    @default([])
-  idempotencyKey        String                      @db.VarChar(128)
-  correlationId         String                      @db.VarChar(100)
-  status                EncompassDocumentPullStatus @default(QUEUED)
-  attemptCount          Int                         @default(0)
-  safeErrorCode         String?                     @db.VarChar(100)
-  attachmentCount       Int?
-  processedCount        Int?
-  startedAt             DateTime?                   @db.Timestamptz
-  completedAt           DateTime?                   @db.Timestamptz
-  createdAt             DateTime                    @default(now()) @db.Timestamptz
-  updatedAt             DateTime                    @updatedAt @db.Timestamptz
+  expectedLoanVersion            Int
+  selectedAttachmentIds          String[]                    @default([])
+  // Immutable list-to-job selection and exact connector destination. Legacy
+  // rows remain nullable and are rejected by the worker before connector I/O.
+  selectionSchemaVersion         String?                     @db.VarChar(64)
+  selectionHash                  String?                     @db.Char(64)
+  selectionTargetIntegrationMode EncompassIntegrationMode?
+  selectionTargetLenderId        String?                     @db.VarChar(255)
+  selectionTargetDeploymentId    String?                     @db.VarChar(255)
+  selectionTargetEncompassGuid   String?                     @db.VarChar(255)
+  // Durable progress uses the loan version produced by the preceding saved
+  // attachment. A per-attempt token fences stale workers after redelivery.
+  workingLoanVersion             Int?
+  processedAttachmentIds         String[]                    @default([])
+  processedByteCount             Int                         @default(0)
+  processedPageCount             Int                         @default(0)
+  claimToken                     String?                     @db.Uuid
+  idempotencyKey                 String                      @db.VarChar(128)
+  correlationId                  String                      @db.VarChar(100)
+  status                         EncompassDocumentPullStatus @default(QUEUED)
+  attemptCount                   Int                         @default(0)
+  safeErrorCode                  String?                     @db.VarChar(100)
+  attachmentCount                Int?
+  processedCount                 Int?
+  startedAt                      DateTime?                   @db.Timestamptz
+  completedAt                    DateTime?                   @db.Timestamptz
+  createdAt                      DateTime                    @default(now()) @db.Timestamptz
+  updatedAt                      DateTime                    @updatedAt @db.Timestamptz
 
   @@unique([tenantId, id], map: "encompass_document_pull_jobs_tenant_id_key")
   @@unique([tenantId, idempotencyKey], map: "encompass_document_pull_jobs_tenant_idempotency_key")

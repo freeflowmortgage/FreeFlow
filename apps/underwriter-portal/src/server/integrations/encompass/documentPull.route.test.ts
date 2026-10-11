@@ -5,6 +5,7 @@ import { withRequestContext } from '../../auth/requestContext';
 import { createDocumentPullHandler } from './documentPullRoute';
 import { createDocumentPullStatusHandler } from './documentPullStatusRoute';
 import type { DocumentPullQueueMessage } from './documentPull';
+import { buildDocumentSelectionBindingHash } from './documentPullSelection';
 
 const originalRuntimeEnv = process.env.FREEFLOW_RUNTIME_ENV;
 const originalTrustedOrigin = process.env.TRUSTED_ORIGIN;
@@ -22,6 +23,16 @@ const TENANT_ID = '00000000-0000-4000-8000-000000000100';
 const USER_ID = '00000000-0000-4000-8000-000000000101';
 const LOAN_ID = '00000000-0000-4000-8000-000000000200';
 const JOB_ID = '00000000-0000-4000-8000-000000000300';
+const SELECTION_BINDING_HASH = buildDocumentSelectionBindingHash({
+  tenantId: TENANT_ID,
+  loanId: LOAN_ID,
+  target: {
+    integrationMode: 'CUSTOM_CONNECTOR',
+    lenderId: 'lender-id',
+    deploymentId: 'deployment-id',
+    encompassLoanGuid: 'encompass-loan-guid',
+  },
+});
 
 function request(overrides: Partial<NextApiRequest> = {}): NextApiRequest {
   return {
@@ -32,7 +43,11 @@ function request(overrides: Partial<NextApiRequest> = {}): NextApiRequest {
       'x-amzn-oidc-data': 'signed-token',
       'idempotency-key': 'document-pull-key-0001',
     },
-    body: { expectedLoanVersion: 3, attachmentIds: ['attachment-1'] },
+    body: {
+      expectedLoanVersion: 3,
+      attachmentIds: ['attachment-1'],
+      selectionBindingHash: SELECTION_BINDING_HASH,
+    },
     ...overrides,
   } as NextApiRequest;
 }
@@ -82,7 +97,7 @@ function transaction(overrides: Record<string, unknown> = {}) {
       }),
     },
     encompassConnectorBinding: {
-      findFirst: async () => ({ id: 'binding-id' }),
+      findFirst: async () => ({ lenderId: 'lender-id', deploymentId: 'deployment-id' }),
     },
     encompassDocumentPullJob: {
       create: async () => ({
@@ -200,6 +215,28 @@ test('fails closed when the tenant has no enabled connector binding', async () =
   const { res, state } = response();
   await handler(request(), res);
   assert.equal(state.status, 422);
+  assert.equal(published, false);
+});
+
+test('rejects a list selection after the connector target changes', async () => {
+  let created = false;
+  let published = false;
+  const tx = transaction({
+    encompassConnectorBinding: {
+      findFirst: async () => ({ lenderId: 'different-lender', deploymentId: 'deployment-id' }),
+    },
+    encompassDocumentPullJob: {
+      create: async () => { created = true; return { id: JOB_ID }; },
+      findFirst: async () => null,
+      updateMany: async () => ({ count: 1 }),
+    },
+  });
+  const handler = wrapCreate('UNDERWRITER', tx, async () => { published = true; });
+  const { res, state } = response();
+  await handler(request(), res);
+  assert.equal(state.status, 409);
+  assert.equal((state.body as { error: { code: string } }).error.code, 'ENCOMPASS_DOCUMENT_SELECTION_STALE');
+  assert.equal(created, false);
   assert.equal(published, false);
 });
 

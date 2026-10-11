@@ -11,6 +11,9 @@ test('lists only allowlisted attachment selector metadata for an authorized tena
   const handler = createAttachmentListHandler({ withTenantTransaction: async (_: any, run: any) => run({ loanApplication: { findFirst: async (query: any) => { assert.equal(query.where.tenantId, context.tenantId); return { id: loanId, encompassGuid: 'provider-loan', encompassIntegrationMode: 'CUSTOM_CONNECTOR', tenant: { configurations: { enableEncompassDocumentPull: true }, encompassConnectorBinding: { lenderId: 'lender', deploymentId: 'deployment', isEnabled: true } } }; } } }), list: async () => [{ id: 'document-1', ignored: 'provider-body' } as any] } as any);
   const res = response(); await handler(request(), res, context);
   assert.equal(res.statusCode, 200); assert.deepEqual(res.body.attachments, [{ id: 'document-1', status: 'SELECTABLE' }]);
+  assert.match(res.body.selectionBindingHash, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(res.body).includes('provider-loan'), false);
+  assert.equal(JSON.stringify(res.body).includes('deployment'), false);
 });
 
 test('does not disclose cross-tenant or missing loans', async () => {

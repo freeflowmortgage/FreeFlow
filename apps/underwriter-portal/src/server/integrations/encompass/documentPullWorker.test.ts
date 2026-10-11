@@ -7,7 +7,10 @@ import { classifyDocumentPullFailure } from './documentPullFailure';
 const message = { jobId: 'job', tenantId: 'tenant', loanId: 'loan', expectedLoanVersion: 1, correlationId: 'request' };
 const job = {
   jobId: 'job', tenantId: 'tenant', loanId: 'loan', correlationId: 'request', encompassLoanGuid: 'guid',
-  lenderId: 'lender', deploymentId: 'deployment', selectedAttachmentIds: ['one', 'two'],
+  requestedByUserId: 'user', expectedLoanVersion: 1, claimToken: 'claim',
+  lenderId: 'lender', deploymentId: 'deployment', totalAttachmentCount: 2, processedCount: 0,
+  processedByteCount: 0, processedPageCount: 0,
+  selectedAttachmentIds: ['one', 'two'],
 };
 
 const extraction = {
@@ -31,7 +34,7 @@ test('processes documents serially, persists metadata only, and erases buffers',
       pageCount: 1, documentCategory: 'W2_WAGE', parserVersion: 'v5', confidence: 99, extraction,
     }),
     saveResult: async (_job, result) => { saved.push(result); },
-    succeed: async (_job, attachmentCount, processedCount) => { assert.deepEqual([attachmentCount, processedCount], [2, 2]); },
+    succeed: async (_job, attachmentCount, processedCount) => { assert.deepEqual([attachmentCount, processedCount], [2, 2]); return 'SUCCEEDED'; },
     fail: async () => assert.fail('should not fail'),
   };
   assert.equal(await runDocumentPullJob(message, deps), 'SUCCEEDED');
@@ -80,7 +83,7 @@ test('classifies throttling and logs only allowlisted diagnostics', async () => 
 
 test('processes only the explicitly selected active attachments', async () => {
   const downloaded: string[] = [];
-  const selectedJob = { ...job, selectedAttachmentIds: ['two'] };
+  const selectedJob = { ...job, totalAttachmentCount: 1, selectedAttachmentIds: ['two'] };
   const deps: DocumentPullWorkerDependencies = {
     claim: async () => selectedJob,
     listAttachments: async () => [{ id: 'one' }, { id: 'two' }, { id: 'three' }],
@@ -92,17 +95,73 @@ test('processes only the explicitly selected active attachments', async () => {
       pageCount: 1, documentCategory: 'W2_WAGE', parserVersion: 'v5', confidence: 99, extraction,
     }),
     saveResult: async () => undefined,
-    succeed: async (_job, attachmentCount, processedCount) => assert.deepEqual([attachmentCount, processedCount], [1, 1]),
+    succeed: async (_job, attachmentCount, processedCount) => { assert.deepEqual([attachmentCount, processedCount], [1, 1]); return 'SUCCEEDED'; },
     fail: async () => assert.fail('should not fail'),
   };
   assert.equal(await runDocumentPullJob(message, deps), 'SUCCEEDED');
   assert.deepEqual(downloaded, ['two']);
 });
 
+test('resumes after attachment one is saved and a retryable attachment two failure without duplicate extraction', async () => {
+  let attempt = 0;
+  let attachmentTwoFailed = false;
+  const persisted: string[] = [];
+  const downloaded: string[] = [];
+  const terminalStates: string[] = [];
+  const deps: DocumentPullWorkerDependencies = {
+    claim: async () => {
+      attempt += 1;
+      return attempt === 1
+        ? { ...job, claimToken: 'claim-1' }
+        : {
+          ...job,
+          claimToken: 'claim-2',
+          processedCount: 1,
+          processedByteCount: 1,
+          processedPageCount: 1,
+          selectedAttachmentIds: ['two'],
+        };
+    },
+    listAttachments: async () => [{ id: 'one' }, { id: 'two' }],
+    download: async (_job, attachmentId) => {
+      downloaded.push(attachmentId);
+      if (attachmentId === 'two' && !attachmentTwoFailed) {
+        attachmentTwoFailed = true;
+        throw new EncompassApiError('ENCOMPASS_API_FAILED_503', 'Synthetic connector outage.', true);
+      }
+      return { bytes: new Uint8Array([1]), sha256: 'a'.repeat(64) };
+    },
+    parse: async () => ({
+      pageCount: 1, documentCategory: 'W2_WAGE', parserVersion: 'v5', confidence: 99, extraction,
+    }),
+    saveResult: async (_job, result) => {
+      assert.equal(persisted.includes(result.attachmentId), false, 'an attachment was extracted twice');
+      persisted.push(result.attachmentId);
+    },
+    succeed: async (_job, attachmentCount, processedCount) => {
+      terminalStates.push('SUCCEEDED');
+      assert.deepEqual([attachmentCount, processedCount], [2, 2]);
+      return 'SUCCEEDED';
+    },
+    fail: async (_job, safeCode, retryable) => {
+      terminalStates.push(retryable ? 'RETRYABLE_FAILURE' : 'FAILED');
+      assert.equal(safeCode, 'ENCOMPASS_API_FAILED_503');
+      assert.equal(retryable, true);
+    },
+  };
+
+  assert.equal(await runDocumentPullJob(message, deps), 'RETRYABLE_FAILURE');
+  assert.deepEqual(persisted, ['one']);
+  assert.equal(await runDocumentPullJob(message, deps), 'SUCCEEDED');
+  assert.deepEqual(persisted, ['one', 'two']);
+  assert.deepEqual(downloaded, ['one', 'two', 'two']);
+  assert.deepEqual(terminalStates, ['RETRYABLE_FAILURE', 'SUCCEEDED']);
+});
+
 test('fails closed when a selected attachment is not active', async () => {
   let failure: unknown;
   const deps: DocumentPullWorkerDependencies = {
-    claim: async () => ({ ...job, selectedAttachmentIds: ['missing'] }),
+    claim: async () => ({ ...job, totalAttachmentCount: 1, selectedAttachmentIds: ['missing'] }),
     listAttachments: async () => [{ id: 'one' }],
     download: async () => assert.fail(), parse: async () => assert.fail(), saveResult: async () => assert.fail(),
     succeed: async () => assert.fail(),
