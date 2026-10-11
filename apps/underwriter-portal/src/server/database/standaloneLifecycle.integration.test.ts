@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import test, { after } from 'node:test';
+import test, { after, before } from 'node:test';
+import { PrismaClient } from '@prisma/client';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import type { RequestContext } from '../auth/requestContext';
 import { createIncomeApprovalHandler } from '../audit/incomeApprovalsRoute';
@@ -17,13 +18,36 @@ import { prisma, withTenantTransaction } from './client';
 
 const TENANT = '00000000-0000-4000-8000-000000000100';
 const USER = '00000000-0000-4000-8000-000000000101';
+const adminDatabaseUrl = process.env.ADMIN_DATABASE_URL;
+assert.ok(adminDatabaseUrl, 'ADMIN_DATABASE_URL is required for the standalone lifecycle database fixture.');
+const fixtureAdmin = new PrismaClient({ datasources: { db: { url: adminDatabaseUrl } } });
 const originalParserUrl = process.env.DOC_PARSER_SERVICE_URL;
 process.env.DOC_PARSER_SERVICE_URL = 'http://synthetic-parser.invalid/parse';
+
+before(async () => {
+  await fixtureAdmin.tenant.create({
+    data: {
+      id: TENANT,
+      companyName: 'FreeFlow Synthetic Standalone Lifecycle',
+      primaryContactEmail: 'standalone-lifecycle@example.invalid',
+      users: {
+        create: {
+          id: USER,
+          email: 'standalone-lifecycle-underwriter@example.invalid',
+          oidcSubject: 'standalone-lifecycle-synthetic-underwriter',
+          firstName: 'Synthetic',
+          lastName: 'Underwriter',
+          role: 'UNDERWRITER',
+        },
+      },
+    },
+  });
+});
 
 after(async () => {
   if (originalParserUrl === undefined) delete process.env.DOC_PARSER_SERVICE_URL;
   else process.env.DOC_PARSER_SERVICE_URL = originalParserUrl;
-  await prisma.$disconnect();
+  await Promise.all([prisma.$disconnect(), fixtureAdmin.$disconnect()]);
 });
 
 test('database-backed standalone lifecycle reopens one approval into all three exports (parser HTTP boundary simulated)', async () => {
