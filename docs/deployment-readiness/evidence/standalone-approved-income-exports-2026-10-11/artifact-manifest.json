@@ -2,7 +2,7 @@
   "schemaVersion": "freeflow-standalone-export-artifact-manifest-v1",
   "classification": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION",
   "sourceRevision": {
-    "baseCommit": "0a94355cb3ddb18449ed1ed1b6b8830d8665f4f9",
+    "baseCommit": "646201800446b250c089c782f6f9871b9c6f28d7",
     "executionSource": "CURRENT_WORKTREE"
   },
   "snapshotHash": "0719f460abc4c4c4f24f61e86330107a05b9770d29f5c45e8588edb725131fb5",

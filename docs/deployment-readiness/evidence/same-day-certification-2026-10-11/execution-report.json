@@ -1,50 +1,42 @@
 {
-  "schemaVersion": "freeflow-same-day-certification-report-v2",
+  "schemaVersion": "freeflow-same-day-certification-report-v3",
   "assessmentDate": "2026-10-11",
-  "implementationRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
+  "implementationRevision": "646201800446b250c089c782f6f9871b9c6f28d7",
   "branch": "test/encompass-certification-20261011",
   "deploymentPerformed": false,
   "productionApproved": false,
-  "currentLiveEvidence": {
-    "runId": "20261011-live-d7f7a43-01",
-    "sourceRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-    "manifestPath": "../standalone-live-application-2026-10-11/artifact-manifest.json",
-    "manifestSha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
+  "latestRetainedLiveEvidence": {
+    "runId": "20261011-live-e4c9e79-01",
+    "sourceRevision": "e4c9e7935eb474aa425d7bb4991e3c4861745615",
+    "manifestPath": "../standalone-live-application-2026-10-11-e4c9e79/artifact-manifest.json",
+    "manifestSha256": "b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca",
     "retainedExportsRehashable": true,
     "businessApiMocked": false
   },
   "results": {
     "standaloneOneBorrowerConventionalManualLifecycle": {
       "status": "PASS",
-      "boundary": "Source revision d7f7a432bed0292bc6d800ec05800d2105ceba95, run 20261011-live-d7f7a43-01; CLI Chromium, actual UI/backend/PostgreSQL/parser, two server-side synthetic development-auth tenants, fixed loopback gateways, retained sanitized exports, no business API mocks"
+      "boundary": "Run 20261011-live-e4c9e79-01; CLI Chromium, actual protected UI/backend/PostgreSQL/parser, two server-side synthetic development-auth tenants, fixed loopback gateways, retained sanitized exports, no business API mocks"
     },
     "standaloneJsonFileImportLive": {
       "status": "NOT_EXECUTED",
-      "boundary": "UI-contract interception and route/component coverage only"
+      "boundary": "Intercepted UI contract plus route/component coverage only"
     },
     "standaloneWithoutLos": {
       "status": "PASS",
-      "boundary": "Executed live loan integration mode NONE"
+      "boundary": "Live loan integration mode NONE; no Encompass request"
     },
-    "standaloneDocumentToIncome": {
+    "standaloneDocumentToIncomeAndApproval": {
       "status": "PASS",
-      "boundary": "One synthetic scanned paystub through live OCR, metadata review, calculation, and standard approval"
+      "boundary": "One synthetic scanned paystub through live OCR, metadata review, shared calculator, standard approval, reopen, and duplicate upload"
     },
     "standaloneThreeProtectedDownloads": {
       "status": "PASS",
-      "boundary": "Live JSON, FreeFlow-profile XML, and PDF downloads from one approved snapshot"
+      "boundary": "Live JSON, FreeFlow-profile XML, and visually inspected PDF from one approved snapshot"
     },
     "standaloneOfficialMismoValidation": {
       "status": "BLOCKED",
       "boundary": "Official MISMO 3.4 XSD and selected implementation-requirement package absent"
-    },
-    "standaloneLivePdfVisualInspection": {
-      "status": "PASS",
-      "boundary": "POST_RUN_VISUAL_INSPECTION: retained live PDF rendered as one legible page with no clipping or overlap; monthly 5721.67 and annual 68660.04 matched retained JSON/XML; automated visual regression not executed"
-    },
-    "standaloneDuplicateUploadAndExport": {
-      "status": "PASS",
-      "boundary": "Live duplicate upload retained one document/extraction and repeated downloads were byte-identical"
     },
     "standaloneCrossTenantExportDenial": {
       "status": "PASS",
@@ -54,21 +46,21 @@
       "status": "NOT_EXECUTED",
       "boundary": "Component auth/session tests pass; no live browser negative-auth run"
     },
+    "standaloneCreateUncertainRetryIdempotency": {
+      "status": "PASS",
+      "boundary": "Intercepted UI contract only; connection-reset retry reused the same UUID key during the mounted session"
+    },
     "standaloneMultiBorrowerOverrideExport": {
       "status": "FAIL",
       "boundary": "Override loan total can retain unreconciled borrower totals; approved snapshot fails closed"
     },
     "malformedDocumentHandling": {
       "status": "PASS",
-      "boundary": "Component tests cover unsupported media type, empty, malformed/non-PDF, oversized, parser rejection, and buffer scrubbing; not rerun as live browser cases"
+      "boundary": "Component coverage; not rerun as live browser cases"
     },
     "conflictingDocumentValues": {
       "status": "NOT_EXECUTED",
-      "boundary": "No semantic conflicting-document-values test was identified; database/writeback conflict tests do not establish this behavior"
-    },
-    "providerTimeoutFailureRetryHandling": {
-      "status": "PASS",
-      "boundary": "Connector component tests with fake provider HTTP; no real Encompass request"
+      "boundary": "No semantic conflicting-document-values execution"
     },
     "encompassPostParseParity": {
       "status": "PASS",
@@ -78,13 +70,25 @@
       "status": "PASS",
       "boundary": "Deterministic local provider simulator only"
     },
-    "encompassWritebackConflictClassification": {
+    "encompassTargetBoundPreviewV2": {
       "status": "PASS",
-      "boundary": "Local component/simulator SUCCESS, REJECTED, UNAVAILABLE, and CONFLICT statuses"
+      "boundary": "Component and database gates; exact fields/mode/lender/deployment/GUID persisted immutably and legacy v1 fails closed"
+    },
+    "encompassSyncRecoveryAndFinalization": {
+      "status": "PASS",
+      "boundary": "Component; ambiguous writes reconcile read-only and final success revalidates loan/target state"
+    },
+    "encompassDocumentPullTargetProgressAndRecovery": {
+      "status": "PASS",
+      "boundary": "Component and database gates; exact target selection, per-attachment durable progress, stale-worker fencing, target revalidation, terminal audit, and stateful partial redelivery"
+    },
+    "encompassCustomConnectorModeGuards": {
+      "status": "PASS",
+      "boundary": "Component; sync and document reads reject non-CUSTOM_CONNECTOR loans"
     },
     "encompassProductionApplicationImport": {
       "status": "NOT_IMPLEMENTED",
-      "boundary": "No lender-approved full-loan provider contract or portal orchestration"
+      "boundary": "No lender-approved full-loan provider contract or customer portal orchestration"
     },
     "encompassIntegratedThreeExportWorkflow": {
       "status": "NOT_IMPLEMENTED",
@@ -92,14 +96,28 @@
     },
     "encompassDirectSyncCustomerUi": {
       "status": "NOT_IMPLEMENTED",
-      "boundary": "Backend preview/sync APIs exist; protected customer UI does not"
+      "boundary": "Backend APIs exist; protected customer preview/confirm/status UI does not"
     },
     "encompassHostedAuthoritativeWriteback": {
       "status": "NOT_IMPLEMENTED",
       "boundary": "Production HTTP routes intentionally disabled with 503"
     },
+    "encompassHostedLaunchProviderIdentityAttestation": {
+      "status": "NOT_IMPLEMENTED",
+      "boundary": "Hosted GUID is browser-supplied, not provider-signed or service-attested"
+    },
+    "encompassHostedCustomConnectorDocumentReads": {
+      "status": "NOT_IMPLEMENTED_DISABLED",
+      "boundary": "Secured APIs reject ENCOMPASS_HOSTED with ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED"
+    },
+    "encompassProductionMultiTenantRouting": {
+      "status": "NOT_IMPLEMENTED",
+      "priority": "P0",
+      "boundary": "Current runtime is one bound tenant/principal and one Encompass credential/instance set"
+    },
     "encompassDistributedReplayProtection": {
       "status": "NOT_IMPLEMENTED",
+      "priority": "P0",
       "boundary": "Signed request nonce store is process-local"
     },
     "realEncompassAuthenticationDocumentsWriteReadback": {
@@ -114,8 +132,21 @@
   "hardSafetyOutcomes": {
     "hostedWritebackProductionHttpStatus": "DISABLED_503",
     "hostedClientSuccessAccepted": false,
-    "legacyHostedSuccessCertifiedByConsoleContext": false,
-    "legacyDatabaseRowsMigrated": false,
+    "customSyncRequiresCustomConnectorMode": true,
+    "customDocumentReadsRequireCustomConnectorMode": true,
+    "documentPullFeatureFlagRequired": true,
+    "previewBindsExactTarget": true,
+    "previewAndTargetDatabaseImmutableToAppAndWorker": true,
+    "legacyV1SyncJobsExecutable": false,
+    "legacyTargetlessDocumentPullJobsExecutable": false,
+    "successFinalizationRevalidatesTarget": true,
+    "documentPullPersistenceRevalidatesTarget": true,
+    "documentPullTerminalStatusAndAuditAtomic": true,
+    "documentPullOperationalEventOutboxImplemented": false,
+    "inFlightConnectorRequestCancellationOnRevocationImplemented": false,
+    "hostedLaunchIdentityProviderAttested": false,
+    "productionMultiTenantConnectorRoutingImplemented": false,
+    "distributedReplayStoreImplemented": false,
     "fieldReadbackRawValuesPersisted": false,
     "fieldReadbackValueHashesPersisted": false,
     "customerDataIncluded": false,
@@ -129,9 +160,9 @@
       "boundary": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION"
     },
     {
-      "name": "standalone-live-application-current",
+      "name": "standalone-live-application-latest-retained",
       "monthlyIncome": "5721.67",
-      "boundary": "SOURCE_D7F7A43_ACTUAL_UI_BACKEND_DATABASE_PARSER_RETAINED_SANITIZED_EXPORTS"
+      "boundary": "SOURCE_E4C9E79_ACTUAL_UI_BACKEND_DATABASE_PARSER_RETAINED_SANITIZED_EXPORTS"
     },
     {
       "name": "encompass-certification",

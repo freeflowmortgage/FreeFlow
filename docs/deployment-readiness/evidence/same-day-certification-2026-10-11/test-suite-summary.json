@@ -1,14 +1,13 @@
 {
-  "schemaVersion": "freeflow-test-suite-summary-v1",
+  "schemaVersion": "freeflow-test-suite-summary-v2",
   "executionDate": "2026-10-11",
-  "implementationRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
+  "implementationRevision": "646201800446b250c089c782f6f9871b9c6f28d7",
   "result": "PASS_WITH_EXPLICIT_BLOCKERS",
-  "priorRegressionExecutionRevision": "3a2ec81d9d3a9051f0752328f414a67c7fde0e56",
-  "priorRegressionChecks": [
+  "finalCodeChecks": [
     {
       "command": "corepack pnpm --filter web test",
       "status": "PASS",
-      "results": { "configurationChecks": 8, "typescriptTests": 213 }
+      "results": { "configurationChecks": 8, "typescriptTests": 237, "total": 245 }
     },
     {
       "command": "corepack pnpm --filter web exec tsc --noEmit",
@@ -17,7 +16,25 @@
     {
       "command": "corepack pnpm --filter web build",
       "status": "PASS",
-      "results": { "productionRoutesVerified": 29 }
+      "results": { "productionRoutesVerified": 29, "testFixtureDebugRoutesFound": 0 }
+    },
+    {
+      "command": "corepack pnpm --filter underwriting-console test:runtime",
+      "status": "PASS",
+      "results": { "tests": 31, "productionServerAssertions": "PASS" }
+    },
+    {
+      "command": "underwriting-console TypeScript validation",
+      "status": "PASS"
+    },
+    {
+      "command": "$env:VITE_FREEFLOW_RUNTIME_MODE='protected-web'; corepack pnpm --filter underwriting-console build",
+      "status": "PASS"
+    },
+    {
+      "command": "corepack pnpm --filter underwriting-console test:e2e:standalone -- --reporter=line",
+      "status": "PASS_UI_CONTRACT_ONLY",
+      "results": { "playwrightTests": 3, "businessApiIntercepted": true }
     },
     {
       "command": "corepack pnpm --filter @mortgage-pos/mortgage-engine test",
@@ -31,7 +48,7 @@
     {
       "command": "corepack pnpm --filter @mortgage-pos/encompass-connector-contract test",
       "status": "PASS",
-      "results": { "tests": 37 }
+      "results": { "tests": 38 }
     },
     {
       "command": "corepack pnpm --filter @mortgage-pos/encompass-connector-contract build",
@@ -47,154 +64,87 @@
       "status": "PASS"
     },
     {
-      "command": "corepack pnpm --filter underwriting-console test:runtime",
-      "status": "PASS",
-      "results": { "tests": 31 }
-    },
-    {
-      "command": "$env:VITE_FREEFLOW_RUNTIME_MODE='protected-web'; corepack pnpm --filter underwriting-console build",
+      "command": "prisma validate --schema packages/database/prisma/schema.prisma",
       "status": "PASS"
-    },
-    {
-      "command": "corepack pnpm --filter underwriting-console test:e2e:standalone -- --reporter=line",
-      "status": "PASS_UI_CONTRACT_ONLY",
-      "results": { "playwrightTests": 2, "businessApiIntercepted": true }
-    },
-    {
-      "command": "corepack pnpm --dir apps/underwriting-console exec tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,DOM --types node --typeRoots ../../node_modules/.pnpm/@types+node@24.19.1/node_modules/@types --skipLibCheck e2e-live/standalone-live.spec.ts playwright.live.config.ts",
-      "status": "PASS"
-    },
-    {
-      "command": "$env:LIVE_APP_URL='http://127.0.0.1:3014'; $env:LIVE_PHASE='cross-tenant'; corepack pnpm --dir apps/underwriting-console exec playwright test --config playwright.live.config.ts --list",
-      "status": "PASS_DISCOVERY_ONLY",
-      "results": { "playwrightTestsDiscovered": 2 }
-    },
-    {
-      "command": "$env:LIVE_APP_URL='http://127.0.0.1:65534'; $env:LIVE_PHASE='main'; $env:LIVE_FIXTURE_IMAGE='freeflow-doc-parser-codex-test:latest'; corepack pnpm --dir apps/underwriting-console exec playwright test --config playwright.live.config.ts --project chromium --grep 'creates, processes'",
-      "status": "EXPECTED_CLOSED_PORT_AFTER_FIXTURE_PREFLIGHT",
-      "results": {
-        "fixtureGeneration": "PASS",
-        "fixtureSha256": "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf",
-        "lifecycle": "NOT_EXECUTED",
-        "expectedTerminalError": "ERR_CONNECTION_REFUSED"
-      }
-    },
-    {
-      "command": "$env:LIVE_APP_URL='https://example.invalid'; $env:LIVE_PHASE='main'; Remove-Item Env:LIVE_ALLOW_REMOTE_SYNTHETIC_WRITES -ErrorAction SilentlyContinue; corepack pnpm --dir apps/underwriting-console exec playwright test --config playwright.live.config.ts --list",
-      "status": "PASS_EXPECTED_REJECTION",
-      "results": { "safeError": "Remote main-phase execution requires LIVE_ALLOW_REMOTE_SYNTHETIC_WRITES=1." }
     },
     {
       "command": "corepack pnpm --filter web run certify:encompass (executed twice)",
       "status": "PASS_BYTE_IDENTICAL",
-      "results": { "manifestSha256": "e2b9e1f88f3af9da4fdc335bde3c1ff47ef712bd52942e37e563a88913ae5dd4" }
+      "results": {
+        "manifestSha256": "5394255df3ed507767ea26edbe9195b6ace1c9ed19c2db3b8bd3993fab5b29dd",
+        "boundary": "POST_PARSE_AND_CONNECTOR_SIMULATOR"
+      }
     },
     {
       "command": "corepack pnpm --filter web run certify:standalone-exports (executed twice)",
       "status": "PASS_BYTE_IDENTICAL",
-      "results": { "manifestSha256": "1b2b266792c3e31e951dee2655e20ae816a362ba9ebbfea9c243a587f648aeb7" }
+      "results": {
+        "manifestSha256": "0b14043f9199de4cfd68206e5634e20e19ba95aa502d95fe30c1ff0e4a4f83e3",
+        "boundary": "SANITIZED_SYNTHETIC_COMPONENT_EXPORT"
+      }
     },
     {
-      "command": "database-validation.yml command sequence against a fresh PostgreSQL 16 container",
-      "status": "PASS",
-      "results": {
-        "migrationsAppliedFromZero": 19,
-        "tenantRlsSql": "PASS",
-        "connectorBindingSql": "PASS",
-        "appRoleTests": 7,
-        "workerRoleTests": 3,
-        "containersRemoved": true
-      }
+      "command": "git diff --check",
+      "status": "PASS"
     }
   ],
-  "currentRevisionChecks": [
-    {
-      "command": "live harness TypeScript validation",
-      "status": "PASS",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95"
-    },
-    {
-      "command": "build current protected console, portal, and hardened parser Docker images",
-      "status": "PASS",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-      "results": { "imagesBuilt": 3 }
-    },
-    {
-      "command": "apply all migrations from zero and assert two-tenant synthetic bootstrap",
-      "status": "PASS",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-      "results": { "migrationsAppliedFromZero": 19, "syntheticTenants": 2 }
-    },
-    {
-      "command": "corepack pnpm --dir apps/underwriting-console run test:e2e:live (LIVE_PHASE=main)",
-      "status": "PASS",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-      "results": {
-        "runId": "20261011-live-d7f7a43-01",
-        "scope": "STANDALONE_LIVE_APPLICATION_BOUNDARY",
-        "testsPassed": 1,
-        "phaseFilteredTestsSkipped": 1,
-        "businessApiMocked": false,
-        "apiResponses": 19,
-        "apiFailures": 0,
-        "encompassRequests": 0,
-        "monthlyIncome": "5721.67",
-        "annualIncome": "68660.04"
-      }
-    },
-    {
-      "command": "corepack pnpm --dir apps/underwriting-console run test:e2e:live (LIVE_PHASE=cross-tenant)",
-      "status": "PASS",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-      "results": {
-        "runId": "20261011-live-d7f7a43-01",
-        "testsPassed": 1,
-        "phaseFilteredTestsSkipped": 1,
-        "httpStatus": 404,
-        "errorCode": "LOAN_NOT_FOUND"
-      }
-    },
-    {
-      "command": "independent live artifact/source-fingerprint rehash, exact allowlist, and forbidden-token scan",
-      "status": "PASS",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-      "results": {
-        "manifestSha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
-        "generatedEvidenceFiles": 7,
-        "rawSourceDocumentRetained": false,
-        "rawOcrRetained": false
-      }
-    },
-    {
-      "command": "render retained approved-income-summary.pdf and inspect one page",
-      "status": "PASS_POST_RUN_VISUAL_INSPECTION",
-      "executionRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
-      "results": {
-        "pages": 1,
-        "legible": true,
-        "clippingOrOverlapObserved": false,
-        "monthlyIncome": "5721.67",
-        "annualIncome": "68660.04",
-        "automatedVisualRegression": false
-      }
-    }
-  ],
-  "currentRevisionLiveExecution": {
+  "documentPullSecurityChecks": {
+    "runtimeTestsPassed": 16,
+    "statefulPartialRedelivery": "PASS",
+    "staleReclaimProgressRace": "PASS",
+    "staleReclaimWorkingVersionRace": "PASS",
+    "disableOrRetargetBeforeConnectorIo": "PASS_ZERO_IO",
+    "disableOrRetargetBeforeSave": "PASS_ZERO_PERSISTENCE",
+    "terminalStatusAndAuditTransaction": "PASS"
+  },
+  "databaseGate": {
+    "executionRevision": "646201800446b250c089c782f6f9871b9c6f28d7",
+    "status": "PASS",
+    "migrationsAppliedFromZero": 22,
+    "migrationDiff": "NO_DIFFERENCE_DETECTED",
+    "checksumMismatches": 0,
+    "tenantRlsAndImmutabilityAssertionBlocks": 22,
+    "tenantRlsAndImmutabilityFailureGuards": 60,
+    "connectorBindingAssertionBlocks": 4,
+    "connectorBindingFailureGuards": 11,
+    "appRoleTests": 7,
+    "workerRoleTests": 3,
+    "containersAndNetworksRemoved": true
+  },
+  "latestRetainedLiveExecution": {
+    "sourceRevision": "e4c9e7935eb474aa425d7bb4991e3c4861745615",
+    "runId": "20261011-live-e4c9e79-01",
+    "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
+    "boundary": "CLI_PLAYWRIGHT_ACTUAL_UI_BACKEND_POSTGRESQL_PARSER_TWO_SYNTHETIC_TENANTS_NO_BUSINESS_API_MOCKS",
+    "mainTestsPassed": 1,
+    "crossTenantTestsPassed": 1,
+    "httpCrossTenantStatus": 404,
+    "crossTenantErrorCode": "LOAN_NOT_FOUND",
+    "apiResponses": 19,
+    "apiFailures": 0,
+    "encompassRequests": 0,
+    "monthlyIncome": "5721.67",
+    "annualIncome": "68660.04",
+    "manifestSha256": "b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca",
+    "pdfVisualInspection": "PASS_ONE_PAGE_LEGIBLE_NO_CLIPPING_OR_OVERLAP",
+    "sanitizedExportsRetained": true
+  },
+  "priorRetainedLiveExecution": {
     "sourceRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
     "runId": "20261011-live-d7f7a43-01",
     "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
-    "boundary": "CLI_PLAYWRIGHT_ACTUAL_UI_BACKEND_POSTGRESQL_PARSER_TWO_SYNTHETIC_TENANTS_NO_BUSINESS_API_MOCKS",
-    "manifestSha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8",
-    "sanitizedExportsRetained": true,
-    "latestRevisionFullLifecycleRerun": true
+    "manifestSha256": "8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8"
   },
-  "historicalLiveExecution": {
+  "historicalOriginalLiveExecution": {
     "runtimeRevision": "d72c1fad75b08361859b4665d834fc4b6b755266",
     "status": "PASS_ONE_BORROWER_CONVENTIONAL_STANDARD_APPROVAL",
-    "boundary": "CLI_PLAYWRIGHT_ACTUAL_UI_BACKEND_POSTGRESQL_PARSER_NO_BUSINESS_API_MOCKS",
-    "rawArtifactsRetained": false,
-    "latestRevisionFullLifecycleRerun": false
+    "rawArtifactsRetained": false
   },
+  "nonFailingWarnings": [
+    "Next.js inferred the parent workspace root because multiple lockfiles exist.",
+    "Vite reported a production JavaScript chunk larger than 500 kB.",
+    "The generic SPA fallback serves the normal app shell for unknown non-API paths; no dedicated test or debug route was found."
+  ],
   "notExecutedOrBlocked": [
     "live JSON file-import path",
     "live browser anonymous or expired-session cases",

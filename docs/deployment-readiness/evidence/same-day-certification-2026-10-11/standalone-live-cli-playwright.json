@@ -5,7 +5,7 @@
   "runner": "CLI_PLAYWRIGHT_CHROMIUM",
   "inAppBrowserAvailable": false,
   "runtimeRevision": "d72c1fad75b08361859b4665d834fc4b6b755266",
-  "revisionQualification": "This is the revision used by the original full live run. No full live rerun was performed at the final branch revision; later deltas have unit/build coverage but must not be treated as new full-live execution evidence.",
+  "revisionQualification": "Historical original run at d72c1fad; superseded as strongest evidence by the retained live runs recorded in execution-report.json. Its raw artifacts remain unavailable.",
   "boundaries": {
     "syntheticDevelopmentAuthenticationStubbed": true,
     "runtimeConfigStubbed": true,

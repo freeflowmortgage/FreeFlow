@@ -7,23 +7,25 @@ It contains no source-document bytes, OCR text, customer data, credentials, toke
 ## Files
 
 - `execution-report.json` — strict workflow and release-gate classifications.
-- `standalone-live-cli-playwright.json` — historical `d72c1fad...` UI/backend/database/parser lifecycle metadata; its original artifacts were not retained.
-- `database-security-gate.json` — migrations, RLS, app-role, worker-role, and cleanup results.
-- `test-suite-summary.json` — commands and final suite/build results.
-- `artifact-manifest.json` — byte/hash inventory for this directory and the three sibling evidence manifests.
+- `standalone-live-cli-playwright.json` — historical original `d72c1fad...` run metadata; its raw artifacts were not retained.
+- `database-security-gate.json` — final 22-migration PostgreSQL/RLS/immutability/app-role/worker-role gate.
+- `test-suite-summary.json` — exact suite, build, simulator, database, and retained-live results.
+- `artifact-manifest.json` — byte/hash inventory for this directory, the completion report, and linked evidence manifests.
 
 ## Evidence boundaries
 
-- The strongest standalone result is the current-source run `20261011-live-d7f7a43-01` at revision `d7f7a432bed0292bc6d800ec05800d2105ceba95`. Its seven generated evidence files are retained in [`../standalone-live-application-2026-10-11`](../standalone-live-application-2026-10-11/), whose manifest SHA-256 is `8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8`.
-- The current run used CLI Playwright because the in-app browser was unavailable. Only synthetic development authentication and local runtime configuration were supplied. No business API response was mocked.
-- The current run used a disposable local stack, two server-side synthetic tenant identities, and two fixed-upstream loopback gateways. The committed `two-tenant-bootstrap.sql` and `local-live-gateway.mjs` preserve that boundary, while service startup and per-portal development-auth configuration remain manual rather than CI-automated.
-- The retained current-run JSON/XML/PDF and aggregate result records are independently rehashable. The source PDF and raw OCR were not retained. The retained PDF received a post-run visual inspection; automated visual regression remains open.
-- `standalone-live-cli-playwright.json` remains an explicitly historical record for runtime `d72c1fad...`. That run's input and downloaded files were erased, so its hashes are observed metadata and cannot be independently rehashed.
-- The separate `$8,000` component-export bundle retains its own synthetic JSON/XML/PDF files and is not the live application run.
-- The Encompass `$21,600` fixture is a post-parse plus connector simulator. It is not a real provider or full application workflow.
-- The standalone `$8,000` component-export fixture, `$5,721.67` live lifecycle, and `$21,600` Encompass simulator are different fixtures and must not be combined into a full-path parity claim.
-- Official MISMO XSD validation was not performed.
-- Real Encompass interoperability was not performed.
-- Production identity, AWS, and production deployment were not exercised.
+- Implementation revision `646201800446b250c089c782f6f9871b9c6f28d7` passed the full code/build gate and a fresh 22-migration disposable PostgreSQL gate.
+- The latest retained standalone live run is `20261011-live-e4c9e79-01` at source `e4c9e7935eb474aa425d7bb4991e3c4861745615`. Its seven generated evidence files plus explanatory README are in [`../standalone-live-application-2026-10-11-e4c9e79`](../standalone-live-application-2026-10-11-e4c9e79/), manifest SHA-256 `b95f8411da77adb6ea5a341c25e4f0f85c45514b2c52552a41ef7b4ab34078ca`.
+- That run used CLI Playwright because the in-app browser was unavailable. Only synthetic development authentication and local runtime configuration were supplied; no business API response was mocked.
+- The run used a disposable local stack, two server-side synthetic tenant identities, fixed-upstream loopback gateways, tmpfs PostgreSQL, and the hardened parser. Its JSON/XML/PDF and aggregate results are independently rehashable. The source PDF and raw OCR were not retained.
+- The retained PDF was rendered as one legible page with no clipping or overlap; automated visual regression remains open.
+- The prior retained run `20261011-live-d7f7a43-01` remains in [`../standalone-live-application-2026-10-11`](../standalone-live-application-2026-10-11/), manifest SHA-256 `8aa3335a864fb246f047d57acea38ac8782815e5fd432f49b5c760e9c75523b8`.
+- `standalone-live-cli-playwright.json` describes the original `d72c1fad...` run. Its input/downloaded files were erased, so its observed hashes are not independently rehashable.
+- The separate `$8,000` component-export bundle is not a browser lifecycle.
+- The Encompass `$21,600` fixture is a post-parse plus connector simulator. It is not a real provider or full customer application workflow.
+- Production multi-tenant connector routing and distributed replay protection are **NOT IMPLEMENTED — P0**.
+- Official MISMO XSD/implementation-requirement validation is **BLOCKED**.
+- Real Encompass interoperability is **BLOCKED**.
+- Production identity, AWS, production deployment, customer data, and production mutation were not exercised.
 
 The authoritative narrative and remediation plan are in [`../../SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md`](../../SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md).
