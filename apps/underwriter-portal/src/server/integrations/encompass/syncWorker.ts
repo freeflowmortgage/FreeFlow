@@ -45,8 +45,8 @@ export async function runEncompassSyncJob(
       return 'FAILED';
     } catch (error) {
       if (error instanceof EncompassConnectorError && error.retryable) {
-        await dependencies.retry(job, error.safeCode);
-        return 'RETRYABLE_FAILURE';
+        await dependencies.reconcile(job, error.safeCode);
+        return 'RECONCILING';
       }
       await dependencies.fail(job, error instanceof EncompassConnectorError ? error.safeCode : 'SYNC_RECONCILIATION_FAILED');
       return 'FAILED';
@@ -74,13 +74,10 @@ export async function runEncompassSyncJob(
     await dependencies.succeed(job, result.providerRevision, readback);
     return 'SUCCEEDED';
   } catch (error) {
-    if (error instanceof EncompassConnectorError && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN') {
+    if (error instanceof EncompassConnectorError
+      && (error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN' || error.retryable)) {
       await dependencies.reconcile(job, error.safeCode);
       return 'RECONCILING';
-    }
-    if (error instanceof EncompassConnectorError && error.retryable) {
-      await dependencies.retry(job, error.safeCode);
-      return 'RETRYABLE_FAILURE';
     }
     await dependencies.fail(job, error instanceof EncompassConnectorError ? error.safeCode : 'SYNC_UNEXPECTED');
     return 'FAILED';

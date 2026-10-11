@@ -75,6 +75,55 @@ test('ECC-04: custom adapter downloads PDF bytes and verifies the service digest
   assert.deepEqual(Object.keys(downloaded).sort(), ['bytes', 'sha256']);
 });
 
+test('custom adapter scrubs source chunks while preserving its independent response copy', async () => {
+  const expected = new TextEncoder().encode('%PDF-1.7 synthetic-buffer');
+  const sourceChunk = expected.slice();
+  const sha256 = createHash('sha256').update(expected).digest('hex');
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(sourceChunk); controller.close(); },
+    }), { headers: { 'x-content-sha256': sha256 } })) as typeof fetch,
+  });
+
+  const downloaded = await adapter.downloadOriginalAttachment(context, 'loan-guid', 'attachment-a');
+  assert.deepEqual(downloaded.bytes, expected);
+  assert.equal(sourceChunk.every((value) => value === 0), true);
+});
+
+test('custom adapter scrubs copied document bytes when validation fails', async () => {
+  const sourceChunk = new TextEncoder().encode('not-a-pdf-document');
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(sourceChunk); controller.close(); },
+    }))) as typeof fetch,
+  });
+  await assert.rejects(
+    () => adapter.downloadOriginalAttachment(context, 'loan-guid', 'attachment-a'),
+    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_ATTACHMENT_NOT_PDF',
+  );
+  assert.equal(sourceChunk.every((value) => value === 0), true);
+});
+
+test('custom adapter treats network failure during write as an unknown outcome', async () => {
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => { throw new TypeError('network unavailable'); }) as typeof fetch,
+  });
+  await assert.rejects(
+    () => adapter.applyApprovedIncomeUpdate(context, 'loan-guid', {
+      approvalEventId: '00000000-0000-4000-8000-000000000300',
+      fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approved' }],
+    }),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+  );
+});
+
 // ECC-17: missing service auth and non-HTTPS origins fail closed.
 test('ECC-17: custom adapter fails closed without service auth or a TLS origin', () => {
   assert.throws(

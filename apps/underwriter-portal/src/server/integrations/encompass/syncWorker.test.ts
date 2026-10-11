@@ -56,14 +56,14 @@ test('successful apply records one external effect and final success', async () 
   assert.equal(succeeded, 1);
 });
 
-test('provider 5xx is retryable while validation 4xx is terminal', async () => {
-  let retried = '';
-  const retryable = await runEncompassSyncJob(message, dependencies({
+test('provider 5xx enters reconciliation while validation 4xx is terminal', async () => {
+  let reconciled = '';
+  const ambiguous = await runEncompassSyncJob(message, dependencies({
     apply: async () => { throw new EncompassConnectorError('ENCOMPASS_WRITE_FAILED_503', 'safe', true); },
-    retry: async (_job, code) => { retried = code; },
+    reconcile: async (_job, code) => { reconciled = code; },
   }));
-  assert.equal(retryable, 'RETRYABLE_FAILURE');
-  assert.equal(retried, 'ENCOMPASS_WRITE_FAILED_503');
+  assert.equal(ambiguous, 'RECONCILING');
+  assert.equal(reconciled, 'ENCOMPASS_WRITE_FAILED_503');
 
   let failed = '';
   const terminal = await runEncompassSyncJob(message, dependencies({
@@ -106,6 +106,25 @@ test('reconciliation with any unavailable field fails closed without another mut
   })), 'FAILED');
   assert.equal(writes, 0);
   assert.equal(failure, 'ENCOMPASS_FIELD_UNAVAILABLE');
+});
+
+test('repeated retryable reconciliation reads stay read-only and remain reconciling', async () => {
+  let writes = 0;
+  let retried = 0;
+  let reconciled = 0;
+  const result = await runEncompassSyncJob(message, dependencies({
+    claim: async () => ({ ...claimed, mode: 'RECONCILE' }),
+    apply: async () => { writes += 1; return {}; },
+    readFields: async () => {
+      throw new EncompassConnectorError('CONNECTOR_SERVICE_FAILED_503', 'safe', true);
+    },
+    retry: async () => { retried += 1; },
+    reconcile: async () => { reconciled += 1; },
+  }));
+  assert.equal(result, 'RECONCILING');
+  assert.equal(writes, 0);
+  assert.equal(retried, 0);
+  assert.equal(reconciled, 1);
 });
 
 test('success requires full readback and classifies rejected, unavailable, and conflicting fields', async () => {

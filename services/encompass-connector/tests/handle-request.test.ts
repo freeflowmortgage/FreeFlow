@@ -193,6 +193,34 @@ test('authenticated and bound synthetic list/download returns deterministic veri
   }
 });
 
+test('download response owns an independent copy before connector bytes are scrubbed', async () => {
+  const expected = new TextEncoder().encode('%PDF-1.7\nsynthetic-copy-test\n%%EOF\n');
+  const connectorBytes = expected.slice();
+  const sha256 = createHash('sha256').update(expected).digest('hex');
+  const connector: EncompassConnector = {
+    ...unavailableConnector(),
+    async downloadOriginalAttachment() { return { bytes: connectorBytes, sha256 }; },
+  };
+  const response = await handleConnectorRequest(new Request(`${ORIGIN}${CONNECTOR_SERVICE_CONTRACT.downloadPath}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({
+      contractVersion: CONNECTOR_SERVICE_CONTRACT.version,
+      deploymentId: DEPLOYMENT,
+      lenderId: LENDER,
+      tenantId: TENANT,
+      loanId: 'loan-1',
+      loanGuid: 'guid-1',
+      correlationId: 'corr-1',
+      attachmentId: 'att-1',
+    }),
+  }), deps({ connector }));
+
+  assert.equal(response.status, 200);
+  assert.equal(connectorBytes.every((value) => value === 0), true);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), expected);
+});
+
 test('authenticated synthetic boundary retrieves loan data and performs approved field write/readback', async () => {
   const synthetic = new SyntheticFreeflowDevConnector();
   const syntheticDeps = deps({

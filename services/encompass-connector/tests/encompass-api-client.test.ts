@@ -43,6 +43,42 @@ test('real connector uses V3 list and short-lived download URLs without exposing
   assert.equal(calls.some((call) => call.url.includes('client-secret') || JSON.stringify(call).includes('client-secret')), false);
 });
 
+test('real connector scrubs streamed source chunks after copying the returned PDF', async () => {
+  const expected = new TextEncoder().encode('%PDF-1.7\nsynthetic-source-buffer\n%%EOF\n');
+  const sourceChunk = expected.slice();
+  const client = connector((async (url) => {
+    if (String(url).endsWith('/oauth2/v1/token')) return Response.json({ access_token: 'provider-token' });
+    if (String(url).endsWith('/attachmentDownloadUrl')) {
+      return Response.json({ attachments: [{ id: 'attachment-a', url: 'https://download.example.test/one' }] });
+    }
+    return new Response(new ReadableStream({
+      start(controller) { controller.enqueue(sourceChunk); controller.close(); },
+    }));
+  }) as typeof fetch);
+
+  const downloaded = await client.downloadOriginalAttachment(context, 'loan-guid', 'attachment-a');
+  assert.deepEqual(downloaded.bytes, expected);
+  assert.equal(sourceChunk.every((value) => value === 0), true);
+});
+
+test('real connector scrubs streamed source chunks when PDF validation fails', async () => {
+  const sourceChunk = new TextEncoder().encode('not-a-pdf');
+  const client = connector((async (url) => {
+    if (String(url).endsWith('/oauth2/v1/token')) return Response.json({ access_token: 'provider-token' });
+    if (String(url).endsWith('/attachmentDownloadUrl')) {
+      return Response.json({ attachments: [{ id: 'attachment-a', url: 'https://download.example.test/one' }] });
+    }
+    return new Response(new ReadableStream({
+      start(controller) { controller.enqueue(sourceChunk); controller.close(); },
+    }));
+  }) as typeof fetch);
+  await assert.rejects(
+    () => client.downloadOriginalAttachment(context, 'loan-guid', 'attachment-a'),
+    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'ENCOMPASS_ATTACHMENT_NOT_PDF',
+  );
+  assert.equal(sourceChunk.every((value) => value === 0), true);
+});
+
 test('real connector rejects non-PDF, oversized, and malformed Encompass responses without persistence', async () => {
   for (const response of [
     new Response('not a pdf'),
@@ -101,6 +137,25 @@ test('network failure during PATCH becomes unknown outcome rather than an automa
     }),
     (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
   );
+});
+
+test('ambiguous PATCH HTTP responses require reconciliation', async () => {
+  for (const status of [408, 429, 500, 503]) {
+    const client = connector((async (url, init) => {
+      if (String(url).endsWith('/oauth2/v1/token')) return Response.json({ access_token: 'provider-token' });
+      if (init?.method === 'PATCH') return new Response(null, { status });
+      return Response.json({});
+    }) as typeof fetch);
+    await assert.rejects(
+      () => client.applyApprovedIncomeUpdate(context, 'loan-guid', {
+        approvalEventId: '00000000-0000-4000-8000-000000000300',
+        fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approval-id' }],
+      }),
+      (error: unknown) => error instanceof EncompassConnectorError
+        && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN'
+        && !error.retryable,
+    );
+  }
 });
 
 test('network failure before PATCH is safely retryable and not an unknown write', async () => {

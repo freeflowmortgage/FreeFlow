@@ -94,18 +94,24 @@ export class CustomConnectorAdapter implements EncompassConnector {
     const response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.downloadPath, body, DOWNLOAD_TIMEOUT_MS);
     const declaredLength = Number(response.headers.get('content-length') ?? '0');
     if (Number.isFinite(declaredLength) && declaredLength > MAX_CONNECTOR_PDF_BYTES) {
+      try { await response.body?.cancel(); } catch { /* Nothing was retained locally. */ }
       throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the parser size limit.', false);
     }
     const bytes = await readBounded(response, MAX_CONNECTOR_PDF_BYTES);
-    if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
-      throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_NOT_PDF', 'Attachment is not a PDF.', false);
+    try {
+      if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
+        throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_NOT_PDF', 'Attachment is not a PDF.', false);
+      }
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const declaredHash = response.headers.get('x-content-sha256')?.trim().toLowerCase();
+      if (declaredHash && declaredHash !== sha256) {
+        throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_HASH_MISMATCH', 'Attachment digest did not match the service contract.', false);
+      }
+      return { bytes, sha256 };
+    } catch (error) {
+      bytes.fill(0);
+      throw error;
     }
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    const declaredHash = response.headers.get('x-content-sha256')?.trim().toLowerCase();
-    if (declaredHash && declaredHash !== sha256) {
-      throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_HASH_MISMATCH', 'Attachment digest did not match the service contract.', false);
-    }
-    return { bytes, sha256 };
   }
 
   async applyApprovedIncomeUpdate(
@@ -115,7 +121,17 @@ export class CustomConnectorAdapter implements EncompassConnector {
   ): Promise<EncompassWriteResult> {
     validateUpdate(update);
     const body = { ...this.requestBody(context, loanGuid), ...update };
-    const response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.applyUpdatePath, body, REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await this.serviceFetch(CONNECTOR_SERVICE_CONTRACT.applyUpdatePath, body, REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof EncompassConnectorError) throw error;
+      throw new EncompassConnectorError(
+        'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+        'Connector write outcome is unknown and requires reconciliation.',
+        false,
+      );
+    }
     const value = await readJson(response, 'CONNECTOR_WRITE_INVALID');
     if (!isRecord(value) || value.applied !== true) {
       throw new EncompassConnectorError('CONNECTOR_WRITE_INVALID', 'Unexpected connector write response.', false);
@@ -386,20 +402,22 @@ async function readBounded(response: Response, maximum: number): Promise<Uint8Ar
       if (done) break;
       length += value.length;
       if (length > maximum) {
+        value.fill(0);
         throw new EncompassConnectorError('CONNECTOR_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the parser size limit.', false);
       }
       chunks.push(value);
     }
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return result;
   } finally {
+    for (const chunk of chunks) chunk.fill(0);
     reader.releaseLock();
   }
-  const result = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
 }
 
 async function readJson(response: Response, safeCode: string): Promise<unknown> {
