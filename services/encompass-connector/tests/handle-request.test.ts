@@ -193,6 +193,88 @@ test('authenticated and bound synthetic list/download returns deterministic veri
   }
 });
 
+test('download response owns an independent copy before connector bytes are scrubbed', async () => {
+  const expected = new TextEncoder().encode('%PDF-1.7\nsynthetic-copy-test\n%%EOF\n');
+  const connectorBytes = expected.slice();
+  const sha256 = createHash('sha256').update(expected).digest('hex');
+  const connector: EncompassConnector = {
+    ...unavailableConnector(),
+    async downloadOriginalAttachment() { return { bytes: connectorBytes, sha256 }; },
+  };
+  const response = await handleConnectorRequest(new Request(`${ORIGIN}${CONNECTOR_SERVICE_CONTRACT.downloadPath}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({
+      contractVersion: CONNECTOR_SERVICE_CONTRACT.version,
+      deploymentId: DEPLOYMENT,
+      lenderId: LENDER,
+      tenantId: TENANT,
+      loanId: 'loan-1',
+      loanGuid: 'guid-1',
+      correlationId: 'corr-1',
+      attachmentId: 'att-1',
+    }),
+  }), deps({ connector }));
+
+  assert.equal(response.status, 200);
+  assert.equal(connectorBytes.every((value) => value === 0), true);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), expected);
+});
+
+test('authenticated synthetic boundary retrieves loan data and performs approved field write/readback', async () => {
+  const synthetic = new SyntheticFreeflowDevConnector();
+  const syntheticDeps = deps({
+    connector: synthetic,
+    bindings: [{
+      tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+      lenderId: 'freeflow-dev',
+      deploymentId: 'freeflow-dev',
+    }],
+  });
+  syntheticDeps.authVerifier = new NonProdBearerServiceAuthVerifier([{
+    token: TOKEN,
+    serviceId: 'portal',
+    tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+  }]);
+  const adapter = new CustomConnectorAdapter({
+    binding: createLenderConnectorBinding({
+      lenderId: 'freeflow-dev',
+      deploymentId: 'freeflow-dev',
+      serviceBaseUrl: ORIGIN,
+    }),
+    serviceAuth: { authorizationHeader: `Bearer ${TOKEN}` },
+    fetch: (async (input, init) => handleConnectorRequest(
+      new Request(String(input), init),
+      syntheticDeps,
+    )) as typeof fetch,
+  });
+  const context = {
+    tenantId: SYNTHETIC_FREEFLOW_DEV_TENANT_ID,
+    loanId: 'synthetic-loan',
+    correlationId: 'synthetic-round-trip',
+  };
+  const snapshot = await adapter.retrieveLoanSnapshot(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
+  assert.equal(snapshot.schemaVersion, 'encompass-loan-snapshot-v1');
+  assert.equal(snapshot.simulated, true);
+  assert.equal(snapshot.borrowers.length, 2);
+
+  const approvalEventId = '00000000-0000-4000-8000-000000000901';
+  const fields = [
+    { fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: approvalEventId },
+    { fieldName: 'CX.FREEFLOW.W2.VARIABLE', value: '1600.00' },
+  ];
+  const write = await adapter.applyApprovedIncomeUpdate(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, {
+    approvalEventId,
+    fields,
+  });
+  assert.deepEqual(write.fieldResults, fields.map((field) => ({ fieldName: field.fieldName, status: 'APPLIED' })));
+  assert.deepEqual(
+    await adapter.readFields(context, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, fields.map((field) => field.fieldName)),
+    Object.fromEntries(fields.map((field) => [field.fieldName, field.value])),
+  );
+  assert.equal(synthetic.mutationCount, 1);
+});
+
 test('connector failures retain a safe provider-neutral response', async () => {
   const listed = await handleConnectorRequest(listRequest(), deps());
   assert.equal(listed.status, 400);
@@ -225,6 +307,9 @@ test('connector failures retain a safe provider-neutral response', async () => {
 function unavailableConnector(): EncompassConnector {
   return {
     kind: 'custom',
+    async retrieveLoanSnapshot() {
+      throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
+    },
     async listActiveAttachments() {
       throw new EncompassConnectorError('ENCOMPASS_CONFIGURATION_MISSING', 'not configured', false);
     },

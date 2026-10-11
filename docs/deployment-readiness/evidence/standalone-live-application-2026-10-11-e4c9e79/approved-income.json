@@ -1,0 +1,79 @@
+{
+  "exportProfile": "freeflow-approved-income-json-v1",
+  "schemaVersion": "freeflow-approved-income-snapshot-v1",
+  "normalizedLoan": {
+    "schemaVersion": "freeflow-normalized-loan-v1",
+    "loanProgram": "CONVENTIONAL",
+    "borrowers": [
+      {
+        "borrowerKey": "borrower-1",
+        "ordinal": 0,
+        "role": "PRIMARY"
+      }
+    ]
+  },
+  "loan": {
+    "id": "18043e82-60c7-499b-982e-533718bf52b7",
+    "version": 4,
+    "program": "CONVENTIONAL",
+    "integrationMode": "NONE"
+  },
+  "approval": {
+    "eventId": "454e4e14-d91b-4725-8d6c-dd3cdb80b4e9",
+    "calculationId": "7d607e25-406b-4a55-a193-f76d30c28547",
+    "action": "INCOME_APPROVED",
+    "approvedAt": "2026-10-11T18:00:12.828Z",
+    "approvedLoanVersion": 3
+  },
+  "calculation": {
+    "schemaVersion": "authoritative-extractions-v1",
+    "source": "persisted-parser-extractions",
+    "mortgageRuleVersion": "form-1084-v9",
+    "canonicalInputHash": "a5d721b72d637ebbcb1231dd6fc00785ab13079fd07dbed9908378a351ce9604",
+    "sourceDocumentHashes": [
+      "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf"
+    ],
+    "qualifyingMonthlyIncome": "5721.67",
+    "totalAnnualCashFlow": "68660.04",
+    "trendingResult": "SINGLE_YEAR",
+    "yearsAnalyzed": [
+      2023
+    ],
+    "components": {
+      "w2BaseMonthly": "4896.67",
+      "w2VariableMonthly": "825.00",
+      "scheduleCMonthly": "0.00",
+      "scheduleFMonthly": "0.00",
+      "form1120SMonthly": "0.00",
+      "form1065Monthly": "0.00",
+      "form1120Monthly": "0.00",
+      "assetIncomeMonthly": "0.00",
+      "rentalMonthly": "0.00",
+      "rentalLiabilityMonthly": "0.00",
+      "housingExpenseAdjustment": "0.00"
+    },
+    "borrowers": [
+      {
+        "borrowerKey": "borrower-1",
+        "ordinal": 0,
+        "role": "PRIMARY",
+        "qualifyingMonthlyIncome": "5721.67"
+      }
+    ]
+  },
+  "provenance": {
+    "extractions": [
+      {
+        "extractionId": "4469a5c8-27fe-4766-9bc1-1843dc57dc08",
+        "extractionHash": "c16bda396d7d8a21527a8fdc53935a5d6259abf3b9c2483500cb231c4f06804e",
+        "sourceDocumentId": "13b7a4c5-d0bd-4c41-a7ce-f446d1569a56",
+        "sourceDocumentVersion": 1,
+        "sourceContentHash": "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf",
+        "metadataReviewId": "52e2214e-a045-44ac-97a9-c3d6e7ba8156",
+        "metadataReviewVersion": 1,
+        "metadataReviewHash": "844f948eec5c078df4cb455bbfa70a011f573525d07d2941328deaa08f2bf7aa"
+      }
+    ]
+  },
+  "snapshotHash": "b26193d348f4eb0f9503a6ade17d475497859aa22a567c79966195510fa5b2cc"
+}

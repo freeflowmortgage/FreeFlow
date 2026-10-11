@@ -1,7 +1,7 @@
 # FreeFlow Deployment Readiness
 
 Status: **not approved for production deployment**
-Assessment date: 2026-09-04
+Assessment date: 2026-10-11
 Canonical product architecture: [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 This folder turns the repository's architecture and design material into a
@@ -15,6 +15,8 @@ tests.
 
 | Document | Purpose |
 |---|---|
+| [SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md](SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md) | Current standalone and Encompass capability matrix, actual execution report, evidence inventory, deployment gates, and ordered remediation |
+| [ENCOMPASS-INTEGRATION-CERTIFICATION-2026-10-11.md](ENCOMPASS-INTEGRATION-CERTIFICATION-2026-10-11.md) | Superseded preliminary audit retained only as a pointer to the current report |
 | [TECHNICAL-READINESS-2026-09-15.md](TECHNICAL-READINESS-2026-09-15.md) | Current weighted readiness assessment, adversarial findings, weekend sales-demo plan, and September 30 technical burndown |
 | [PARTNER-READINESS-BRIEF-2026-09-15.md](PARTNER-READINESS-BRIEF-2026-09-15.md) | Plain-language partner briefing on what works, what remains, and what can honestly be sold by the target dates |
 | [PR15-REGRESSION-AUDIT-2026-09-14.md](PR15-REGRESSION-AUDIT-2026-09-14.md) | PR 15 comparison, retained/fixed behavior, supplied-document evidence, and local acceptance checklist |

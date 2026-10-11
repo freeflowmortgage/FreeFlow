@@ -7,6 +7,7 @@ import {
   type EncompassConnectorContext,
   type EncompassApprovedIncomeUpdate,
   type EncompassWriteResult,
+  type EncompassLoanSnapshot,
 } from '@mortgage-pos/encompass-connector-contract';
 
 export const MAX_ENCOMPASS_ATTACHMENT_BYTES = 40 * 1024 * 1024;
@@ -34,6 +35,20 @@ export class EncompassV3Connector implements EncompassConnector {
     private readonly credentials: EncompassRuntimeCredentials,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
+
+  async retrieveLoanSnapshot(
+    _context: EncompassConnectorContext,
+    _loanGuid: string,
+  ): Promise<EncompassLoanSnapshot> {
+    // No production loan-read contract is asserted here until a lender-approved
+    // provider schema/field set is configured and certified. Do not guess an
+    // Encompass endpoint or silently return a partial loan.
+    throw new EncompassConnectorError(
+      'ENCOMPASS_LOAN_RETRIEVAL_NOT_IMPLEMENTED',
+      'Encompass loan retrieval is not implemented for the real connector.',
+      false,
+    );
+  }
 
   async listActiveAttachments(
     _context: EncompassConnectorContext,
@@ -119,7 +134,16 @@ export class EncompassV3Connector implements EncompassConnector {
         false,
       );
     }
-    if (!response.ok) throw httpError('ENCOMPASS_WRITE_FAILED', response.status);
+    if (!response.ok) {
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        throw new EncompassConnectorError(
+          'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+          'Encompass write outcome is unknown and requires reconciliation.',
+          false,
+        );
+      }
+      throw httpError('ENCOMPASS_WRITE_FAILED', response.status);
+    }
     return { providerRevision: response.headers.get('etag')?.slice(0, 100) || undefined };
   }
 
@@ -248,6 +272,7 @@ function parseDownloadContract(value: unknown, attachmentId: string): { url: str
 async function readPdf(response: Response): Promise<DownloadedEncompassAttachment> {
   const declared = Number(response.headers.get('content-length') ?? '0');
   if (Number.isFinite(declared) && declared > MAX_ENCOMPASS_ATTACHMENT_BYTES) {
+    try { await response.body?.cancel(); } catch { /* Nothing was retained locally. */ }
     throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the permitted size.', false);
   }
   if (!response.body) throw new EncompassConnectorError('ENCOMPASS_DOWNLOAD_EMPTY', 'Encompass attachment was empty.', true);
@@ -259,18 +284,28 @@ async function readPdf(response: Response): Promise<DownloadedEncompassAttachmen
       const { done, value } = await reader.read();
       if (done) break;
       length += value.length;
-      if (length > MAX_ENCOMPASS_ATTACHMENT_BYTES) throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the permitted size.', false);
+      if (length > MAX_ENCOMPASS_ATTACHMENT_BYTES) {
+        value.fill(0);
+        throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_TOO_LARGE', 'Attachment exceeds the permitted size.', false);
+      }
       chunks.push(value);
     }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
-    bytes.fill(0);
-    throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_NOT_PDF', 'Attachment is not a PDF.', false);
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    try {
+      if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
+        throw new EncompassConnectorError('ENCOMPASS_ATTACHMENT_NOT_PDF', 'Attachment is not a PDF.', false);
+      }
+      return { bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
+    } catch (error) {
+      bytes.fill(0);
+      throw error;
+    }
+  } finally {
+    for (const chunk of chunks) chunk.fill(0);
+    reader.releaseLock();
   }
-  return { bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
 async function readJson(response: Response, safeCode: string): Promise<unknown> {

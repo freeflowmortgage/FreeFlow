@@ -1,1 +1,7 @@
-*.pdf -text
+*.pdf -text -diff
+# Evidence manifests contain byte-level SHA-256 values; keep text bytes stable.
+docs/deployment-readiness/evidence/**/*.json text eol=lf
+docs/deployment-readiness/evidence/**/*.txt text eol=lf
+docs/deployment-readiness/evidence/**/*.xml text eol=lf
+docs/deployment-readiness/evidence/**/*.md text eol=lf
+docs/deployment-readiness/SAME-DAY-STANDALONE-ENCOMPASS-COMPLETION-2026-10-11.md text eol=lf

@@ -43,9 +43,12 @@ export function createConsoleContextHandler(dependencies = { withTenantTransacti
         approval: approval ? { ...approval, current: approvalCurrent } : null,
         documentPull: loan.encompassDocumentPullJobs[0] ?? null,
         sync: loan.encompassSyncJobs[0] ?? null,
-        hostWrite: hostWrite ? { ...hostWrite, current: approvalCurrent
-          && hostWrite.approvalEventId === approval?.id
-          && hostWrite.expectedLoanVersion === loan.version } : null,
+        hostWrite: hostWrite ? {
+          ...hostWrite,
+          certified: false,
+          readbackCertification: 'NOT_SERVER_VERIFIED',
+          current: false,
+        } : null,
         requestId: context.requestId,
       });
     } catch (error) { if (error instanceof ApiError) return sendApiError(res, context.requestId, error); throw error; }

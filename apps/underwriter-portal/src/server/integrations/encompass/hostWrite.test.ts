@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { RequestContext } from '../../auth/requestContext';
 import { ApiError } from '../../http/apiError';
 import { authorizeHostWrite, completeHostWrite } from './hostWrite';
+import { createHostFieldMapHandler, createHostWriteCompletionHandler } from './hostWriteRoute';
 
 const TENANT = '00000000-0000-4000-8000-000000000100';
 const USER = '00000000-0000-4000-8000-000000000101';
@@ -28,7 +29,7 @@ function transaction(overrides: Record<string, unknown> = {}) {
     form1084Audit: { findFirst: async () => ({
       qualifyingMonthlyIncome: decimal(8125.5), trendingResult: 'CONVENTIONAL_STABLE_OR_INCREASING', yearsAnalyzed: [2025, 2024],
       scheduleCMonthlyTotal: null, form1120SMonthlyTotal: null, form1065MonthlyTotal: null, form1120MonthlyTotal: null,
-      w2BaseMonthly: decimal(8000), w2VariableMonthly: null, scheduleFMonthlyTotal: null, assetIncomeMonthly: null,
+      w2BaseMonthly: decimal(7600), w2VariableMonthly: decimal(400), scheduleFMonthlyTotal: null, assetIncomeMonthly: decimal(125.5),
       rentalMonthly: null, rentalLiabilityMonthly: null, housingExpenseAdjustment: null,
       extractionBindings: [{ extractionId: 'e', extractionHash: 'a'.repeat(64), sourceDocumentId: 'd', sourceDocumentVersion: 1, sourceContentHash: 'b'.repeat(64), metadataReviewId: null, metadataReviewVersion: null, metadataReviewHash: null, extraction: { status: 'ACTIVE', canonicalHash: 'a'.repeat(64), sourceDocumentVersion: 1, sourceContentHash: 'b'.repeat(64), sourceDocument: { version: 1, sourceContentHash: 'b'.repeat(64) }, metadataReviews: [] } }],
     }) },
@@ -51,6 +52,8 @@ test('approved host map is durable and stores no borrower identity or field valu
   const result = await authorizeHostWrite(state.tx as never, context, input);
   assert.equal(result.writeId, WRITE);
   assert.equal(result.fields['CX.FREEFLOW.APPROVAL.ID'], APPROVAL);
+  assert.equal(result.fields['CX.FREEFLOW.W2.VARIABLE'], '400.00');
+  assert.equal(result.fields['CX.FREEFLOW.ASSET.INCOME'], '125.50');
   assert.match(result.fieldMapHash, /^[0-9a-f]{64}$/);
   const persisted = state.getWrite() ?? {};
   assert.equal('fields' in persisted, false);
@@ -95,12 +98,36 @@ test('a stale loan version cannot authorize a hosted write', async () => {
   assert.equal(created, false);
 });
 
-test('host completion is stateful and idempotently reports the committed outcome', async () => {
+test('a browser claim cannot mark a hosted write successful without server verification', async () => {
   const state = transaction();
   const authorized = await authorizeHostWrite(state.tx as never, context, input);
-  const completed = await completeHostWrite(state.tx as never, context, { writeId: WRITE, fieldMapHash: authorized.fieldMapHash, outcome: 'SUCCEEDED', idempotencyKey: 'host-complete-key-01' });
-  assert.equal(completed.status, 'SUCCEEDED');
-  const replay = await completeHostWrite(state.tx as never, context, { writeId: WRITE, fieldMapHash: authorized.fieldMapHash, outcome: 'SUCCEEDED', idempotencyKey: 'host-complete-key-01' });
-  assert.equal(replay.status, 'SUCCEEDED');
+  await assert.rejects(
+    () => completeHostWrite(state.tx as never, context, { writeId: WRITE, fieldMapHash: authorized.fieldMapHash, outcome: 'SUCCEEDED', idempotencyKey: 'host-complete-key-01' }),
+    (error: unknown) => error instanceof ApiError && error.code === 'HOST_WRITE_SERVER_VERIFICATION_REQUIRED',
+  );
+  assert.equal(state.getWrite()?.status, 'AUTHORIZED');
+});
+
+test('failed host completion is stateful and idempotent', async () => {
+  const state = transaction();
+  const authorized = await authorizeHostWrite(state.tx as never, context, input);
+  const completed = await completeHostWrite(state.tx as never, context, { writeId: WRITE, fieldMapHash: authorized.fieldMapHash, outcome: 'FAILED', idempotencyKey: 'host-complete-key-02' });
+  assert.equal(completed.status, 'FAILED');
+  const replay = await completeHostWrite(state.tx as never, context, { writeId: WRITE, fieldMapHash: authorized.fieldMapHash, outcome: 'FAILED', idempotencyKey: 'host-complete-key-02' });
+  assert.equal(replay.status, 'FAILED');
   assert.equal(replay.replayed, true);
+});
+
+test('hosted writeback HTTP entry points are disabled until independent verification exists', async () => {
+  for (const handler of [createHostFieldMapHandler(), createHostWriteCompletionHandler()]) {
+    const state: { status?: number; body?: unknown } = {};
+    const response: any = {
+      status: (status: number) => { state.status = status; return response; },
+      json: (body: unknown) => { state.body = body; return response; },
+      setHeader: () => undefined,
+    };
+    await handler({ method: 'POST', query: {}, body: {}, headers: {} } as never, response, context);
+    assert.equal(state.status, 503);
+    assert.equal((state.body as any).error.code, 'ENCOMPASS_HOST_WRITEBACK_NOT_CERTIFIED');
+  }
 });

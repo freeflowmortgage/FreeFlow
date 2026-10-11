@@ -75,6 +75,74 @@ test('ECC-04: custom adapter downloads PDF bytes and verifies the service digest
   assert.deepEqual(Object.keys(downloaded).sort(), ['bytes', 'sha256']);
 });
 
+test('custom adapter scrubs source chunks while preserving its independent response copy', async () => {
+  const expected = new TextEncoder().encode('%PDF-1.7 synthetic-buffer');
+  const sourceChunk = expected.slice();
+  const sha256 = createHash('sha256').update(expected).digest('hex');
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(sourceChunk); controller.close(); },
+    }), { headers: { 'x-content-sha256': sha256 } })) as typeof fetch,
+  });
+
+  const downloaded = await adapter.downloadOriginalAttachment(context, 'loan-guid', 'attachment-a');
+  assert.deepEqual(downloaded.bytes, expected);
+  assert.equal(sourceChunk.every((value) => value === 0), true);
+});
+
+test('custom adapter scrubs copied document bytes when validation fails', async () => {
+  const sourceChunk = new TextEncoder().encode('not-a-pdf-document');
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(sourceChunk); controller.close(); },
+    }))) as typeof fetch,
+  });
+  await assert.rejects(
+    () => adapter.downloadOriginalAttachment(context, 'loan-guid', 'attachment-a'),
+    (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_ATTACHMENT_NOT_PDF',
+  );
+  assert.equal(sourceChunk.every((value) => value === 0), true);
+});
+
+test('custom adapter treats network failure during write as a retryable unknown outcome without leaking transport text', async () => {
+  const transportDetail = 'network unavailable for borrower-sensitive upstream';
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => { throw new TypeError(transportDetail); }) as typeof fetch,
+  });
+  await assert.rejects(
+    () => adapter.applyApprovedIncomeUpdate(context, 'loan-guid', {
+      approvalEventId: '00000000-0000-4000-8000-000000000300',
+      fields: [{ fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: 'approved' }],
+    }),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN'
+      && error.retryable
+      && !`${error.message}\n${error.stack ?? ''}`.includes(transportDetail),
+  );
+});
+
+test('custom adapter maps rejected reconciliation reads to a retryable safe error without leaking transport text', async () => {
+  const transportDetail = 'socket reset for provider tenant borrower-secret';
+  const adapter = new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => { throw new DOMException(transportDetail, 'AbortError'); }) as typeof fetch,
+  });
+  await assert.rejects(
+    () => adapter.readFields(context, 'loan-guid', ['CX.FREEFLOW.APPROVAL.ID']),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'CONNECTOR_SERVICE_UNAVAILABLE'
+      && error.retryable
+      && !`${error.message}\n${error.stack ?? ''}`.includes(transportDetail),
+  );
+});
+
 // ECC-17: missing service auth and non-HTTPS origins fail closed.
 test('ECC-17: custom adapter fails closed without service auth or a TLS origin', () => {
   assert.throws(
@@ -119,4 +187,41 @@ test('signed service authentication permits only private Cloud Map HTTP origins'
     binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'http://connector.example.test' },
     serviceAuth: { kind: 'signed-hmac', serviceId: 'smoke', signingKey: 'test-key' },
   }), (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'CONNECTOR_SERVICE_URL_INVALID');
+});
+
+test('loan snapshot parser rejects negative money and control characters from the provider boundary', async () => {
+  const base = {
+    schemaVersion: 'encompass-loan-snapshot-v1',
+    sourceSystem: 'ENCOMPASS',
+    simulated: true,
+    loanGuid: 'loan-guid',
+    loan: { loanProgram: 'CONVENTIONAL', loanPurpose: 'PURCHASE', requestedAmount: 0 },
+    borrowers: [{
+      providerBorrowerId: 'borrower-1', role: 'BORROWER', givenName: 'Synthetic', familyName: 'Borrower',
+      employment: [{
+        providerEmploymentId: 'employment-1', employerName: 'Synthetic Employer', status: 'CURRENT',
+        baseMonthlyIncome: 0, variableMonthlyIncome: 0,
+      }],
+    }],
+  };
+  const adapterFor = (body: unknown) => new CustomConnectorAdapter({
+    binding: { ...FREEFLOW_DEV_CONNECTOR_BINDING, serviceBaseUrl: 'https://connector.example.test' },
+    serviceAuth: { authorizationHeader: 'Bearer service-token' },
+    fetch: (async () => Response.json(body)) as typeof fetch,
+  });
+  assert.equal((await adapterFor(base).retrieveLoanSnapshot(context, 'loan-guid')).loan.requestedAmount, 0);
+  for (const invalid of [
+    { ...base, loan: { ...base.loan, requestedAmount: -1 } },
+    { ...base, borrowers: [{ ...base.borrowers[0], givenName: 'Synthetic\nInjected' }] },
+    { ...base, borrowers: [{
+      ...base.borrowers[0],
+      employment: [{ ...base.borrowers[0].employment[0], variableMonthlyIncome: -0.01 }],
+    }] },
+  ]) {
+    await assert.rejects(
+      () => adapterFor(invalid).retrieveLoanSnapshot(context, 'loan-guid'),
+      (error: unknown) => error instanceof EncompassConnectorError
+        && error.safeCode === 'CONNECTOR_LOAN_INVALID',
+    );
+  }
 });

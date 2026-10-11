@@ -1,0 +1,270 @@
+{
+  "schemaVersion": "freeflow-simulated-encompass-round-trip-v1",
+  "classification": "SYNTHETIC_CONNECTOR_SIMULATOR_ONLY",
+  "realEncompassInteroperability": "NOT_CLAIMED",
+  "sourceSnapshotSchemaVersion": "encompass-loan-snapshot-v1",
+  "simulated": true,
+  "loanProjection": {
+    "schemaVersion": "freeflow-normalized-loan-v1",
+    "loanProgram": "CONVENTIONAL",
+    "borrowers": [
+      {
+        "borrowerKey": "borrower-1",
+        "ordinal": 0,
+        "role": "PRIMARY",
+        "employment": [
+          {
+            "employerName": "Synthetic Payroll LLC",
+            "employmentStatus": "CURRENT",
+            "monthlyIncome": "5600.00"
+          }
+        ]
+      },
+      {
+        "borrowerKey": "borrower-2",
+        "ordinal": 1,
+        "role": "CO_BORROWER"
+      }
+    ]
+  },
+  "documentRetrieval": {
+    "rawDocumentBytesPersisted": false,
+    "buffersErased": true,
+    "attachments": [
+      {
+        "attachmentId": "synthetic-income-document-1",
+        "sha256": "50eb5ac04498465000f569680a030df85c44dac939ba117411b43588e3a2ba2b",
+        "bytes": 807
+      },
+      {
+        "attachmentId": "synthetic-pack-form-1065-2025",
+        "sha256": "4f7b1ea6d86cfc087de9c6657afefb774830cec93f2fc37b68866cbe927e32ee",
+        "bytes": 979320
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-k1-1065-2025",
+        "sha256": "c7a0cb7ac7aecd75fd262afbbc8bcd363790653bb8a6616fbddcdc230cadfe90",
+        "bytes": 270367
+      },
+      {
+        "attachmentId": "synthetic-pack-paystub-usb-nates",
+        "sha256": "cb1e8465f79cd24e4d323ceec58d51016d37f8dc79bbdd50483b866c6f5995fd",
+        "bytes": 303949
+      },
+      {
+        "attachmentId": "synthetic-pack-w2-2021-nates",
+        "sha256": "0678ea430c4716a478e5367f1df565223dc3a64d15f0e4c3f0c6a03e0862b18e",
+        "bytes": 745178
+      },
+      {
+        "attachmentId": "synthetic-pack-w2-2021-coborrower",
+        "sha256": "0678ea430c4716a478e5367f1df565223dc3a64d15f0e4c3f0c6a03e0862b18e",
+        "bytes": 745178
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-e-2025",
+        "sha256": "ff14337f558406d5c5a8c533c4693be380de5d611d53d825fc4b5ccdbf5029f1",
+        "bytes": 195354
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-b-2025",
+        "sha256": "cd1af5599d84c66ea13adf2f6227811acfd83164391d0673274e5cb98c249dd7",
+        "bytes": 748
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-c-2025",
+        "sha256": "2fdb9af27e95e41b2ad283bb62c1940abe95a2118aba0d1c06e23bd17bcf72a7",
+        "bytes": 901
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-f-2025",
+        "sha256": "18b25453cef9d37c54e653fa2fd344f1d9b82194f396a80b57b1c863816047d9",
+        "bytes": 895
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-d-2025",
+        "sha256": "5a642705c53137707c5b098caec4a67a111544f031380da5336c7a85935c4194",
+        "bytes": 748
+      },
+      {
+        "attachmentId": "synthetic-pack-form-1120s-2025",
+        "sha256": "59fbd49915f2a5ea455e0a3b3bf284ba31ed422303a45e09ae36b72084b71be2",
+        "bytes": 1015
+      },
+      {
+        "attachmentId": "synthetic-pack-schedule-k1-1120s-2025",
+        "sha256": "b4ef854471dcdba0d2cab631b9f0f5ee80db6965d924735d0d79e4058b2c79b6",
+        "bytes": 966
+      },
+      {
+        "attachmentId": "synthetic-pack-form-1120-2025",
+        "sha256": "e9999553c366ae583a0c239df80cdd1eb841e065fe3d214d7db460e48e8863aa",
+        "bytes": 971
+      }
+    ]
+  },
+  "approvedPreview": {
+    "schemaVersion": "encompass-write-preview-v1",
+    "approvalEventId": "00000000-0000-4000-8000-000000000901",
+    "previewHash": "cfb826e94ff15f15a7f977a80285eb6f0bea820dfddee50a9d6959fa35687447",
+    "fieldNames": [
+      "CX.FREEFLOW.APPROVAL.ID",
+      "CX.FREEFLOW.ASSET.INCOME",
+      "CX.FREEFLOW.AUDIT.URL",
+      "CX.FREEFLOW.BORROWER.1.INCOME",
+      "CX.FREEFLOW.BORROWER.2.INCOME",
+      "CX.FREEFLOW.FORM.1065",
+      "CX.FREEFLOW.INCOME",
+      "CX.FREEFLOW.RENTAL",
+      "CX.FREEFLOW.SCH.C",
+      "CX.FREEFLOW.TRENDING",
+      "CX.FREEFLOW.W2.BASE",
+      "CX.FREEFLOW.W2.VARIABLE",
+      "CX.FREEFLOW.YEARS"
+    ]
+  },
+  "providerRevision": "synthetic-9778b4ebaa933c93",
+  "writeReadback": {
+    "schemaVersion": "encompass-field-readback-v1",
+    "allSucceeded": true,
+    "fields": [
+      {
+        "fieldName": "CX.FREEFLOW.APPROVAL.ID",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.ASSET.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.AUDIT.URL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.1.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.2.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.FORM.1065",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.RENTAL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.SCH.C",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.TRENDING",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.BASE",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.VARIABLE",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.YEARS",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      }
+    ]
+  },
+  "fieldStatusCoverage": {
+    "schemaVersion": "encompass-field-readback-v1",
+    "allSucceeded": false,
+    "fields": [
+      {
+        "fieldName": "CX.FREEFLOW.APPROVAL.ID",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.ASSET.INCOME",
+        "status": "UNAVAILABLE",
+        "reasonCode": "FIELD_UNAVAILABLE"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.AUDIT.URL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.1.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.BORROWER.2.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.FORM.1065",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.INCOME",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.RENTAL",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.SCH.C",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.TRENDING",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.BASE",
+        "status": "REJECTED",
+        "reasonCode": "PROVIDER_REJECTED"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.W2.VARIABLE",
+        "status": "CONFLICT",
+        "reasonCode": "VALUE_CONFLICT"
+      },
+      {
+        "fieldName": "CX.FREEFLOW.YEARS",
+        "status": "SUCCESS",
+        "reasonCode": "VALUE_CONFIRMED"
+      }
+    ]
+  },
+  "mutationCount": 1
+}

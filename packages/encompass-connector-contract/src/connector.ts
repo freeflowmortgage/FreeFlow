@@ -5,6 +5,7 @@ import type {
   EncompassConnectorContext,
   EncompassApprovedIncomeUpdate,
   EncompassWriteResult,
+  EncompassLoanSnapshot,
 } from './types';
 
 /**
@@ -13,6 +14,10 @@ import type {
  */
 export interface EncompassConnector {
   readonly kind: ConnectorKind;
+  retrieveLoanSnapshot(
+    context: EncompassConnectorContext,
+    loanGuid: string,
+  ): Promise<EncompassLoanSnapshot>;
   listActiveAttachments(
     context: EncompassConnectorContext,
     loanGuid: string,

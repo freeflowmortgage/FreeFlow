@@ -56,9 +56,13 @@ export function createEncompassHostBridge(script: EncompassScriptObject | undefi
       await hostLoan.setFields({ ...fields });
       await hostLoan.calculate();
       await hostLoan.commit();
-      const approvalId = fields['CX.FREEFLOW.APPROVAL.ID'];
-      if (!approvalId || await hostLoan.getField('CX.FREEFLOW.APPROVAL.ID') !== approvalId) {
-        throw new EncompassHostError('ENCOMPASS_COMMIT_NOT_CONFIRMED', 'Encompass did not confirm the approved result marker.');
+      const readback = await Promise.all(Object.entries(fields).map(async ([fieldName, expectedValue]) => ({
+        fieldName,
+        expectedValue,
+        actualValue: await hostLoan.getField(fieldName),
+      })));
+      if (readback.some(({ expectedValue, actualValue }) => actualValue !== expectedValue)) {
+        throw new EncompassHostError('ENCOMPASS_COMMIT_NOT_CONFIRMED', 'Encompass did not confirm every approved result field.');
       }
       return { loanGuid: expectedLoanGuid, fieldCount: Object.keys(fields).length, committed: true };
     },

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { EncompassConnectorError } from '@mortgage-pos/encompass-connector-contract';
+import {
+  EncompassConnectorError,
+  buildEncompassWritePreview,
+  compareEncompassFieldReadback,
+  executeApprovedIncomeRoundTrip,
+} from '@mortgage-pos/encompass-connector-contract';
 import {
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_ID,
   SYNTHETIC_FREEFLOW_DEV_ATTACHMENT_IDS,
@@ -26,6 +31,14 @@ const CONTEXT = {
   loanId: '00000000-0000-4000-8000-000000000201',
   correlationId: 'synthetic-unit-test',
 };
+
+const APPROVAL_ID = '00000000-0000-4000-8000-000000000901';
+const ROUND_TRIP_FIELDS = [
+  { fieldName: 'CX.FREEFLOW.APPROVAL.ID', value: APPROVAL_ID },
+  { fieldName: 'CX.FREEFLOW.W2.BASE', value: '4000.00' },
+  { fieldName: 'CX.FREEFLOW.W2.VARIABLE', value: '1600.00' },
+  { fieldName: 'CX.FREEFLOW.ASSET.INCOME', value: '1000.00' },
+] as const;
 
 test('synthetic freeflow-dev connector returns the in-memory W-2 and morning-pack fixtures', async () => {
   const connector = new SyntheticFreeflowDevConnector();
@@ -186,4 +199,123 @@ test('synthetic freeflow-dev connector rejects every other tenant, loan, and att
     ),
     (error: unknown) => error instanceof EncompassConnectorError && error.safeCode === 'SYNTHETIC_LOAN_NOT_FOUND',
   );
+});
+
+test('synthetic provider retrieves a deterministic versioned loan without SSN data', async () => {
+  const connector = new SyntheticFreeflowDevConnector();
+  const first = await connector.retrieveLoanSnapshot(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
+  const second = await connector.retrieveLoanSnapshot(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID);
+  assert.deepEqual(first, second);
+  assert.equal(first.schemaVersion, 'encompass-loan-snapshot-v1');
+  assert.equal(first.simulated, true);
+  assert.deepEqual(first.borrowers.map((borrower) => borrower.role), ['BORROWER', 'COBORROWER']);
+  assert.equal(first.borrowers[0].employment[0].baseMonthlyIncome, 4000);
+  const serialized = JSON.stringify(first);
+  assert.equal(/socialSecurity|ssn|taxIdentification/i.test(serialized), false);
+  await assert.rejects(
+    () => connector.retrieveLoanSnapshot(
+      { ...CONTEXT, tenantId: crypto.randomUUID() },
+      SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    ),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'SYNTHETIC_LOAN_NOT_FOUND',
+  );
+});
+
+test('explicit preview approval is required and repeated writes are idempotent', async () => {
+  const connector = new SyntheticFreeflowDevConnector();
+  const preview = buildEncompassWritePreview({ approvalEventId: APPROVAL_ID, fields: ROUND_TRIP_FIELDS });
+  await assert.rejects(
+    () => executeApprovedIncomeRoundTrip({
+      connector,
+      context: CONTEXT,
+      loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+      preview,
+      reviewerApproval: { approvalEventId: APPROVAL_ID, previewHash: '0'.repeat(64) },
+    }),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'ENCOMPASS_WRITE_APPROVAL_MISMATCH',
+  );
+  assert.equal(connector.mutationCount, 0);
+
+  const first = await executeApprovedIncomeRoundTrip({
+    connector,
+    context: CONTEXT,
+    loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    preview,
+    reviewerApproval: { approvalEventId: APPROVAL_ID, previewHash: preview.previewHash },
+  });
+  const second = await executeApprovedIncomeRoundTrip({
+    connector,
+    context: CONTEXT,
+    loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    preview,
+    reviewerApproval: { approvalEventId: APPROVAL_ID, previewHash: preview.previewHash },
+  });
+  assert.equal(first.readback.allSucceeded, true);
+  assert.deepEqual(second, first);
+  assert.equal(connector.mutationCount, 1);
+  assert.equal(connector.writeAttemptCount, 2);
+  assert.equal(JSON.stringify(first.readback).includes('4000.00'), false);
+  assert.doesNotMatch(JSON.stringify(first.readback), /ValueSha256/);
+});
+
+test('simulator reports rejected, unavailable, and conflicting fields independently', async () => {
+  const connector = new SyntheticFreeflowDevConnector({
+    fieldBehaviors: {
+      'CX.FREEFLOW.W2.BASE': 'REJECTED',
+      'CX.FREEFLOW.W2.VARIABLE': 'CONFLICT',
+      'CX.FREEFLOW.ASSET.INCOME': 'UNAVAILABLE',
+    },
+  });
+  const preview = buildEncompassWritePreview({ approvalEventId: APPROVAL_ID, fields: ROUND_TRIP_FIELDS });
+  const result = await executeApprovedIncomeRoundTrip({
+    connector,
+    context: CONTEXT,
+    loanGuid: SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    preview,
+    reviewerApproval: { approvalEventId: APPROVAL_ID, previewHash: preview.previewHash },
+  });
+  assert.equal(result.readback.allSucceeded, false);
+  assert.deepEqual(Object.fromEntries(result.readback.fields.map((field) => [field.fieldName, field.status])), {
+    'CX.FREEFLOW.APPROVAL.ID': 'SUCCESS',
+    'CX.FREEFLOW.ASSET.INCOME': 'UNAVAILABLE',
+    'CX.FREEFLOW.W2.BASE': 'REJECTED',
+    'CX.FREEFLOW.W2.VARIABLE': 'CONFLICT',
+  });
+});
+
+test('unknown outcome and transient read retry reconcile without a duplicate mutation', async () => {
+  const connector = new SyntheticFreeflowDevConnector({
+    unknownWriteOutcomeOnce: true,
+    readFailuresBeforeSuccess: 1,
+  });
+  const preview = buildEncompassWritePreview({ approvalEventId: APPROVAL_ID, fields: ROUND_TRIP_FIELDS });
+  await assert.rejects(
+    () => connector.applyApprovedIncomeUpdate(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, {
+      approvalEventId: preview.approvalEventId,
+      fields: preview.fields,
+    }),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'ENCOMPASS_WRITE_OUTCOME_UNKNOWN',
+  );
+  assert.equal(connector.mutationCount, 1);
+  await assert.rejects(
+    () => connector.readFields(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, preview.fields.map((field) => field.fieldName)),
+    (error: unknown) => error instanceof EncompassConnectorError
+      && error.safeCode === 'SYNTHETIC_READ_TIMEOUT'
+      && error.retryable,
+  );
+  const actual = await connector.readFields(
+    CONTEXT,
+    SYNTHETIC_FREEFLOW_DEV_LOAN_GUID,
+    preview.fields.map((field) => field.fieldName),
+  );
+  assert.equal(compareEncompassFieldReadback(preview.fields, actual).allSucceeded, true);
+  const replay = await connector.applyApprovedIncomeUpdate(CONTEXT, SYNTHETIC_FREEFLOW_DEV_LOAN_GUID, {
+    approvalEventId: preview.approvalEventId,
+    fields: preview.fields,
+  });
+  assert.match(replay.providerRevision ?? '', /^synthetic-/);
+  assert.equal(connector.mutationCount, 1);
 });

@@ -1,0 +1,68 @@
+{
+  "evidenceSchemaVersion": "freeflow-live-acceptance-manifest-v1",
+  "runId": "20261011-live-a228f69-01",
+  "sourceRevision": "a228f69f045157b2a5b50c9bc25997288e369eba",
+  "fixtureSha256": "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf",
+  "loanIdentifierClassification": "SYNTHETIC_TEST_ONLY",
+  "businessApiMocked": false,
+  "rawDocumentPersisted": false,
+  "rawOcrPersisted": false,
+  "artifacts": [
+    {
+      "name": "approved-income.json",
+      "bytes": 2575,
+      "sha256": "573f6a5672995cd29f545c2e06376e977f5271e19f974cccb82d206a88809da6"
+    },
+    {
+      "name": "approved-income.mismo.xml",
+      "bytes": 5527,
+      "sha256": "67771e36477cdb2f84ebf767991bebbfc811ff06a90951f2cf7ece65527359b9"
+    },
+    {
+      "name": "approved-income-summary.pdf",
+      "bytes": 5198,
+      "sha256": "ea0a74c0cbbfd2070dcbfae742abd6f8be8d573a66b1af6ea30cda0767a53474"
+    },
+    {
+      "name": "cross-tenant-result.json",
+      "bytes": 354,
+      "sha256": "dbb89de787a7d5161170c5ecec077b410773e037d046c650a11a4effb7dff69d"
+    },
+    {
+      "name": "main-result.json",
+      "bytes": 842,
+      "sha256": "889fb28fc42d744cb746132b38637c293fc3df4ec762b8df40654290ec21f50a"
+    },
+    {
+      "name": "processing-validation-report.json",
+      "bytes": 1604,
+      "sha256": "b2cb03579a2ce21dbefb69ee499430c41f82d3d88d5068644073328896bfb086"
+    }
+  ],
+  "sourceFingerprints": {
+    "liveSpec": {
+      "sha256": "dab8e9743b48e9428e79c670af606d4a32e4f2698f7fe9b57365ea569df0ef57",
+      "bytes": 30121
+    },
+    "playwrightConfig": {
+      "sha256": "03294ae1f2f977b74011bb6527c498d14b13b1a06bcc7b6dd9f96c9367690ffa",
+      "bytes": 2357
+    },
+    "localGateway": {
+      "sha256": "efe6954a3d67b57096b2d2029746600f18a2a8c8b1e1f02733e159a12603b1d9",
+      "bytes": 2489
+    },
+    "tenantBootstrap": {
+      "sha256": "b80c8e82393f2a0b4785ec98c4c63e8ba252254dccea31b7f68a5b552d9e6f4f",
+      "bytes": 3038
+    },
+    "fixtureGenerator": {
+      "sha256": "2f8944f42dcdeb642b385189579cb52576496860b393637540f996de441e7284",
+      "bytes": 8560
+    },
+    "dependencyLock": {
+      "sha256": "73721ff945bb11901d3ae2ec03cd036535b1750470688d7f85d250453205f49a",
+      "bytes": 211143
+    }
+  }
+}

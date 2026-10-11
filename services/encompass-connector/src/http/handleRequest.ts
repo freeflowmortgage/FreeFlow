@@ -38,6 +38,7 @@ export async function handleConnectorRequest(
 
   if (
     path !== CONNECTOR_SERVICE_CONTRACT.listPath
+    && path !== CONNECTOR_SERVICE_CONTRACT.retrieveLoanPath
     && path !== CONNECTOR_SERVICE_CONTRACT.downloadPath
     && path !== CONNECTOR_SERVICE_CONTRACT.applyUpdatePath
     && path !== CONNECTOR_SERVICE_CONTRACT.readFieldsPath
@@ -103,6 +104,10 @@ export async function handleConnectorRequest(
   }
 
   try {
+    if (path === CONNECTOR_SERVICE_CONTRACT.retrieveLoanPath) {
+      return Response.json(await deps.connector.retrieveLoanSnapshot(context, loanGuid));
+    }
+
     if (path === CONNECTOR_SERVICE_CONTRACT.listPath) {
       const attachments = await deps.connector.listActiveAttachments(context, loanGuid);
       return Response.json({ attachments });
@@ -114,7 +119,11 @@ export async function handleConnectorRequest(
       const fields = readFields(body.fields);
       if (!UUID.test(approvalEventId) || !fields) return safeErrorResponse(400, 'CONNECTOR_REQUEST_INVALID');
       const result = await deps.connector.applyApprovedIncomeUpdate(context, loanGuid, { approvalEventId, fields });
-      return Response.json({ applied: true, ...(result.providerRevision ? { providerRevision: result.providerRevision } : {}) });
+      return Response.json({
+        applied: true,
+        ...(result.providerRevision ? { providerRevision: result.providerRevision } : {}),
+        ...(result.fieldResults ? { fieldResults: result.fieldResults } : {}),
+      });
     }
 
     if (path === CONNECTOR_SERVICE_CONTRACT.readFieldsPath) {
@@ -151,7 +160,7 @@ export async function handleConnectorRequest(
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const FIELD_NAME = /^(?:CX\.FREEFLOW\.[A-Z0-9.]+|10[1-7])$/;
+const FIELD_NAME = /^(?:CX\.[A-Z0-9][A-Z0-9._-]{0,99}|10[1-7])$/;
 
 function readFieldNames(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 32) return null;

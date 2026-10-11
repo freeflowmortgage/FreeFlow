@@ -1,0 +1,42 @@
+{
+  "certificationBoundary": "POST_PARSE_SIMULATOR",
+  "schemaVersion": "freeflow-certification-result-v1",
+  "artifactClass": "CERTIFICATION_HARNESS_ONLY",
+  "fixtureVersion": "encompass-certification-v1",
+  "loanId": "00000000-0000-4000-8000-000000000200",
+  "loanProgram": "CONVENTIONAL",
+  "borrowerRoster": [
+    {
+      "borrowerKey": "borrower-1",
+      "ordinal": 0,
+      "role": "PRIMARY"
+    },
+    {
+      "borrowerKey": "borrower-2",
+      "ordinal": 1,
+      "role": "CO_BORROWER"
+    }
+  ],
+  "result": {
+    "qualifyingMonthlyIncome": 21600,
+    "borrowerIncome": {
+      "borrower-1": "5600.00",
+      "borrower-2": "16000.00"
+    },
+    "trendingResult": "SINGLE_YEAR",
+    "yearsAnalyzed": [
+      2025
+    ],
+    "mapperMonthly": {
+      "w2Base": 4000,
+      "w2Variable": 1600,
+      "scheduleC": 8000,
+      "form1065": 5000,
+      "rental": 2000,
+      "asset": 1000
+    },
+    "reconciliationGaps": [
+      "PAYSTUB_W2_RECONCILED"
+    ]
+  }
+}

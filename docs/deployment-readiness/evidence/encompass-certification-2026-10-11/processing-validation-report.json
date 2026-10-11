@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "freeflow-encompass-certification-report-v2",
+  "boundary": "POST_PARSE_SIMULATOR",
+  "fixtureVersion": "encompass-certification-v1",
+  "sourceRevision": {
+    "baseCommit": "646201800446b250c089c782f6f9871b9c6f28d7",
+    "executionSource": "CURRENT_WORKTREE",
+    "workingTreeInputs": [
+      {
+        "path": "apps/underwriter-portal/scripts/encompass-certification.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "94f34c8c476ebab82d9f5acf69d1bbea603dd9b98bd04d803839abf9389cb9c8"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertificationHarness.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "04339fcf4f7bbdc14f006da74b08e2d6fe7f1623ceba0c9de9c03eedd5baba9e"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/encompassCertification.test.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "41442dd0bcc4719414fe31798771c656232eb6050a7316b950a035970ae03464"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/fixtures/encompass-certification-v1.json",
+        "canonicalization": "UTF8_LF",
+        "sha256": "a5d5a9209cce554c75ef929d29b1599979bdf23478d12f1bfd45193a951e41f1"
+      },
+      {
+        "path": "services/encompass-connector/src/connector/syntheticFreeflowDevConnector.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "0f6c5375af8db1527877fbb0a5a96e89d3c957cc67c65b3d27993064841e1d18"
+      },
+      {
+        "path": "packages/encompass-connector-contract/src/roundTrip.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "7631886e457d56d0904e1f46670f2bb2e5997af82261efc4bf44be85e71ca634"
+      },
+      {
+        "path": "packages/mortgage-engine/src/normalizedLoan.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "c2125c18a8ffc9ea00132c19aa72f7945dfe661afe94aeefb9df66cee8254d37"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/normalizeImportedLoan.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "85db577c92d3c7b7c5a4deb5a399ea43083a61fce97ee66a33e2f2102c431c69"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/syncPreview.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "6341cb6a42f6bf7c3a6bca6380fc2137fce4e3bd835c16e78d8fdde8a410cbe4"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/integrations/encompass/syncWorker.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "3a5fb85a792e262229ba024c9f0c76690cd2539c26edf05e7bdd4780e13fc1ad"
+      },
+      {
+        "path": "apps/underwriter-portal/src/server/exports/approvedIncomeExports.ts",
+        "canonicalization": "UTF8_LF",
+        "sha256": "97d22e78775da2345fcfd650006217491de12466246edd139c1b798e5eb889c1"
+      }
+    ]
+  },
+  "results": {
+    "integratedPostParseProjectionCalculation": "PASS",
+    "standalonePostParseProjectionCalculation": "PASS",
+    "financialEquivalence": "PASS",
+    "jsonHarnessArtifact": "PASS",
+    "summaryHarnessArtifact": "PASS",
+    "exactCurrentMapperOutput": "PASS",
+    "approvedFieldContractCompleteness": "PASS",
+    "inMemoryFieldProjectionComparison": "PASS",
+    "simulatedEncompassLoanRetrieval": "PASS",
+    "simulatedEncompassDocumentRetrieval": "PASS",
+    "simulatedEncompassApprovedWriteReadback": "PASS",
+    "simulatedEncompassPerFieldStatuses": "PASS"
+  },
+  "mappingGaps": [],
+  "capabilitiesOutsideHarness": [
+    "real Encompass authentication, retrieval, document download, writeback, and readback",
+    "production application import orchestration",
+    "server-authoritative database-backed write preview and immutable sync persistence",
+    "ambiguous provider-write reconciliation",
+    "customer standalone loan creation and approved export routes",
+    "MISMO XML generation or profile/XSD validation",
+    "provider error-log redaction",
+    "hosted full-field readback"
+  ],
+  "warnings": [
+    "PASS results in this artifact are operations asserted during this simulator execution only.",
+    "The harness starts with deterministic post-parse, persisted-extraction-shaped data. It links no PDF bytes and does not execute pull, upload, parsing, persistence, or review boundaries.",
+    "The in-memory field projection is not connector writeback, readback, or an Encompass installation.",
+    "The simulated connector round trip is deterministic local evidence only and is not verified interoperability with a real Encompass installation.",
+    "Capabilities listed outside the harness require their own test or inspection evidence and receive no PASS status from this generator.",
+    "No MISMO XML artifact is produced for this fixture; a standalone XML generated from a different fixture cannot establish this fixture's XML consistency."
+  ]
+}

@@ -1,127 +1,461 @@
 import { randomUUID } from 'node:crypto';
 import { DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
-import { Prisma } from '@prisma/client';
+import { Prisma, type EncompassDocumentPullStatus } from '@prisma/client';
 import { CustomConnectorAdapter, EncompassConnectorError, type EncompassConnector } from '@mortgage-pos/encompass-connector-contract';
 import { prisma, setTenantContext } from '../../database/client';
+import { appendAuditEvent, AUDIT_ACTIONS, hashAuditResult } from '../../audit/appendEvent';
+import type { RequestContext } from '../../auth/requestContext';
 import type { DocumentPullQueueMessage } from './documentPull';
 import { parseWithIncomeService } from './encompassApi';
-import { runDocumentPullJob, type ClaimedDocumentPull, type DocumentPullWorkerDependencies } from './documentPullWorker';
+import {
+  DOCUMENT_PULL_MAX_AGGREGATE_BYTES,
+  DOCUMENT_PULL_MAX_AGGREGATE_PAGES,
+  runDocumentPullJob,
+  validateAggregateDocumentLimits,
+  type ClaimedDocumentPull,
+  type DocumentPullWorkerDependencies,
+} from './documentPullWorker';
 import { isUniqueViolation, logDocumentPullPersistRecovery } from './documentPullFailure';
 import { emitOperationalEvent } from '../../observability/operationalEvents';
+import {
+  documentTargetsEqual,
+  restorePersistedDocumentPullSelection,
+  type EncompassDocumentTarget,
+} from './documentPullSelection';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WORKER_PRINCIPAL_ID = '00000000-0000-4000-8000-000000000001';
+export const DOCUMENT_PULL_MAX_ATTEMPTS = 5;
+export const DOCUMENT_PULL_VISIBILITY_TIMEOUT_SECONDS = 900;
+export const DOCUMENT_PULL_STALE_AFTER_MS = 14 * 60_000;
 
-export function createRuntimeDependencies(environment: NodeJS.ProcessEnv = process.env): DocumentPullWorkerDependencies {
+type DocumentPullClaimState = Readonly<{
+  status: 'QUEUED' | 'RETRYABLE_FAILURE' | 'IN_PROGRESS';
+  attemptCount: number;
+  startedAt: Date | null;
+  encompassIntegrationMode: string;
+}>;
+
+export function documentPullClaimDecision(
+  state: DocumentPullClaimState,
+  nowMs = Date.now(),
+): 'CLAIM' | 'ACTIVE' | 'EXHAUSTED' | 'INVALID' | 'WRONG_INTEGRATION_MODE' {
+  if (!Number.isSafeInteger(state.attemptCount) || state.attemptCount < 0) return 'INVALID';
+  if (state.encompassIntegrationMode !== 'CUSTOM_CONNECTOR') return 'WRONG_INTEGRATION_MODE';
+  if (state.status === 'IN_PROGRESS') {
+    if (!state.startedAt || !Number.isFinite(state.startedAt.getTime())) return 'INVALID';
+    if (state.startedAt.getTime() > nowMs - DOCUMENT_PULL_STALE_AFTER_MS) return 'ACTIVE';
+  }
+  return state.attemptCount >= DOCUMENT_PULL_MAX_ATTEMPTS ? 'EXHAUSTED' : 'CLAIM';
+}
+
+type RuntimeDocumentPull = ClaimedDocumentPull & Readonly<{
+  target: EncompassDocumentTarget;
+}>;
+
+type ClaimFailure = Readonly<{ kind: 'FAILED'; safeErrorCode: string }>;
+
+const documentPullAuthorizationSelect = {
+  workingLoanVersion: true,
+  selectedAttachmentIds: true,
+  selectionSchemaVersion: true,
+  selectionHash: true,
+  selectionTargetIntegrationMode: true,
+  selectionTargetLenderId: true,
+  selectionTargetDeploymentId: true,
+  selectionTargetEncompassGuid: true,
+  loanApplication: { select: { version: true, encompassGuid: true, encompassIntegrationMode: true } },
+  tenant: { select: {
+    configurations: { select: { enableEncompassDocumentPull: true } },
+    encompassConnectorBinding: { select: { lenderId: true, deploymentId: true, isEnabled: true } },
+  } },
+} as const satisfies Prisma.EncompassDocumentPullJobSelect;
+
+type DocumentPullAuthorizationRecord = Prisma.EncompassDocumentPullJobGetPayload<{
+  select: typeof documentPullAuthorizationSelect;
+}>;
+
+export type DocumentPullRuntimeInfrastructure = Readonly<{
+  withTransaction<T>(operation: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  setTenantContext: typeof setTenantContext;
+  createConnector(input: Readonly<{
+    serviceBaseUrl: string;
+    serviceId: string;
+    signingKey: string;
+    lenderId: string;
+    deploymentId: string;
+  }>): EncompassConnector;
+  parse(bytes: Uint8Array, parserUrl: string): ReturnType<typeof parseWithIncomeService>;
+}>;
+
+const defaultRuntimeInfrastructure: DocumentPullRuntimeInfrastructure = {
+  withTransaction: (operation) => prisma.$transaction(operation),
+  setTenantContext,
+  createConnector: (input) => new CustomConnectorAdapter({
+    binding: {
+      kind: 'custom', lenderId: input.lenderId, deploymentId: input.deploymentId,
+      serviceBaseUrl: input.serviceBaseUrl,
+    },
+    serviceAuth: { kind: 'signed-hmac', serviceId: input.serviceId, signingKey: input.signingKey },
+  }),
+  parse: (bytes, parserUrl) => parseWithIncomeService(bytes, { parserUrl }),
+};
+
+export function createRuntimeDependencies(
+  environment: NodeJS.ProcessEnv = process.env,
+  infrastructure: DocumentPullRuntimeInfrastructure = defaultRuntimeInfrastructure,
+): DocumentPullWorkerDependencies {
   const parserUrl = required(environment.DOC_PARSER_SERVICE_URL, 'DOC_PARSER_SERVICE_URL');
   const serviceBaseUrl = required(environment.ENCOMPASS_CONNECTOR_SERVICE_URL, 'ENCOMPASS_CONNECTOR_SERVICE_URL');
   const serviceId = required(environment.ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID, 'ENCOMPASS_CONNECTOR_SIGNED_SERVICE_ID');
   const signingKey = required(environment.ENCOMPASS_CONNECTOR_SIGNING_KEY, 'ENCOMPASS_CONNECTOR_SIGNING_KEY');
   const clients = new Map<string, EncompassConnector>();
 
+  const clientKey = (job: ClaimedDocumentPull) => `${job.jobId}:${job.claimToken}`;
   const clientFor = (job: ClaimedDocumentPull) => {
-    let client = clients.get(job.jobId);
+    const key = clientKey(job);
+    let client = clients.get(key);
     if (!client) {
-      client = new CustomConnectorAdapter({
-        binding: {
-          kind: 'custom',
-          lenderId: job.lenderId,
-          deploymentId: job.deploymentId,
-          serviceBaseUrl,
-        },
-        serviceAuth: { kind: 'signed-hmac', serviceId, signingKey },
+      client = infrastructure.createConnector({
+        lenderId: job.lenderId,
+        deploymentId: job.deploymentId,
+        serviceBaseUrl,
+        serviceId,
+        signingKey,
       });
-      clients.set(job.jobId, client);
+      clients.set(key, client);
     }
     return client;
   };
 
   return {
-    claim: async (message) => prisma.$transaction(async (transaction) => {
-      await setTenantContext(transaction, { tenantId: message.tenantId, principalId: WORKER_PRINCIPAL_ID });
-      const claimWhere: Prisma.EncompassDocumentPullJobWhereInput = {
-        id: message.jobId,
-        tenantId: message.tenantId,
-        loanId: message.loanId,
-        expectedLoanVersion: message.expectedLoanVersion,
-        correlationId: message.correlationId,
-        status: { in: ['QUEUED', 'RETRYABLE_FAILURE'] },
-        attemptCount: { lt: 5 },
-      };
-      const record = await transaction.encompassDocumentPullJob.findFirst({
-        where: claimWhere,
+    claim: async (message) => {
+      const outcome = await infrastructure.withTransaction<RuntimeDocumentPull | ClaimFailure | null>(async (transaction) => {
+        await infrastructure.setTenantContext(transaction, { tenantId: message.tenantId, principalId: WORKER_PRINCIPAL_ID });
+        const identityWhere: Prisma.EncompassDocumentPullJobWhereInput = {
+          id: message.jobId,
+          tenantId: message.tenantId,
+          loanId: message.loanId,
+          expectedLoanVersion: message.expectedLoanVersion,
+          correlationId: message.correlationId,
+        };
+        const record = await transaction.encompassDocumentPullJob.findFirst({
+          where: { ...identityWhere, status: { in: ['QUEUED', 'RETRYABLE_FAILURE', 'IN_PROGRESS'] } },
+          select: {
+            id: true,
+            tenantId: true,
+            loanId: true,
+            status: true,
+            attemptCount: true,
+            startedAt: true,
+            claimToken: true,
+            requestedByUserId: true,
+            expectedLoanVersion: true,
+            correlationId: true,
+            loanApplication: { select: { version: true, encompassGuid: true, encompassIntegrationMode: true } },
+            selectedAttachmentIds: true,
+            processedAttachmentIds: true,
+            processedByteCount: true,
+            processedPageCount: true,
+            workingLoanVersion: true,
+            selectionSchemaVersion: true,
+            selectionHash: true,
+            selectionTargetIntegrationMode: true,
+            selectionTargetLenderId: true,
+            selectionTargetDeploymentId: true,
+            selectionTargetEncompassGuid: true,
+            tenant: { select: {
+              configurations: { select: { enableEncompassDocumentPull: true } },
+              encompassConnectorBinding: { select: { lenderId: true, deploymentId: true, isEnabled: true } },
+            } },
+          },
+        });
+        if (!record) return null;
+        if (!isDocumentPullClaimStatus(record.status)) return null;
+        const claimWhere: Prisma.EncompassDocumentPullJobWhereInput = {
+          ...identityWhere,
+          status: record.status,
+          attemptCount: record.attemptCount,
+          startedAt: record.startedAt,
+          claimToken: record.claimToken,
+          workingLoanVersion: record.workingLoanVersion,
+          processedAttachmentIds: { equals: record.processedAttachmentIds },
+          processedByteCount: record.processedByteCount,
+          processedPageCount: record.processedPageCount,
+        };
+        const claimDecision = documentPullClaimDecision({
+          status: record.status,
+          attemptCount: record.attemptCount,
+          startedAt: record.startedAt,
+          encompassIntegrationMode: record.loanApplication.encompassIntegrationMode,
+        });
+        if (claimDecision === 'ACTIVE') return null;
+        if (claimDecision === 'EXHAUSTED' || claimDecision === 'INVALID' || claimDecision === 'WRONG_INTEGRATION_MODE') {
+          const safeErrorCode = claimDecision === 'EXHAUSTED'
+            ? 'DOCUMENT_PULL_RETRY_LIMIT_REACHED'
+            : claimDecision === 'WRONG_INTEGRATION_MODE'
+              ? 'ENCOMPASS_CUSTOM_CONNECTOR_REQUIRED'
+              : 'DOCUMENT_PULL_CLAIM_STATE_INVALID';
+          return failDocumentPullClaim(transaction, record, claimWhere, safeErrorCode);
+        }
+        const selection = restorePersistedDocumentPullSelection({
+          tenantId: record.tenantId,
+          loanId: record.loanId,
+          schemaVersion: record.selectionSchemaVersion,
+          hash: canonicalStoredHash(record.selectionHash),
+          targetIntegrationMode: record.selectionTargetIntegrationMode,
+          targetLenderId: record.selectionTargetLenderId,
+          targetDeploymentId: record.selectionTargetDeploymentId,
+          targetEncompassGuid: record.selectionTargetEncompassGuid,
+          attachmentIds: record.selectedAttachmentIds,
+        });
+        if (!selection || !validDocumentProgress(
+          record.selectedAttachmentIds,
+          record.processedAttachmentIds,
+          record.workingLoanVersion,
+          record.processedByteCount,
+          record.processedPageCount,
+        )) {
+          return failDocumentPullClaim(transaction, record, claimWhere, 'ENCOMPASS_DOCUMENT_SELECTION_INVALID');
+        }
+        const configuration = record.tenant.configurations;
+        if (record.loanApplication.version !== record.workingLoanVersion) {
+          return failDocumentPullClaim(transaction, record, claimWhere, 'STALE_LOAN_VERSION');
+        }
+        const binding = record.tenant.encompassConnectorBinding;
+        if (!configuration?.enableEncompassDocumentPull || !binding?.isEnabled || !record.loanApplication.encompassGuid) {
+          return failDocumentPullClaim(transaction, record, claimWhere, 'ENCOMPASS_CONFIGURATION_INCOMPLETE');
+        }
+        const currentTarget: EncompassDocumentTarget = {
+          integrationMode: 'CUSTOM_CONNECTOR',
+          lenderId: binding.lenderId,
+          deploymentId: binding.deploymentId,
+          encompassLoanGuid: record.loanApplication.encompassGuid,
+        };
+        if (!documentTargetsEqual(selection.target, currentTarget)) {
+          return failDocumentPullClaim(transaction, record, claimWhere, 'ENCOMPASS_DOCUMENT_TARGET_CHANGED');
+        }
+        const claimToken = randomUUID();
+        const claimed = await transaction.encompassDocumentPullJob.updateMany({
+          where: claimWhere,
+          data: {
+            status: 'IN_PROGRESS',
+            attemptCount: { increment: 1 },
+            safeErrorCode: null,
+            startedAt: new Date(),
+            claimToken,
+          },
+        });
+        if (claimed.count !== 1) return null;
+        return {
+          jobId: record.id,
+          tenantId: record.tenantId,
+          loanId: record.loanId,
+          correlationId: message.correlationId,
+          requestedByUserId: record.requestedByUserId,
+          expectedLoanVersion: record.expectedLoanVersion,
+          claimToken,
+          encompassLoanGuid: selection.target.encompassLoanGuid,
+          lenderId: selection.target.lenderId,
+          deploymentId: selection.target.deploymentId,
+          totalAttachmentCount: selection.attachmentIds.length,
+          processedCount: record.processedAttachmentIds.length,
+          processedByteCount: record.processedByteCount,
+          processedPageCount: record.processedPageCount,
+          selectedAttachmentIds: selection.attachmentIds.filter((id) => !record.processedAttachmentIds.includes(id)),
+          target: selection.target,
+        } satisfies RuntimeDocumentPull;
+      });
+      if (!outcome) return null;
+      if ('kind' in outcome) {
+        emitOperationalEvent('document_pull_failure', outcome.safeErrorCode);
+        return null;
+      }
+      return outcome;
+    },
+    listAttachments: async (job) => {
+      await assertDocumentPullTargetAuthorized(job as RuntimeDocumentPull, infrastructure);
+      return clientFor(job).listActiveAttachments(job, job.encompassLoanGuid);
+    },
+    download: async (job, attachmentId) => {
+      await assertDocumentPullTargetAuthorized(job as RuntimeDocumentPull, infrastructure);
+      return clientFor(job).downloadOriginalAttachment(job, job.encompassLoanGuid, attachmentId);
+    },
+    parse: async (bytes) => infrastructure.parse(bytes, parserUrl),
+    saveResult: async (job, result) => infrastructure.withTransaction(async (transaction) => {
+      await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+      const progress = await transaction.encompassDocumentPullJob.findFirst({
+        where: { id: job.jobId, tenantId: job.tenantId, status: 'IN_PROGRESS', claimToken: job.claimToken },
         select: {
-          id: true,
-          tenantId: true,
-          loanId: true,
-          loanApplication: { select: { version: true, encompassGuid: true } },
+          workingLoanVersion: true,
           selectedAttachmentIds: true,
+          processedAttachmentIds: true,
+          processedByteCount: true,
+          processedPageCount: true,
+          selectionSchemaVersion: true,
+          selectionHash: true,
+          selectionTargetIntegrationMode: true,
+          selectionTargetLenderId: true,
+          selectionTargetDeploymentId: true,
+          selectionTargetEncompassGuid: true,
+          loanApplication: { select: { version: true, encompassGuid: true, encompassIntegrationMode: true } },
           tenant: { select: {
             configurations: { select: { enableEncompassDocumentPull: true } },
             encompassConnectorBinding: { select: { lenderId: true, deploymentId: true, isEnabled: true } },
           } },
         },
       });
-      if (!record) return null;
-      const configuration = record.tenant.configurations;
-      if (record.loanApplication.version !== message.expectedLoanVersion) {
-        await transaction.encompassDocumentPullJob.updateMany({
-          where: claimWhere,
-          data: { status: 'FAILED', safeErrorCode: 'STALE_LOAN_VERSION', completedAt: new Date() },
-        });
-        return null;
+      if (!progress || !validDocumentProgress(
+        progress.selectedAttachmentIds,
+        progress.processedAttachmentIds,
+        progress.workingLoanVersion,
+        progress.processedByteCount,
+        progress.processedPageCount,
+      ) || !progress.selectedAttachmentIds.includes(result.attachmentId)
+        || progress.processedAttachmentIds.includes(result.attachmentId)
+        || !Number.isSafeInteger(result.byteCount) || result.byteCount < 1
+        || !Number.isSafeInteger(result.parsed.pageCount) || result.parsed.pageCount < 1) {
+        throw new EncompassConnectorError('DOCUMENT_PULL_CLAIM_LOST', 'The document pull claim is no longer current.', false);
       }
-      const binding = record.tenant.encompassConnectorBinding;
-      if (!configuration?.enableEncompassDocumentPull || !binding?.isEnabled || !record.loanApplication.encompassGuid
-        || record.selectedAttachmentIds.length < 1) {
-        await transaction.encompassDocumentPullJob.updateMany({
-          where: claimWhere,
-          data: { status: 'FAILED', safeErrorCode: 'ENCOMPASS_CONFIGURATION_INCOMPLETE', completedAt: new Date() },
-        });
-        return null;
+      assertAuthorizedDocumentPullRecord(job as RuntimeDocumentPull, progress);
+      const processedByteCount = progress.processedByteCount + result.byteCount;
+      const processedPageCount = progress.processedPageCount + result.parsed.pageCount;
+      validateAggregateDocumentLimits({
+        attachmentCount: progress.selectedAttachmentIds.length,
+        bytes: processedByteCount,
+        pages: processedPageCount,
+        elapsedMs: 0,
+      });
+      const nextLoanVersion = await persistParsedExtraction(
+        transaction,
+        job,
+        result,
+        'WORKER',
+        progress.workingLoanVersion!,
+      );
+      if (typeof nextLoanVersion !== 'number' || !Number.isSafeInteger(nextLoanVersion) || nextLoanVersion < 1) {
+        throw new EncompassConnectorError('DOCUMENT_PULL_PROGRESS_INVALID', 'The document pull progress is invalid.', false);
       }
-      const claimed = await transaction.encompassDocumentPullJob.updateMany({
-        where: claimWhere,
-        data: {
+      const currentAuthorization = await transaction.encompassDocumentPullJob.findFirst({
+        where: { id: job.jobId, tenantId: job.tenantId, status: 'IN_PROGRESS', claimToken: job.claimToken },
+        select: documentPullAuthorizationSelect,
+      });
+      if (!currentAuthorization) {
+        throw new EncompassConnectorError('DOCUMENT_PULL_CLAIM_LOST', 'The document pull claim is no longer current.', false);
+      }
+      assertAuthorizedDocumentPullRecord(job as RuntimeDocumentPull, currentAuthorization, nextLoanVersion);
+      const processedAttachmentIds = [...progress.processedAttachmentIds, result.attachmentId];
+      const advanced = await transaction.encompassDocumentPullJob.updateMany({
+        where: {
+          id: job.jobId,
+          tenantId: job.tenantId,
           status: 'IN_PROGRESS',
-          attemptCount: { increment: 1 },
-          safeErrorCode: null,
-          startedAt: new Date(),
+          claimToken: job.claimToken,
+          workingLoanVersion: progress.workingLoanVersion,
+          processedAttachmentIds: { equals: progress.processedAttachmentIds },
+          processedByteCount: progress.processedByteCount,
+          processedPageCount: progress.processedPageCount,
+        },
+        data: {
+          workingLoanVersion: nextLoanVersion,
+          processedAttachmentIds,
+          processedByteCount,
+          processedPageCount,
+          attachmentCount: progress.selectedAttachmentIds.length,
+          processedCount: processedAttachmentIds.length,
         },
       });
-      if (claimed.count !== 1) return null;
-      return {
-        jobId: record.id,
-        tenantId: record.tenantId,
-        loanId: record.loanId,
-        correlationId: message.correlationId,
-        encompassLoanGuid: record.loanApplication.encompassGuid,
-        lenderId: binding.lenderId,
-        deploymentId: binding.deploymentId,
-        selectedAttachmentIds: record.selectedAttachmentIds,
-      };
+      if (advanced.count !== 1) {
+        throw new EncompassConnectorError('DOCUMENT_PULL_CLAIM_LOST', 'The document pull claim is no longer current.', false);
+      }
     }),
-    listAttachments: async (job) => clientFor(job).listActiveAttachments(job, job.encompassLoanGuid),
-    download: async (job, attachmentId) => clientFor(job).downloadOriginalAttachment(job, job.encompassLoanGuid, attachmentId),
-    parse: async (bytes) => parseWithIncomeService(bytes, { parserUrl }),
-    saveResult: async (job, result) => prisma.$transaction(async (transaction) => {
-      await setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
-      await persistParsedExtraction(transaction, job, result);
-    }),
-    succeed: async (job, attachmentCount, processedCount) => updateJob(job, {
-      status: 'SUCCEEDED', attachmentCount, processedCount, completedAt: new Date(), safeErrorCode: null,
-    }),
+    succeed: async (job, attachmentCount, processedCount) => {
+      clients.delete(clientKey(job));
+      const outcome = await finalizeDocumentPull(
+        job as RuntimeDocumentPull,
+        infrastructure,
+        'SUCCEEDED',
+        undefined,
+        attachmentCount,
+        processedCount,
+      );
+      if (outcome?.status === 'SUCCEEDED') {
+        emitOperationalEvent('document_pull_success', 'DOCUMENT_PULL_SUCCEEDED');
+      } else if (outcome?.status === 'FAILED') {
+        emitOperationalEvent('document_pull_failure', outcome.safeErrorCode ?? 'DOCUMENT_PULL_FAILED');
+      }
+      return outcome?.status ?? 'FAILED';
+    },
     fail: async (job, safeErrorCode, retryable) => {
-      clients.delete(job.jobId);
-      await updateJob(job, {
-        status: retryable ? 'RETRYABLE_FAILURE' : 'FAILED', safeErrorCode, completedAt: retryable ? null : new Date(),
-      });
-      emitOperationalEvent(retryable ? 'document_pull_retry' : 'document_pull_failure', safeErrorCode);
+      clients.delete(clientKey(job));
+      if (retryable) {
+        const transitioned = await retryDocumentPull(job as RuntimeDocumentPull, infrastructure, safeErrorCode);
+        if (transitioned) emitOperationalEvent('document_pull_retry', safeErrorCode);
+      } else {
+        const outcome = await finalizeDocumentPull(job as RuntimeDocumentPull, infrastructure, 'FAILED', safeErrorCode);
+        if (outcome) emitOperationalEvent('document_pull_failure', outcome.safeErrorCode ?? safeErrorCode);
+      }
     },
   };
 }
 
-type ParsedResult = Parameters<DocumentPullWorkerDependencies['saveResult']>[1];
+async function assertDocumentPullTargetAuthorized(
+  job: RuntimeDocumentPull,
+  infrastructure: DocumentPullRuntimeInfrastructure,
+): Promise<void> {
+  const record = await infrastructure.withTransaction(async (transaction) => {
+    await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+    return transaction.encompassDocumentPullJob.findFirst({
+      where: {
+        id: job.jobId,
+        tenantId: job.tenantId,
+        status: 'IN_PROGRESS',
+        claimToken: job.claimToken,
+      },
+      select: documentPullAuthorizationSelect,
+    });
+  });
+  if (!record) {
+    throw new EncompassConnectorError('DOCUMENT_PULL_CLAIM_LOST', 'The document pull claim is no longer current.', false);
+  }
+  assertAuthorizedDocumentPullRecord(job, record);
+}
+
+function assertAuthorizedDocumentPullRecord(
+  job: RuntimeDocumentPull,
+  record: DocumentPullAuthorizationRecord,
+  expectedLoanVersion = record.workingLoanVersion,
+): void {
+  const selection = restorePersistedDocumentPullSelection({
+    tenantId: job.tenantId,
+    loanId: job.loanId,
+    schemaVersion: record.selectionSchemaVersion,
+    hash: canonicalStoredHash(record.selectionHash),
+    targetIntegrationMode: record.selectionTargetIntegrationMode,
+    targetLenderId: record.selectionTargetLenderId,
+    targetDeploymentId: record.selectionTargetDeploymentId,
+    targetEncompassGuid: record.selectionTargetEncompassGuid,
+    attachmentIds: record.selectedAttachmentIds,
+  });
+  if (!selection || !documentTargetsEqual(selection.target, job.target)) {
+    throw new EncompassConnectorError('ENCOMPASS_DOCUMENT_SELECTION_INVALID', 'The persisted document selection is no longer valid.', false);
+  }
+  const binding = record.tenant.encompassConnectorBinding;
+  const targetStillAuthorized = record.tenant.configurations?.enableEncompassDocumentPull
+    && binding?.isEnabled
+    && record.loanApplication.encompassIntegrationMode === 'CUSTOM_CONNECTOR'
+    && record.loanApplication.encompassGuid === job.target.encompassLoanGuid
+    && binding.lenderId === job.target.lenderId
+    && binding.deploymentId === job.target.deploymentId;
+  if (!targetStillAuthorized) {
+    throw new EncompassConnectorError('ENCOMPASS_DOCUMENT_TARGET_CHANGED', 'The Encompass document target is no longer authorized.', false);
+  }
+  if (expectedLoanVersion === null || record.loanApplication.version !== expectedLoanVersion) {
+    throw new EncompassConnectorError('STALE_LOAN_VERSION', 'The loan changed while the document pull was running.', false);
+  }
+}
+
+type ParsedResult = Omit<Parameters<DocumentPullWorkerDependencies['saveResult']>[1], 'byteCount'>;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const documentSelect = {
@@ -145,10 +479,11 @@ type StoredDocument = Readonly<{
  */
 export async function persistParsedExtraction(
   transaction: Prisma.TransactionClient,
-  job: ClaimedDocumentPull,
+  job: Pick<ClaimedDocumentPull, 'tenantId' | 'loanId'>,
   result: ParsedResult,
   writer: 'WORKER' | 'AUTHENTICATED_UPLOAD' = 'WORKER',
-): Promise<void> {
+  expectedLoanVersion?: number,
+): Promise<number | void> {
   if (!SHA256_HEX.test(result.sha256)
     || result.attachmentId.length < 1
     || result.attachmentId.length > 255
@@ -232,11 +567,20 @@ export async function persistParsedExtraction(
     }
   }
   if (!existing || hashChanged || extractionCreated) {
-    await transaction.loanApplication.updateMany({
-      where: { id: job.loanId, tenantId: job.tenantId },
+    const updated = await transaction.loanApplication.updateMany({
+      where: {
+        id: job.loanId,
+        tenantId: job.tenantId,
+        ...(expectedLoanVersion === undefined ? {} : { version: expectedLoanVersion }),
+      },
       data: { version: { increment: 1 }, status: 'DOCS_UPLOADED' },
     });
+    if (expectedLoanVersion !== undefined && updated.count !== 1) {
+      throw new EncompassConnectorError('STALE_LOAN_VERSION', 'The loan changed while the document was being saved.', false);
+    }
+    return expectedLoanVersion === undefined ? undefined : expectedLoanVersion + 1;
   }
+  return expectedLoanVersion;
 }
 
 function documentWrite(result: ParsedResult): {
@@ -257,7 +601,7 @@ function documentWrite(result: ParsedResult): {
 
 async function findLoanDocument(
   transaction: Prisma.TransactionClient,
-  job: ClaimedDocumentPull,
+  job: Pick<ClaimedDocumentPull, 'tenantId' | 'loanId'>,
   attachmentId: string,
 ): Promise<StoredDocument | null> {
   return transaction.loanDocument.findFirst({
@@ -268,7 +612,7 @@ async function findLoanDocument(
 
 async function createLoanDocument(
   transaction: Prisma.TransactionClient,
-  job: ClaimedDocumentPull,
+  job: Pick<ClaimedDocumentPull, 'tenantId' | 'loanId'>,
   result: ParsedResult,
 ): Promise<StoredDocument> {
   return transaction.loanDocument.create({
@@ -286,7 +630,7 @@ async function createLoanDocument(
 
 async function updateLoanDocument(
   transaction: Prisma.TransactionClient,
-  job: ClaimedDocumentPull,
+  job: Pick<ClaimedDocumentPull, 'tenantId' | 'loanId'>,
   existing: StoredDocument,
   result: ParsedResult,
 ): Promise<StoredDocument> {
@@ -336,7 +680,7 @@ export async function runQueueWorker(environment: NodeJS.ProcessEnv = process.en
       QueueUrl: queueUrl,
       MaxNumberOfMessages: 1,
       WaitTimeSeconds: 20,
-      VisibilityTimeout: 900,
+      VisibilityTimeout: DOCUMENT_PULL_VISIBILITY_TIMEOUT_SECONDS,
       MessageSystemAttributeNames: ['ApproximateReceiveCount'],
     }));
     for (const item of response.Messages ?? []) {
@@ -368,19 +712,231 @@ function parseMessage(body: string): DocumentPullQueueMessage {
   return value as DocumentPullQueueMessage;
 }
 
-async function updateJob(job: ClaimedDocumentPull, data: Prisma.EncompassDocumentPullJobUpdateManyMutationInput): Promise<void> {
-  await prisma.$transaction(async (transaction) => {
-    await setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
-    await transaction.encompassDocumentPullJob.updateMany({
-      where: { id: job.jobId, tenantId: job.tenantId, status: 'IN_PROGRESS' },
-      data,
-    });
+async function failDocumentPullClaim(
+  transaction: Prisma.TransactionClient,
+  record: Readonly<{
+    id: string;
+    tenantId: string;
+    loanId: string;
+    requestedByUserId: string;
+    correlationId?: string;
+    expectedLoanVersion: number;
+    status: EncompassDocumentPullStatus;
+    selectedAttachmentIds: ReadonlyArray<string>;
+    processedAttachmentIds: ReadonlyArray<string>;
+  }>,
+  claimWhere: Prisma.EncompassDocumentPullJobWhereInput,
+  safeErrorCode: string,
+): Promise<ClaimFailure | null> {
+  const failed = await transaction.encompassDocumentPullJob.updateMany({
+    where: claimWhere,
+    data: { status: 'FAILED', safeErrorCode, completedAt: new Date(), claimToken: null },
   });
+  if (failed.count !== 1) return null;
+  await appendDocumentPullTerminalAudit(transaction, record, 'FAILED', safeErrorCode);
+  return { kind: 'FAILED', safeErrorCode };
+}
+
+async function retryDocumentPull(
+  job: RuntimeDocumentPull,
+  infrastructure: DocumentPullRuntimeInfrastructure,
+  safeErrorCode: string,
+): Promise<boolean> {
+  return infrastructure.withTransaction(async (transaction) => {
+    await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+    const updated = await transaction.encompassDocumentPullJob.updateMany({
+      where: {
+        id: job.jobId,
+        tenantId: job.tenantId,
+        status: 'IN_PROGRESS',
+        claimToken: job.claimToken,
+      },
+      data: {
+        status: 'RETRYABLE_FAILURE',
+        safeErrorCode,
+        startedAt: null,
+        completedAt: null,
+        claimToken: null,
+      },
+    });
+    return updated.count === 1;
+  });
+}
+
+async function finalizeDocumentPull(
+  job: RuntimeDocumentPull,
+  infrastructure: DocumentPullRuntimeInfrastructure,
+  requestedStatus: 'SUCCEEDED' | 'FAILED',
+  requestedSafeErrorCode?: string,
+  reportedAttachmentCount?: number,
+  reportedProcessedCount?: number,
+): Promise<{ status: 'SUCCEEDED' | 'FAILED'; safeErrorCode?: string } | null> {
+  return infrastructure.withTransaction(async (transaction) => {
+    await infrastructure.setTenantContext(transaction, { tenantId: job.tenantId, principalId: WORKER_PRINCIPAL_ID });
+    const record = await transaction.encompassDocumentPullJob.findFirst({
+      where: {
+        id: job.jobId,
+        tenantId: job.tenantId,
+        status: 'IN_PROGRESS',
+        claimToken: job.claimToken,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        loanId: true,
+        requestedByUserId: true,
+        correlationId: true,
+        expectedLoanVersion: true,
+        selectedAttachmentIds: true,
+        processedAttachmentIds: true,
+        processedByteCount: true,
+        processedPageCount: true,
+        workingLoanVersion: true,
+        loanApplication: { select: { version: true, encompassGuid: true, encompassIntegrationMode: true } },
+        tenant: { select: {
+          configurations: { select: { enableEncompassDocumentPull: true } },
+          encompassConnectorBinding: { select: { lenderId: true, deploymentId: true, isEnabled: true } },
+        } },
+      },
+    });
+    if (!record) return null;
+
+    let status = requestedStatus;
+    let safeErrorCode = requestedSafeErrorCode;
+    if (status === 'SUCCEEDED') {
+      const progressValid = validDocumentProgress(
+        record.selectedAttachmentIds,
+        record.processedAttachmentIds,
+        record.workingLoanVersion,
+        record.processedByteCount,
+        record.processedPageCount,
+      ) && record.processedAttachmentIds.length === record.selectedAttachmentIds.length
+        && reportedAttachmentCount === record.selectedAttachmentIds.length
+        && reportedProcessedCount === record.processedAttachmentIds.length;
+      if (!progressValid) {
+        status = 'FAILED';
+        safeErrorCode = 'DOCUMENT_PULL_PROGRESS_INVALID';
+      } else if (record.loanApplication.version !== record.workingLoanVersion) {
+        status = 'FAILED';
+        safeErrorCode = 'STALE_LOAN_VERSION';
+      } else {
+        const binding = record.tenant.encompassConnectorBinding;
+        const targetStillAuthorized = record.tenant.configurations?.enableEncompassDocumentPull
+          && binding?.isEnabled
+          && record.loanApplication.encompassIntegrationMode === 'CUSTOM_CONNECTOR'
+          && record.loanApplication.encompassGuid === job.target.encompassLoanGuid
+          && binding.lenderId === job.target.lenderId
+          && binding.deploymentId === job.target.deploymentId;
+        if (!targetStillAuthorized) {
+          status = 'FAILED';
+          safeErrorCode = 'ENCOMPASS_DOCUMENT_TARGET_CHANGED';
+        }
+      }
+    }
+
+    const updated = await transaction.encompassDocumentPullJob.updateMany({
+      where: {
+        id: job.jobId,
+        tenantId: job.tenantId,
+        status: 'IN_PROGRESS',
+        claimToken: job.claimToken,
+      },
+      data: {
+        status,
+        safeErrorCode: safeErrorCode ?? null,
+        attachmentCount: record.selectedAttachmentIds.length,
+        processedCount: record.processedAttachmentIds.length,
+        completedAt: new Date(),
+        claimToken: null,
+      },
+    });
+    if (updated.count !== 1) return null;
+    await appendDocumentPullTerminalAudit(transaction, record, status, safeErrorCode);
+    return { status, ...(safeErrorCode ? { safeErrorCode } : {}) };
+  });
+}
+
+async function appendDocumentPullTerminalAudit(
+  transaction: Prisma.TransactionClient,
+  record: Readonly<{
+    id: string;
+    tenantId: string;
+    loanId: string;
+    requestedByUserId: string;
+    correlationId?: string;
+    expectedLoanVersion: number;
+    selectedAttachmentIds: ReadonlyArray<string>;
+    processedAttachmentIds: ReadonlyArray<string>;
+  }>,
+  status: 'SUCCEEDED' | 'FAILED',
+  safeErrorCode?: string,
+): Promise<void> {
+  await appendAuditEvent(transaction, documentPullWorkerContext(record), {
+    loanId: record.loanId,
+    entityType: 'ENCOMPASS_DOCUMENT_PULL_JOB',
+    entityId: record.id,
+    expectedLoanVersion: record.expectedLoanVersion,
+    action: status === 'SUCCEEDED'
+      ? AUDIT_ACTIONS.ENCOMPASS_DOCUMENT_PULL_SUCCEEDED
+      : AUDIT_ACTIONS.ENCOMPASS_DOCUMENT_PULL_FAILED,
+    reasonCode: status === 'SUCCEEDED' ? 'DOCUMENT_PULL_COMPLETED' : (safeErrorCode ?? 'DOCUMENT_PULL_FAILED'),
+    ruleVersion: 'encompass-document-pull-v2',
+    schemaVersion: 'audit-event-v1',
+    resultHash: hashAuditResult({
+      jobId: record.id,
+      status,
+      safeErrorCode: safeErrorCode ?? null,
+      attachmentCount: record.selectedAttachmentIds.length,
+      processedCount: record.processedAttachmentIds.length,
+    }),
+  });
+}
+
+function documentPullWorkerContext(record: Readonly<{
+  correlationId?: string;
+  tenantId: string;
+  requestedByUserId: string;
+}>): RequestContext {
+  return Object.freeze({
+    requestId: record.correlationId ?? 'document-pull-worker',
+    subject: 'encompass-document-pull-worker',
+    tenantId: record.tenantId,
+    membershipId: record.requestedByUserId,
+    permissions: ['encompass:pull'] as const,
+    authTime: new Date(),
+  });
+}
+
+function validDocumentProgress(
+  selectedAttachmentIds: ReadonlyArray<string>,
+  processedAttachmentIds: ReadonlyArray<string>,
+  workingLoanVersion: number | null,
+  processedByteCount: number,
+  processedPageCount: number,
+): boolean {
+  const selected = new Set(selectedAttachmentIds);
+  return Number.isSafeInteger(workingLoanVersion)
+    && Number(workingLoanVersion) > 0
+    && selectedAttachmentIds.length >= 1
+    && selectedAttachmentIds.length <= 20
+    && selected.size === selectedAttachmentIds.length
+    && new Set(processedAttachmentIds).size === processedAttachmentIds.length
+    && processedAttachmentIds.every((id) => selected.has(id))
+    && Number.isSafeInteger(processedByteCount)
+    && processedByteCount >= 0
+    && processedByteCount <= DOCUMENT_PULL_MAX_AGGREGATE_BYTES
+    && Number.isSafeInteger(processedPageCount)
+    && processedPageCount >= 0
+    && processedPageCount <= DOCUMENT_PULL_MAX_AGGREGATE_PAGES;
 }
 
 function required(value: string | undefined, name: string): string {
   if (!value?.trim()) throw new Error(`${name} is required.`);
   return value.trim();
+}
+
+function isDocumentPullClaimStatus(value: string): value is DocumentPullClaimState['status'] {
+  return value === 'QUEUED' || value === 'RETRYABLE_FAILURE' || value === 'IN_PROGRESS';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

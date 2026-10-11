@@ -40,12 +40,14 @@ export function createDocumentPullHandler(
       const idempotencyKey = readIdempotencyKey(req);
       const expectedLoanVersion = readExpectedLoanVersion(req.body);
       const attachmentIds = readAttachmentIds(req.body);
+      const selectionBindingHash = readSelectionBindingHash(req.body);
       const result = await dependencies.withTenantTransaction(
         { tenantId: context.tenantId, principalId: context.membershipId },
         (transaction) => createDocumentPullJob(transaction, context, {
           loanId,
           expectedLoanVersion,
           attachmentIds,
+          selectionBindingHash,
           idempotencyKey,
         }),
       );
@@ -118,4 +120,12 @@ function readAttachmentIds(body: unknown): string[] {
     throw new ApiError(400, 'INVALID_ATTACHMENT_SELECTION', 'attachmentIds must contain 1 to 20 unique attachment identifiers.');
   }
   return value as string[];
+}
+
+function readSelectionBindingHash(body: unknown): string {
+  const value = (body as { selectionBindingHash?: unknown } | null)?.selectionBindingHash;
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new ApiError(400, 'INVALID_ATTACHMENT_SELECTION_BINDING', 'A valid attachment selection binding is required.');
+  }
+  return value;
 }

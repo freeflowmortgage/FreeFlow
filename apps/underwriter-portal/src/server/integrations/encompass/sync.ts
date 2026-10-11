@@ -5,7 +5,11 @@ import { appendAuditEvent, AUDIT_ACTIONS, hashAuditResult } from '../../audit/ap
 import { resolveIdempotencyKey, storeIdempotencyResult } from '../../audit/idempotency';
 import { ApiError } from '../../http/apiError';
 import { hashCanonical } from '../../http/canonical';
-import { hasCurrentCalculationExtractions } from '../../income/extractionFreshness';
+import {
+  ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION,
+  loadApprovedEncompassSyncPreview,
+  type SyncPreviewConfiguration,
+} from './syncPreview';
 
 export const ENCOMPASS_SYNC_OPERATION = 'encompass-syncs';
 
@@ -26,8 +30,10 @@ export async function createEncompassSyncJob(
     loanId: string;
     approvalEventId: string;
     expectedLoanVersion: number;
+    previewHash: string;
     idempotencyKey: string;
   }>,
+  configuration: SyncPreviewConfiguration,
 ) {
   const requestHash = hashCanonical(input);
   const idempotency = await resolveIdempotencyKey(transaction, context, {
@@ -38,78 +44,55 @@ export async function createEncompassSyncJob(
   if (idempotency.kind === 'replay') {
     const existing = await transaction.encompassSyncJob.findFirst({
       where: { id: idempotency.stored.responseReference, tenantId: context.tenantId, loanId: input.loanId },
-      select: { id: true, status: true, expectedLoanVersion: true, correlationId: true },
+      select: {
+        id: true, status: true, expectedLoanVersion: true, correlationId: true,
+        writePreviewSchemaVersion: true, writePreviewHash: true,
+        writeTargetIntegrationMode: true, writeTargetLenderId: true,
+        writeTargetDeploymentId: true, writeTargetEncompassGuid: true,
+      },
     });
-    if (!existing) throw new ApiError(409, 'IDEMPOTENCY_STATE_INVALID', 'The stored sync state is unavailable.');
-    return { ...existing, replayed: true };
+    if (!existing
+      || existing.writePreviewSchemaVersion !== ENCOMPASS_WRITE_PREVIEW_SCHEMA_VERSION
+      || existing.writePreviewHash !== input.previewHash
+      || existing.writeTargetIntegrationMode !== 'CUSTOM_CONNECTOR'
+      || !existing.writeTargetLenderId
+      || !existing.writeTargetDeploymentId
+      || !existing.writeTargetEncompassGuid) {
+      throw new ApiError(409, 'IDEMPOTENCY_STATE_INVALID', 'The stored sync state is unavailable.');
+    }
+    const {
+      writePreviewSchemaVersion: _writePreviewSchemaVersion,
+      writePreviewHash: _writePreviewHash,
+      writeTargetIntegrationMode: _writeTargetIntegrationMode,
+      writeTargetLenderId: _writeTargetLenderId,
+      writeTargetDeploymentId: _writeTargetDeploymentId,
+      writeTargetEncompassGuid: _writeTargetEncompassGuid,
+      ...safeExisting
+    } = existing;
+    return { ...safeExisting, replayed: true };
   }
 
-  const loan = await transaction.loanApplication.findFirst({
-    where: { id: input.loanId, tenantId: context.tenantId },
-    select: { id: true, version: true, encompassGuid: true },
-  });
-  if (!loan) throw new ApiError(404, 'LOAN_NOT_FOUND', 'The requested loan was not found.');
-  if (loan.version !== input.expectedLoanVersion) {
-    throw new ApiError(409, 'STALE_APPROVAL', 'The approved loan state is stale.');
-  }
-  if (!loan.encompassGuid) throw new ApiError(422, 'ENCOMPASS_LOAN_NOT_LINKED', 'The loan is not linked to Encompass.');
-
-  const configuration = await transaction.tenantConfiguration.findFirst({
-    where: { tenantId: context.tenantId },
-    select: { enableEncompassSync: true },
-  });
-  const binding = await transaction.encompassConnectorBinding.findFirst({
-    where: { tenantId: context.tenantId, isEnabled: true },
-    select: { id: true },
-  });
-  if (!configuration?.enableEncompassSync || !binding) {
-    throw new ApiError(422, 'ENCOMPASS_SYNC_DISABLED', 'Encompass synchronization is not enabled for this tenant.');
-  }
-
-  const approval = await transaction.auditEvent.findFirst({
-    where: {
-      id: input.approvalEventId,
-      tenantId: context.tenantId,
-      loanId: input.loanId,
-      entityType: 'FORM_1084_AUDIT',
-      action: { in: [AUDIT_ACTIONS.INCOME_APPROVED, AUDIT_ACTIONS.INCOME_OVERRIDE] },
-    },
-    select: { id: true, entityId: true, expectedLoanVersion: true },
-  });
-  if (!approval) throw new ApiError(422, 'APPROVAL_REQUIRED', 'An immutable approved calculation is required.');
-  if (approval.expectedLoanVersion + 1 !== input.expectedLoanVersion) {
-    throw new ApiError(409, 'STALE_APPROVAL', 'The approval does not match the current loan version.');
-  }
-  const calculation = await transaction.form1084Audit.findFirst({
-    where: { id: approval.entityId, tenantId: context.tenantId, loanId: input.loanId, isHumanVerified: true },
-    select: {
-      id: true,
-      extractionBindings: { select: {
-          extractionId: true, extractionHash: true, sourceDocumentId: true,
-          sourceDocumentVersion: true, sourceContentHash: true,
-          metadataReviewId: true, metadataReviewVersion: true, metadataReviewHash: true,
-          extraction: { select: {
-            status: true, canonicalHash: true, sourceDocumentVersion: true, sourceContentHash: true,
-            sourceDocument: { select: { version: true, sourceContentHash: true } },
-            metadataReviews: { orderBy: { metadataVersion: 'desc' }, take: 1, select: { id: true, metadataVersion: true, canonicalHash: true } },
-        } },
-      } },
-    },
-  });
-  if (!calculation) throw new ApiError(422, 'APPROVED_CALCULATION_UNAVAILABLE', 'The approved calculation is unavailable.');
-  if (!hasCurrentCalculationExtractions(calculation.extractionBindings)) {
-    throw new ApiError(409, 'STALE_APPROVAL_EXTRACTION', 'The approved calculation is based on a superseded extraction.');
+  const preview = await loadApprovedEncompassSyncPreview(transaction, context, input, configuration);
+  if (preview.previewHash !== input.previewHash) {
+    throw new ApiError(409, 'ENCOMPASS_WRITE_APPROVAL_MISMATCH', 'The approved write preview no longer matches the current approved loan state.');
   }
 
   const job = await transaction.encompassSyncJob.create({
     data: {
       tenantId: context.tenantId,
       loanId: input.loanId,
-      approvalEventId: approval.id,
+      approvalEventId: preview.approvalEventId,
       requestedByUserId: context.membershipId,
       expectedLoanVersion: input.expectedLoanVersion,
       idempotencyKey: input.idempotencyKey,
       correlationId: context.requestId,
+      writePreviewSchemaVersion: preview.schemaVersion,
+      writePreviewHash: preview.previewHash,
+      writePreviewFields: preview.fields as unknown as Prisma.InputJsonValue,
+      writeTargetIntegrationMode: preview.target.integrationMode,
+      writeTargetLenderId: preview.target.lenderId,
+      writeTargetDeploymentId: preview.target.deploymentId,
+      writeTargetEncompassGuid: preview.target.encompassLoanGuid,
     },
     select: { id: true, status: true, expectedLoanVersion: true, correlationId: true },
   });
@@ -122,7 +105,12 @@ export async function createEncompassSyncJob(
     reasonCode: 'APPROVED_RESULT_QUEUED',
     ruleVersion: 'encompass-sync-v1',
     schemaVersion: 'audit-event-v1',
-    resultHash: hashAuditResult({ jobId: job.id, approvalEventId: approval.id, expectedLoanVersion: input.expectedLoanVersion }),
+    resultHash: hashAuditResult({
+      jobId: job.id,
+      approvalEventId: preview.approvalEventId,
+      expectedLoanVersion: input.expectedLoanVersion,
+      previewHash: preview.previewHash,
+    }),
   });
   await storeIdempotencyResult(transaction, context, {
     operation: ENCOMPASS_SYNC_OPERATION,

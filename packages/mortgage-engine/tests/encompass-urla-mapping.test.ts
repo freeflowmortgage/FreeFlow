@@ -166,10 +166,58 @@ describe('AI 1003 / URLA Encompass mapping', () => {
       yearsAnalyzed: [2025],
       auditUrl: 'https://app.example.com/audit/2',
       w2BaseMonthly: 4000,
+      w2VariableMonthly: 350,
+      assetIncomeMonthly: 75,
       rentalMonthly: 500,
     });
     expect(Array.isArray(patch.customFields)).toBe(true);
     expect(patch.customFields.find((field) => field.fieldName === 'CX.FREEFLOW.INCOME')?.value).toBe('5000.00');
+    expect(patch.customFields.find((field) => field.fieldName === 'CX.FREEFLOW.W2.VARIABLE')?.value).toBe('350.00');
+    expect(patch.customFields.find((field) => field.fieldName === 'CX.FREEFLOW.ASSET.INCOME')?.value).toBe('75.00');
     expect(patch).not.toHaveProperty('otherIncome');
+  });
+
+  test('lender field overrides are closed, validated, and collision-free', () => {
+    const overridden = buildEncompassFieldUpdatePayload('loan-1', {
+      qualifyingMonthlyIncome: 5000,
+      trendingAnalysis: 'Stable',
+      yearsAnalyzed: [2025],
+      auditUrl: 'https://app.example.com/audit/2',
+      w2VariableMonthly: 350,
+    }, { fieldMapOverrides: { FREEFLOW_W2_VARIABLE: 'CX.SYNTHETIC.VARIABLE' } });
+    expect(overridden.customFields.find((field) => field.value === '350.00')?.fieldName).toBe('CX.SYNTHETIC.VARIABLE');
+
+    expect(() => buildEncompassFieldUpdatePayload('loan-1', {
+      qualifyingMonthlyIncome: 5000,
+      trendingAnalysis: 'Stable',
+      yearsAnalyzed: [2025],
+      auditUrl: 'https://app.example.com/audit/2',
+    }, { fieldMapOverrides: { MISSPELLED_KEY: 'CX.SYNTHETIC.VALUE' } })).toThrow('configured Encompass income field mapping is invalid');
+    expect(() => buildEncompassFieldUpdatePayload('loan-1', {
+      qualifyingMonthlyIncome: 5000,
+      trendingAnalysis: 'Stable',
+      yearsAnalyzed: [2025],
+      auditUrl: 'https://app.example.com/audit/2',
+    }, { fieldMapOverrides: { FREEFLOW_W2_VARIABLE: 'CX.FREEFLOW.W2.BASE' } })).toThrow('configured Encompass income field mapping is invalid');
+
+    for (const reserved of ['CX.FREEFLOW.APPROVAL.ID', 'CX.FREEFLOW.BORROWER.1.INCOME']) {
+      expect(() => buildEncompassFieldUpdatePayload('loan-1', {
+        qualifyingMonthlyIncome: 5000,
+        trendingAnalysis: 'Stable',
+        yearsAnalyzed: [2025],
+        auditUrl: 'https://app.example.com/audit/2',
+      }, { fieldMapOverrides: { FREEFLOW_W2_VARIABLE: reserved } })).toThrow('configured Encompass income field mapping is invalid');
+    }
+
+    const withoutTimestamp = buildEncompassFieldUpdatePayload('loan-1', {
+      qualifyingMonthlyIncome: 5000,
+      trendingAnalysis: 'Stable',
+      yearsAnalyzed: [2025],
+      auditUrl: 'https://app.example.com/audit/2',
+    }, {
+      fieldMapOverrides: { FREEFLOW_SYNCED_TIMESTAMP: 'CX.SYNTHETIC.SYNCED.AT' },
+      includeSyncedAt: false,
+    });
+    expect(withoutTimestamp.customFields.some((field) => field.fieldName === 'CX.SYNTHETIC.SYNCED.AT')).toBe(false);
   });
 });

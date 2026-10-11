@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "freeflow-live-standalone-acceptance-v1",
+  "classification": "SANITIZED_SYNTHETIC_LIVE_LOCAL_EXECUTION",
+  "executionDate": "2026-10-11",
+  "runner": "CLI_PLAYWRIGHT_CHROMIUM",
+  "inAppBrowserAvailable": false,
+  "runtimeRevision": "d72c1fad75b08361859b4665d834fc4b6b755266",
+  "revisionQualification": "Historical original run at d72c1fad; superseded as strongest evidence by the retained live runs recorded in execution-report.json. Its raw artifacts remain unavailable.",
+  "boundaries": {
+    "syntheticDevelopmentAuthenticationStubbed": true,
+    "runtimeConfigStubbed": true,
+    "businessApiResponsesMocked": false,
+    "portalApiForwardedLive": true,
+    "postgresqlLiveDisposable": true,
+    "documentParserLiveHardened": true,
+    "realLosConnectionUsed": false,
+    "realCustomerDataUsed": false
+  },
+  "lifecycle": {
+    "manualStandaloneLoanCreated": "PASS",
+    "jsonLoanImport": "NOT_EXECUTED_IN_LIVE_RUN",
+    "scannedPdfUploaded": "PASS",
+    "realOcrExtraction": "PASS",
+    "metadataReview": "PASS",
+    "calculation": "PASS",
+    "approval": "PASS",
+    "jsonDownload": "PASS",
+    "mismoProfileXmlDownload": "PASS",
+    "summaryPdfDownload": "PASS",
+    "reopenConsistency": "PASS",
+    "duplicateUploadIdempotency": "PASS",
+    "repeatExportByteIdentity": "PASS",
+    "crossTenantExportDenial": "PASS",
+    "anonymousOrExpiredSessionBrowserCases": "NOT_EXECUTED",
+    "officialMismoXsdValidation": "BLOCKED"
+  },
+  "calculation": {
+    "qualifyingMonthlyIncome": "5721.67",
+    "totalAnnualIncome": "68660.04"
+  },
+  "hashes": {
+    "syntheticInputFixtureSha256": "335fb87ed412e0850533561451391db8968e25acd8ab4d983a42c027bb4af077",
+    "approvedSnapshotSha256": "637e72028503599e9901d28627368faac1c7d3b9c2fb6c2c9cb1a3a66a9a58ce",
+    "jsonSha256": "5c4dfc1b2228037a7fbd8f73130214f4e909670f29ddf85a73061c62d86cf581",
+    "mismoXmlSha256": "19ed0689d51463fd61702c7bcde431924d74f366abb69d66e41001c769500486",
+    "summaryPdfSha256": "b47bb5e4a0fbd5101803fdb711f6a6bf8f6aa0f129c0f8c9890d8a01f4112622"
+  },
+  "hashVerificationBoundary": "OBSERVED_DURING_EXECUTION_RAW_BYTES_NOT_RETAINED_NOT_REHASHABLE_FROM_BUNDLE",
+  "persistence": {
+    "loanVersion": 4,
+    "loanStatus": "VERIFIED",
+    "extractionStatus": "ACTIVE",
+    "documents": 1,
+    "extractions": 1,
+    "calculations": 1,
+    "approvals": 1
+  },
+  "crossTenantResult": {
+    "httpStatus": 404,
+    "safeCode": "LOAN_NOT_FOUND"
+  },
+  "pdfInspection": {
+    "livePdfSignatureContentHashAndConsistencyChecked": true,
+    "livePdfVisuallyRendered": false,
+    "separateDeterministicComponentPdfVisuallyInspected": true
+  },
+  "committedReproductionHarness": {
+    "path": "apps/underwriting-console/e2e-live/standalone-live.spec.ts",
+    "phases": ["main", "cross-tenant"],
+    "businessApiInterception": false,
+    "authBootstrapIncluded": false,
+    "independentlySelfContained": false,
+    "requiredExternalPrerequisite": "Environment-specific server-side synthetic Tenant A/Tenant B authentication bootstrap or proxy",
+    "typecheck": "PASS",
+    "playwrightDiscoveryTests": 2,
+    "deterministicFixturePreflight": "PASS",
+    "deterministicFixtureSha256": "0c32930fafb11d3ad5ddeb205518974209468552314497eae3190ea09342dccf",
+    "fullLifecycleRerunAfterCommit": false
+  },
+  "rawArtifactsRetained": false
+}

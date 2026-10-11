@@ -1,0 +1,10 @@
+{
+  "evidenceSchemaVersion": "freeflow-live-acceptance-result-v1",
+  "runId": "20261011-live-d7f7a43-01",
+  "sourceRevision": "d7f7a432bed0292bc6d800ec05800d2105ceba95",
+  "status": "PASS",
+  "loanId": "b4494c4c-0e9b-42b7-8d32-7766abba5f3b",
+  "loanIdentifierClassification": "SYNTHETIC_TEST_ONLY",
+  "httpStatus": 404,
+  "errorCode": "LOAN_NOT_FOUND"
+}

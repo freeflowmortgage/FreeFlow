@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "freeflow-standalone-export-artifact-manifest-v1",
+  "classification": "SANITIZED_SYNTHETIC_COMPONENT_EXECUTION",
+  "sourceRevision": {
+    "baseCommit": "646201800446b250c089c782f6f9871b9c6f28d7",
+    "executionSource": "CURRENT_WORKTREE"
+  },
+  "snapshotHash": "0719f460abc4c4c4f24f61e86330107a05b9770d29f5c45e8588edb725131fb5",
+  "reproducibility": {
+    "generations": 2,
+    "byteIdentical": true,
+    "artifacts": [
+      {
+        "name": "approved-income-snapshot.json",
+        "firstSha256": "5b61107908ecf23e98599e8ab0b6006d2755d73100a4cf6b7b277ca7b0e60fb5",
+        "secondSha256": "5b61107908ecf23e98599e8ab0b6006d2755d73100a4cf6b7b277ca7b0e60fb5",
+        "byteIdentical": true
+      },
+      {
+        "name": "approved-income.json",
+        "firstSha256": "c3895b009f7b5a248941f80d17542f4586196dcd6c51989e5532f0f8a37c7447",
+        "secondSha256": "c3895b009f7b5a248941f80d17542f4586196dcd6c51989e5532f0f8a37c7447",
+        "byteIdentical": true
+      },
+      {
+        "name": "approved-income.mismo.xml",
+        "firstSha256": "658c2285504cdd609da8bf49b4a884284abe91b22ad05a263f612855ca909f07",
+        "secondSha256": "658c2285504cdd609da8bf49b4a884284abe91b22ad05a263f612855ca909f07",
+        "byteIdentical": true
+      },
+      {
+        "name": "approved-income-summary.pdf",
+        "firstSha256": "4c685f21a2299fde5950051e2758a82f42d7908294b2e6985853810aac250d01",
+        "secondSha256": "4c685f21a2299fde5950051e2758a82f42d7908294b2e6985853810aac250d01",
+        "byteIdentical": true
+      },
+      {
+        "name": "mismo-profile-validation.json",
+        "firstSha256": "f6abbb3530a09ecdca8404f460282662e82c6763a328405eebda86049f4a9b77",
+        "secondSha256": "f6abbb3530a09ecdca8404f460282662e82c6763a328405eebda86049f4a9b77",
+        "byteIdentical": true
+      },
+      {
+        "name": "processing-validation-report.json",
+        "firstSha256": "4a63dac9f2b2619ecf029b378464521efe41c4de7c98311792b9633e40118c86",
+        "secondSha256": "4a63dac9f2b2619ecf029b378464521efe41c4de7c98311792b9633e40118c86",
+        "byteIdentical": true
+      }
+    ]
+  },
+  "sourceInputs": [
+    {
+      "path": "apps/underwriter-portal/scripts/standalone-export-evidence.ts",
+      "canonicalization": "UTF8_LF",
+      "sha256": "42c8da5a6d04b1e9adbe06da574bc93448b1049246876a8846934cb0412d4979"
+    },
+    {
+      "path": "apps/underwriter-portal/src/server/exports/approvedIncomeSnapshot.ts",
+      "canonicalization": "UTF8_LF",
+      "sha256": "891cd6e7e14b01b008b34a966a3e4607648810abab3bafd5c8a29d9ce9617146"
+    },
+    {
+      "path": "apps/underwriter-portal/src/server/exports/approvedIncomeExports.ts",
+      "canonicalization": "UTF8_LF",
+      "sha256": "97d22e78775da2345fcfd650006217491de12466246edd139c1b798e5eb889c1"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "approved-income-snapshot.json",
+      "bytes": 2405,
+      "sha256": "5b61107908ecf23e98599e8ab0b6006d2755d73100a4cf6b7b277ca7b0e60fb5"
+    },
+    {
+      "name": "approved-income.json",
+      "bytes": 2460,
+      "sha256": "c3895b009f7b5a248941f80d17542f4586196dcd6c51989e5532f0f8a37c7447"
+    },
+    {
+      "name": "approved-income.mismo.xml",
+      "bytes": 3063,
+      "sha256": "658c2285504cdd609da8bf49b4a884284abe91b22ad05a263f612855ca909f07"
+    },
+    {
+      "name": "approved-income-summary.pdf",
+      "bytes": 5192,
+      "sha256": "4c685f21a2299fde5950051e2758a82f42d7908294b2e6985853810aac250d01"
+    },
+    {
+      "name": "mismo-profile-validation.json",
+      "bytes": 486,
+      "sha256": "f6abbb3530a09ecdca8404f460282662e82c6763a328405eebda86049f4a9b77"
+    },
+    {
+      "name": "processing-validation-report.json",
+      "bytes": 1012,
+      "sha256": "4a63dac9f2b2619ecf029b378464521efe41c4de7c98311792b9633e40118c86"
+    }
+  ]
+}

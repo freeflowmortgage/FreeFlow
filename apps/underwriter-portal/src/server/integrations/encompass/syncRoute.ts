@@ -4,15 +4,20 @@ import { withTenantTransaction } from '../../database/client';
 import { ApiError, sendApiError } from '../../http/apiError';
 import { isIdempotencyKey, isUuid } from '../../http/identifiers';
 import { createEncompassSyncJob, markSyncQueueFailure, publishEncompassSyncJob, type EncompassSyncQueueMessage } from './sync';
+import { readSyncPreviewConfiguration, type SyncPreviewConfiguration } from './syncPreview';
+
+const SHA_256 = /^[0-9a-f]{64}$/;
 
 type Dependencies = {
   withTenantTransaction: typeof withTenantTransaction;
   publishJob: (message: EncompassSyncQueueMessage) => Promise<void>;
+  previewConfiguration: () => SyncPreviewConfiguration;
 };
 
 export function createEncompassSyncHandler(dependencies: Dependencies = {
   withTenantTransaction,
   publishJob: publishEncompassSyncJob,
+  previewConfiguration: readSyncPreviewConfiguration,
 }) {
   return async (req: NextApiRequest, res: NextApiResponse, context: RequestContext) => {
     if (req.method !== 'POST') {
@@ -23,8 +28,12 @@ export function createEncompassSyncHandler(dependencies: Dependencies = {
       const loanId = readUuid(req.query.loanId, 'loanId');
       const approvalEventId = readUuid((req.body as { approvalEventId?: unknown } | null)?.approvalEventId, 'approvalEventId');
       const expectedLoanVersion = (req.body as { expectedLoanVersion?: unknown } | null)?.expectedLoanVersion;
+      const previewHash = (req.body as { previewHash?: unknown } | null)?.previewHash;
       if (!Number.isSafeInteger(expectedLoanVersion) || Number(expectedLoanVersion) < 1) {
         throw new ApiError(400, 'INVALID_LOAN_VERSION', 'expectedLoanVersion must be a positive integer.');
+      }
+      if (typeof previewHash !== 'string' || !SHA_256.test(previewHash)) {
+        throw new ApiError(400, 'INVALID_PREVIEW_HASH', 'previewHash must be a lowercase SHA-256 hash.');
       }
       const header = req.headers['idempotency-key'];
       if (Array.isArray(header) || typeof header !== 'string' || !isIdempotencyKey(header)) {
@@ -33,8 +42,8 @@ export function createEncompassSyncHandler(dependencies: Dependencies = {
       const result = await dependencies.withTenantTransaction(
         { tenantId: context.tenantId, principalId: context.membershipId },
         (transaction) => createEncompassSyncJob(transaction, context, {
-          loanId, approvalEventId, expectedLoanVersion: Number(expectedLoanVersion), idempotencyKey: header,
-        }),
+          loanId, approvalEventId, expectedLoanVersion: Number(expectedLoanVersion), previewHash, idempotencyKey: header,
+        }, dependencies.previewConfiguration()),
       );
       if (!['SUCCEEDED', 'FAILED', 'IN_PROGRESS', 'RECONCILING'].includes(result.status)) {
         const message: EncompassSyncQueueMessage = {
