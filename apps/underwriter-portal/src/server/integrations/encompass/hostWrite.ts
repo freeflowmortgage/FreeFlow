@@ -85,19 +85,16 @@ export async function completeHostWrite(transaction: Prisma.TransactionClient, c
   if (write.status === 'AUTHORIZED') {
     const updated = await transaction.encompassHostWrite.updateMany({
       where: { id: write.id, tenantId: context.tenantId, status: 'AUTHORIZED', fieldMapHash: input.fieldMapHash },
-      data: { status: input.outcome, safeErrorCode: input.outcome === 'FAILED' ? 'HOST_COMMIT_FAILED' : null, completedAt: new Date() },
+      data: { status: 'FAILED', safeErrorCode: 'HOST_COMMIT_FAILED', completedAt: new Date() },
     });
     if (updated.count !== 1) throw new ApiError(409, 'HOST_WRITE_ALREADY_COMPLETED', 'The hosted write was completed concurrently.');
     await appendAuditEvent(transaction, context, {
       loanId: write.loanId, entityType: 'ENCOMPASS_HOST_WRITE', entityId: write.id,
       expectedLoanVersion: write.expectedLoanVersion,
-      action: input.outcome === 'SUCCEEDED' ? AUDIT_ACTIONS.ENCOMPASS_HOST_WRITE_SUCCEEDED : AUDIT_ACTIONS.ENCOMPASS_HOST_WRITE_FAILED,
-      reasonCode: input.outcome === 'SUCCEEDED' ? 'HOST_READBACK_REPORTED' : 'HOST_COMMIT_FAILED',
+      action: AUDIT_ACTIONS.ENCOMPASS_HOST_WRITE_FAILED,
+      reasonCode: 'HOST_COMMIT_FAILED',
       ruleVersion: 'encompass-host-write-v1', schemaVersion: 'audit-event-v1',
-      resultHash: hashAuditResult({ writeId: write.id, approvalEventId: write.approvalEventId, fieldMapHash: write.fieldMapHash, status: input.outcome }),
-    });
-    if (input.outcome === 'SUCCEEDED') await transaction.loanApplication.updateMany({
-      where: { id: write.loanId, tenantId: context.tenantId, version: write.expectedLoanVersion }, data: { status: 'EXPORTED_TO_LOS' },
+      resultHash: hashAuditResult({ writeId: write.id, approvalEventId: write.approvalEventId, fieldMapHash: write.fieldMapHash, status: 'FAILED' }),
     });
   }
   await storeIdempotencyResult(transaction, context, {
