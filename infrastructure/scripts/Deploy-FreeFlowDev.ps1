@@ -6,6 +6,8 @@ param(
     [string]$AwsProfile = "freeflow-dev",
     [string]$AwsRegion = "us-west-2",
     [string]$ImageTag,
+    [ValidateSet("protected-web", "encompass-hosted")]
+    [string]$ConsoleMode = "encompass-hosted",
     [string]$BuilderName = "freeflow-deploy",
     [string]$PlanPath,
     [switch]$ValidateOnly,
@@ -353,6 +355,10 @@ if ($missingServices.Count -gt 0) {
                 $previousEnvironment[$environmentName] = [Environment]::GetEnvironmentVariable($environmentName, "Process")
                 [Environment]::SetEnvironmentVariable($environmentName, "$($images[$name].RepositoryUrl):$ImageTag", "Process")
             }
+            if ($missingServices -contains "console") {
+                $previousEnvironment["FREEFLOW_CONSOLE_MODE"] = [Environment]::GetEnvironmentVariable("FREEFLOW_CONSOLE_MODE", "Process")
+                [Environment]::SetEnvironmentVariable("FREEFLOW_CONSOLE_MODE", $ConsoleMode, "Process")
+            }
 
             # Preserve the existing single-manifest release contract. Buildx
             # otherwise adds a provenance-attestation manifest by default.
@@ -401,6 +407,9 @@ if ($selectedServices -contains "portal") {
     # an explicitly configured connector_worker_image from pinning those
     # workers to an older portal digest during a scoped portal deployment.
     $planArguments.Add("-var=connector_worker_image=$($images["portal"].Reference)")
+}
+if ($selectedServices -contains "console") {
+    $planArguments.Add("-var=console_runtime_mode=$ConsoleMode")
 }
 
 if ($PSCmdlet.ShouldProcess($PlanPath, "Create and validate saved Terraform deployment plan")) {

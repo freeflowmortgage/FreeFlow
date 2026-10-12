@@ -390,6 +390,17 @@ variable "console_image" {
   }
 }
 
+variable "console_runtime_mode" {
+  type        = string
+  description = "Protected console runtime compiled into the immutable console image and enforced by its ECS task."
+  default     = "encompass-hosted"
+
+  validation {
+    condition     = contains(["protected-web", "encompass-hosted"], var.console_runtime_mode)
+    error_message = "console_runtime_mode must be protected-web or encompass-hosted."
+  }
+}
+
 variable "migration_image" {
   type        = string
   description = "Database migration ECR image reference pinned with @sha256:."
