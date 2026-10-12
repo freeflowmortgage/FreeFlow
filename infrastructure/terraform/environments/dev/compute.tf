@@ -455,14 +455,14 @@ resource "aws_ecs_task_definition" "console" {
       }
       environment = [
         { name = "PORT", value = "3000" },
-        { name = "FREEFLOW_RUNTIME_MODE", value = "encompass-hosted" },
+        { name = "FREEFLOW_RUNTIME_MODE", value = var.console_runtime_mode },
         { name = "FREEFLOW_RUNTIME_ENV", value = "development" },
         { name = "FREEFLOW_SYNTHETIC_PRODUCT_DEMOS", value = "true" },
         { name = "COGNITO_LOGOUT_URL", value = "https://${aws_cognito_user_pool_domain.live_test[0].domain}.auth.${var.aws_region}.amazoncognito.com/logout?client_id=${aws_cognito_user_pool_client.alb[0].id}&logout_uri=${urlencode("https://${var.portal_hostname}/")}" },
         { name = "ALB_AUTH_SESSION_COOKIE_NAME", value = "FreeFlowDevAuth" },
         { name = "ENCOMPASS_FRAME_ANCESTORS", value = local.console_frame_ancestors },
-        { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.enable_encompass_test_host) },
-        { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.enable_encompass_test_host) },
+        { name = "ENCOMPASS_TEST_HOST_ENABLED", value = tostring(var.console_runtime_mode == "encompass-hosted" && var.enable_encompass_test_host) },
+        { name = "ENCOMPASS_TEST_HOST_QUALIFICATION", value = tostring(var.console_runtime_mode == "encompass-hosted" && var.enable_encompass_test_host) },
         { name = "ENCOMPASS_TEST_HOST_LOAN_GUID", value = var.encompass_test_host_loan_guid },
       ]
       command = ["node", "/app/serve-production.mjs"]
