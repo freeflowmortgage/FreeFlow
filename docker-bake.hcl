@@ -18,6 +18,10 @@ variable "CONNECTOR_IMAGE" {
   default = "freeflow-encompass-connector:dev"
 }
 
+variable "FREEFLOW_CONSOLE_MODE" {
+  default = "encompass-hosted"
+}
+
 group "default" {
   targets = ["portal", "parser", "console", "migration", "connector"]
 }
@@ -41,6 +45,9 @@ target "console" {
   dockerfile = "apps/underwriting-console/Dockerfile"
   tags       = [CONSOLE_IMAGE]
   platforms  = ["linux/amd64"]
+  args = {
+    FREEFLOW_CONSOLE_MODE = FREEFLOW_CONSOLE_MODE
+  }
 }
 
 target "migration" {
