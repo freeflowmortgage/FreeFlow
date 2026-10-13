@@ -308,7 +308,7 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   await expect(page.getByTestId('authoritative-workflow-tab')).toContainText('Submit & approve');
   await page.getByTestId('authoritative-workflow-tab').click();
   await page.getByRole('combobox').selectOption('CURRENT');
-  await page.getByRole('button', { name: 'Confirm reviewed metadata' }).click();
+  await page.getByRole('button', { name: 'Confirm assignments and reviewed data' }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('READY TO CALCULATE');
   await page.getByTestId('calculate-income').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('CALCULATED');
@@ -381,8 +381,8 @@ test('TB-01 through TB-12 two-borrower hosted path assigns both documents and wr
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('BOUND');
   await page.getByTestId('authoritative-workflow-tab').click();
-  await expect(page.getByTestId('borrower-roster')).toContainText('Primary borrower-1');
-  await expect(page.getByTestId('borrower-roster')).toContainText('Co-borrower borrower-2');
+  await expect(page.getByTestId('borrower-roster')).toContainText('Primary borrower');
+  await expect(page.getByTestId('borrower-roster')).toContainText('Co-borrower');
   await expect(page.getByTestId('calculate-income')).toBeDisabled();
   await page.getByTestId('pull-documents').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
@@ -392,7 +392,7 @@ test('TB-01 through TB-12 two-borrower hosted path assigns both documents and wr
   await selects.nth(1).selectOption('CURRENT');
   await selects.nth(2).selectOption('borrower-2');
   await selects.nth(3).selectOption('CURRENT');
-  await page.getByRole('button', { name: 'Confirm reviewed metadata' }).click();
+  await page.getByRole('button', { name: 'Confirm assignments and reviewed data' }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('READY TO CALCULATE');
   await page.getByTestId('calculate-income').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('CALCULATED');
@@ -450,14 +450,14 @@ test('demo gate harness renders paystub and matching W-2 reconciliation, then ap
     const select = label.locator('select');
     const input = label.locator('input');
     if (await select.count()) {
-      if (text.includes('borrowerAssignment')) await select.selectOption(text.includes('Schedule') || text.includes('Form 1065') ? 'borrower-2' : 'borrower-1');
-      else if (text.includes('employmentRole')) await select.selectOption('CURRENT');
-      else if (text.includes('assetElection')) await select.selectOption('INCLUDE');
+      if (text.includes('Borrower assignment')) await select.selectOption(text.includes('Schedule') || text.includes('Form 1065') ? 'borrower-2' : 'borrower-1');
+      else if (text.includes('Employment status')) await select.selectOption('CURRENT');
+      else if (text.includes('Use this asset income?')) await select.selectOption('INCLUDE');
     } else if (await input.count()) {
-      await input.fill(text.includes('elapsedMonths') ? '7.5' : '2025');
+      await input.fill(text.includes('Months elapsed year to date') ? '7.5' : '2025');
     }
   }
-  await page.getByRole('button', { name: 'Confirm reviewed metadata' }).click();
+  await page.getByRole('button', { name: 'Confirm assignments and reviewed data' }).click();
   await expect(page.getByTestId('workflow-state')).toHaveText('READY TO CALCULATE');
   await page.getByTestId('calculate-income').click();
   await expect(page.getByTestId('workflow-state')).toHaveText('CALCULATED');
