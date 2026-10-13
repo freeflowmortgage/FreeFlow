@@ -90,6 +90,63 @@ export function applyRequirementValue(
   else assignment[field] = Number(raw);
 }
 
+const REVIEW_FIELD_LABELS: Record<MetadataRequirement['field'], string> = {
+  taxYear: 'Tax year',
+  employmentRole: 'Employment status',
+  ownershipPercentage: 'Ownership percentage',
+  requiredParserField: 'Required document data',
+  unsupportedCalculation: 'Calculation availability',
+  borrowerAssignment: 'Borrower assignment',
+  assetElection: 'Use this asset income?',
+  elapsedMonths: 'Months elapsed year to date',
+  payFrequency: 'Pay frequency',
+  baseIncomeMethod: 'Base income method',
+};
+
+export function reviewFieldLabel(field: MetadataRequirement['field']): string {
+  return REVIEW_FIELD_LABELS[field];
+}
+
+/**
+ * Returns a useful review-row identity without exposing internal entity keys.
+ * Schedule E properties are distinguished by the extracted address so an
+ * underwriter assigns the property they actually recognize.
+ */
+export function reviewEntityLabel(context: ConsoleContext | null, requirement: MetadataRequirement): string {
+  const extraction = context?.extractions.find((item) => item.id === requirement.extractionId);
+  const input = isRecord(extraction?.normalizedInput) ? extraction.normalizedInput : null;
+  if (!input) return requirement.form;
+
+  if (requirement.form === 'Schedule E') {
+    const match = /^schedule-e-(\d+)$/.exec(requirement.entityId);
+    const index = match ? Number(match[1]) : -1;
+    const property = index >= 0 && Array.isArray(input.scheduleEProperties)
+      ? input.scheduleEProperties[index]
+      : null;
+    const address = isRecord(property) && typeof property.propertyAddress === 'string'
+      ? property.propertyAddress.trim()
+      : '';
+    return address ? `Schedule E rental · ${address}` : `Schedule E rental property ${index + 1}`;
+  }
+
+  if (requirement.form === 'W-2' && Array.isArray(input.w2Records)) {
+    const row = input.w2Records.find((item) => isRecord(item) && item.entityId === requirement.entityId);
+    const employer = isRecord(row) && typeof row.employerName === 'string' ? row.employerName.trim() : '';
+    if (employer) return `W-2 · ${employer}`;
+  }
+
+  if (Array.isArray(input.formRecords)) {
+    const row = input.formRecords.find((item) => isRecord(item) && item.entityId === requirement.entityId);
+    if (isRecord(row) && Array.isArray(row.fields)) {
+      const employer = row.fields.find((item) => isRecord(item) && item.sourceFieldId === 'ps-employer-name');
+      const value = isRecord(employer) && typeof employer.value === 'string' ? employer.value.trim() : '';
+      if (value) return `${requirement.form} · ${value}`;
+    }
+  }
+
+  return requirement.form;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
