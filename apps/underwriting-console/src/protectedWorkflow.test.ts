@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyRequirementValue, deriveProtectedWorkflowState, readEvidenceFields, type ConsoleContext } from './protectedWorkflow';
+import {
+  applyRequirementValue,
+  deriveProtectedWorkflowState,
+  readEvidenceFields,
+  reviewEntityLabel,
+  reviewFieldLabel,
+  type ConsoleContext,
+} from './protectedWorkflow';
 
 const base = {
   loan: { id: 'loan', version: 1, status: 'DRAFT', program: 'CONVENTIONAL', borrowerName: null },
@@ -44,4 +51,30 @@ test('accepts only bounded persisted coordinate evidence', () => {
     { collection: 'formExtracts', entityId: 'entity', field: 'ent1-net', pageIndex: 2, box: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 } },
     { collection: 'bad', field: 'outside', pageIndex: 0, box: { x: -1, y: 0, w: 1, h: 1 } },
   ] }), [{ collection: 'formExtracts', entityId: 'entity', field: 'ent1-net', pageIndex: 2, box: [0.1, 0.2, 0.3, 0.04] }]);
+});
+
+test('uses underwriting-language review labels instead of internal metadata keys', () => {
+  assert.equal(reviewFieldLabel('borrowerAssignment'), 'Borrower assignment');
+  assert.equal(reviewFieldLabel('elapsedMonths'), 'Months elapsed year to date');
+});
+
+test('identifies Schedule E borrower assignments by property address', () => {
+  const context = {
+    ...base,
+    extractions: [{
+      id: 'extraction-1',
+      normalizedInput: {
+        scheduleEProperties: [
+          { propertyAddress: '100 Synthetic Lane' },
+          { propertyAddress: '200 Example Avenue' },
+        ],
+      },
+    }],
+  } as unknown as ConsoleContext;
+  assert.equal(reviewEntityLabel(context, {
+    extractionId: 'extraction-1', entityId: 'schedule-e-1', field: 'borrowerAssignment', form: 'Schedule E',
+  }), 'Schedule E rental · 200 Example Avenue');
+  assert.equal(reviewEntityLabel(context, {
+    extractionId: 'extraction-1', entityId: 'schedule-e-9', field: 'borrowerAssignment', form: 'Schedule E',
+  }), 'Schedule E rental property 10');
 });

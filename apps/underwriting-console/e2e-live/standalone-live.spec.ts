@@ -70,15 +70,15 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
       await page.getByTestId('upload-pdf').click();
       expect((await firstUpload).status()).toBe(201);
 
-      const review = page.getByRole('heading', { name: '3. Metadata review' }).locator('..');
-      const confirmReview = page.getByRole('button', { name: 'Confirm reviewed metadata' });
+      const review = page.getByRole('heading', { name: '3. Borrower assignment and data review' }).locator('..');
+      const confirmReview = page.getByRole('button', { name: 'Confirm assignments and reviewed data' });
       await expect(confirmReview).toBeVisible();
       await expect(review.locator('label')).toHaveCount(3);
       await reviewedField(review, 'employmentRole', 'select').selectOption('CURRENT');
       await reviewedField(review, 'taxYear', 'input').fill('2023');
       await reviewedField(review, 'elapsedMonths', 'input').fill(String(FIXTURE_EXPECTATION.elapsedMonths));
       await confirmReview.click();
-      await expect(page.getByText('No outstanding metadata review.')).toBeVisible();
+      await expect(page.getByText('Borrower assignments and required data are complete.')).toBeVisible();
 
       await page.getByTestId('calculate-income').click();
       await expect(page.getByTestId('combined-income')).toContainText(`$${withThousands(EXPECTED_QUALIFYING_MONTHLY)}`);
@@ -174,7 +174,12 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
 });
 
 function reviewedField(review: ReturnType<Page['locator']>, field: string, control: 'input' | 'select') {
-  return review.locator('label').filter({ hasText: `/ ${field}` }).locator(control);
+  const labels: Record<string, string> = {
+    employmentRole: 'Employment status',
+    taxYear: 'Tax year',
+    elapsedMonths: 'Months elapsed year to date',
+  };
+  return review.locator('label').filter({ hasText: labels[field] ?? field }).locator(control);
 }
 
 function buildSyntheticScannedPaystub(): Buffer {

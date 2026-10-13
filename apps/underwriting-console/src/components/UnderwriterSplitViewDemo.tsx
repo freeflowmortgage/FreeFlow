@@ -645,6 +645,7 @@ export default function UnderwriterSplitViewDemo({
   // 1. Navigation & View States
   const [activeTab, setActiveTab] = useState<IncomeTab>('PAYSTUB_RECONCILIATION');
   const [highlightFieldId, setHighlightFieldId] = useState<string | null>(null);
+  const qaPointerTargetRef = useRef<HTMLElement | null>(null);
 
   const availableTabs = useMemo(() => {
     const allTabs = [
@@ -2339,6 +2340,7 @@ export default function UnderwriterSplitViewDemo({
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
   const handleInspectField = (fieldId: string, documentId?: string, clicked?: HTMLElement | null) => {
+    const originatedInQaPanel = Boolean(clicked ?? qaPointerTargetRef.current);
     skipPageResetRef.current = true;
     setHighlightFieldId(fieldId);
     setDocMode('pdf');
@@ -2395,6 +2397,11 @@ export default function UnderwriterSplitViewDemo({
     if (fieldId.endsWith('-y2')) setCanvasYearIndex(1);
     else if (fieldId.endsWith('-y1')) setCanvasYearIndex(0);
     requestAnimationFrame(() => {
+      // The underwriter already had to see a QA control to click it. Moving the
+      // right pane after that click is both unnecessary and disorienting. Only
+      // navigation originating elsewhere (PDF overlay, split window, keyboard)
+      // should bring a QA field into view.
+      if (originatedInQaPanel) return;
       // Only the worksheet field is scrolled here, and only within its own
       // pane. scrollIntoView walks every scrollable ancestor, so scrolling the
       // PDF overlay box from here dragged the whole page and sent the QA panel
@@ -3437,7 +3444,13 @@ export default function UnderwriterSplitViewDemo({
             ))}
           </div>
         {docPopout && isLive && tabDocGroups.length ? docChips : null}
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
+        <div
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6"
+          onPointerDownCapture={(event) => {
+            qaPointerTargetRef.current = event.target instanceof HTMLElement ? event.target : null;
+            window.setTimeout(() => { qaPointerTargetRef.current = null; }, 0);
+          }}
+        >
           {docPopout && (
             <div className="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs">
               <span className="flex items-center gap-2 font-bold text-indigo-800">
