@@ -290,25 +290,25 @@ function projectPersistedInput(
       if (!hasAny(fields, S_CORP_K1_INCOME_FIELD_IDS)) {
         // Return pages persist scorp-return-* lines as evidence for the K-1.
         // They are not an independent borrower income calculation row.
-        if (isSCorpReturnEvidenceOnly(record.fields)) continue;
+        if (isSCorpReturnEvidenceOnly(record.fields) || isScheduleLEvidenceOnly(record.fields)) continue;
         requireParserField(requirements, extractionId, record);
         continue;
       }
       const ownership = n('scorp-own-pct') ?? meta.ownershipPercentage;
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
-      push(projected, 'form1120S', compact({ ...base, businessName: t('scorp-name'), ein: t('scorp-ein'), ownershipPercentage: ownership, k1OrdinaryIncome: n('scorp-ord'), k1NetRentalRealEstate: n('scorp-rre'), k1OtherNetRentalIncome: n('scorp-onr'), k1Distributions: n('scorp-dist'), depletion: n('scorp-depletion'), mealsExclusion: n('scorp-meals'), hasStableDistributions: meta.hasStableDistributions }));
+      push(projected, 'form1120S', compact({ ...base, businessName: t('scorp-name'), ein: t('scorp-ein'), ownershipPercentage: ownership, k1OrdinaryIncome: n('scorp-ord'), k1NetRentalRealEstate: n('scorp-rre'), k1OtherNetRentalIncome: n('scorp-onr'), k1Distributions: n('scorp-dist'), depletion: n('scorp-depletion'), mealsExclusion: n('scorp-meals'), hasStableDistributions: meta.hasStableDistributions, scheduleL: scheduleLFor(persisted.formRecords ?? [], 'Form 1120-S') }));
     } else if (record.form === 'Form 1065') {
       if (!hasAny(fields, PARTNERSHIP_K1_INCOME_FIELD_IDS)) {
         // Return pages persist entity-level pt-return-* lines on their own formRecord.
         // They are evidence for the K-1 extraction, not a calc row, and must not fail-close.
-        if (isPartnershipReturnEvidenceOnly(record.fields)) continue;
+        if (isPartnershipReturnEvidenceOnly(record.fields) || isScheduleLEvidenceOnly(record.fields)) continue;
         requireParserField(requirements, extractionId, record);
         continue;
       }
       const profit = n('pt-profit-pct'); const capital = n('pt-capital-pct');
       const ownership = meta.ownershipPercentage ?? profit ?? capital;
       if (ownership === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
-      push(projected, 'form1065', compact({ ...base, businessName: t('pt-name'), ein: t('pt-ein'), ownershipPercentage: ownership, profitPercentageEnd: profit, capitalPercentageEnd: capital, k1OrdinaryIncome: n('pt-ord'), k1NetRentalRealEstate: n('pt-rre'), k1OtherNetRentalIncome: n('pt-onr'), k1GuaranteedPayments: n('pt-gp'), k1Distributions: n('pt-dist'), depletion: n('pt-depletion'), mealsExclusion: n('pt-meals'), hasStableDistributions: meta.hasStableDistributions }));
+      push(projected, 'form1065', compact({ ...base, businessName: t('pt-name'), ein: t('pt-ein'), ownershipPercentage: ownership, profitPercentageEnd: profit, capitalPercentageEnd: capital, k1OrdinaryIncome: n('pt-ord'), k1NetRentalRealEstate: n('pt-rre'), k1OtherNetRentalIncome: n('pt-onr'), k1GuaranteedPayments: n('pt-gp'), k1Distributions: n('pt-dist'), depletion: n('pt-depletion'), mealsExclusion: n('pt-meals'), hasStableDistributions: meta.hasStableDistributions, scheduleL: scheduleLFor(persisted.formRecords ?? [], 'Form 1065') }));
     } else if (record.form === 'Form 1120') {
       if (n('c1120-taxable') === undefined) { requireParserField(requirements, extractionId, record); continue; }
       if (meta.ownershipPercentage === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
@@ -342,8 +342,48 @@ function compact(value: Record<string, unknown>): Record<string, unknown> {
 const PARTNERSHIP_K1_INCOME_FIELD_IDS = ['pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist'] as const;
 const S_CORP_K1_INCOME_FIELD_IDS = ['scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist'] as const;
 
+/** Parser id -> the balance-sheet line the liquidity test reads it as. */
+const SCHEDULE_L_LINES = {
+  'sch-l-cash': 'cash',
+  'sch-l-ar': 'accountsReceivable',
+  'sch-l-securities': 'taxExemptSecurities',
+  'sch-l-ap': 'accountsPayable',
+  'sch-l-notes': 'notesPayableLt1Yr',
+  'sch-l-other-current': 'otherCurrentLiabilities',
+  'sch-l-current-liabilities': 'currentLiabilities',
+} as const;
+
 function hasAny(fields: ReadonlyMap<string, unknown>, ids: readonly string[]): boolean {
   return ids.some((id) => fields.has(id));
+}
+
+/** True when a record carries only Schedule L lines, which are not a calc row of their own. */
+function isScheduleLEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?: string }>): boolean {
+  return fields.length > 0 && fields.every((field) => (field.sourceFieldId ?? '') in SCHEDULE_L_LINES);
+}
+
+/**
+ * The balance sheet a return's K-1 is tested against.
+ *
+ * Schedule L prints on its own page, so it arrives as a separate record from
+ * the K-1 it belongs to. Returned only when the packet holds exactly one for
+ * the form: with two partnerships in one packet there is no way to tell which
+ * balance sheet belongs to which K-1, and guessing would let one business's
+ * liquidity carry another's income. Without it the K-1 falls back to the
+ * distributions actually received, which is the safe direction.
+ */
+function scheduleLFor(
+  records: ReadonlyArray<z.infer<typeof persistedFormRecord>>,
+  form: 'Form 1065' | 'Form 1120-S',
+): Record<string, number> | undefined {
+  const sheets = records.filter((record) => record.form === form && isScheduleLEvidenceOnly(record.fields));
+  if (sheets.length !== 1) return undefined;
+  const sheet: Record<string, number> = {};
+  for (const field of sheets[0].fields) {
+    const line = SCHEDULE_L_LINES[field.sourceFieldId as keyof typeof SCHEDULE_L_LINES];
+    if (line && typeof field.numericValue === 'number') sheet[line] = field.numericValue;
+  }
+  return Object.keys(sheet).length > 0 ? sheet : undefined;
 }
 
 /** True when every captured field is a partnership return id (pt-return-*) and none are K-1 income boxes. */

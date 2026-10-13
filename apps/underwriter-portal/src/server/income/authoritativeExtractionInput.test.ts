@@ -482,3 +482,59 @@ test('a verification with no reviewed metadata fails closed on every missing fac
     return true;
   });
 });
+
+test('Schedule L reaches the partnership it was printed in rather than failing the packet', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000230';
+  const scheduleL = {
+    entityId: 'form-1065-p4', form: 'Form 1065' as const, pageIndex: 4, fields: [
+      { sourceFieldId: 'sch-l-cash', numericValue: 180000 },
+      { sourceFieldId: 'sch-l-ar', numericValue: 20000 },
+      { sourceFieldId: 'sch-l-ap', numericValue: 50000 },
+      { sourceFieldId: 'sch-l-notes', numericValue: 30000 },
+    ],
+  };
+  const result = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [
+      { entityId: 'form-1065-k1', form: 'Form 1065' as const, pageIndex: 3, fields: [
+        { sourceFieldId: 'pt-ord', numericValue: 120000 },
+        { sourceFieldId: 'pt-dist', numericValue: 30000 },
+      ] },
+      scheduleL,
+    ] },
+    metadataAssignments: [
+      { entityId: 'form-1065-k1', taxYear: 2024, ownershipPercentage: 50, hasStableDistributions: true },
+      { entityId: 'form-1065-p4', taxYear: 2024 },
+    ],
+  }]);
+
+  // A Schedule L page carries no K-1 income, and must not be read as a missing one.
+  assert.equal(result.form1065?.length, 1);
+  assert.deepEqual(result.form1065?.[0].scheduleL, {
+    cash: 180000, accountsReceivable: 20000, accountsPayable: 50000, notesPayableLt1Yr: 30000,
+  });
+});
+
+test('two partnerships in one packet leave the balance sheet unassigned rather than guessing', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000231';
+  const sheet = (entityId: string, pageIndex: number, cash: number) => ({
+    entityId, form: 'Form 1065' as const, pageIndex,
+    fields: [{ sourceFieldId: 'sch-l-cash', numericValue: cash }, { sourceFieldId: 'sch-l-ap', numericValue: 10000 }],
+  });
+  const result = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [
+      { entityId: 'form-1065-k1', form: 'Form 1065' as const, pageIndex: 3, fields: [{ sourceFieldId: 'pt-ord', numericValue: 120000 }] },
+      sheet('form-1065-p4', 4, 180000),
+      sheet('form-1065-p9', 9, 2000),
+    ] },
+    metadataAssignments: [
+      { entityId: 'form-1065-k1', taxYear: 2024, ownershipPercentage: 50, hasStableDistributions: true },
+      { entityId: 'form-1065-p4', taxYear: 2024 },
+      { entityId: 'form-1065-p9', taxYear: 2024 },
+    ],
+  }]);
+
+  // One business's liquidity must never carry another's income.
+  assert.equal(result.form1065?.[0].scheduleL, undefined);
+});
