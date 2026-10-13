@@ -28,6 +28,7 @@ export type WvoeAnnualizationGap =
   | 'BASE_METHOD_UNAVAILABLE'
   | 'BASE_PAY_PERIOD_REQUIRED'
   | 'WEEKLY_HOURS_REQUIRED'
+  | 'PAY_CYCLE_REQUIRED'
   | 'ELAPSED_MONTHS_REQUIRED'
   | 'ELAPSED_MONTHS_EXCEEDS_EMPLOYMENT'
   | 'PRIOR_YEAR_UNAVAILABLE';
@@ -36,8 +37,17 @@ export type WvoeAnnualizationInput = Readonly<{
   /** Item 12A, in the unit named by `basePayPeriod`. */
   currentBasePay?: number;
   basePayPeriod?: WvoeBasePayPeriod;
-  /** Required only when `basePayPeriod` is `HOURLY`. */
+  /** Required only when `basePayPeriod` is `HOURLY`, unless hours come per pay period. */
   weeklyHours?: number;
+  /**
+   * Hours per pay period, which is what The Work Number reports ("Avg. Hrs.
+   * Worked / Pay Period: 86"). Reading that figure as weekly hours overstates
+   * a semi-monthly earner by well over double, so it is only usable alongside
+   * the cycle those hours were counted over.
+   */
+  payPeriodHours?: number;
+  /** The paycheck cycle, distinct from the unit the rate itself is quoted in. */
+  payCycle?: Exclude<WvoeBasePayPeriod, 'HOURLY' | 'ANNUAL'>;
   /** The year-to-date column of item 12B. */
   baseYtd?: number;
   overtimeYtd?: number;
@@ -98,7 +108,37 @@ export function parseWvoeBasePayPeriod(value: string | undefined | null): WvoeBa
   return undefined;
 }
 
+/**
+ * The paycheck cycle, which is not the unit the rate is quoted in.
+ *
+ * The Work Number prints both and they routinely disagree: "Employee Pay
+ * Frequency: Hourly" over "Pay Cycle: Semi Monthly". Truework prints "Current
+ * Gross Pay: $45.00 Hourly" over "Paycheck Frequency: Monthly". Taking the
+ * cycle as the rate basis turns an hourly wage into a monthly salary.
+ */
+export function parseWvoePayCycle(
+  value: string | null | undefined,
+): Exclude<WvoeBasePayPeriod, 'HOURLY' | 'ANNUAL'> | undefined {
+  const period = parseWvoeBasePayPeriod(value);
+  if (period === undefined || period === 'HOURLY' || period === 'ANNUAL') return undefined;
+  return period;
+}
+
+/** Months employed from a stated duration: "8 Yrs 7 Months", "2 Years, 9 Months". */
+export function monthsFromEmploymentDuration(value: string | null | undefined): number | null {
+  const text = (value ?? '').toLowerCase();
+  if (!text) return null;
+  const years = /(\d{1,2})\s*(?:yrs?|years?)\b/.exec(text);
+  const months = /(\d{1,3})\s*(?:mos?|months?)\b/.exec(text);
+  if (!years && !months) return null;
+  const total = (years ? Number(years[1]) * 12 : 0) + (months ? Number(months[1]) : 0);
+  return total > 0 && total <= 720 ? total : null;
+}
+
 const money = (value: Decimal) => value.toDecimalPlaces(2).toNumber();
+
+const positive = (value: number | undefined): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 
 export function annualizeWvoe(input: WvoeAnnualizationInput): WvoeAnnualization {
   const gaps: WvoeAnnualizationGap[] = [];
@@ -123,8 +163,15 @@ export function annualizeWvoe(input: WvoeAnnualizationInput): WvoeAnnualization 
     if (!input.basePayPeriod) {
       gaps.push('BASE_PAY_PERIOD_REQUIRED');
     } else if (input.basePayPeriod === 'HOURLY') {
-      if (typeof input.weeklyHours === 'number' && Number.isFinite(input.weeklyHours) && input.weeklyHours > 0) {
-        current = money(new Decimal(input.currentBasePay).mul(input.weeklyHours).mul(52).div(12));
+      const weekly = positive(input.weeklyHours);
+      const perPeriod = positive(input.payPeriodHours);
+      if (weekly !== null) {
+        current = money(new Decimal(input.currentBasePay).mul(weekly).mul(52).div(12));
+      } else if (perPeriod !== null && input.payCycle) {
+        const annualHours = new Decimal(perPeriod).mul(wvoeBasePeriodsPerYear(input.payCycle));
+        current = money(new Decimal(input.currentBasePay).mul(annualHours).div(12));
+      } else if (perPeriod !== null) {
+        gaps.push('PAY_CYCLE_REQUIRED');
       } else {
         gaps.push('WEEKLY_HOURS_REQUIRED');
       }

@@ -1,7 +1,9 @@
 import {
   annualizeWvoe,
   monthsEmployedBetween,
+  monthsFromEmploymentDuration,
   parseWvoeBasePayPeriod,
+  parseWvoePayCycle,
   wvoeBasePeriodsPerYear,
 } from '../src/wvoeAnnualization';
 import { w2VariableMethods } from '../src/w2-income-methods';
@@ -108,5 +110,56 @@ describe('annualizeWvoe', () => {
     expect(monthsEmployedBetween('06/01/2025', '12/31/2025')).toBe(6);
     expect(monthsEmployedBetween('12/31/2025', '06/01/2025')).toBeNull();
     expect(monthsEmployedBetween(null, '12/31/2025')).toBeNull();
+  });
+
+  test('hours stated per pay period are annualized over the pay cycle, not the week', () => {
+    // The Work Number: rate of pay $17.42 Hourly, 86 avg hours per pay period,
+    // semi-monthly cycle. Reading 86 as weekly hours returns $77,902 a year.
+    const workNumber = annualizeWvoe({
+      currentBasePay: 17.42, basePayPeriod: 'HOURLY', payPeriodHours: 86, payCycle: 'SEMIMONTHLY',
+    });
+    expect(workNumber.components.base).toBe(2996.24);
+    expect(workNumber.annualBase).toBe(35954.88);
+    expect(workNumber.status).toBe('READY');
+    const biweekly = annualizeWvoe({
+      currentBasePay: 17.42, basePayPeriod: 'HOURLY', payPeriodHours: 80, payCycle: 'BIWEEKLY',
+    });
+    expect(biweekly.annualBase).toBe(36233.64);
+    // Weekly hours stay authoritative when the document states them outright.
+    const both = annualizeWvoe({
+      currentBasePay: 17.42, basePayPeriod: 'HOURLY', weeklyHours: 40, payPeriodHours: 86, payCycle: 'SEMIMONTHLY',
+    });
+    expect(both.annualBase).toBe(36233.64);
+  });
+
+  test('hours per pay period without a cycle is a gap, never a weekly figure', () => {
+    const orphan = annualizeWvoe({ currentBasePay: 17.42, basePayPeriod: 'HOURLY', payPeriodHours: 86 });
+    expect(orphan.gaps).toContain('PAY_CYCLE_REQUIRED');
+    expect(orphan.gaps).not.toContain('WEEKLY_HOURS_REQUIRED');
+    expect(orphan.status).toBe('GAPS');
+    expect(orphan.annualBase).toBe(0);
+    // Truework reports "Average Hours Worked Per Week: N/A" against an hourly
+    // rate, which leaves nothing to annualize.
+    const truework = annualizeWvoe({ currentBasePay: 45, basePayPeriod: 'HOURLY' });
+    expect(truework.gaps).toContain('WEEKLY_HOURS_REQUIRED');
+    expect(truework.status).toBe('GAPS');
+  });
+
+  test('a paycheck cycle is never mistaken for the unit the rate is quoted in', () => {
+    expect(parseWvoePayCycle('Semi Monthly')).toBe('SEMIMONTHLY');
+    expect(parseWvoePayCycle('Bi-Weekly')).toBe('BIWEEKLY');
+    expect(parseWvoePayCycle('Monthly')).toBe('MONTHLY');
+    expect(parseWvoePayCycle('Hourly')).toBeUndefined();
+    expect(parseWvoePayCycle('Annual')).toBeUndefined();
+    expect(parseWvoePayCycle('')).toBeUndefined();
+  });
+
+  test('months employed can be read from the duration both vendors print', () => {
+    expect(monthsFromEmploymentDuration('8 Yrs 7 Months')).toBe(103);
+    expect(monthsFromEmploymentDuration('2 Years, 9 Months')).toBe(33);
+    expect(monthsFromEmploymentDuration('11 Mos')).toBe(11);
+    expect(monthsFromEmploymentDuration('3 Years')).toBe(36);
+    expect(monthsFromEmploymentDuration('Data not provided')).toBeNull();
+    expect(monthsFromEmploymentDuration(null)).toBeNull();
   });
 });
