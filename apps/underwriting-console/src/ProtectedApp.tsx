@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ConsoleView } from './appTypes';
+import type { ConsoleView, LegalSlug } from './appTypes';
 import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
+import LegalPage from './components/LegalPage';
+import { noticeFor } from './legal/notices';
+import { legalSlugFromHash } from './legalRoute';
 import Conversational1003 from './components/Conversational1003';
 import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
 import SplitDocPane from './components/SplitDocPane';
@@ -54,7 +57,23 @@ async function sha256File(file: File): Promise<string> {
 }
 
 export default function ProtectedApp() {
+  // The published notices are reachable from the landing footer, which renders
+  // in this build too. Routing them here rather than inside the workflow keeps
+  // them available without an authorized loan context.
+  const [legalSlug, setLegalSlug] = useState<LegalSlug | null>(() => legalSlugFromHash(window.location.hash));
+
+  useEffect(() => {
+    const onHash = () => setLegalSlug(legalSlugFromHash(window.location.hash));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    if (legalSlug) document.title = `${noticeFor(legalSlug).title} · FreeFlow`;
+  }, [legalSlug]);
+
   if (window.location.hash === '#split-doc') return <SplitDocPane />;
+  if (legalSlug) return <LegalPage slug={legalSlug} onHome={() => { window.location.hash = ''; }} />;
 
   return <ProtectedWorkflowApp />;
 }

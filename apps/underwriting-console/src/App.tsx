@@ -9,6 +9,7 @@ import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
 import LegalPage from './components/LegalPage';
 import { noticeFor } from './legal/notices';
+import { legalSlugFromHash } from './legalRoute';
 import Conversational1003 from './components/Conversational1003';
 import SplitDocPane from './components/SplitDocPane';
 import AppraisalDocPane from './components/AppraisalDocPane';
@@ -28,13 +29,12 @@ const NAV: { id: ConsoleView; label: string; icon: typeof ShieldCheck }[] = [
   { id: 'usda', label: 'USDA', icon: ToggleRight },
 ];
 
-const LEGAL_SLUGS: LegalSlug[] = ['legal', 'terms', 'privacy'];
-
 function parseHash(): { surface: Surface; view: ConsoleView; demo: boolean; legal: LegalSlug } {
   const hash = window.location.hash.replace(/^#/, '');
 
-  if ((LEGAL_SLUGS as string[]).includes(hash)) {
-    return { surface: 'legal', view: 'split', demo: false, legal: hash as LegalSlug };
+  const legal = legalSlugFromHash(hash);
+  if (legal) {
+    return { surface: 'legal', view: 'split', demo: false, legal };
   }
 
   // Standalone demo routes: one service, no workspace chrome (#demo-income, #demo-1003, …)
