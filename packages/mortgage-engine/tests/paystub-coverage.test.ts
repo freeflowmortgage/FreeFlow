@@ -96,7 +96,9 @@ describe('paystubCoverage', () => {
     // Outside that window the frequency cannot change the answer.
     const june = paystubCoverage({ taxYear: 2025, periodEnd: '06/30/2025' });
     expect(june.status).toBe('READY');
-    expect(june.elapsedMonths).toBeCloseTo(5.95, 2);
+    expect(june.elapsedMonths).toBe(6);
+    // A period that does not close a month is measured by its day share.
+    expect(paystubCoverage({ taxYear: 2025, periodEnd: '06/13/2025' }).elapsedMonths).toBeCloseTo(5.39, 2);
   });
 
   test('the derived figure is what annualizePaystub needs to read a year-end stub', () => {

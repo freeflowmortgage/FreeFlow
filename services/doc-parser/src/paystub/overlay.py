@@ -289,6 +289,52 @@ def income_fields(result: PaystubResult) -> list[dict]:
             )
         )
 
+    # The date the period closed is what says how much of the year the
+    # year-to-date column covers, and whether this is the last stub of it.
+    # Without it the elapsed-months divisor is a number nothing can check.
+    if result.identity.period_end and result.identity.period_end_box:
+        records.append(
+            _record(
+                page_index=page,
+                source_id="ps-period-end",
+                box_label="Period End",
+                field_label="Pay Period End",
+                line_num="Period End",
+                category="identity",
+                value=result.identity.period_end,
+                numeric=Decimal("0"),
+                box=result.identity.period_end_box,
+            )
+        )
+        if result.identity.period_begin:
+            records.append(
+                _record(
+                    page_index=page,
+                    source_id="ps-period-start",
+                    box_label="Period Start",
+                    field_label="Pay Period Start",
+                    line_num="Period Start",
+                    category="identity",
+                    value=result.identity.period_begin,
+                    numeric=Decimal("0"),
+                    box=result.identity.period_end_box,
+                )
+            )
+        if result.identity.check_date:
+            records.append(
+                _record(
+                    page_index=page,
+                    source_id="ps-pay-date",
+                    box_label="Pay Date",
+                    field_label="Pay Date",
+                    line_num="Pay Date",
+                    category="identity",
+                    value=result.identity.check_date,
+                    numeric=Decimal("0"),
+                    box=result.identity.period_end_box,
+                )
+            )
+
     # Frequency is derived from the period dates, so the highlight points at
     # the pay period end the underwriter would check it against.
     if income.pay_frequency and result.identity.period_end_box:

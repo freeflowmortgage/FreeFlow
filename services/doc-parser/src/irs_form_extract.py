@@ -145,6 +145,11 @@ PAYSTUB_FIELDS = (
     FieldSpec("ps-tips-ytd", "Paystub", "wages", "Tips YTD", "Tips YTD", "Tips", ("Tips YTD", "YTD tips"), "money"),
     FieldSpec("ps-commission-ytd", "Paystub", "wages", "Commission YTD", "Commission YTD", "Commission", ("Commission YTD", "YTD commission"), "money"),
     FieldSpec("ps-rsu-ytd", "Paystub", "wages", "RSU YTD", "RSU / Stock Award YTD", "RSU", ("RSU", "Restricted stock", "Stock award"), "money"),
+    # How much of the year the YTD column covers, and whether any pay period
+    # of that year closes after this one, both follow from the period end.
+    FieldSpec("ps-period-end", "Paystub", "identity", "Period End", "Pay Period End", "Period End", ("Pay Period End", "Period End", "Period Ending", "Pay Period Ending"), "date"),
+    FieldSpec("ps-period-start", "Paystub", "identity", "Period Start", "Pay Period Start", "Period Start", ("Pay Period Begin", "Period Start", "Period Beginning", "Pay Period Beginning"), "date"),
+    FieldSpec("ps-pay-date", "Paystub", "identity", "Pay Date", "Pay Date", "Pay Date", ("Check Date", "Pay Date", "Payment Date"), "date"),
 )
 
 _WVOE_CURRENT_BASE_LABELS = (

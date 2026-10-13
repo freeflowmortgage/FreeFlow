@@ -22,6 +22,15 @@ const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Obje
   'Paystub': new Set([
     'ps-employee-name', 'ps-employer-name', 'ps-hourly-rate', 'ps-hours-week', 'ps-current-base', 'ps-base-ytd',
     'ps-bonus-ytd', 'ps-ot-ytd', 'ps-tips-ytd', 'ps-commission-ytd', 'ps-rsu-ytd', 'ps-other-ytd', 'ps-pay-frequency',
+    // The period the stub covers. Without it the elapsed-months divisor every
+    // year-to-date figure is divided by rests on reviewer recall alone, and a
+    // December stub left at the mid-year default overstates income by 60%.
+    'ps-period-end', 'ps-period-start', 'ps-pay-date',
+  ]),
+  'WVOE': new Set([
+    'wvoe-employer-name', 'wvoe-base', 'wvoe-base-period', 'wvoe-pay-cycle', 'wvoe-hours-week', 'wvoe-hours-period',
+    'wvoe-base-ytd', 'wvoe-base-ytd-prior', 'wvoe-ot', 'wvoe-ot-prior', 'wvoe-bonus', 'wvoe-bonus-prior',
+    'wvoe-commission', 'wvoe-commission-prior', 'wvoe-ytd-thru', 'wvoe-ytd-year', 'wvoe-hire-date', 'wvoe-months',
   ]),
 });
 

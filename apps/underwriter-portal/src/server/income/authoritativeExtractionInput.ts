@@ -1,5 +1,18 @@
 import { z } from 'zod';
-import { annualizePaystub, parsePayFrequency, type PayFrequency, type PaystubBaseMethod, type UnifiedIncomeCalculationPayload } from '@mortgage-pos/mortgage-engine';
+import {
+  annualizePaystub,
+  annualizeWvoe,
+  elapsedMonthsAgree,
+  parsePayFrequency,
+  parseWvoeBasePayPeriod,
+  parseWvoePayCycle,
+  paystubCoverage,
+  type PayFrequency,
+  type PaystubBaseMethod,
+  type UnifiedIncomeCalculationPayload,
+  type WvoeBaseMethod,
+  type WvoeVariableMethod,
+} from '@mortgage-pos/mortgage-engine';
 
 const money = z.number().finite().min(-1_000_000_000).max(1_000_000_000);
 const year = z.number().int().min(1990).max(2100);
@@ -100,7 +113,7 @@ const persistedField = z.object({
   sourceFieldId: z.string().trim().min(1).max(100), value: z.string().max(255).optional(), numericValue: money.optional(),
 }).strict();
 const persistedFormRecord = z.object({
-  entityId, form: z.enum(['Schedule C', 'Schedule F', 'Form 1120-S', 'Form 1065', 'Form 1120', 'Form 1040', 'Schedule B', 'Schedule D', 'Paystub']),
+  entityId, form: z.enum(['Schedule C', 'Schedule F', 'Form 1120-S', 'Form 1065', 'Form 1120', 'Form 1040', 'Schedule B', 'Schedule D', 'Paystub', 'WVOE']),
   pageIndex: z.number().int().min(0).max(10_000), fields: z.array(persistedField).min(1).max(100),
 }).strict();
 const persistedExtractionInput = z.object({
@@ -119,6 +132,8 @@ export type ExtractionMetadataAssignment = Readonly<{
   elapsedMonths?: number;
   payFrequency?: PayFrequency;
   baseIncomeMethod?: PaystubBaseMethod;
+  wvoeBaseMethod?: WvoeBaseMethod;
+  wvoeVariableMethod?: WvoeVariableMethod;
   includeInQualifyingIncome?: boolean;
   hasThreeYearAssetSupport?: boolean;
   hasStableDistributions?: boolean;
@@ -169,7 +184,14 @@ export function mergeAuthoritativeExtractionInputs(
     }
   }
   if (requirements.length) {
-    throw new ExtractionMetadataRequiredError(requirements.sort((a, b) =>
+    // A requirement names a fact the reviewer has to supply, so naming it
+    // twice says nothing more than naming it once.
+    const seen = new Set<string>();
+    const unique = requirements.filter((item) => {
+      const key = `${item.extractionId}:${item.entityId}:${item.field}`;
+      return seen.has(key) ? false : (seen.add(key), true);
+    });
+    throw new ExtractionMetadataRequiredError(unique.sort((a, b) =>
       `${a.extractionId}:${a.entityId}:${a.field}`.localeCompare(`${b.extractionId}:${b.entityId}:${b.field}`)));
   }
   return {
@@ -236,6 +258,10 @@ function projectPersistedInput(
   for (const record of persisted.formRecords ?? []) {
     if (record.form === 'Paystub') {
       projectPaystub(extractionId, record, metadata, requirements, requireBorrower, roster, priorW2Wages, projected);
+      continue;
+    }
+    if (record.form === 'WVOE') {
+      projectWvoe(extractionId, record, metadata, requirements, requireBorrower, roster, projected);
       continue;
     }
     const meta = metadata.get(record.entityId);
@@ -361,6 +387,133 @@ function sortEntries(values: unknown[]): unknown[] {
   });
 }
 
+/**
+ * The months a year-to-date column covers, read from the document first.
+ *
+ * `elapsedMonths` divides every year-to-date figure, so it decides the answer
+ * outright: a December stub divided by the mid-year default of 7.5 overstates
+ * income by 60%. Both a stub and a verification print the date their column
+ * was struck, which settles the figure without a reviewer recalling it, and a
+ * reviewed figure that contradicts the document is a contradiction to settle
+ * rather than one to average away.
+ */
+function resolveElapsedMonths(
+  extractionId: string,
+  record: z.infer<typeof persistedFormRecord>,
+  reviewed: number | undefined,
+  taxYear: number | undefined,
+  dates: Readonly<{ periodEnd?: string; payDate?: string; payFrequency?: PayFrequency }>,
+  requirements: ExtractionMetadataRequirement[],
+): number | undefined {
+  if (typeof taxYear !== 'number' || !(dates.periodEnd ?? dates.payDate)) return reviewed;
+  const coverage = paystubCoverage({
+    taxYear,
+    periodEnd: dates.periodEnd,
+    payDate: dates.payDate,
+    payFrequency: dates.payFrequency,
+  });
+  if (coverage.gaps.includes('PERIOD_END_OUTSIDE_TAX_YEAR')) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
+    return undefined;
+  }
+  if (coverage.status !== 'READY' || coverage.elapsedMonths === null) return reviewed;
+  if (reviewed === undefined) return coverage.elapsedMonths;
+  if (elapsedMonthsAgree(reviewed, coverage.elapsedMonths)) return reviewed;
+  requirements.push({ extractionId, entityId: record.entityId, field: 'elapsedMonths', form: record.form });
+  return undefined;
+}
+
+/**
+ * A verification of employment, on Form 1005 or in a vendor's own report.
+ *
+ * It lands in `w2Employers` the way a pay stub does, because a verification
+ * states the same facts a stub does: a rate of pay, the year-to-date earnings
+ * by category, and often the prior full year. Nothing is inferred when the
+ * document is silent; a missing divisor or a rate quoted in hours with no hours
+ * stated comes back as a gap for a person to close.
+ */
+function projectWvoe(
+  extractionId: string,
+  record: z.infer<typeof persistedFormRecord>,
+  metadata: ReadonlyMap<string, ExtractionMetadataAssignment>,
+  requirements: ExtractionMetadataRequirement[],
+  requireBorrower: boolean,
+  roster: ReadonlySet<string>,
+  projected: Record<string, unknown>,
+): void {
+  const meta = metadata.get(record.entityId);
+  const fields = new Map(record.fields.map((field) => [field.sourceFieldId, field]));
+  const n = (id: string) => fields.get(id)?.numericValue;
+  const t = (id: string) => {
+    const value = fields.get(id)?.value;
+    return typeof value === 'string' ? value.trim() : undefined;
+  };
+  const employerName = t('wvoe-employer-name');
+  const role = meta?.employmentRole;
+  const year = meta?.taxYear;
+  const borrowerKey = meta?.borrowerKey;
+  const borrowerBlocked = requireBorrower && (!borrowerKey || !roster.has(borrowerKey));
+  if (!employerName || !employerIdentityKey(employerName)) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'requiredParserField', form: record.form });
+  }
+  if (borrowerBlocked) requirements.push({ extractionId, entityId: record.entityId, field: 'borrowerAssignment', form: record.form });
+  if (!role) requirements.push({ extractionId, entityId: record.entityId, field: 'employmentRole', form: record.form });
+  if (typeof year !== 'number' || !Number.isInteger(year)) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
+  }
+  // The column heading names the year it accumulated over, so a reviewed tax
+  // year that disagrees with it is reading the wrong column.
+  const columnYear = n('wvoe-ytd-year');
+  if (typeof year === 'number' && typeof columnYear === 'number' && columnYear !== year) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
+  }
+  const payCycle = parseWvoePayCycle(t('wvoe-pay-cycle'));
+  const elapsedMonths = resolveElapsedMonths(extractionId, record, meta?.elapsedMonths, year, {
+    periodEnd: t('wvoe-ytd-thru'),
+    payFrequency: parsePayFrequency(t('wvoe-pay-cycle')),
+  }, requirements);
+  const annualized = annualizeWvoe({
+    currentBasePay: n('wvoe-base'),
+    basePayPeriod: parseWvoeBasePayPeriod(t('wvoe-base-period')),
+    weeklyHours: n('wvoe-hours-week'),
+    payPeriodHours: n('wvoe-hours-period'),
+    payCycle,
+    baseYtd: n('wvoe-base-ytd'),
+    overtimeYtd: n('wvoe-ot'),
+    bonusYtd: n('wvoe-bonus'),
+    commissionYtd: n('wvoe-commission'),
+    overtimePriorYear: n('wvoe-ot-prior'),
+    bonusPriorYear: n('wvoe-bonus-prior'),
+    commissionPriorYear: n('wvoe-commission-prior'),
+    elapsedMonths,
+    monthsEmployed: n('wvoe-months'),
+    baseMethod: meta?.wvoeBaseMethod,
+    variableMethod: meta?.wvoeVariableMethod,
+  });
+  const gaps = new Set(annualized.gaps);
+  if (gaps.delete('ELAPSED_MONTHS_REQUIRED')) {
+    requirements.push({ extractionId, entityId: record.entityId, field: 'elapsedMonths', form: record.form });
+    if (typeof n('wvoe-base-ytd') === 'number') {
+      gaps.delete('NO_BASE_METHOD');
+      if (meta?.wvoeBaseMethod === 'ytd') gaps.delete('BASE_METHOD_UNAVAILABLE');
+    }
+  }
+  if (gaps.size) requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
+  if (!employerName || borrowerBlocked || !role || typeof year !== 'number' || annualized.status !== 'READY') return;
+  const parts = annualized.annualComponents;
+  push(projected, 'w2Employers', {
+    entityId: record.entityId,
+    employerName,
+    role,
+    year,
+    annualBaseIncome: annualized.annualBase,
+    annualVariableIncome: annualized.annualVariable,
+    annualOvertimeIncome: parts.overtime,
+    annualBonusIncome: parts.bonus,
+    annualCommissionIncome: parts.commission,
+  });
+}
+
 function projectPaystub(
   extractionId: string,
   record: z.infer<typeof persistedFormRecord>,
@@ -393,7 +546,11 @@ function projectPaystub(
     requirements.push({ extractionId, entityId: record.entityId, field: 'taxYear', form: record.form });
   }
   const payFrequency = meta?.payFrequency ?? parsePayFrequency(t('ps-pay-frequency'));
-  const elapsedMonths = meta?.elapsedMonths;
+  const elapsedMonths = resolveElapsedMonths(extractionId, record, meta?.elapsedMonths, year, {
+    periodEnd: t('ps-period-end'),
+    payDate: t('ps-pay-date'),
+    payFrequency,
+  }, requirements);
   const baseYtd = n('ps-base-ytd');
   const method = meta?.baseIncomeMethod;
   const annualized = annualizePaystub({
@@ -416,7 +573,12 @@ function projectPaystub(
   if (gaps.has('ELAPSED_MONTHS_REQUIRED')) {
     requirements.push({ extractionId, entityId: record.entityId, field: 'elapsedMonths', form: record.form });
     gaps.delete('ELAPSED_MONTHS_REQUIRED');
-    if (gaps.has('NO_BASE_METHOD') && typeof baseYtd === 'number') gaps.delete('NO_BASE_METHOD');
+    if (typeof baseYtd === 'number') {
+      gaps.delete('NO_BASE_METHOD');
+      // The year-to-date method is unavailable only because the divisor is,
+      // which the elapsed-months requirement above already says.
+      if (method === 'ytd') gaps.delete('BASE_METHOD_UNAVAILABLE');
+    }
   }
   if (gaps.has('BASE_METHOD_UNAVAILABLE') && method === 'period' && !payFrequency) {
     requirements.push({ extractionId, entityId: record.entityId, field: 'payFrequency', form: record.form });
@@ -487,8 +649,12 @@ export function reconcileDuplicateWages(
       wages.push({ id: `${record.extractionId}:${row.entityId}`, borrowerKey: assignments.get(row.entityId), employer: employerIdentityKey(typeof row.employerName === 'string' ? row.employerName : ''), kind: 'w2' });
     }
     for (const row of Array.isArray(input.formRecords) ? input.formRecords : []) {
-      if (!isRecord(row) || row.form !== 'Paystub' || typeof row.entityId !== 'string' || !Array.isArray(row.fields)) continue;
-      const employer = row.fields.find((field) => isRecord(field) && field.sourceFieldId === 'ps-employer-name' && typeof field.value === 'string') as { value?: string } | undefined;
+      if (!isRecord(row) || typeof row.entityId !== 'string' || !Array.isArray(row.fields)) continue;
+      // A verification carries the same current wage a stub does, so it
+      // supersedes a W-2 for the same employer on the same terms.
+      const employerField = row.form === 'Paystub' ? 'ps-employer-name' : row.form === 'WVOE' ? 'wvoe-employer-name' : null;
+      if (!employerField) continue;
+      const employer = row.fields.find((field) => isRecord(field) && field.sourceFieldId === employerField && typeof field.value === 'string') as { value?: string } | undefined;
       wages.push({ id: `${record.extractionId}:${row.entityId}`, borrowerKey: assignments.get(row.entityId), employer: employerIdentityKey(employer?.value), kind: 'paystub' });
     }
   }

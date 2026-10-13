@@ -162,7 +162,12 @@ function ready(
   elapsedDays: number,
   total: number,
 ): PaystubCoverage {
-  const share = new Decimal(elapsedDays).div(total).mul(12).toDecimalPlaces(2).toNumber();
+  // A column struck on the last day of a month covers that many whole months.
+  // Measuring it by day share instead would call 09/30 8.98 months, which
+  // divides a verified year-to-date figure by slightly too little.
+  const share = date.day === daysInMonth(date.year, date.month)
+    ? date.month
+    : new Decimal(elapsedDays).div(total).mul(12).toDecimalPlaces(2).toNumber();
   return {
     status: 'READY',
     gaps: [],
