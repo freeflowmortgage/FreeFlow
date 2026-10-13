@@ -50,6 +50,7 @@ SOURCE_IDS: dict[str, tuple[str, dict[str, str]]] = {
             "gain_4797": "pt-return-4797",
             "other_income": "pt-return-other",
             "depreciation": "pt-return-dep",
+            "depreciation_1125a": "pt-return-dep-1125a",
             "meals": "pt-return-meals",
         },
     ),
@@ -95,6 +96,7 @@ FIELD_LABELS = {
     "gain_4797": ("adjustment", "Net Gain (Loss) from Form 4797"),
     "other_income": ("adjustment", "Other Income (Loss)"),
     "depreciation": ("addback", "Depreciation"),
+    "depreciation_1125a": ("addback", "Depreciation in Cost of Goods Sold"),
     "meals": ("adjustment", "Travel, Meals and Entertainment (M-1)"),
     "net_rental_real_estate": ("income", "Net Rental Real Estate Income (Loss)"),
     "other_net_rental": ("income", "Other Net Rental Income (Loss)"),
@@ -262,6 +264,20 @@ def _record(
     }
 
 
+def _cells(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every cell a figure may be printed in, best first.
+
+    One line can be split over several cells and preparers do not fill all of
+    them: a 1065 with nothing in cost of goods sold often carries depreciation
+    on line 16a and leaves the 16c net blank.
+    """
+    return [spec, *(spec.get("fallbacks") or [])]
+
+
+def _checks_for(cell: dict[str, Any]) -> list[list[str]]:
+    return cell.get("checks") or [["left", cell["caption"]]]
+
+
 def _read_field(
     page: Any,
     pymupdf: Any,
@@ -275,26 +291,27 @@ def _read_field(
     spec: dict[str, Any],
     size: list[float],
 ) -> dict[str, Any] | None:
-    checks = spec.get("checks") or [["left", spec["caption"]]]
-    box = locate(words, _scale(page, spec["box"], size), checks)
-    if box is None:
-        return None
-    raw = _clip_text(page, pymupdf, box, ocr_words, money=True)
-    if field in PERCENT_FIELDS:
-        pct = _percent(raw)
-        if pct is None:
-            return None
+    for cell in _cells(spec):
+        box = locate(words, _scale(page, cell["box"], size), _checks_for(cell))
+        if box is None:
+            continue
+        raw = _clip_text(page, pymupdf, box, ocr_words, money=True)
+        if field in PERCENT_FIELDS:
+            pct = _percent(raw)
+            if pct is None:
+                continue
+            return _record(
+                page, page_index=page_index, form=form, source_id=source_id, field=field,
+                line=cell["line"], value=f"{pct:g}%", numeric=pct, box=box,
+            )
+        amount = _money(raw)
+        if amount is None:
+            continue
         return _record(
             page, page_index=page_index, form=form, source_id=source_id, field=field,
-            line=spec["line"], value=f"{pct:g}%", numeric=pct, box=box,
+            line=cell["line"], value=_dollars(amount), numeric=amount, box=box,
         )
-    amount = _money(raw)
-    if amount is None:
-        return None
-    return _record(
-        page, page_index=page_index, form=form, source_id=source_id, field=field,
-        line=spec["line"], value=_dollars(amount), numeric=amount, box=box,
-    )
+    return None
 
 
 def _read_coded(
@@ -377,6 +394,19 @@ def _combine_guaranteed_payments(rows: list[dict[str, Any]], page: Any, page_ind
     )
 
 
+def _reconcile_line_16(rows: list[dict[str, Any]]) -> None:
+    """Keep the 1065 depreciation addback equal to line 16a, never over it.
+
+    16b and 16c are disjoint parts of 16a, so both are added back. Falling back
+    to 16a means the total is already in hand, and adding 16b to it would count
+    the cost-of-goods-sold depreciation twice.
+    """
+    depreciation = next((row for row in rows if row["sourceFieldId"] == "pt-return-dep"), None)
+    if depreciation is None or depreciation["lineNum"] != "Line 16a":
+        return
+    rows[:] = [row for row in rows if row["sourceFieldId"] != "pt-return-dep-1125a"]
+
+
 def _other_income_note(rows: list[dict[str, Any]]) -> None:
     other = next((row for row in rows if row["sourceFieldId"].endswith("-return-other")), None)
     if other is None or abs(float(other["numericValue"])) < 0.005:
@@ -447,8 +477,10 @@ def extract_business_return_page(
         source_id = ids.get(field)
         if source_id is None:
             continue
-        checks = spec.get("checks") or [["left", spec["caption"]]]
-        if locate(words, _scale(page, spec["box"], size), checks) is not None:
+        if any(
+            locate(words, _scale(page, cell["box"], size), _checks_for(cell)) is not None
+            for cell in _cells(spec)
+        ):
             found.add(source_id)
         row = _read_field(
             page, pymupdf, words, ocr_words, page_index=page_index, form=form,
@@ -468,6 +500,8 @@ def extract_business_return_page(
         )
         if row is not None:
             rows.append(row)
+    if form_key == "1065":
+        _reconcile_line_16(rows)
     if form_key == "1065-k1":
         _combine_guaranteed_payments(rows, page, page_index)
         if {"pt-gp-services", "pt-gp-capital"} <= found:

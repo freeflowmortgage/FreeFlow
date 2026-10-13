@@ -14,6 +14,9 @@ const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Obje
     'pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals',
     'pt-return-name', 'pt-return-ein', 'pt-return-gross', 'pt-return-wages', 'pt-return-ord', 'pt-return-gp',
     'pt-return-4797', 'pt-return-other', 'pt-return-dep', 'pt-return-depletion', 'pt-return-meals',
+    // Line 16b, the depreciation deducted through cost of goods sold. It is
+    // disjoint from the 16c net on 'pt-return-dep' and reduced line 23 as well.
+    'pt-return-dep-1125a',
   ]),
   'Form 1120': new Set(['c1120-name', 'c1120-ein', 'c1120-taxable', 'c1120-tax', 'c1120-dep', 'c1120-depletion', 'c1120-amort', 'c1120-meals', 'c1120-nol']),
   'Form 1040': new Set(['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']),

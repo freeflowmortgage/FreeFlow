@@ -442,7 +442,11 @@ PARTNERSHIP_RETURN_FIELDS = (
     FieldSpec("pt-return-ord", "Form 1065", "income", "Line 23", "Ordinary Business Income (Loss)", "Line 23", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
     FieldSpec("pt-return-gp", "Form 1065", "income", "Line 10", "Guaranteed Payments to Partners", "Line 10", ("Guaranteed payments to partners", "Guaranteed payments"), "money"),
     FieldSpec("pt-return-wages", "Form 1065", "income", "Line 9", "Salaries and Wages", "Line 9", ("Salaries and wages",), "money"),
-    FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16c", "Depreciation", "Line 16c", ("Depreciation, if required", "Depreciation"), "money"),
+    # Anchored on the line 16a caption, so it reports the whole depreciation
+    # claimed rather than the 16c net. This catalog only runs on a page the
+    # template could not read at all, where 16b is not available to add to the
+    # net, so the 16a total is the closest figure in reach.
+    FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16a", "Depreciation", "Line 16a", ("Depreciation, if required", "Depreciation"), "money"),
     FieldSpec("pt-return-depletion", "Form 1065", "addback", "Line 17", "Depletion", "Line 17", ("Depletion",), "money"),
     FieldSpec("pt-return-gross", "Form 1065", "income", "Line 1c", "Gross Receipts or Sales", "Line 1c", ("Gross receipts or sales",), "money"),
 )

@@ -73,6 +73,7 @@ export type LiveCorpPatch = {
   profitPctEnd?: number;
   capitalPctEnd?: number;
   depreciation?: number;
+  depreciation1125A?: number;
   depreciation8825?: number;
   gain4797?: number;
   otherIncome?: number;
@@ -283,6 +284,10 @@ export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch
     gain4797: num(fields, 'pt-return-4797'),
     otherIncome: num(fields, 'pt-return-other'),
     depreciation: num(fields, 'pt-return-dep') ?? num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
+    // Line 16b. Line 16c holds only what was deducted on line 16 itself, so
+    // without this the addback is short by the depreciation that reached line
+    // 23 through cost of goods sold.
+    depreciation1125A: num(fields, 'pt-return-dep-1125a'),
     depreciation8825: num(fields, 'pt-return-dep') != null ? num(fields, 'form-8825-dep') : undefined,
     mealsM1: num(fields, 'pt-return-meals'),
     section179: num(fields, 'pt-179') ?? num(fields, 'form-4562-179'),

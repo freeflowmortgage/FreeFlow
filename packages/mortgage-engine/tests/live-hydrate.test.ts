@@ -157,6 +157,19 @@ describe('live worksheet hydration', () => {
     ]);
   });
 
+  test('carries line 16b so the worksheet adds back the depreciation inside cost of goods sold', () => {
+    const fields: MappedIncomeField[] = [
+      field('pt-ord', 91200, { form: 'Form 1065', entityId: 'form-1065-p0' }),
+      field('pt-return-dep', 50000, { form: 'Form 1065', entityId: 'form-1065-p0', lineNum: 'Line 16c' }),
+      field('pt-return-dep-1125a', 14500, { form: 'Form 1065', entityId: 'form-1065-p0', lineNum: 'Line 16b' }),
+    ];
+    // The worksheet sums the three depreciation slots, so 16c plus 16b is the
+    // line 16a total the partnership actually claimed.
+    expect(livePartnershipPatches(fields)).toEqual([
+      expect.objectContaining({ depreciation: 50000, depreciation1125A: 14500 }),
+    ]);
+  });
+
   test('falls back to Form 4562 depreciation when Form 8825 Line 14 is absent', () => {
     const fields: MappedIncomeField[] = [
       field('pt-ord', 41000, { form: 'Form 1065', entityId: 'form-1065-p0' }),
