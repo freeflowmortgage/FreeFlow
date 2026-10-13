@@ -21,7 +21,7 @@ export const COMPANY = {
   /** Registered entity form and state of organization. */
   entity: 'FreeFlow Mortgage Solutions LLC, an Arizona limited liability company',
   /** Notice address for legal process. */
-  address: 'TO BE COMPLETED — street address for service of process, Maricopa County, Arizona',
+  address: '21959 E. Bonanza Way, Queen Creek, AZ 85142',
   legalEmail: 'legal@freeflowmortgage.com',
   privacyEmail: 'privacy@freeflowmortgage.com',
   securityEmail: 'security@freeflowmortgage.com',

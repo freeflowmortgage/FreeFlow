@@ -74,12 +74,25 @@ test('the governing law section preserves non-waivable resident rights', () => {
 
 /**
  * A placeholder that reaches production reads as though it were the notice.
- * Only the service-of-process street address is still outstanding; if another
- * one appears, it has to be deliberate.
+ * Every value is now settled, so any reappearing placeholder is a regression.
  */
-test('only the postal address is still outstanding', () => {
+test('no placeholder is left in the published notices', () => {
   const outstanding = Object.entries(COMPANY)
     .filter(([, value]) => typeof value === 'string' && value.includes('TO BE COMPLETED'))
     .map(([key]) => key);
-  assert.deepEqual(outstanding, ['address']);
+  assert.deepEqual(outstanding, []);
+
+  for (const notice of NOTICES) {
+    const prose = JSON.stringify(notice);
+    assert.doesNotMatch(prose, /TO BE COMPLETED/, `${notice.slug} must not render a placeholder`);
+  }
+});
+
+test('service of process reaches a street address, not just an inbox', () => {
+  assert.match(COMPANY.address, /^21959 E\. Bonanza Way, Queen Creek, AZ 85142$/);
+
+  const notices = noticeFor('terms').sections.find((section) => section.id === 'general');
+  assert.ok(notices, 'the terms must say where legal notices go');
+  const prose = notices.blocks.flatMap((block) => (block.kind === 'p' ? [block.text] : [])).join(' ');
+  assert.match(prose, /Queen Creek, AZ 85142/);
 });
