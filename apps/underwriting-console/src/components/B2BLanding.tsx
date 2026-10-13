@@ -13,6 +13,7 @@ import {
 import BrandLogo from './BrandLogo';
 import FreeFlowMascot from './FreeFlowMascot';
 import type { ConsoleView } from '../appTypes';
+import { COMPANY } from '../legal/notices';
 
 const PRODUCTS: {
   id: string;
@@ -495,6 +496,7 @@ export default function B2BLanding({
               <a href="#privacy" className="font-semibold text-slate-400 hover:text-white">Privacy Policy</a>
             </nav>
             <p className="text-xs text-slate-500">freeflowmortgage.com · freeflowmortgagesolutions.com</p>
+            <p className="text-xs text-slate-500">© {new Date().getFullYear()} {COMPANY.legalName}. All rights reserved.</p>
           </div>
         </div>
       </footer>

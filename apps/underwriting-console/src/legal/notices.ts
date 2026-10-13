@@ -16,21 +16,21 @@
  */
 
 export const COMPANY = {
-  legalName: 'FreeFlow Mortgage Solutions',
+  legalName: 'FreeFlow Mortgage Solutions LLC',
   shortName: 'FreeFlow',
   /** Registered entity form and state of organization. */
-  entity: 'TO BE COMPLETED — registered entity name, form and state of organization',
+  entity: 'FreeFlow Mortgage Solutions LLC, an Arizona limited liability company',
   /** Notice address for legal process. */
-  address: 'TO BE COMPLETED — notice address for legal process',
+  address: 'TO BE COMPLETED — street address for service of process, Maricopa County, Arizona',
   legalEmail: 'legal@freeflowmortgage.com',
   privacyEmail: 'privacy@freeflowmortgage.com',
   securityEmail: 'security@freeflowmortgage.com',
   salesEmail: 'sales@freeflowmortgage.com',
   /** Toll-free line the CCPA requires of a business that sells or shares; see the privacy notice. */
-  privacyPhone: 'TO BE COMPLETED — toll-free privacy request line, if one is offered',
+  privacyPhone: '(844) 356-1181',
   sites: ['freeflowmortgage.com', 'freeflowmortgagesolutions.com'],
-  governingState: 'California',
-  governingVenue: 'TO BE COMPLETED — county and state for venue',
+  governingState: 'Arizona',
+  governingVenue: 'the state and federal courts located in Maricopa County, Arizona',
 } as const;
 
 export const LAST_UPDATED = 'October 13, 2026';
@@ -393,6 +393,14 @@ const TERMS: Notice = {
         {
           kind: 'p',
           text:
+            'This choice of law does not reduce a right that cannot be waived by agreement. A consumer whose personal ' +
+            'information we handle keeps every protection the law of their own state of residence gives them, including ' +
+            'the California rights described in our Privacy Policy, and may exercise those rights and any remedy that ' +
+            'law provides regardless of the governing law and venue stated above.',
+        },
+        {
+          kind: 'p',
+          text:
             'You will comply with applicable export control and economic sanctions law and will not make the service ' +
             'available to a prohibited party or region. Neither party may assign these terms without the other\u2019s consent, ' +
             'except to a successor in a merger or sale of substantially all assets.',
@@ -659,7 +667,8 @@ const PRIVACY: Notice = {
         {
           kind: 'p',
           text:
-            `To make a request, email ${COMPANY.privacyEmail} with enough detail for us to identify the information at ` +
+            `To make a request, email ${COMPANY.privacyEmail} or call ${COMPANY.privacyPhone}, with enough detail for us ` +
+            'to identify the information at ' +
             'issue. We will acknowledge within 10 business days and respond within 45 calendar days, extendable once by a ' +
             'further 45 days with notice to you. We verify requests by matching the request against information we ' +
             'already hold, and may ask for additional confirmation proportionate to the sensitivity of what is requested. ' +
@@ -950,7 +959,7 @@ const LEGAL: Notice = {
           head: ['Subject', 'Contact'],
           rows: [
             ['Legal notices and service of process', `${COMPANY.legalEmail} · ${COMPANY.address}`],
-            ['Privacy requests', COMPANY.privacyEmail],
+            ['Privacy requests', `${COMPANY.privacyEmail} · ${COMPANY.privacyPhone}`],
             ['Security reports', COMPANY.securityEmail],
             ['Sales and security review packets', COMPANY.salesEmail],
           ],
