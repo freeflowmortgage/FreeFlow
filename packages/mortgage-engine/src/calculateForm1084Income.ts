@@ -185,6 +185,7 @@ export interface ScheduleFEntry {
 }
 
 export interface Form1040BenefitInput {
+  entityId?: string;
   year: number;
   totalSocialSecurity?: number;
   taxableSocialSecurity?: number;
@@ -200,6 +201,7 @@ export interface Form1040BenefitInput {
  * recent year qualifies, and only after an underwriter confirms continuance.
  */
 export interface IraDistributionInput {
+  entityId?: string;
   year: number;
   totalDistributions?: number;   // Form 1040 Line 4a
   taxableDistributions?: number; // Form 1040 Line 4b
