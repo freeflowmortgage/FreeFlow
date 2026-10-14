@@ -118,6 +118,30 @@ test('JSON, MISMO profile, and PDF summary use the same snapshot values and hash
   assert.ok(pdf.byteLength > 1_000);
 });
 
+test('Social Security and retirement components reconcile to the total in JSON, MISMO, and the summary', async () => {
+  const snapshot = await loadApprovedIncomeSnapshot(transaction({
+    components: {
+      w2BaseMonthly: new Prisma.Decimal('3800.00'),
+      socialSecurityMonthly: new Prisma.Decimal('2156.25'),
+      retirementIncomeMonthly: new Prisma.Decimal('2043.75'),
+    },
+  }) as never, context, LOAN);
+  const json = JSON.parse(serializeApprovedIncomeJson(snapshot));
+  assert.equal(json.calculation.components.socialSecurityMonthly, '2156.25');
+  assert.equal(json.calculation.components.retirementIncomeMonthly, '2043.75');
+  const componentTotal = Object.values(json.calculation.components as Record<string, string | null>)
+    .reduce((total, amount) => total + (amount === null ? 0 : Number(amount)), 0);
+  assert.equal(componentTotal.toFixed(2), json.calculation.qualifyingMonthlyIncome);
+
+  const xml = serializeApprovedIncomeMismo(snapshot);
+  assert.match(xml, /<FREEFLOW:ComponentType>socialSecurityMonthly<\/FREEFLOW:ComponentType>\s*<FREEFLOW:MonthlyAmount>2156\.25<\/FREEFLOW:MonthlyAmount>/);
+  assert.match(xml, /<FREEFLOW:ComponentType>retirementIncomeMonthly<\/FREEFLOW:ComponentType>\s*<FREEFLOW:MonthlyAmount>2043\.75<\/FREEFLOW:MonthlyAmount>/);
+
+  const lines = approvedIncomeSummaryLines(snapshot);
+  assert.ok(lines.includes('Social Security: $2156.25 monthly'));
+  assert.ok(lines.includes('Retirement (pension and IRA): $2043.75 monthly'));
+});
+
 test('download handler returns bounded formats and honest MISMO validation headers', async () => {
   const tx = transaction();
   const handler = createApprovedIncomeExportHandler({
@@ -178,6 +202,7 @@ function transaction(options: {
     role: 'PRIMARY' | 'CO_BORROWER';
     qualifyingMonthlyIncome: string;
   }> | null;
+  components?: Partial<Record<'w2BaseMonthly' | 'socialSecurityMonthly' | 'retirementIncomeMonthly', Prisma.Decimal | null>>;
 } = {}) {
   const state: {
     loanWhere?: unknown;
@@ -220,9 +245,12 @@ function transaction(options: {
     form1065MonthlyTotal: null,
     form1120MonthlyTotal: null,
     assetIncomeMonthly: null,
+    socialSecurityMonthly: null,
+    retirementIncomeMonthly: null,
     rentalMonthly: null,
     rentalLiabilityMonthly: null,
     housingExpenseAdjustment: null,
+    ...options.components,
     borrowerIncome: options.borrowerIncome ?? null,
     verifiedAt: APPROVED_AT,
     verifiedByUserId: USER,

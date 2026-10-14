@@ -127,6 +127,9 @@ export function approvedIncomeSummaryLines(snapshot: ApprovedIncomeSnapshot): re
   for (const borrower of snapshot.calculation.borrowers) {
     lines.push(`${borrower.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} ${borrower.borrowerKey}: $${borrower.qualifyingMonthlyIncome} monthly`);
   }
+  const { socialSecurityMonthly, retirementIncomeMonthly } = snapshot.calculation.components;
+  if (socialSecurityMonthly !== null) lines.push(`Social Security: $${socialSecurityMonthly} monthly`);
+  if (retirementIncomeMonthly !== null) lines.push(`Retirement (pension and IRA): $${retirementIncomeMonthly} monthly`);
   return lines;
 }
 

@@ -372,6 +372,8 @@ model Form1084Audit {
   form1065MonthlyTotal     Decimal? @db.Decimal(12, 2)
   form1120MonthlyTotal     Decimal? @db.Decimal(12, 2)
   assetIncomeMonthly       Decimal? @db.Decimal(12, 2)
+  socialSecurityMonthly    Decimal? @db.Decimal(12, 2)
+  retirementIncomeMonthly  Decimal? @db.Decimal(12, 2)
   rentalMonthly            Decimal? @db.Decimal(12, 2)
   rentalLiabilityMonthly   Decimal? @db.Decimal(12, 2)
   housingExpenseAdjustment Decimal? @db.Decimal(12, 2)

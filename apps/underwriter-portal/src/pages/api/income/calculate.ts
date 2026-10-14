@@ -322,7 +322,7 @@ function readExtractionIds(value: unknown): string[] | null {
 }
 
 function sumMapperOutputs(rows: Array<ReturnType<typeof deriveMapperOutputs>>) {
-  const keys = ['w2BaseMonthly', 'w2VariableMonthly', 'scheduleCMonthlyTotal', 'scheduleFMonthlyTotal', 'form1120SMonthlyTotal', 'form1065MonthlyTotal', 'form1120MonthlyTotal', 'assetIncomeMonthly', 'rentalMonthly', 'rentalLiabilityMonthly', 'housingExpenseAdjustment'] as const;
+  const keys = ['w2BaseMonthly', 'w2VariableMonthly', 'scheduleCMonthlyTotal', 'scheduleFMonthlyTotal', 'form1120SMonthlyTotal', 'form1065MonthlyTotal', 'form1120MonthlyTotal', 'assetIncomeMonthly', 'socialSecurityMonthly', 'retirementIncomeMonthly', 'rentalMonthly', 'rentalLiabilityMonthly', 'housingExpenseAdjustment'] as const;
   return Object.fromEntries(keys.map((key) => [key, rows.reduce((total, row) => total + (row[key] ?? 0), 0)]));
 }
 
@@ -339,7 +339,10 @@ function deriveMapperOutputs(result: ReturnType<typeof dispatchNonUsda>) {
     form1120SMonthlyTotal: sum(result.form1120SBreakdown, 'totalCombinedQualifying'),
     form1065MonthlyTotal: sum(result.form1065Breakdown, 'totalCombinedQualifying'),
     form1120MonthlyTotal: sum(result.form1120Breakdown, 'totalCombinedQualifying'),
-    assetIncomeMonthly: sum(result.assetIncomeBreakdown, 'totalQualifyingIncome'),
+    assetIncomeMonthly: sum(result.assetIncomeBreakdown, 'qualifyingAssetIncome'),
+    socialSecurityMonthly: sum(result.benefitsBreakdown, 'qualifyingSocialSecurity'),
+    retirementIncomeMonthly: sum(result.benefitsBreakdown, 'qualifyingPensionsAndAnnuities')
+      + (result.iraDistributionBreakdown?.qualifyingMonthlyIncome ?? 0),
     rentalMonthly: sum(result.scheduleEPropertiesBreakdown, 'totalCashFlow'),
     rentalLiabilityMonthly: result.summary.proposedRentalLossDebt,
     housingExpenseAdjustment: result.summary.subjectHousingExpenseAdjustment,
