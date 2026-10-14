@@ -458,6 +458,27 @@ test('the reviewed current method keeps variable pay to the year to date', () =>
   assert.equal(projected.w2Employers?.[0].annualBonusIncome, 15999.96);
 });
 
+test('a reviewed quarterly bonus on a verification divides by the quarters paid', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000213';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024, wvoeVariableMethod: 'avg24' as const, bonusFrequency: 'QUARTERLY' as const }],
+  }], ROSTER);
+  // Through 09/30 three quarterly payouts cover nine months, so (12,000 + 6,000) / 21
+  // is unchanged; overtime is untouched by the bonus schedule.
+  assert.equal(projected.w2Employers?.[0].annualBonusIncome, 10285.68);
+  assert.equal(projected.w2Employers?.[0].annualOvertimeIncome, 4285.68);
+  const semiannual = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024, wvoeVariableMethod: 'current' as const, bonusFrequency: 'SEMIANNUAL' as const }],
+  }], ROSTER);
+  // One semi-annual payout by 09/30 pays for six months: 12,000 / 6, annualized.
+  assert.equal(semiannual.w2Employers?.[0].annualBonusIncome, 24000);
+  assert.equal(semiannual.w2Employers?.[0].annualOvertimeIncome, 6000);
+});
+
 test('an hourly verification annualizes over the cycle its hours were counted on', () => {
   const extractionId = '00000000-0000-4000-8000-000000000206';
   // The Work Number: $17.42 an hour, 86 hours a semi-monthly period. Reading

@@ -1,3 +1,4 @@
+import { bonusMonthsCovered, type BonusFrequency } from './bonusTiming';
 import type { Form1084BorrowerIncome } from './encompass-urla-map';
 import { payPeriodsPerYear, type PayFrequency } from './paystubAnnualization';
 
@@ -41,6 +42,12 @@ export interface W2EmployerWageInput {
   monthsAtJob: number;
   /** Most recent W-2 Box 5 from this employer, when one was provided. */
   w2Year1Box5: number;
+  /**
+   * How often this employer pays its bonus. Unset divides the bonus by the
+   * same months as overtime; set, the bonus is divided by the months the
+   * bonuses paid in that window cover.
+   */
+  bonusFrequency?: BonusFrequency;
 }
 
 /** The previous-employer history on the 1003, which belongs to the primary borrower. */
@@ -74,6 +81,10 @@ export interface W2VariableMethods {
   recommendedId: W2VariableMethodId;
   /** False for a co-borrower, or when the 1003 has no prior-employer history to add. */
   mergesPriorEmployer: boolean;
+  /** Months every current-job variable amount except the bonus is divided by. */
+  variableMonths: number;
+  /** Months the current-job bonus is divided by; equals `variableMonths` without a bonus frequency. */
+  bonusMonths: number;
 }
 
 export interface W2MethodChoices {
@@ -116,19 +127,30 @@ export function hasPriorEmployerHistory(prior: PriorEmployerWageHistory | undefi
 
 export function w2VariableMethods(employer: W2EmployerWageInput, context: W2MethodContext): W2VariableMethods {
   const fromWvoe = employer.wageDocSource === 'WVOE';
-  const total = fromWvoe
-    ? employer.wvoeBonus + employer.wvoeOvertime
-    : employer.bonusYtd + employer.overtimeYtd + employer.tipsYtd + employer.commissionYtd;
-  const current = total / Math.max(fromWvoe ? employer.wvoeMonths : employer.monthsAtJob, 1);
+  const bonus = fromWvoe ? employer.wvoeBonus : employer.bonusYtd;
+  const otherVariable = fromWvoe
+    ? employer.wvoeOvertime
+    : employer.overtimeYtd + employer.tipsYtd + employer.commissionYtd;
+  const variableMonths = Math.max(fromWvoe ? employer.wvoeMonths : employer.monthsAtJob, 1);
+  const frequency = employer.bonusFrequency;
+  const bonusMonths = frequency ? bonusMonthsCovered(variableMonths, frequency) : variableMonths;
+  // Without a bonus frequency this is the console's original single division,
+  // kept exact so existing files reproduce to the cent.
+  const current = frequency
+    ? bonus / bonusMonths + otherVariable / variableMonths
+    : (bonus + otherVariable) / variableMonths;
   // Without prior history the merge would divide this job's variable pay by
   // 12 months nobody worked, so a primary borrower would get less than an
   // identical co-borrower.
   const mergesPriorEmployer = context.ownedByPrimary && hasPriorEmployerHistory(context.priorEmployer);
   const prior = context.priorEmployer;
-  const merged = mergesPriorEmployer
-    ? (employer.bonusYtd + employer.overtimeYtd + (prior?.box12Bonus ?? 0) + (prior?.box14Overtime ?? 0))
-      / (employer.monthsAtJob + 12)
-    : current;
+  const mergedMonths = employer.monthsAtJob + 12;
+  const merged = !mergesPriorEmployer
+    ? current
+    : frequency
+      ? (employer.bonusYtd + (prior?.box12Bonus ?? 0)) / (bonusMonthsCovered(employer.monthsAtJob, frequency) + 12)
+        + (employer.overtimeYtd + (prior?.box14Overtime ?? 0)) / mergedMonths
+      : (employer.bonusYtd + employer.overtimeYtd + (prior?.box12Bonus ?? 0) + (prior?.box14Overtime ?? 0)) / mergedMonths;
   return {
     options: [
       { id: 'current', monthly: current },
@@ -137,6 +159,8 @@ export function w2VariableMethods(employer: W2EmployerWageInput, context: W2Meth
     ],
     recommendedId: mergesPriorEmployer && employer.monthsAtJob < 12 ? 'avg24' : 'current',
     mergesPriorEmployer,
+    variableMonths,
+    bonusMonths,
   };
 }
 

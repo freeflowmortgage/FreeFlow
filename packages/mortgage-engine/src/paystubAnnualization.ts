@@ -1,4 +1,5 @@
 import { Decimal } from 'decimal.js';
+import { bonusMonthsCovered, type BonusFrequency } from './bonusTiming';
 
 /**
  * Port of the console four-way base reconciliation in
@@ -23,6 +24,8 @@ import { Decimal } from 'decimal.js';
  * elapsed months. RSU and other use that same division on parser fields
  * `ps-rsu-ytd` and `ps-other-ytd`. The demo variable total does not include
  * RSU or other, so those two components are not a cited console total.
+ * When `bonusFrequency` is reviewed, bonus divides by the months the bonuses
+ * paid within the elapsed window cover instead (see `bonusTiming`).
  *
  * Ben's 10 protected paystub rules are enforced by the portal projector in
  * `apps/underwriter-portal/src/server/income/authoritativeExtractionInput.ts`,
@@ -54,6 +57,7 @@ export type PaystubAnnualizationInput = Readonly<{
   elapsedMonths?: number;
   priorYearW2Wages?: number;
   baseMethod?: PaystubBaseMethod;
+  bonusFrequency?: BonusFrequency;
 }>;
 
 export type PaystubComponentMonthly = Readonly<{
@@ -87,6 +91,8 @@ export type PaystubAnnualization = Readonly<{
   components: PaystubComponentMonthly;
   annualComponents: PaystubComponentAnnual;
   methods: Readonly<{ hourly: number | null; period: number | null; ytd: number | null; prior: number | null }>;
+  /** Months year-to-date bonus was divided by, or null without a usable elapsed-months figure. */
+  bonusMonths: number | null;
 }>;
 
 export function payPeriodsPerYear(frequency: PayFrequency): number {
@@ -110,11 +116,14 @@ export function annualizePaystub(input: PaystubAnnualizationInput): PaystubAnnua
   const gaps: string[] = [];
   const elapsed = input.elapsedMonths;
   const elapsedOk = typeof elapsed === 'number' && Number.isFinite(elapsed) && elapsed > 0 && elapsed <= 12;
-  const ytdMonthly = (amount: number | undefined): number | null => {
+  const ytdMonthly = (amount: number | undefined, months = elapsed): number | null => {
     if (amount == null) return null;
     if (!elapsedOk) return null;
-    return new Decimal(amount).div(elapsed as number).toDecimalPlaces(2).toNumber();
+    return new Decimal(amount).div(months as number).toDecimalPlaces(2).toNumber();
   };
+  const bonusMonths = !elapsedOk
+    ? null
+    : input.bonusFrequency ? bonusMonthsCovered(elapsed as number, input.bonusFrequency) : (elapsed as number);
   const usesYtd = [input.baseYtd, input.overtimeYtd, input.bonusYtd, input.commissionYtd, input.tipsYtd, input.rsuYtd, input.otherYtd]
     .some((amount) => typeof amount === 'number' && amount !== 0);
   if (usesYtd && !elapsedOk) gaps.push('ELAPSED_MONTHS_REQUIRED');
@@ -150,7 +159,7 @@ export function annualizePaystub(input: PaystubAnnualizationInput): PaystubAnnua
   const components: PaystubComponentMonthly = {
     base: selected ? methods[selected] ?? 0 : 0,
     overtime: ytdMonthly(input.overtimeYtd) ?? 0,
-    bonus: ytdMonthly(input.bonusYtd) ?? 0,
+    bonus: ytdMonthly(input.bonusYtd, bonusMonths ?? undefined) ?? 0,
     commission: ytdMonthly(input.commissionYtd) ?? 0,
     tips: ytdMonthly(input.tipsYtd) ?? 0,
     rsu: ytdMonthly(input.rsuYtd) ?? 0,
@@ -182,5 +191,6 @@ export function annualizePaystub(input: PaystubAnnualizationInput): PaystubAnnua
       other: annualOf(ready ? components.other : 0),
     },
     methods,
+    bonusMonths,
   };
 }

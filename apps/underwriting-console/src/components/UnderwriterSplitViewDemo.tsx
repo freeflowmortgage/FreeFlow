@@ -125,6 +125,11 @@ import {
   splitIncomeByBorrower,
   w2BaseMethods,
   w2VariableMethods,
+  BONUS_FREQUENCIES,
+  bonusFrequencyLabel,
+  bonusMonthsCovered,
+  isBonusFrequency,
+  type BonusFrequency,
   type Form1084BorrowerIncome,
   type W2MethodContext,
 } from '@mortgage-pos/mortgage-engine';
@@ -181,6 +186,8 @@ interface W2Employer {
   /** Wage source ids the parser located on the document, when one was parsed. */
   extractedFieldIds?: string[];
   wvoeMonths: number;
+  /** How often this employer pays its bonus; unset averages bonus over the same months as overtime. */
+  bonusFrequency?: BonusFrequency;
   w2Year1Box5: number;
   w2Year1Bonus: number;
   w2Year1Ot: number;
@@ -1508,7 +1515,8 @@ export default function UnderwriterSplitViewDemo({
       ? activeW2Employer.wvoeBonus + activeW2Employer.wvoeOvertime
       : currentBonusYtd + currentOtYtd + currentTipsYtd + currentCommissionYtd;
     const currentMonths = fromWvoe ? Math.max(activeW2Employer.wvoeMonths, 1) : monthsAtCurrentJob;
-    const currentMonthlyVariableAvg = currentBonusOtTotal / currentMonths;
+    const currentMonthlyVariableAvg =
+      w2VariableMethods(activeW2Employer, { ownedByPrimary: false }).options.find((option) => option.id === 'current')?.monthly ?? 0;
 
     const previousBonusOtTotal = prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime;
     const previousMonthlyVariableAvg = previousBonusOtTotal / 12;
@@ -1530,7 +1538,7 @@ export default function UnderwriterSplitViewDemo({
       aggregatedVariableTotal,
       totalRollingMonths
     };
-  }, [currentBonusYtd, currentOtYtd, currentTipsYtd, currentCommissionYtd, monthsAtCurrentJob, mergePreviousEmployerVariable, prevEmployerW2, activeW2Employer.wageDocSource, activeW2Employer.wvoeBonus, activeW2Employer.wvoeOvertime, activeW2Employer.wvoeMonths]);
+  }, [activeW2Employer, currentBonusYtd, currentOtYtd, currentTipsYtd, currentCommissionYtd, monthsAtCurrentJob, mergePreviousEmployerVariable, prevEmployerW2]);
 
   const schCFlow = useMemo(() => {
     const y1 = schCAnnual(schCYears[0]);
@@ -1992,20 +2000,37 @@ export default function UnderwriterSplitViewDemo({
     };
   }, [baseWageReconciliation]);
 
+  const w2VarMethods = useMemo(
+    () => w2VariableMethods(activeW2Employer, w2ContextFor(activeW2Employer)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
+    [activeW2Employer, prevEmployerW2, borrowers],
+  );
+
   const w2VarPicks = useMemo(() => {
-    const methods = w2VariableMethods(activeW2Employer, w2ContextFor(activeW2Employer));
+    const methods = w2VarMethods;
     const current = methods.options.find((option) => option.id === 'current')?.monthly ?? 0;
     const merged = methods.options.find((option) => option.id === 'avg24')?.monthly ?? 0;
     const withPrior = methods.mergesPriorEmployer;
+    const frequency = activeW2Employer.bonusFrequency;
+    const payout = frequency ? bonusFrequencyLabel(frequency).toLowerCase() : '';
     const options = [
-      { id: 'current', label: 'Current job only', monthly: current, formula: `(Bonus YTD + OT YTD) / ${monthsAtCurrentJob} months` },
+      {
+        id: 'current',
+        label: 'Current job only',
+        monthly: current,
+        formula: frequency
+          ? `Bonus / ${methods.bonusMonths} months its ${payout} payouts cover + OT / ${methods.variableMonths} months`
+          : `(Bonus YTD + OT YTD) / ${methods.variableMonths} months`,
+      },
       {
         id: 'avg24',
         label: '24-month merged',
         monthly: merged,
-        formula: withPrior
-          ? `(Current variable + prior W-2 bonus/OT) / ${monthsAtCurrentJob + 12} months`
-          : 'No previous employer on the 1003 for this borrower; same as current job',
+        formula: !withPrior
+          ? 'No previous employer on the 1003 for this borrower; same as current job'
+          : frequency
+            ? `(Bonus + prior W-2 bonus) / ${bonusMonthsCovered(monthsAtCurrentJob, frequency) + 12} months + (OT + prior W-2 OT) / ${monthsAtCurrentJob + 12} months`
+            : `(Current variable + prior W-2 bonus/OT) / ${monthsAtCurrentJob + 12} months`,
       },
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
@@ -2026,7 +2051,7 @@ export default function UnderwriterSplitViewDemo({
           : `The previous-employer history on the 1003 is ${borrowerName(undefined)}'s, so ${borrowerName(activeW2Employer.borrowerId)}'s variable income uses this job only.`,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
-  }, [activeW2Employer, prevEmployerW2, monthsAtCurrentJob, borrowers]);
+  }, [w2VarMethods, activeW2Employer, prevEmployerW2, monthsAtCurrentJob, borrowers]);
 
   const schCPicks = useMemo(() => {
     const rec = seRecommend(schCFlow.y1, schCFlow.y2, twoYearSchC, false, loanProgram);
@@ -3776,6 +3801,26 @@ export default function UnderwriterSplitViewDemo({
                     <Activity className="h-4 w-4 text-indigo-500" />
                     {activeW2Employer.wageDocSource === 'WVOE' ? 'WVOE variable history' : 'Current Job YTD Variable Extractions'}
                   </h4>
+                  <div className="text-xs">
+                    <label htmlFor="bonus-frequency" className="block text-[10px] font-extrabold text-slate-400 uppercase mb-1">Bonus paid</label>
+                    <select
+                      id="bonus-frequency"
+                      data-qa-field="bonus-frequency"
+                      value={activeW2Employer.bonusFrequency ?? ''}
+                      onChange={(e) => patchW2Employer({ bonusFrequency: isBonusFrequency(e.target.value) ? e.target.value : undefined })}
+                      className="w-full rounded border border-slate-300 bg-white p-2 font-semibold focus:outline-none"
+                    >
+                      <option value="">With each paycheck</option>
+                      {BONUS_FREQUENCIES.map((frequency) => (
+                        <option key={frequency} value={frequency}>{bonusFrequencyLabel(frequency)}</option>
+                      ))}
+                    </select>
+                    <span className="text-[9px] text-slate-400 block mt-1">
+                      {activeW2Employer.bonusFrequency
+                        ? `Bonus averages over the ${w2VarMethods.bonusMonths} months its ${bonusFrequencyLabel(activeW2Employer.bonusFrequency).toLowerCase()} payouts cover, not the ${w2VarMethods.variableMonths}-month window.`
+                        : 'Averages bonus over the same months as overtime. Choose a schedule when bonus is paid in lump sums.'}
+                    </span>
+                  </div>
                   {activeW2Employer.wageDocSource === 'WVOE' ? (
                   <div className="flex flex-col divide-y divide-slate-100 text-xs">
                     <div>
@@ -3908,12 +3953,12 @@ export default function UnderwriterSplitViewDemo({
                 />
                 <div className="flex justify-between rounded bg-slate-50 p-3 text-xs">
                   <span className="font-semibold text-slate-500">Current monthly variable average</span>
-                  <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo</span>
+                  <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo</span>
                 </div>
                 <div className="flex justify-between rounded bg-slate-50 p-3 text-xs">
                   <span className="font-semibold text-slate-500">Prior monthly variable average</span>
                   <span className={`font-black text-slate-800 ${!mergePreviousEmployerVariable ? 'opacity-40' : ''}`}>
-                    ${variableContinuityCalculations.previousMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo
+                    ${variableContinuityCalculations.previousMonthlyVariableAvg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo
                   </span>
                 </div>
                 <IncomeChoicePanel
