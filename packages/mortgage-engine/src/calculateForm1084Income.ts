@@ -913,9 +913,17 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
   // ──────────────────────────────────────────────────────────────────────
   // E. FORM 1040 BENEFIT INPUTS (SOCIAL SECURITY, DISABILITY, AND PENSIONS)
   // ──────────────────────────────────────────────────────────────────────
+  const benefitsBreakdown: Array<{
+    entityId: string | null;
+    year: number;
+    qualifyingSocialSecurity: number;
+    qualifyingPensionsAndAnnuities: number;
+    qualifyingVaDisability: number;
+  }> = [];
   if (payload.benefits && payload.benefits.length > 0) {
     payload.benefits.forEach((entry) => {
       let benefitFlow = new Decimal(0);
+      let vaQualifyingAnnual = new Decimal(0);
 
       // 1. Social Security Retirement & Disability OASDI Gross-Up Math
       const ssTotal = new Decimal(entry.totalSocialSecurity || 0);
@@ -956,11 +964,18 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // 3. VA Disability & Benefits (100% Tax-Free, grossed up)
       const vaDisability = new Decimal(entry.vaDisabilityMonthly || 0);
       if (vaDisability.gt(0)) {
-        const vaQualifyingAnnual = vaDisability.mul(grossUpMultiplier).mul(12);
+        vaQualifyingAnnual = vaDisability.mul(grossUpMultiplier).mul(12);
         benefitFlow = benefitFlow.add(vaQualifyingAnnual);
       }
 
       addFlowToYear(entry.year, benefitFlow);
+      benefitsBreakdown.push({
+        entityId: entry.entityId ?? null,
+        year: entry.year,
+        qualifyingSocialSecurity: ssQualifying.toNumber(),
+        qualifyingPensionsAndAnnuities: pensionQualifying.toNumber(),
+        qualifyingVaDisability: vaQualifyingAnnual.toNumber(),
+      });
     });
   }
 
@@ -1397,6 +1412,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     form1065Breakdown,
     form1120Breakdown,
     assetIncomeBreakdown,
+    benefitsBreakdown,
     scheduleEPropertiesBreakdown,
     militaryBreakdown,
     iraDistributionBreakdown
