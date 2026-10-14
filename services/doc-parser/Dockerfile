@@ -25,7 +25,10 @@ RUN --mount=type=cache,id=freeflow-pip-cache,target=/root/.cache/pip,sharing=loc
     python3.11 -m pip install --no-compile -r requirements.txt \
     && python3.11 -m pip check \
     && rm -rf /usr/local/lib/python3.11/site-packages/pip* \
-        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
+        /usr/local/lib/python3.11/site-packages/setuptools* \
+        /usr/local/lib/python3.11/site-packages/wheel* \
+        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11 \
+        /usr/local/bin/wheel
 
 COPY src/ ./
 COPY templates /app/templates
