@@ -60,9 +60,13 @@ const form1065 = z.object({
   hasStableDistributions: z.boolean().optional(), scheduleL: scheduleL.optional(),
 }).strict();
 const benefits = z.object({
-  year, totalSocialSecurity: money.optional(), taxableSocialSecurity: money.optional(),
+  entityId: entityId.optional(), year, totalSocialSecurity: money.optional(), taxableSocialSecurity: money.optional(),
   isSupplementalSecurityIncome: z.boolean().optional(), totalPensionsAndAnnuities: money.optional(),
   taxablePensionsAndAnnuities: money.optional(), isNonGovernmentPension: z.boolean().optional(), vaDisabilityMonthly: money.optional(),
+}).strict();
+const iraDistributions = z.object({
+  entityId: entityId.optional(), year, totalDistributions: money.optional(), taxableDistributions: money.optional(), accountBalance: money.optional(),
+  hasThreeYearContinuance: z.boolean().optional(), grossUpNonTaxable: z.boolean().optional(),
 }).strict();
 const assets = z.object({
   entityId: entityId.optional(), year, interestIncome: money.optional(), dividendIncome: money.optional(), capitalGainsNetLoss: money.optional(),
@@ -83,6 +87,7 @@ const extractionInput = z.object({
   w2Employers: z.array(w2).max(100).optional(), scheduleC: z.array(scheduleC).max(100).optional(),
   scheduleF: z.array(scheduleF).max(100).optional(),   form1120S: z.array(form1120S).max(100).optional(), form1120: z.array(form1120).max(100).optional(),
   form1065: z.array(form1065).max(100).optional(), benefits: z.array(benefits).max(100).optional(),
+  iraDistributions: z.array(iraDistributions).max(100).optional(),
   assets: z.array(assets).max(100).optional(), trusts: z.array(trusts).max(100).optional(),
   scheduleEProperties: z.array(scheduleE).max(300).optional(),
 }).strict();
@@ -124,11 +129,15 @@ export type ExtractionMetadataAssignment = Readonly<{
   hasStableDistributions?: boolean;
   cash?: number;
   currentLiabilities?: number;
+  /** Entered from the most recent retirement account statement. */
+  iraAccountBalance?: number;
+  hasThreeYearIraContinuance?: boolean;
+  grossUpIraNonTaxable?: boolean;
 }>;
 export type ExtractionMetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod' | 'iraAccountBalance' | 'iraContinuance';
   form: string;
 }>;
 
@@ -288,8 +297,19 @@ function projectPersistedInput(
       if (meta.ownershipPercentage === undefined) { requirements.push({ extractionId, entityId: record.entityId, field: 'ownershipPercentage', form: record.form }); continue; }
       push(projected, 'form1120', compact({ ...base, businessName: t('c1120-name'), ein: t('c1120-ein'), ownershipPercentage: meta.ownershipPercentage, taxableIncome: n('c1120-taxable'), totalTaxPaid: n('c1120-tax'), depreciation: n('c1120-dep'), depletion: n('c1120-depletion'), amortization: n('c1120-amort'), mealsExclusion: n('c1120-meals'), nolAndSpecialDeductions: n('c1120-nol'), cash: meta.cash, currentLiabilities: meta.currentLiabilities }));
     } else if (record.form === 'Form 1040') {
-      if (!hasAny(fields, ['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable'])) { requireParserField(requirements, extractionId, record); continue; }
-      push(projected, 'benefits', compact({ year: meta.taxYear, totalSocialSecurity: n('f1040-ss-total'), taxableSocialSecurity: n('f1040-ss-taxable'), totalPensionsAndAnnuities: n('f1040-pensions-total'), taxablePensionsAndAnnuities: n('f1040-pensions-taxable') }));
+      const hasBenefits = hasAny(fields, ['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']);
+      const hasIra = (n('f1040-ira-total') ?? 0) > 0 || (n('f1040-ira-taxable') ?? 0) > 0;
+      if (!hasBenefits && !hasIra) { requireParserField(requirements, extractionId, record); continue; }
+      if (hasBenefits) push(projected, 'benefits', compact({ ...base, totalSocialSecurity: n('f1040-ss-total'), taxableSocialSecurity: n('f1040-ss-taxable'), totalPensionsAndAnnuities: n('f1040-pensions-total'), taxablePensionsAndAnnuities: n('f1040-pensions-taxable') }));
+      if (!hasIra) continue;
+      if (meta.iraAccountBalance === undefined) requirements.push({ extractionId, entityId: record.entityId, field: 'iraAccountBalance', form: record.form });
+      if (meta.hasThreeYearIraContinuance === undefined) requirements.push({ extractionId, entityId: record.entityId, field: 'iraContinuance', form: record.form });
+      if (meta.iraAccountBalance === undefined || meta.hasThreeYearIraContinuance === undefined) continue;
+      push(projected, 'iraDistributions', compact({
+        ...base, totalDistributions: n('f1040-ira-total'), taxableDistributions: n('f1040-ira-taxable'),
+        accountBalance: meta.iraAccountBalance, hasThreeYearContinuance: meta.hasThreeYearIraContinuance,
+        grossUpNonTaxable: meta.hasThreeYearIraContinuance && meta.grossUpIraNonTaxable === true,
+      }));
     } else {
       if (!hasAny(fields, ['schedule-b-interest', 'schedule-b-dividends', 'schedule-d-capital-gain-loss'])) { requireParserField(requirements, extractionId, record); continue; }
       if (meta.includeInQualifyingIncome === undefined) {

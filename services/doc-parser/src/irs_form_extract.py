@@ -55,6 +55,9 @@ class FieldSpec:
     line_num: str
     labels: tuple[str, ...]
     capture: str = "money"
+    # Labels that repeat on every row ("Taxable amount" on 1040 lines 4b/5b/6b)
+    # are only read on the row that starts with one of these labels.
+    row_anchor: tuple[str, ...] = ()
 
 
 W2_FIELDS = (
@@ -189,10 +192,12 @@ FORM_1120_FIELDS = (
 
 FORM_1040_FIELDS = (
     FieldSpec("f1040-wages", "Form 1040", "wages", "Line 1z", "Wages, Salaries, Tips", "Line 1z", ("1z Add lines 1a through 1h", "Wages, salaries, tips, etc."), "money"),
+    FieldSpec("f1040-ira-total", "Form 1040", "income", "Line 4a", "IRA Distributions", "Line 4a", ("IRA distributions",), "money"),
+    FieldSpec("f1040-ira-taxable", "Form 1040", "income", "Line 4b", "Taxable IRA Distributions", "Line 4b", ("Taxable amount",), "money", ("IRA distributions",)),
+    FieldSpec("f1040-pensions-total", "Form 1040", "income", "Line 5a", "Pensions and Annuities", "Line 5a", ("Pensions and annuities",), "money"),
+    FieldSpec("f1040-pensions-taxable", "Form 1040", "income", "Line 5b", "Taxable Pensions", "Line 5b", ("Taxable amount",), "money", ("Pensions and annuities",)),
     FieldSpec("f1040-ss-total", "Form 1040", "income", "Line 6a", "Social Security Benefits", "Line 6a", ("Social security benefits",), "money"),
-    FieldSpec("f1040-ss-taxable", "Form 1040", "income", "Line 6b", "Taxable Social Security", "Line 6b", ("Taxable amount",), "money"),
-    FieldSpec("f1040-pensions-total", "Form 1040", "income", "Line 5a", "Pensions and Annuities", "Line 5a", ("IRA distributions", "Pensions and annuities"), "money"),
-    FieldSpec("f1040-pensions-taxable", "Form 1040", "income", "Line 5b", "Taxable Pensions", "Line 5b", ("Taxable amount",), "money"),
+    FieldSpec("f1040-ss-taxable", "Form 1040", "income", "Line 6b", "Taxable Social Security", "Line 6b", ("Taxable amount",), "money", ("Social security benefits",)),
 )
 
 SCHEDULE_B_FIELDS = (
@@ -601,6 +606,29 @@ def _first_hit(page: Any, labels: tuple[str, ...], words: list[dict[str, Any]] |
     return _hit_from_words(words, labels)
 
 
+def _on_row_right_of(anchor: Any, hit: Any) -> bool:
+    anchor_mid = (float(anchor.y0) + float(anchor.y1)) / 2.0
+    hit_mid = (float(hit.y0) + float(hit.y1)) / 2.0
+    tolerance = max(4.0, (float(anchor.y1) - float(anchor.y0)) * 0.75)
+    return abs(hit_mid - anchor_mid) <= tolerance and float(hit.x0) >= float(anchor.x1)
+
+
+def _row_hit(page: Any, spec: FieldSpec, words: list[dict[str, Any]] | None):
+    anchor = _first_hit(page, spec.row_anchor, words)
+    if anchor is None:
+        return None
+    for label in spec.labels:
+        for variant in _label_variants(label):
+            for hit in page.search_for(variant):
+                if _on_row_right_of(anchor, hit):
+                    return hit
+    row_words = [
+        word for word in _word_items(words)
+        if _on_row_right_of(anchor, _Hit(word["x0"], word["y0"], word["x1"], word["y1"]))
+    ]
+    return _hit_from_words(row_words, spec.labels)
+
+
 def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None:
     """Snap a label to the live AcroForm cell in the same column, then right / below."""
     widgets = list(page.widgets() or [])
@@ -786,7 +814,7 @@ def _extract_spec(
     if spec.source_id.startswith("sch-l-") or spec.source_id.startswith("form-4562-"):
         form = _corporate_form(blob, spec.form)
         entity_id = f"{_form_slug(form)}-p{page_index}"
-    hit = _first_hit(page, spec.labels, words)
+    hit = _row_hit(page, spec, words) if spec.row_anchor else _first_hit(page, spec.labels, words)
     if hit is None:
         return None
     boxes: list[list[float]] = []
@@ -806,14 +834,19 @@ def _extract_spec(
         boxes.append(widget_box)
     if spec.form == "W-2":
         boxes.append(_clip_w2_column(page, hit))
-    boxes.extend(
-        [
-            _clip_right(page, hit),
-            _clip_below(page, hit),
-            _clip_left(page, hit),
-            _clip_above(page, hit),
-        ]
-    )
+    if spec.row_anchor:
+        # A blank "b" cell must stay blank, not borrow the "a" amount on its
+        # left or the next row's amount below.
+        boxes.append(_clip_right(page, hit))
+    else:
+        boxes.extend(
+            [
+                _clip_right(page, hit),
+                _clip_below(page, hit),
+                _clip_left(page, hit),
+                _clip_above(page, hit),
+            ]
+        )
     parsed = None
     used_box = boxes[0]
     for box in boxes:

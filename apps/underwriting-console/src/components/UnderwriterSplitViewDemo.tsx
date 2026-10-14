@@ -22,12 +22,23 @@ import {
   Minimize2,
   Tractor,
   Coins,
+  PiggyBank,
   Printer,
 } from 'lucide-react';
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, reviewNotesForPage, scheduleEGridFieldId } from '../incomeFieldMap';
 import { liveAssetPatch, liveBorrowerName, liveScheduleLPatch } from '../liveHydrate';
+import {
+  calculateRetirementIncome,
+  EMPTY_RETIREMENT_RETURN,
+  IRA_CONTINUANCE_MONTHS,
+  mostRecentRetirementReturn,
+  retirementMethodLabel,
+  retirementReturnsFromFields,
+  type IraContinuanceDecision,
+  type RetirementReturnLines,
+} from '../retirementIncome';
 import {
   allScheduleEExtracts,
   fieldForInspection,
@@ -320,8 +331,27 @@ type IncomeTab =
   | 'PARTNERSHIP'
   | 'SCHEDULE_F'
   | 'ASSET_INCOME'
+  | 'RETIREMENT'
   | 'SCHEDULE_E'
   | 'ENCOMPASS_SYNC';
+
+/** Demo return: an IRA distribution that stays excluded until the underwriter confirms continuance. */
+const DEMO_RETIREMENT_RETURN: RetirementReturnLines = {
+  ...EMPTY_RETIREMENT_RETURN,
+  year: 2025,
+  iraTotal: 24000,
+  iraTaxable: 18000,
+};
+
+type RetirementLineKey = 'iraTotal' | 'iraTaxable' | 'pensionTotal' | 'pensionTaxable' | 'ssTotal' | 'ssTaxable';
+const RETIREMENT_LINES: ReadonlyArray<readonly [string, string, RetirementLineKey, string]> = [
+  ['Line 4a', 'IRA distributions', 'iraTotal', 'f1040-ira-total'],
+  ['Line 4b', 'Taxable IRA distributions', 'iraTaxable', 'f1040-ira-taxable'],
+  ['Line 5a', 'Pensions and annuities', 'pensionTotal', 'f1040-pensions-total'],
+  ['Line 5b', 'Taxable pensions', 'pensionTaxable', 'f1040-pensions-taxable'],
+  ['Line 6a', 'Social Security benefits', 'ssTotal', 'f1040-ss-total'],
+  ['Line 6b', 'Taxable Social Security', 'ssTaxable', 'f1040-ss-taxable'],
+];
 
 // ── Rental Income (Schedule E Page 1 · Form 1084 / 1038 worksheet) ────────────
 
@@ -656,6 +686,7 @@ export default function UnderwriterSplitViewDemo({
       ['PARTNERSHIP', '1065', FileSpreadsheet],
       ['SCHEDULE_F', 'Sch F', Tractor],
       ['ASSET_INCOME', 'Assets', Coins],
+      ['RETIREMENT', 'Retirement', PiggyBank],
       ['SCHEDULE_E', 'Rental', Home],
       ['ENCOMPASS_SYNC', 'Reconcile', Lock],
     ] as const;
@@ -674,6 +705,7 @@ export default function UnderwriterSplitViewDemo({
       if (id === 'PARTNERSHIP') return hasKind('partnership');
       if (id === 'SCHEDULE_F') return hasKind('schedule-f');
       if (id === 'ASSET_INCOME') return hasKind('asset');
+      if (id === 'RETIREMENT') return hasKind('retirement');
       if (id === 'SCHEDULE_E') return hasKind('schedule-e');
       return false;
     });
@@ -699,6 +731,7 @@ export default function UnderwriterSplitViewDemo({
         case 'PARTNERSHIP': return [{ label: '1065', kind: 'partnership', docs: having('partnership') }];
         case 'SCHEDULE_F': return [{ label: 'Sch F', kind: 'schedule-f', docs: having('schedule-f') }];
         case 'ASSET_INCOME': return [{ label: 'Assets', kind: 'asset', docs: having('asset') }];
+        case 'RETIREMENT': return [{ label: 'Form 1040', kind: 'retirement', docs: having('retirement') }];
         case 'SCHEDULE_E': return [{ label: 'Sch E', kind: 'schedule-e', docs: having('schedule-e') }];
         default: return [{ label: 'All', docs: packet }];
       }
@@ -1175,6 +1208,12 @@ export default function UnderwriterSplitViewDemo({
     { year: 2024, interestIncome: 3900, dividendIncome: 7100, capitalGainsNetLoss: 9800 },
   ]);
   const [assetIncomeIncluded, setAssetIncomeIncluded] = useState(false);
+  const [retirementReturn, setRetirementReturn] = useState<RetirementReturnLines>(
+    isLive ? EMPTY_RETIREMENT_RETURN : DEMO_RETIREMENT_RETURN,
+  );
+  /** Customer-entered vested balance from the most recent retirement account statement. */
+  const [iraBalanceInput, setIraBalanceInput] = useState('');
+  const [iraContinuance, setIraContinuance] = useState<IraContinuanceDecision | null>(null);
   const [loanProgram, setLoanProgram] = useState<'CONVENTIONAL' | 'FHA' | 'VA' | 'USDA'>(
     protectedContext?.loanProgram ?? 'CONVENTIONAL',
   );
@@ -1387,6 +1426,11 @@ export default function UnderwriterSplitViewDemo({
       { year: 2024, interestIncome: 0, dividendIncome: 0, capitalGainsNetLoss: 0 },
     ]);
     setAssetIncomeIncluded(Boolean(asset) || kinds.has('asset'));
+    const retirementReturns = retirementReturnsFromFields(mappedFields, (documentId, pageIndex) =>
+      packet.find((doc) => doc.id === documentId)?.result.pages.find((page) => page.index === pageIndex));
+    setRetirementReturn(mostRecentRetirementReturn(retirementReturns) ?? EMPTY_RETIREMENT_RETURN);
+    setIraBalanceInput('');
+    setIraContinuance(null);
     if (!kinds.has('schedule-e') && scheduleEExtracts.length === 0) {
       setRentalProperties([]);
     }
@@ -2047,6 +2091,14 @@ export default function UnderwriterSplitViewDemo({
     [assetIncomeMonthly, twoYearAssetIncome],
   );
 
+  const iraAccountBalance = iraBalanceInput.trim() !== '' && Number.isFinite(Number(iraBalanceInput))
+    ? Number(iraBalanceInput)
+    : null;
+  const retirement = useMemo(
+    () => calculateRetirementIncome(retirementReturn, { iraAccountBalance, iraContinuance }, loanProgram),
+    [retirementReturn, iraAccountBalance, iraContinuance, loanProgram],
+  );
+
   const w2BaseChosen = chosenMonthly(w2BasePicks.options, w2BaseChoice, w2BasePicks.recommendedId);
   const w2VarChosen = chosenMonthly(w2VarPicks.options, w2VarChoice, w2VarPicks.recommendedId);
   const schCChosen = chosenMonthly(schCPicks.options, schCChoice, schCPicks.recommendedId);
@@ -2068,6 +2120,8 @@ export default function UnderwriterSplitViewDemo({
     partnershipMonthly: partnershipChosen.monthly + additionalBusinessMonthly.partnership,
     scheduleFMonthly: scheduleFChosen.monthly + additionalBusinessMonthly.scheduleF,
     assetIncomeMonthly: assetIncomeChosen.monthly,
+    socialSecurityMonthly: retirement.socialSecurityMonthly,
+    retirementIncomeMonthly: retirement.retirementIncomeMonthly,
     w2BaseMonthly: w2BaseChosen.monthly + additionalW2Monthly.base,
     w2VariableMonthly: w2VarChosen.monthly + additionalW2Monthly.variable,
     rentalMonthly: rentalChosen.monthly,
@@ -2083,6 +2137,8 @@ export default function UnderwriterSplitViewDemo({
       scheduleFChosen.monthly +
       additionalBusinessMonthly.scheduleF +
       assetIncomeChosen.monthly +
+      retirement.socialSecurityMonthly +
+      retirement.retirementIncomeMonthly +
       w2BaseChosen.monthly +
       additionalW2Monthly.base +
       w2VarChosen.monthly +
@@ -2120,7 +2176,10 @@ export default function UnderwriterSplitViewDemo({
         ...businessShares(cCorpEntities, activeCCorp.id, cCorpChosen.monthly, cCorpMonthlyOf),
         ...businessShares(scheduleFEntities, activeScheduleF.id, scheduleFChosen.monthly, scheduleFMonthlyOf),
       ],
-      jointMonthly: form1084CashFlow.rentalMonthly + form1084CashFlow.assetIncomeMonthly,
+      jointMonthly: form1084CashFlow.rentalMonthly
+        + form1084CashFlow.assetIncomeMonthly
+        + form1084CashFlow.socialSecurityMonthly
+        + form1084CashFlow.retirementIncomeMonthly,
     });
   })();
 
@@ -2136,6 +2195,8 @@ export default function UnderwriterSplitViewDemo({
         form1120_MonthlyTotal: form1084CashFlow.cCorpMonthly,
         scheduleF_MonthlyTotal: form1084CashFlow.scheduleFMonthly,
         assetIncomeMonthly: form1084CashFlow.assetIncomeMonthly,
+        socialSecurityMonthly: form1084CashFlow.socialSecurityMonthly,
+        retirementIncomeMonthly: form1084CashFlow.retirementIncomeMonthly,
         rentalMonthly: form1084CashFlow.rentalMonthly,
         byBorrower: incomeByBorrower.length ? incomeByBorrower : undefined,
       })
@@ -2151,6 +2212,8 @@ export default function UnderwriterSplitViewDemo({
     { source: 'Partnership', method: partnershipChosen.label, monthly: form1084CashFlow.partnershipMonthly },
     { source: 'Schedule F', method: scheduleFChosen.label, monthly: form1084CashFlow.scheduleFMonthly },
     { source: 'Asset income', method: assetIncomeChosen.label, monthly: form1084CashFlow.assetIncomeMonthly },
+    { source: 'Social Security', method: retirementMethodLabel(retirementReturn.year, 'Line 6a/6b'), monthly: form1084CashFlow.socialSecurityMonthly },
+    { source: 'Retirement', method: retirementMethodLabel(retirementReturn.year, retirement.ira?.confirmed ? 'Lines 4–5 · IRA continuance confirmed' : 'Line 5a/5b'), monthly: form1084CashFlow.retirementIncomeMonthly },
   ]);
 
   const chosenRentalRouting = rentalPicks.routingByOption[rentalChosen.id] ?? rentalFlow.routing;
@@ -2295,6 +2358,8 @@ export default function UnderwriterSplitViewDemo({
       });
     }
 
+    list.push(...retirement.alerts);
+
     // Rental PITIA missing (Encompass loan details did not include the property)
     if (rentalFlow.anyPitiaMissing) {
       const missing = rentalFlow.properties.filter((p) => p.pitiaMissing).map((p) => p.address || 'Unnamed property');
@@ -2335,7 +2400,7 @@ export default function UnderwriterSplitViewDemo({
     }
 
     return list;
-  }, [locateResult.warnings, monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor, assetIncomeAnnual, assetIncomeIncluded]);
+  }, [locateResult.warnings, monthsAtCurrentJob, currentBaseYtd, sCorpLRatio, partnershipLRatio, baseWageReconciliation, rentalFlow, borrowerMetadata.loanProgram, sCorpFlow, partnershipFlow, sCorpShareholderPct, partnershipPct, gseInvestor, assetIncomeAnnual, assetIncomeIncluded, retirement.alerts]);
 
   // ==================== 6. INTERACTIVE ACTIONS ====================
 
@@ -3381,6 +3446,20 @@ export default function UnderwriterSplitViewDemo({
                   </div>
                 </div>
               </div>
+            ) : activeTab === 'RETIREMENT' ? (
+              <div className="h-[540px] overflow-auto rounded-lg border border-slate-300 bg-[#f8f6f1] p-4 shadow-inner">
+                <div className="min-h-full rounded border-2 border-slate-900 bg-white p-4">
+                  <p className="text-[8px] font-bold uppercase tracking-widest text-slate-500">Department of the Treasury — Internal Revenue Service</p>
+                  <h3 className="border-b-2 border-slate-900 pb-2 text-sm font-black">Form 1040 · U.S. Individual Income Tax Return</h3>
+                  <p className="py-3 text-xs font-bold">{retirementReturn.year ?? 'Most recent'} return · Lines 4–6</p>
+                  {RETIREMENT_LINES.map(([line, label, key]) => (
+                    <div key={key} className="mb-2 flex justify-between rounded border border-slate-200 px-3 py-2 text-xs">
+                      <span className="font-semibold text-slate-600"><span className="mr-2 font-mono font-black">{line}</span>{label}</span>
+                      <span className="font-mono font-black">{usd(retirementReturn[key])}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
               <DemoDocumentCanvas
                 tab={activeTab}
@@ -4286,6 +4365,120 @@ export default function UnderwriterSplitViewDemo({
             </div>
           )}
           
+          {activeTab === 'RETIREMENT' && (
+            <div data-testid="retirement-panel" className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                <h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900">
+                  <PiggyBank className="h-5 w-5 text-emerald-600" />
+                  Retirement Income · Form 1040 Lines 4–6
+                </h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-black uppercase text-slate-600">
+                    {retirementReturn.year ? `${retirementReturn.year} return` : 'Most recent return'}
+                  </span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-700">
+                    {loanProgram} gross-up {Math.round((retirement.multiplier - 1) * 100)}%
+                  </span>
+                </div>
+              </div>
+              <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+                Uses the most recent return only. The non-taxable part of Social Security and pensions is grossed up for the program. IRA distributions count only after the customer enters the account balance and the underwriter confirms {IRA_CONTINUANCE_MONTHS}-month continuance. SSI is not reported on Form 1040; document it with the award letter.
+              </p>
+
+              <YearStack title="Form 1040" subtitle={retirementReturn.year ? `${retirementReturn.year} · most recent` : 'Most recent'}>
+                {RETIREMENT_LINES.map(([line, label, key, sourceId]) => (
+                  <label key={key} className="flex items-center gap-2 rounded border border-slate-200 bg-white px-2.5 py-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={(event) => handleInspectField(sourceId, retirementReturn.documentId, event.currentTarget)}
+                      className="w-16 shrink-0 text-left font-mono text-[10px] font-black uppercase text-slate-500 hover:text-indigo-600"
+                    >
+                      {line}
+                    </button>
+                    <span className="min-w-0 flex-1 font-semibold text-slate-700">{label}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      aria-label={`${line} ${label}`}
+                      value={retirementReturn[key]}
+                      onChange={(event) => setRetirementReturn((lines) => ({ ...lines, [key]: Math.max(0, Number(event.target.value) || 0) }))}
+                      className="w-28 rounded border border-slate-300 px-2 py-1.5 text-right font-mono font-bold"
+                    />
+                  </label>
+                ))}
+              </YearStack>
+
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
+                <div className="rounded-lg border bg-slate-50 p-3">
+                  <span className="text-[10px] font-black uppercase text-slate-400">Social Security</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(retirement.socialSecurityMonthly)}/mo</span>
+                </div>
+                <div className="rounded-lg border bg-slate-50 p-3">
+                  <span className="text-[10px] font-black uppercase text-slate-400">Pensions and annuities</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(retirement.pensionMonthly)}/mo</span>
+                </div>
+              </div>
+
+              {retirement.ira ? (
+                <div data-testid="ira-review" className="space-y-4 rounded-xl border border-amber-300 bg-amber-50/60 p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h4 className="text-sm font-extrabold text-slate-900">IRA distributions</h4>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {usd(retirement.ira.totalDistributions)} reported · {usd(retirement.ira.taxableDistributions)} taxable · {usd(retirement.ira.monthlyDistribution)}/mo
+                    </span>
+                  </div>
+                  <label className="block text-xs">
+                    <span className="mb-1 block font-black uppercase tracking-wider text-slate-500">Customer · IRA account balance from the most recent statement</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1_000_000_000}
+                      step={0.01}
+                      data-testid="ira-balance-input"
+                      value={iraBalanceInput}
+                      onChange={(event) => setIraBalanceInput(event.target.value)}
+                      placeholder="Vested balance"
+                      className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 font-mono font-bold"
+                    />
+                    {retirement.ira.monthsOfContinuance != null ? (
+                      <span className={`mt-1 block font-semibold ${retirement.ira.monthsOfContinuance >= IRA_CONTINUANCE_MONTHS ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        Balance covers {retirement.ira.monthsOfContinuance} months at the current distribution rate ({IRA_CONTINUANCE_MONTHS} required).
+                      </span>
+                    ) : null}
+                  </label>
+                  <fieldset className="space-y-2">
+                    <legend className="mb-1 text-xs font-black uppercase tracking-wider text-slate-500">Underwriter · {IRA_CONTINUANCE_MONTHS}-month continuance</legend>
+                    {([
+                      ['CONFIRMED_GROSS_UP', `Confirmed ${IRA_CONTINUANCE_MONTHS}+ months · gross up non-taxable portion ${Math.round((retirement.multiplier - 1) * 100)}% (${loanProgram})`, retirement.ira.monthlyIfConfirmed.grossUp],
+                      ['CONFIRMED', `Confirmed ${IRA_CONTINUANCE_MONTHS}+ months · no gross-up`, retirement.ira.monthlyIfConfirmed.noGrossUp],
+                      ['NOT_CONFIRMED', 'Not confirmed · exclude from qualifying income', 0],
+                    ] as const).filter(([id]) => id !== 'CONFIRMED_GROSS_UP' || retirement.ira!.nonTaxableDistributions > 0).map(([id, label, monthly]) => (
+                      <label key={id} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-xs ${iraContinuance === id ? 'border-indigo-400 bg-white ring-2 ring-indigo-200' : 'border-slate-200 bg-white/70'}`}>
+                        <input
+                          type="radio"
+                          name="ira-continuance"
+                          value={id}
+                          checked={iraContinuance === id}
+                          onChange={() => setIraContinuance(id)}
+                        />
+                        <span className="flex-1 font-semibold text-slate-700">{label}</span>
+                        <span className="font-mono font-black text-slate-900">{usd(monthly)}/mo</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <p className="text-right text-xs font-black text-slate-900">
+                    Qualifying IRA income {usd(retirement.ira.qualifyingMonthly)}/mo
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-indigo-300 bg-indigo-50 p-3 text-xs">
+                <div className="flex justify-between"><span className="font-semibold text-indigo-800">CX.FREEFLOW.SOCIAL.SECURITY</span><span className="font-mono font-black text-indigo-900">{usd(retirement.socialSecurityMonthly)}/mo</span></div>
+                <div className="mt-1 flex justify-between"><span className="font-semibold text-indigo-800">CX.FREEFLOW.RETIREMENT (pension + IRA)</span><span className="font-mono font-black text-indigo-900">{usd(retirement.retirementIncomeMonthly)}/mo</span></div>
+              </div>
+            </div>
+          )}
+
           {/* ==================== TAB: RENTAL INCOME (SCHEDULE E PAGE 1) ==================== */}
           {activeTab === 'SCHEDULE_E' && (
             <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -4791,6 +4984,16 @@ export default function UnderwriterSplitViewDemo({
                   <span className="text-[10px] font-black uppercase text-slate-400">Asset income</span>
                   <span className="mt-0.5 block text-[11px] text-slate-500">Interest / dividends / gains · {assetIncomeChosen.label}</span>
                   <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.assetIncomeMonthly)}/mo</span>
+                </div>
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <span className="text-[10px] font-black uppercase text-slate-400">Social Security</span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">Form 1040 Line 6a/6b · grossed up</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.socialSecurityMonthly)}/mo</span>
+                </div>
+                <div className={`rounded-lg border p-4 ${retirement.ira && !retirement.ira.confirmed ? 'border-amber-300 bg-amber-50' : 'bg-slate-50'}`}>
+                  <span className="text-[10px] font-black uppercase text-slate-400">Retirement</span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">Pension + IRA · {retirement.ira ? (retirement.ira.confirmed ? 'IRA continuance confirmed' : 'IRA excluded pending continuance') : 'Line 5a/5b'}</span>
+                  <span className="mt-1 block text-lg font-black text-indigo-700">{usd(form1084CashFlow.retirementIncomeMonthly)}/mo</span>
                 </div>
                 <div className="rounded-lg border bg-slate-50 p-4 ring-2 ring-indigo-200">
                   <span className="text-[10px] font-black uppercase text-slate-400">Field 113</span>

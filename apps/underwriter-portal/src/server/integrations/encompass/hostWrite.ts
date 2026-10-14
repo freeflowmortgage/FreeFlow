@@ -124,7 +124,8 @@ async function loadApprovedFieldMap(transaction: Prisma.TransactionClient, conte
     select: {
       qualifyingMonthlyIncome: true, trendingResult: true, yearsAnalyzed: true, scheduleCMonthlyTotal: true,
       form1120SMonthlyTotal: true, form1065MonthlyTotal: true, form1120MonthlyTotal: true, w2BaseMonthly: true,
-      w2VariableMonthly: true, assetIncomeMonthly: true, rentalMonthly: true, borrowerIncome: true,
+      w2VariableMonthly: true, assetIncomeMonthly: true, socialSecurityMonthly: true, retirementIncomeMonthly: true,
+      rentalMonthly: true, borrowerIncome: true,
       extractionBindings: { select: {
         extractionId: true, extractionHash: true, sourceDocumentId: true, sourceDocumentVersion: true,
         sourceContentHash: true, metadataReviewId: true, metadataReviewVersion: true, metadataReviewHash: true,
@@ -150,6 +151,8 @@ async function loadApprovedFieldMap(transaction: Prisma.TransactionClient, conte
     w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
     w2VariableMonthly: numberOrUndefined(calculation.w2VariableMonthly),
     assetIncomeMonthly: numberOrUndefined(calculation.assetIncomeMonthly),
+    socialSecurityMonthly: numberOrUndefined(calculation.socialSecurityMonthly),
+    retirementIncomeMonthly: numberOrUndefined(calculation.retirementIncomeMonthly),
     rentalMonthly: numberOrUndefined(calculation.rentalMonthly),
     borrowerIncome: calculation.borrowerIncome,
     auditUrl: `${input.appOrigin.replace(/\/$/, '')}/audit/${approval.id}`,
@@ -171,6 +174,8 @@ export function approvedHostFields(input: Readonly<{
   w2BaseMonthly?: number;
   w2VariableMonthly?: number;
   assetIncomeMonthly?: number;
+  socialSecurityMonthly?: number;
+  retirementIncomeMonthly?: number;
   rentalMonthly?: number;
   borrowerIncome: unknown;
   auditUrl: string;
@@ -189,6 +194,8 @@ export function approvedHostFields(input: Readonly<{
     w2BaseMonthly: input.w2BaseMonthly,
     w2VariableMonthly: input.w2VariableMonthly,
     assetIncomeMonthly: input.assetIncomeMonthly,
+    socialSecurityMonthly: input.socialSecurityMonthly,
+    retirementIncomeMonthly: input.retirementIncomeMonthly,
     rentalMonthly: input.rentalMonthly,
     borrowerMonthlyIncome: lines.map((line) => ({ ordinal: line.ordinal, qualifyingMonthlyIncome: Number(line.qualifyingMonthlyIncome) })),
     auditUrl: input.auditUrl,

@@ -296,3 +296,38 @@ test('a newer reviewed metadata version invalidates calculation provenance', () 
   };
   assert.equal(hasCurrentCalculationExtractions([binding]), false);
 });
+
+test('Form 1040 IRA distributions require entered balance and underwriter continuance before projecting', () => {
+  const entityId = 'form-1040-p0';
+  const record = {
+    extractionId: '00000000-0000-4000-8000-000000000101',
+    normalizedInput: { formRecords: [{ entityId, form: 'Form 1040', pageIndex: 0, fields: [
+      { sourceFieldId: 'f1040-ira-total', numericValue: 24000 }, { sourceFieldId: 'f1040-ira-taxable', numericValue: 18000 },
+      { sourceFieldId: 'f1040-ss-total', numericValue: 26400 }, { sourceFieldId: 'f1040-ss-taxable', numericValue: 22440 },
+    ] }] },
+  };
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{ ...record, metadataAssignments: [{ entityId, taxYear: 2025 }] }]), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements.map((item) => item.field), ['iraAccountBalance', 'iraContinuance']);
+    return true;
+  });
+  const projected = mergeAuthoritativeExtractionInputs([{ ...record, metadataAssignments: [{
+    entityId, taxYear: 2025, iraAccountBalance: 400000, hasThreeYearIraContinuance: true, grossUpIraNonTaxable: true,
+  }] }]);
+  assert.deepEqual(projected.iraDistributions, [{
+    entityId: `${record.extractionId}:${entityId}`, year: 2025, totalDistributions: 24000, taxableDistributions: 18000, accountBalance: 400000,
+    hasThreeYearContinuance: true, grossUpNonTaxable: true,
+  }]);
+  assert.equal(projected.benefits?.[0].totalSocialSecurity, 26400);
+});
+
+test('Form 1040 IRA gross-up is dropped when the underwriter does not confirm continuance', () => {
+  const entityId = 'form-1040-p0';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId: '00000000-0000-4000-8000-000000000101',
+    normalizedInput: { formRecords: [{ entityId, form: 'Form 1040', pageIndex: 0, fields: [{ sourceFieldId: 'f1040-ira-taxable', numericValue: 30000 }] }] },
+    metadataAssignments: [{ entityId, taxYear: 2025, iraAccountBalance: 0, hasThreeYearIraContinuance: false, grossUpIraNonTaxable: true }],
+  }]);
+  assert.equal(projected.benefits, undefined);
+  assert.deepEqual(projected.iraDistributions, [{ entityId: `00000000-0000-4000-8000-000000000101:${entityId}`, year: 2025, taxableDistributions: 30000, accountBalance: 0, hasThreeYearContinuance: false, grossUpNonTaxable: false }]);
+});

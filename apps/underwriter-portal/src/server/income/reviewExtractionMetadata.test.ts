@@ -63,3 +63,30 @@ test('wrong-loan or cross-tenant extraction is not disclosed', async () => {
     assignments: [{ entityId: 'w2-p0-0', employmentRole: 'CURRENT' }], idempotencyKey: 'review-key-87654321',
   }), (error: unknown) => error instanceof ApiError && error.code === 'EXTRACTION_NOT_FOUND');
 });
+
+test('IRA continuance metadata is typed and cannot gross up an unconfirmed distribution', () => {
+  const body = (assignment: Record<string, unknown>) => ({ expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', assignments: [{ entityId: 'form-1040-p0', ...assignment }] });
+  assert.deepEqual(parseMetadataReviewBody(body({ iraAccountBalance: 400000, hasThreeYearIraContinuance: true, grossUpIraNonTaxable: true })).assignments, [
+    { entityId: 'form-1040-p0', iraAccountBalance: 400000, hasThreeYearIraContinuance: true, grossUpIraNonTaxable: true },
+  ]);
+  assert.throws(() => parseMetadataReviewBody(body({ iraAccountBalance: -1 })), ApiError);
+  assert.throws(() => parseMetadataReviewBody(body({ hasThreeYearIraContinuance: 'yes' })), ApiError);
+  assert.throws(() => parseMetadataReviewBody(body({ hasThreeYearIraContinuance: false, grossUpIraNonTaxable: true })), ApiError);
+});
+
+test('IRA continuance metadata is only accepted on a Form 1040 record', async () => {
+  const transaction = {
+    $executeRaw: async () => 0, apiIdempotencyKey: { findFirst: async () => null },
+    loanApplication: { findFirst: async () => ({ id: LOAN, version: 1 }) },
+    incomeExtraction: { findFirst: async () => ({
+      id: EXTRACTION, status: 'ACTIVE', normalizedInput: { formRecords: [{ entityId: 'schedule-c-p0', form: 'Schedule C' }] }, canonicalHash: HASH,
+      sourceDocumentId: DOCUMENT, sourceDocumentVersion: 1, sourceContentHash: HASH,
+      sourceDocument: { version: 1, sourceContentHash: HASH }, metadataReviews: [],
+    }) },
+  };
+  await assert.rejects(reviewExtractionMetadata(transaction as never, context, {
+    loanId: LOAN, extractionId: EXTRACTION, expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW',
+    reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null, idempotencyKey: 'review-key-12345678',
+    assignments: [{ entityId: 'schedule-c-p0', hasThreeYearIraContinuance: true }],
+  }), (error) => error instanceof ApiError && error.code === 'METADATA_FIELD_NOT_ALLOWED');
+});

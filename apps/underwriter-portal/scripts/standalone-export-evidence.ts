@@ -63,6 +63,8 @@ const core = {
       form1065Monthly: null,
       form1120Monthly: null,
       assetIncomeMonthly: null,
+      socialSecurityMonthly: null,
+      retirementIncomeMonthly: null,
       rentalMonthly: null,
       rentalLiabilityMonthly: null,
       housingExpenseAdjustment: null,

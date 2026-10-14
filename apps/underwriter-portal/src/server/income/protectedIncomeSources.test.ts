@@ -455,3 +455,16 @@ function approvalTransaction(roster: ReadonlyArray<{ borrowerKey: string }>) {
     loanBorrower: { findMany: async () => roster },
   };
 }
+
+test('AC-12 Form 1040 Social Security and confirmed IRA distributions follow the record borrower', () => {
+  const { result } = authorize([business('00000000-0000-4000-8000-000000000312', 'Form 1040', 'f1040-1', [
+    { sourceFieldId: 'f1040-ira-total', numericValue: 24000 }, { sourceFieldId: 'f1040-ira-taxable', numericValue: 18000 },
+    { sourceFieldId: 'f1040-ss-total', numericValue: 26400 }, { sourceFieldId: 'f1040-ss-taxable', numericValue: 22440 },
+  ], {
+    entityId: 'f1040-1', taxYear: 2025, borrowerKey: 'borrower-2',
+    iraAccountBalance: 400000, hasThreeYearIraContinuance: true, grossUpIraNonTaxable: true,
+  })]);
+  // Social Security 22,440 + 3,960 × 1.25 and IRA 18,000 + 6,000 × 1.25, both over 12 months.
+  assert.equal(line(result, 'borrower-2').qualifyingMonthlyIncome, '4407.50');
+  assert.equal(line(result, 'borrower-1').qualifyingMonthlyIncome, '0.00');
+});
