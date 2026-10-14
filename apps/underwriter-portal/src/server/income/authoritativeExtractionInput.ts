@@ -152,7 +152,7 @@ export type ExtractionMetadataAssignment = Readonly<{
 export type ExtractionMetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod' | 'iraAccountBalance' | 'iraContinuance';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod' | 'iraAccountBalance' | 'iraContinuance' | 'wvoeVariableMethod';
   form: string;
 }>;
 
@@ -559,7 +559,13 @@ function projectWvoe(
     }
   }
   if (gaps.size) requirements.push({ extractionId, entityId: record.entityId, field: 'unsupportedCalculation', form: record.form });
-  if (!employerName || borrowerBlocked || !role || typeof year !== 'number' || annualized.status !== 'READY') return;
+  // With a prior year on the form, year-to-date alone and the 24-month average
+  // can differ materially, so the underwriter picks rather than the default.
+  const hasVariableYtd = [n('wvoe-ot'), n('wvoe-bonus'), n('wvoe-commission')].some((amount) => typeof amount === 'number' && amount !== 0);
+  const hasPriorYear = [n('wvoe-ot-prior'), n('wvoe-bonus-prior'), n('wvoe-commission-prior')].some((amount) => typeof amount === 'number');
+  const variableMethodBlocked = hasVariableYtd && hasPriorYear && meta?.wvoeVariableMethod === undefined;
+  if (variableMethodBlocked) requirements.push({ extractionId, entityId: record.entityId, field: 'wvoeVariableMethod', form: record.form });
+  if (!employerName || borrowerBlocked || !role || typeof year !== 'number' || variableMethodBlocked || annualized.status !== 'READY') return;
   const parts = annualized.annualComponents;
   push(projected, 'w2Employers', {
     entityId: record.entityId,

@@ -409,6 +409,55 @@ test('a Form 1005 verification reaches the calculation on its own', () => {
   assert.equal(row?.entityId, `${extractionId}:WVOE:wvoe-p0`);
 });
 
+const WVOE_WITH_PRIOR_YEAR = {
+  entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+  fields: fields({
+    'wvoe-employer-name': 'Acme Manufacturing Inc',
+    'wvoe-base': 5200, 'wvoe-base-period': 'Monthly',
+    'wvoe-base-ytd': 46800, 'wvoe-ot': 4500, 'wvoe-bonus': 12000,
+    'wvoe-ot-prior': 3000, 'wvoe-bonus-prior': 6000,
+    'wvoe-ytd-thru': '09/30/2024', 'wvoe-months': 66,
+  }),
+};
+
+test('a verification with a prior year asks the underwriter how to average variable pay', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000210';
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024 }],
+  }], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{ extractionId, entityId: 'WVOE:wvoe-p0', field: 'wvoeVariableMethod', form: 'WVOE' }]);
+    return true;
+  });
+});
+
+test('the reviewed 24-month method averages year to date with the prior year', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000211';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024, wvoeVariableMethod: 'avg24' as const }],
+  }], ROSTER);
+  const row = projected.w2Employers?.[0];
+  // (4,500 + 3,000) / 21 months and (12,000 + 6,000) / 21 months, annualized.
+  assert.equal(row?.annualOvertimeIncome, 4285.68);
+  assert.equal(row?.annualBonusIncome, 10285.68);
+  assert.equal(row?.annualBaseIncome, 62400);
+});
+
+test('the reviewed current method keeps variable pay to the year to date', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000212';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024, wvoeVariableMethod: 'current' as const }],
+  }], ROSTER);
+  assert.equal(projected.w2Employers?.[0].annualOvertimeIncome, 6000);
+  assert.equal(projected.w2Employers?.[0].annualBonusIncome, 15999.96);
+});
+
 test('an hourly verification annualizes over the cycle its hours were counted on', () => {
   const extractionId = '00000000-0000-4000-8000-000000000206';
   // The Work Number: $17.42 an hour, 86 hours a semi-monthly period. Reading
