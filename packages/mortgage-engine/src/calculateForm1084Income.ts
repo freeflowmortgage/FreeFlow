@@ -195,6 +195,24 @@ export interface Form1040BenefitInput {
   vaDisabilityMonthly?: number;
 }
 
+/**
+ * Form 1040 Line 4a/4b IRA distributions for one tax year. Only the most
+ * recent year qualifies, and only after an underwriter confirms continuance.
+ */
+export interface IraDistributionInput {
+  year: number;
+  totalDistributions?: number;   // Form 1040 Line 4a
+  taxableDistributions?: number; // Form 1040 Line 4b
+  /** Vested balance from the most recent retirement account statement. */
+  accountBalance?: number;
+  /** Underwriter confirmed the distributions continue at least 36 months. */
+  hasThreeYearContinuance?: boolean;
+  /** Underwriter documented the Line 4a − 4b portion as non-taxable and elects the program gross-up. */
+  grossUpNonTaxable?: boolean;
+}
+
+export const IRA_CONTINUANCE_MONTHS = 36;
+
 export interface ScheduleBAndDInput {
   year: number;
   interestIncome?: number;       // Schedule B, Part I
@@ -259,6 +277,7 @@ export interface UnifiedIncomeCalculationPayload {
   form1065?: Form1065Entry[];
   form1120?: Form1120Entry[];
   benefits?: Form1040BenefitInput[];
+  iraDistributions?: IraDistributionInput[];
   assets?: ScheduleBAndDInput[];
   trusts?: ScheduleEPartIIIInput[];
   scheduleEProperties?: ScheduleEPage1PropertyInput[]; // Added Schedule E Page 1
@@ -278,6 +297,112 @@ function getMonthsInService(entry: ScheduleEPage1PropertyInput): number {
     return Math.max(1, Math.min(12, Math.ceil(entry.fairRentalDays / 30)));
   }
   return 12; // Default to standard 12 months if no days rented is specified
+}
+
+export interface IraDistributionBreakdown {
+  year: number;
+  priorYearsReported: number[];
+  totalDistributions: number;
+  taxableDistributions: number;
+  nonTaxableDistributions: number;
+  monthlyDistribution: number;
+  accountBalance: number | null;
+  monthsOfContinuance: number | null;
+  hasThreeYearContinuance: boolean;
+  grossUpNonTaxable: boolean;
+  appliedGrossUpMultiplier: number;
+  monthlyGrossUpBenefit: number;
+  includedInQualifyingIncome: boolean;
+  qualifyingMonthlyIncome: number;
+}
+
+function calculateIraDistributions(
+  entries: IraDistributionInput[],
+  grossUpMultiplier: Decimal,
+  warnings: WarningMessage[],
+  conditions: GeneratedCondition[],
+): IraDistributionBreakdown | null {
+  // Fully taxable distributions are reported on Line 4b alone with 4a blank.
+  const totalOf = (entry: IraDistributionInput) => Decimal.max(
+    new Decimal(entry.totalDistributions || 0),
+    new Decimal(entry.taxableDistributions || 0),
+  );
+  const reported = entries
+    .filter((entry) => totalOf(entry).gt(0))
+    .sort((a, b) => b.year - a.year);
+  if (reported.length === 0) return null;
+  const latest = reported[0];
+  if (reported.filter((entry) => entry.year === latest.year).length > 1) {
+    warnings.push({
+      code: 'IRA_DUPLICATE_TAX_YEAR',
+      severity: 'WARNING',
+      message: `More than one Form 1040 reported IRA distributions for ${latest.year}. Only the first was used; confirm the duplicate return before relying on this figure.`
+    });
+  }
+
+  const total = totalOf(latest);
+  const taxable = Decimal.min(total, Decimal.max(0, new Decimal(latest.taxableDistributions || 0)));
+  const nonTaxable = total.sub(taxable);
+  if (taxable.eq(0)) {
+    warnings.push({
+      code: 'IRA_DISTRIBUTION_NOT_TAXABLE',
+      severity: 'WARNING',
+      message: `The ${latest.year} Form 1040 reports $${total.toFixed(2)} on Line 4a with no taxable amount on Line 4b. A rollover, Roth conversion, or qualified charitable distribution is not recurring income; confirm the distributions are ongoing before relying on them.`
+    });
+  }
+  const monthly = total.div(12);
+  const balance = latest.accountBalance !== undefined && latest.accountBalance !== null && latest.accountBalance >= 0
+    ? new Decimal(latest.accountBalance)
+    : null;
+  const monthsOfContinuance = balance ? balance.div(monthly).toDecimalPlaces(1, Decimal.ROUND_DOWN) : null;
+  const confirmed = latest.hasThreeYearContinuance === true;
+  const grossUp = confirmed && latest.grossUpNonTaxable === true && nonTaxable.gt(0);
+  const multiplier = grossUp ? grossUpMultiplier : new Decimal(1);
+  const qualifyingAnnual = confirmed ? taxable.add(nonTaxable.mul(multiplier)) : new Decimal(0);
+
+  if (!confirmed) {
+    warnings.push({
+      code: 'IRA_DISTRIBUTION_EXCLUDED_PENDING_CONTINUANCE',
+      severity: 'WARNING',
+      message: `IRA distributions of $${total.toFixed(2)} were reported on the ${latest.year} Form 1040 (Line 4a) but are excluded until an underwriter confirms at least ${IRA_CONTINUANCE_MONTHS} months of continuance.`
+    });
+    conditions.push({
+      title: 'IRA Distribution 36-Month Continuance',
+      category: 'INCOME',
+      description: `Form 1040 Line 4a reports $${total.toFixed(2)} of IRA distributions for ${latest.year}. Obtain the most recent retirement account statement and evidence of the distribution schedule, then confirm the vested balance supports at least ${IRA_CONTINUANCE_MONTHS} months of continued distributions.`,
+      requiredDocType: 'RETIREMENT_ACCOUNT_STATEMENT'
+    });
+  } else if (!balance) {
+    conditions.push({
+      title: 'IRA Account Balance Documentation',
+      category: 'INCOME',
+      description: `Underwriter confirmed ${IRA_CONTINUANCE_MONTHS}-month continuance of IRA distributions without a recorded account balance. Retain the most recent retirement account statement supporting the confirmation.`,
+      requiredDocType: 'RETIREMENT_ACCOUNT_STATEMENT'
+    });
+  } else if (monthsOfContinuance && monthsOfContinuance.lt(IRA_CONTINUANCE_MONTHS)) {
+    warnings.push({
+      code: 'IRA_CONTINUANCE_BALANCE_SHORTFALL',
+      severity: 'CRITICAL',
+      message: `The recorded IRA balance of $${balance.toFixed(2)} supports ${monthsOfContinuance.toString()} months at the ${latest.year} distribution rate of $${monthly.toFixed(2)}/mo, short of the ${IRA_CONTINUANCE_MONTHS} months the underwriter confirmed.`
+    });
+  }
+
+  return {
+    year: latest.year,
+    priorYearsReported: reported.slice(1).map((entry) => entry.year).filter((year) => year !== latest.year),
+    totalDistributions: total.toNumber(),
+    taxableDistributions: taxable.toNumber(),
+    nonTaxableDistributions: nonTaxable.toNumber(),
+    monthlyDistribution: monthly.toDecimalPlaces(2).toNumber(),
+    accountBalance: balance ? balance.toNumber() : null,
+    monthsOfContinuance: monthsOfContinuance ? monthsOfContinuance.toNumber() : null,
+    hasThreeYearContinuance: confirmed,
+    grossUpNonTaxable: grossUp,
+    appliedGrossUpMultiplier: multiplier.toNumber(),
+    monthlyGrossUpBenefit: nonTaxable.mul(multiplier.sub(1)).div(12).toDecimalPlaces(2).toNumber(),
+    includedInQualifyingIncome: confirmed,
+    qualifyingMonthlyIncome: qualifyingAnnual.div(12).toDecimalPlaces(2).toNumber()
+  };
 }
 
 function isActiveW2Role(role: W2EmploymentRole): boolean {
@@ -1236,8 +1361,15 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     }
   }
 
-  // Combine military and rental impact
+  // IRA distributions qualify from the most recent return only, so they are
+  // added after trending rather than averaged with prior years.
+  const iraDistributionBreakdown = calculateIraDistributions(
+    payload.iraDistributions || [], grossUpMultiplier, warnings, conditions,
+  );
+
+  // Combine military, IRA, and rental impact
   totalQualifyingMonthlyIncome = totalQualifyingMonthlyIncome.add(totalQualifyingMilitaryMonthly);
+  totalQualifyingMonthlyIncome = totalQualifyingMonthlyIncome.add(iraDistributionBreakdown?.qualifyingMonthlyIncome ?? 0);
   totalQualifyingMonthlyIncome = totalQualifyingMonthlyIncome.add(finalRentalIncomeImpact);
 
   return {
@@ -1264,6 +1396,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     form1120Breakdown,
     assetIncomeBreakdown,
     scheduleEPropertiesBreakdown,
-    militaryBreakdown
+    militaryBreakdown,
+    iraDistributionBreakdown
   };
 }
