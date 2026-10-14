@@ -21,6 +21,10 @@ export interface Form1084CalculationPayload {
   w2VariableMonthly?: number;
   /** Qualifying income derived from eligible assets. */
   assetIncomeMonthly?: number;
+  /** Qualifying Social Security from Form 1040 line 6a/6b, non-taxable portion grossed up. */
+  socialSecurityMonthly?: number;
+  /** Qualifying pension/annuity (line 5a/5b) plus continuance-confirmed IRA distributions (line 4a/4b). */
+  retirementIncomeMonthly?: number;
   /** Net rental income from Schedule E. */
   rentalMonthly?: number;
   borrowerMonthlyIncome?: ReadonlyArray<{ ordinal: number; qualifyingMonthlyIncome: number }>;
@@ -45,6 +49,8 @@ export const ENCOMPASS_FIELD_MAP = {
   FREEFLOW_W2_BASE: 'CX.FREEFLOW.W2.BASE',
   FREEFLOW_W2_VARIABLE: 'CX.FREEFLOW.W2.VARIABLE',
   FREEFLOW_ASSET_INCOME: 'CX.FREEFLOW.ASSET.INCOME',
+  FREEFLOW_SOCIAL_SECURITY: 'CX.FREEFLOW.SOCIAL.SECURITY',
+  FREEFLOW_RETIREMENT_INCOME: 'CX.FREEFLOW.RETIREMENT',
   FREEFLOW_RENTAL_TOTAL: 'CX.FREEFLOW.RENTAL',
   FREEFLOW_SYNCED_TIMESTAMP: 'CX.FREEFLOW.SYNCED.AT',
 } as const;
@@ -124,6 +130,8 @@ export function buildEncompassFieldUpdatePayload(
   push(fieldMap.FREEFLOW_W2_BASE, money(payload.w2BaseMonthly));
   push(fieldMap.FREEFLOW_W2_VARIABLE, money(payload.w2VariableMonthly));
   push(fieldMap.FREEFLOW_ASSET_INCOME, money(payload.assetIncomeMonthly));
+  push(fieldMap.FREEFLOW_SOCIAL_SECURITY, money(payload.socialSecurityMonthly));
+  push(fieldMap.FREEFLOW_RETIREMENT_INCOME, money(payload.retirementIncomeMonthly));
   push(fieldMap.FREEFLOW_RENTAL_TOTAL, money(payload.rentalMonthly));
   for (const borrower of payload.borrowerMonthlyIncome ?? []) {
     if (borrower.ordinal >= 0 && borrower.ordinal < 4) push(`CX.FREEFLOW.BORROWER.${borrower.ordinal + 1}.INCOME`, money(borrower.qualifyingMonthlyIncome));

@@ -173,6 +173,8 @@ export interface Form1084EncompassIncome {
   form1120_MonthlyTotal?: number;
   scheduleF_MonthlyTotal?: number;
   assetIncomeMonthly?: number;
+  socialSecurityMonthly?: number;
+  retirementIncomeMonthly?: number;
   rentalMonthly?: number;
   rentalLiabilityMonthly?: number;
   housingExpenseAdjustment?: number;
@@ -475,6 +477,8 @@ export function buildEncompassLoanUpdate(input: {
     statedOtherIncome,
     income?.scheduleF_MonthlyTotal,
     income?.assetIncomeMonthly,
+    income?.socialSecurityMonthly,
+    income?.retirementIncomeMonthly,
   ].filter((value): value is number => value != null && value !== 0);
   const otherIncomeTotal = otherIncomePieces.length > 0
     ? otherIncomePieces.reduce((sum, value) => sum + value, 0)
@@ -721,6 +725,8 @@ export function buildEncompassLoanUpdate(input: {
     pushCustom(customFields, 'CX.FREEFLOW.FORM.1120', moneyText(income.form1120_MonthlyTotal));
     pushCustom(customFields, 'CX.FREEFLOW.SCH.F', moneyText(income.scheduleF_MonthlyTotal));
     pushCustom(customFields, 'CX.FREEFLOW.ASSET.INCOME', moneyText(income.assetIncomeMonthly));
+    pushCustom(customFields, 'CX.FREEFLOW.SOCIAL.SECURITY', moneyText(income.socialSecurityMonthly));
+    pushCustom(customFields, 'CX.FREEFLOW.RETIREMENT', moneyText(income.retirementIncomeMonthly));
     pushCustom(customFields, 'CX.FREEFLOW.RENTAL', moneyText(income.rentalMonthly));
     pushCustom(customFields, 'CX.FREEFLOW.RENTAL.LIABILITY', moneyText(income.rentalLiabilityMonthly));
     pushCustom(customFields, 'CX.FREEFLOW.HOUSING.ADJ', moneyText(income.housingExpenseAdjustment));

@@ -13,7 +13,7 @@ export type ProtectedWorkflowState =
 export type MetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod' | 'iraAccountBalance' | 'iraContinuance';
   form: string;
 }>;
 
@@ -86,8 +86,131 @@ export function applyRequirementValue(
   if (field === 'requiredParserField' || field === 'unsupportedCalculation') return;
   if (field === 'borrowerAssignment') assignment.borrowerKey = raw;
   else if (field === 'assetElection') assignment.includeInQualifyingIncome = raw === 'INCLUDE';
+  else if (field === 'iraContinuance') {
+    assignment.hasThreeYearIraContinuance = raw === 'CONFIRMED_GROSS_UP' || raw === 'CONFIRMED';
+    assignment.grossUpIraNonTaxable = raw === 'CONFIRMED_GROSS_UP';
+  }
   else if (field === 'employmentRole' || field === 'payFrequency' || field === 'baseIncomeMethod') assignment[field] = raw;
   else assignment[field] = Number(raw);
+}
+
+const REVIEW_FIELD_LABELS: Record<MetadataRequirement['field'], string> = {
+  taxYear: 'Tax year',
+  employmentRole: 'Employment status',
+  ownershipPercentage: 'Ownership percentage',
+  requiredParserField: 'Required document data',
+  unsupportedCalculation: 'Calculation availability',
+  borrowerAssignment: 'Borrower assignment',
+  assetElection: 'Use this asset income?',
+  elapsedMonths: 'Months elapsed year to date',
+  payFrequency: 'Pay frequency',
+  baseIncomeMethod: 'Base income method',
+  iraAccountBalance: 'IRA account balance from the most recent statement',
+  iraContinuance: 'Underwriter: IRA 36-month continuance',
+};
+
+/** Program gross-up for the non-taxable portion of benefit and retirement income. */
+export function programGrossUpMultiplier(program: string | null | undefined): number {
+  return program?.toUpperCase() === 'FHA' ? 1.15 : 1.25;
+}
+
+export type IraReturnAmounts = Readonly<{ totalDistributions: number; taxableDistributions: number }>;
+
+/** Form 1040 Line 4a/4b on a persisted record. A fully taxable distribution may appear on Line 4b alone. */
+export function readIraReturnAmounts(context: ConsoleContext | null, requirement: MetadataRequirement): IraReturnAmounts | null {
+  const extraction = context?.extractions.find((item) => item.id === requirement.extractionId);
+  const input = isRecord(extraction?.normalizedInput) ? extraction.normalizedInput : null;
+  const row = Array.isArray(input?.formRecords)
+    ? input.formRecords.find((item) => isRecord(item) && item.entityId === requirement.entityId && item.form === 'Form 1040')
+    : null;
+  const fields: unknown[] | null = isRecord(row) && Array.isArray(row.fields) ? row.fields : null;
+  if (!fields) return null;
+  const amount = (id: string) => {
+    const field = fields.find((item) => isRecord(item) && item.sourceFieldId === id);
+    return isRecord(field) && typeof field.numericValue === 'number' ? field.numericValue : 0;
+  };
+  const taxable = Math.max(0, amount('f1040-ira-taxable'));
+  const total = Math.max(amount('f1040-ira-total'), taxable);
+  return total > 0 ? { totalDistributions: total, taxableDistributions: taxable } : null;
+}
+
+/** Months the entered balance covers at the most recent return's monthly distribution. */
+export function iraContinuanceMonths(amounts: IraReturnAmounts, balance: number): number {
+  const monthly = amounts.totalDistributions / 12;
+  return Math.floor((balance / monthly) * 10) / 10;
+}
+
+export function describeIraContinuance(amounts: IraReturnAmounts, balanceRaw: string | undefined, program: string | null | undefined): string[] {
+  const multiplier = programGrossUpMultiplier(program);
+  const nonTaxable = amounts.totalDistributions - amounts.taxableDistributions;
+  const lines = [`Most recent return: ${formatCents(amounts.totalDistributions / 12)}/mo (Line 4a ÷ 12), ${formatWholeDollars(nonTaxable)} non-taxable.`];
+  const balance = balanceRaw?.trim() ? Number(balanceRaw) : NaN;
+  if (Number.isFinite(balance) && balance >= 0) {
+    const months = iraContinuanceMonths(amounts, balance);
+    lines.push(`Entered balance covers ${months} months, ${months >= 36 ? 'meeting' : 'short of'} the 36-month requirement.`);
+  }
+  const plain = amounts.totalDistributions / 12;
+  const grossed = (amounts.taxableDistributions + nonTaxable * multiplier) / 12;
+  lines.push(nonTaxable > 0
+    ? `If confirmed: ${formatCents(plain)}/mo, or ${formatCents(grossed)}/mo with the ${Math.round((multiplier - 1) * 100)}% ${program ?? 'program'} gross-up.`
+    : `If confirmed: ${formatCents(plain)}/mo. Fully taxable, so there is nothing to gross up.`);
+  return lines;
+}
+
+export function reviewFieldLabel(field: MetadataRequirement['field']): string {
+  return REVIEW_FIELD_LABELS[field];
+}
+
+/**
+ * Returns a useful review-row identity without exposing internal entity keys.
+ * Schedule E properties are distinguished by the extracted address so an
+ * underwriter assigns the property they actually recognize.
+ */
+export function reviewEntityLabel(context: ConsoleContext | null, requirement: MetadataRequirement): string {
+  const extraction = context?.extractions.find((item) => item.id === requirement.extractionId);
+  const input = isRecord(extraction?.normalizedInput) ? extraction.normalizedInput : null;
+  if (!input) return requirement.form;
+
+  if (requirement.form === 'Schedule E') {
+    const match = /^schedule-e-(\d+)$/.exec(requirement.entityId);
+    const index = match ? Number(match[1]) : -1;
+    const property = index >= 0 && Array.isArray(input.scheduleEProperties)
+      ? input.scheduleEProperties[index]
+      : null;
+    const address = isRecord(property) && typeof property.propertyAddress === 'string'
+      ? property.propertyAddress.trim()
+      : '';
+    return address ? `Schedule E rental · ${address}` : `Schedule E rental property ${index + 1}`;
+  }
+
+  if (requirement.form === 'W-2' && Array.isArray(input.w2Records)) {
+    const row = input.w2Records.find((item) => isRecord(item) && item.entityId === requirement.entityId);
+    const employer = isRecord(row) && typeof row.employerName === 'string' ? row.employerName.trim() : '';
+    if (employer) return `W-2 · ${employer}`;
+  }
+
+  if (Array.isArray(input.formRecords)) {
+    const row = input.formRecords.find((item) => isRecord(item) && item.entityId === requirement.entityId);
+    if (isRecord(row) && row.form === 'Form 1040') {
+      const ira = readIraReturnAmounts(context, requirement);
+      if (ira) return `Form 1040 · IRA distributions ${formatWholeDollars(ira.totalDistributions)} (Line 4a), ${formatWholeDollars(ira.taxableDistributions)} taxable (Line 4b)`;
+    }
+    if (isRecord(row) && Array.isArray(row.fields)) {
+      const employer = row.fields.find((item) => isRecord(item) && item.sourceFieldId === 'ps-employer-name');
+      const value = isRecord(employer) && typeof employer.value === 'string' ? employer.value.trim() : '';
+      if (value) return `${requirement.form} · ${value}`;
+    }
+  }
+
+  return requirement.form;
+}
+
+function formatWholeDollars(value: number): string {
+  return `$${Math.round(value).toLocaleString('en-US')}`;
+}
+
+function formatCents(value: number): string {
+  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

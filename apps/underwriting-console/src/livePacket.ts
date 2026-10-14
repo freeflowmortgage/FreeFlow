@@ -1,6 +1,7 @@
 import { inspectFamily } from './incomeInspect';
 import { isUsableOverlayBox } from './overlayBox';
 import type { LiveDocument, MappedIncomeField, ParsePage, ParseResponse, ScheduleEPropertyExtract } from './parseTypes';
+import { RETIREMENT_SOURCE_FIELD_IDS } from './retirementIncome';
 
 export type DocKind =
   | 'paystub'
@@ -12,6 +13,7 @@ export type DocKind =
   | 'partnership'
   | 'schedule-f'
   | 'asset'
+  | 'retirement'
   | 'unknown';
 
 export type WorkspaceTab =
@@ -22,6 +24,7 @@ export type WorkspaceTab =
   | 'PARTNERSHIP'
   | 'SCHEDULE_F'
   | 'ASSET_INCOME'
+  | 'RETIREMENT'
   | 'SCHEDULE_E'
   | 'ENCOMPASS_SYNC';
 
@@ -75,10 +78,21 @@ export function classifyDocument(result: ParseResponse, fileName = ''): DocKind[
   if (/1120 \(C-Corporation|C-Corporation Return/i.test(labels) && !/1120-?S/i.test(labels)) kinds.push('ccorp');
   if (/Schedule F/i.test(labels)) kinds.push('schedule-f');
   if (/Schedule B|Schedule D/i.test(labels)) kinds.push('asset');
+  if (reportsRetirementIncome(result)) kinds.push('retirement');
   for (const hint of fileNameHints(fileName)) {
     if (!kinds.includes(hint)) kinds.push(hint);
   }
   return kinds.length ? kinds : ['unknown'];
+}
+
+/** Form 1040 Line 4, 5, or 6 carries a non-zero amount. Every return has the lines, so a bare 1040 label is not enough. */
+function reportsRetirementIncome(result: ParseResponse): boolean {
+  const wanted = new Set<string>(RETIREMENT_SOURCE_FIELD_IDS);
+  return [...(result.incomeFields ?? []), ...(result.formExtracts ?? [])].some(
+    (field) => field.form === 'Form 1040'
+      && wanted.has(field.sourceFieldId ?? ('id' in field ? field.id : ''))
+      && field.numericValue > 0,
+  );
 }
 
 export function kindsOf(doc: Pick<LiveDocument, 'fileName' | 'result'>): DocKind[] {
@@ -156,6 +170,7 @@ function pageMatchesKind(page: ParsePage, kind: DocKind): boolean {
   if (kind === 'partnership') return /Form 1065|K-1 \(1065\)/i.test(ids);
   if (kind === 'schedule-f') return /Schedule F/i.test(ids);
   if (kind === 'asset') return /Schedule B|Schedule D/i.test(ids);
+  if (kind === 'retirement') return /Form 1040 \(Individual Return\)/i.test(ids);
   return false;
 }
 
@@ -338,7 +353,9 @@ export function pickDocumentForTab(
                     ? 'schedule-f'
                     : tab === 'ASSET_INCOME'
                       ? 'asset'
-                      : 'unknown',
+                      : tab === 'RETIREMENT'
+                        ? 'retirement'
+                        : 'unknown',
       ];
 
   for (const want of wanted) {
@@ -367,6 +384,7 @@ export function tabForKinds(kinds: DocKind[]): { tab: WorkspaceTab; wageDocKind?
   if (kinds.includes('ccorp')) return { tab: 'CCORP' };
   if (kinds.includes('schedule-f')) return { tab: 'SCHEDULE_F' };
   if (kinds.includes('asset')) return { tab: 'ASSET_INCOME' };
+  if (kinds.includes('retirement')) return { tab: 'RETIREMENT' };
   if (kinds.includes('w2')) return { tab: 'PAYSTUB_RECONCILIATION', wageDocKind: 'w2' };
   if (kinds.includes('paystub')) return { tab: 'PAYSTUB_RECONCILIATION', wageDocKind: 'paystub' };
   return { tab: 'PAYSTUB_RECONCILIATION' };

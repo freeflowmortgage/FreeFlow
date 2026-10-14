@@ -109,6 +109,20 @@ export const ENCOMPASS_CUSTOM_FIELD_SETUP: EncompassCustomFieldDefinition[] = [
     category: 'FreeFlow Income',
   },
   {
+    fieldName: 'CX.FREEFLOW.SOCIAL.SECURITY',
+    description: 'Qualifying Social Security monthly (Form 1040 line 6a/6b, non-taxable portion grossed up)',
+    format: 'DECIMAL_2',
+    maxLength: 20,
+    category: 'FreeFlow Income',
+  },
+  {
+    fieldName: 'CX.FREEFLOW.RETIREMENT',
+    description: 'Qualifying retirement monthly: pensions/annuities (line 5a/5b) plus IRA distributions (line 4a/4b) with 36-month continuance',
+    format: 'DECIMAL_2',
+    maxLength: 20,
+    category: 'FreeFlow Income',
+  },
+  {
     fieldName: 'CX.FREEFLOW.RENTAL',
     description: 'Qualifying net rental income monthly (positive only)',
     format: 'DECIMAL_2',

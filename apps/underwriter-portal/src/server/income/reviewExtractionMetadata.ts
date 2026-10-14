@@ -15,7 +15,7 @@ const FREQUENCIES = new Set(['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY']);
 const BASE_METHODS = new Set(['hourly', 'period', 'ytd', 'prior']);
 const WVOE_BASE_METHODS = new Set(['current', 'ytd']);
 const WVOE_VARIABLE_METHODS = new Set(['current', 'avg24']);
-const ASSIGNMENT_FIELDS = ['entityId', 'taxYear', 'employmentRole', 'ownershipPercentage', 'borrowerKey', 'elapsedMonths', 'payFrequency', 'baseIncomeMethod', 'wvoeBaseMethod', 'wvoeVariableMethod', 'includeInQualifyingIncome', 'hasThreeYearAssetSupport', 'hasStableDistributions', 'cash', 'currentLiabilities'];
+const ASSIGNMENT_FIELDS = ['entityId', 'taxYear', 'employmentRole', 'ownershipPercentage', 'borrowerKey', 'elapsedMonths', 'payFrequency', 'baseIncomeMethod', 'wvoeBaseMethod', 'wvoeVariableMethod', 'includeInQualifyingIncome', 'hasThreeYearAssetSupport', 'hasStableDistributions', 'cash', 'currentLiabilities', 'iraAccountBalance', 'hasThreeYearIraContinuance', 'grossUpIraNonTaxable'];
 /** Forms whose year-to-date figures are divided by a reviewed elapsed-months count. */
 const YTD_FORMS = ['Paystub', 'WVOE'];
 
@@ -98,6 +98,7 @@ function parseAssignment(value: unknown): ExtractionMetadataAssignment {
     baseIncomeMethod?: ExtractionMetadataAssignment['baseIncomeMethod']; includeInQualifyingIncome?: boolean;
     wvoeBaseMethod?: ExtractionMetadataAssignment['wvoeBaseMethod']; wvoeVariableMethod?: ExtractionMetadataAssignment['wvoeVariableMethod'];
     hasThreeYearAssetSupport?: boolean; hasStableDistributions?: boolean; cash?: number; currentLiabilities?: number;
+    iraAccountBalance?: number; hasThreeYearIraContinuance?: boolean; grossUpIraNonTaxable?: boolean;
   } = { entityId: value.entityId };
   if (value.taxYear !== undefined) assignment.taxYear = boundedInteger(value.taxYear, 1990, 2100, 'taxYear');
   if (value.employmentRole !== undefined) { if (typeof value.employmentRole !== 'string' || !ROLES.has(value.employmentRole)) throw new ApiError(400, 'INVALID_EMPLOYMENT_ROLE', 'The employment role is not allowed.'); assignment.employmentRole = value.employmentRole as ExtractionMetadataAssignment['employmentRole']; }
@@ -113,6 +114,10 @@ function parseAssignment(value: unknown): ExtractionMetadataAssignment {
   if (value.hasStableDistributions !== undefined) { if (typeof value.hasStableDistributions !== 'boolean') throw new ApiError(400, 'INVALID_METADATA_ASSIGNMENT', 'Distribution stability must be true or false.'); assignment.hasStableDistributions = value.hasStableDistributions; }
   if (value.cash !== undefined) assignment.cash = boundedMoney(value.cash, 'cash');
   if (value.currentLiabilities !== undefined) assignment.currentLiabilities = boundedMoney(value.currentLiabilities, 'currentLiabilities');
+  if (value.iraAccountBalance !== undefined) assignment.iraAccountBalance = boundedMoney(value.iraAccountBalance, 'iraAccountBalance');
+  if (value.hasThreeYearIraContinuance !== undefined) { if (typeof value.hasThreeYearIraContinuance !== 'boolean') throw new ApiError(400, 'INVALID_IRA_CONTINUANCE', 'IRA continuance must be true or false.'); assignment.hasThreeYearIraContinuance = value.hasThreeYearIraContinuance; }
+  if (value.grossUpIraNonTaxable !== undefined) { if (typeof value.grossUpIraNonTaxable !== 'boolean') throw new ApiError(400, 'INVALID_IRA_CONTINUANCE', 'IRA gross-up must be true or false.'); assignment.grossUpIraNonTaxable = value.grossUpIraNonTaxable; }
+  if (assignment.grossUpIraNonTaxable === true && assignment.hasThreeYearIraContinuance === false) throw new ApiError(400, 'INVALID_IRA_CONTINUANCE', 'IRA distributions cannot be grossed up without confirmed continuance.');
   if (keys.length === 1) throw new ApiError(400, 'EMPTY_METADATA_ASSIGNMENT', 'Each assignment must supply metadata.');
   return assignment;
 }
@@ -132,6 +137,7 @@ function validateAssignment(item: ExtractionMetadataAssignment, entities: Map<st
   if (form !== 'WVOE' && (item.wvoeBaseMethod !== undefined || item.wvoeVariableMethod !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Verification annualization metadata only applies to a verification of employment.');
   if (item.ownershipPercentage !== undefined && !['Form 1120-S', 'Form 1065', 'Form 1120'].includes(form)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Ownership metadata is not accepted for this form.');
   if ((item.includeInQualifyingIncome !== undefined || item.hasThreeYearAssetSupport !== undefined) && !['Schedule B', 'Schedule D'].includes(form)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Asset election only applies to Schedule B or D.');
+  if ((item.iraAccountBalance !== undefined || item.hasThreeYearIraContinuance !== undefined || item.grossUpIraNonTaxable !== undefined) && form !== 'Form 1040') throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'IRA continuance only applies to Form 1040.');
   if ((item.cash !== undefined || item.currentLiabilities !== undefined) && form !== 'Form 1120') throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Balance-sheet facts only apply to Form 1120.');
 }
 async function assertBorrowerKeys(

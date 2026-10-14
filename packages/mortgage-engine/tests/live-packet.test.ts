@@ -9,6 +9,7 @@ import {
   latestPageForKind,
   pageForKind,
   pickDocumentForTab,
+  tabForKinds,
   taxReturnFingerprint,
 } from '../../../apps/underwriting-console/src/livePacket';
 
@@ -318,5 +319,33 @@ describe('live packet routing', () => {
       ),
     };
     expect(findDuplicate([standalone], fullReturn)?.reason).toMatch(/Duplicate tax return/);
+  });
+});
+
+describe('Retirement routing', () => {
+  const formExtract = (sourceFieldId: string, numericValue: number) => ({
+    pageIndex: 0, form: 'Form 1040' as const, sourceFieldId, boxLabel: '', fieldLabel: '', lineNum: '',
+    category: 'income', value: String(numericValue), numericValue, box: { x: 0.7, y: 0.4, w: 0.1, h: 0.01 },
+  });
+  const individualReturn = [page(0, ['Form 1040 (Individual Return)'])];
+
+  test('a return reporting IRA distributions opens the Retirement tab on its 1040 page', () => {
+    const result = response(individualReturn, { formExtracts: [formExtract('f1040-ira-total', 24000)] });
+    const kinds = classifyDocument(result, 'return-2025.pdf');
+    expect(kinds).toContain('retirement');
+    expect(tabForKinds(kinds)).toEqual({ tab: 'RETIREMENT' });
+    expect(firstPageForKind(result, 'retirement')).toBe(0);
+  });
+
+  test('a return with blank or zero Lines 4-6 is not routed to Retirement', () => {
+    const blank = response(individualReturn, { formExtracts: [formExtract('f1040-ira-total', 0), formExtract('f1040-wages', 90000)] });
+    expect(classifyDocument(blank, 'return-2025.pdf')).not.toContain('retirement');
+  });
+
+  test('business schedules keep their tab when the same return also reports Social Security', () => {
+    const result = response([page(0, ['Form 1040 (Individual Return)']), page(1, ['Schedule C (Page 1 - Profits)'])], {
+      formExtracts: [formExtract('f1040-ss-total', 26400)],
+    });
+    expect(tabForKinds(classifyDocument(result, 'return-2025.pdf'))).toEqual({ tab: 'SCHEDULE_C' });
   });
 });

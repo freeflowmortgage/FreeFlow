@@ -32,7 +32,7 @@ const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Obje
     ...SCHEDULE_L_FIELD_IDS,
   ]),
   'Form 1120': new Set(['c1120-name', 'c1120-ein', 'c1120-taxable', 'c1120-tax', 'c1120-dep', 'c1120-depletion', 'c1120-amort', 'c1120-meals', 'c1120-nol']),
-  'Form 1040': new Set(['f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']),
+  'Form 1040': new Set(['f1040-ira-total', 'f1040-ira-taxable', 'f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']),
   'Schedule B': new Set(['schedule-b-interest', 'schedule-b-dividends']),
   'Schedule D': new Set(['schedule-d-capital-gain-loss']),
   'Paystub': new Set([

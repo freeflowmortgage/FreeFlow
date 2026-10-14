@@ -17,7 +17,12 @@ import { consoleRuntime } from './runtimeMode';
 import {
   applyRequirementValue,
   deriveProtectedWorkflowState,
+  describeIraContinuance,
+  programGrossUpMultiplier,
+  readIraReturnAmounts,
   readEvidenceFields,
+  reviewEntityLabel,
+  reviewFieldLabel,
   type ConsoleContext,
   type MetadataRequirement,
 } from './protectedWorkflow';
@@ -163,7 +168,7 @@ function ProtectedWorkflowApp() {
     setRequirements(null);
     void Promise.all(active.map((item) => portalClient.getMetadataRequirements(contextState.loan.id, item.id)))
       .then((responses) => { if (!cancelled) setRequirements(responses.flatMap((item) => item.requirements)); })
-      .catch((error) => { if (!cancelled) setActionError(describeError(error, 'Metadata requirements could not be loaded.')); });
+      .catch((error) => { if (!cancelled) setActionError(describeError(error, 'Borrower assignment and data review requirements could not be loaded.')); });
     return () => { cancelled = true; };
   }, [contextState?.loan.id, contextState?.loan.version]);
 
@@ -249,7 +254,7 @@ function ProtectedWorkflowApp() {
     const byEntity = new Map<string, Record<string, string | number | boolean>>();
     for (const requirement of requested) {
       const value = reviewValues[requirementKey(requirement)]?.trim();
-      if (!value) { setActionError(`Review ${requirement.form} ${requirement.field} before continuing.`); return; }
+      if (!value) { setActionError(`Complete ${reviewFieldLabel(requirement.field).toLowerCase()} for ${reviewEntityLabel(contextState, requirement)} before continuing.`); return; }
       const assignment = byEntity.get(requirement.entityId) ?? { entityId: requirement.entityId };
       applyRequirementValue(assignment, requirement.field, value);
       byEntity.set(requirement.entityId, assignment);
@@ -263,7 +268,7 @@ function ProtectedWorkflowApp() {
         assignments: Array.from(byEntity.values()),
       }, crypto.randomUUID());
       await refreshContext(contextState.loan.id);
-    }, 'The metadata review could not be saved.');
+    }, 'The borrower assignment and data review could not be saved.');
   };
 
   const calculate = async () => {
@@ -419,7 +424,7 @@ function ProtectedWorkflowApp() {
               </div>
               <p className="mt-2 text-xs text-slate-500">PDF only, up to 40 MiB. Hosted pull sends attachment ids only. Raw document bytes are not placed on the queue.</p>
               {localDocuments.length > 1 ? <div className="mt-3 flex flex-wrap gap-1">{localDocuments.map((document) => <button key={document.id} type="button" onClick={() => { setActiveLocalDocumentId(document.id); setCurrentPage(1); setSelectedEvidence(0); }} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${localDocument?.id === document.id ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 text-slate-600'}`}>{document.file.name}</button>)}</div> : null}
-              {(contextState?.borrowers?.length ?? 0) > 0 ? <ol data-testid="borrower-roster" className="mt-3 space-y-1 text-xs text-slate-700">{contextState!.borrowers!.map((borrower) => <li key={borrower.borrowerKey}>{borrower.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {borrower.borrowerKey}</li>)}</ol> : null}
+              {(contextState?.borrowers?.length ?? 0) > 0 ? <ol data-testid="borrower-roster" className="mt-3 space-y-1 text-xs text-slate-700">{contextState!.borrowers!.map((borrower) => <li key={borrower.borrowerKey}>{borrowerDisplayLabel(contextState!.borrowers!, borrower)}</li>)}</ol> : null}
             </div>
 
             <div className="rounded-lg border border-slate-200 p-4">
@@ -430,12 +435,13 @@ function ProtectedWorkflowApp() {
             </div>
 
             <div className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-900">3. Metadata review</h2>
-              {requirements === null ? <p className="mt-2 text-xs text-slate-500">Loading authoritative review requirements...</p> : requirements.length === 0 ? <p className="mt-2 text-xs font-medium text-emerald-700">No outstanding metadata review.</p> : null}
+              <h2 className="text-sm font-bold text-slate-900">3. Borrower assignment and data review</h2>
+              <p className="mt-1 text-xs text-slate-500">Confirm who owns each income source and review any missing calculation details.</p>
+              {requirements === null ? <p className="mt-2 text-xs text-slate-500">Loading borrower assignments and review items...</p> : requirements.length === 0 ? <p className="mt-2 text-xs font-medium text-emerald-700">Borrower assignments and required data are complete.</p> : null}
               {Array.from(new Set((requirements ?? []).map((item) => item.extractionId))).map((extractionId) => {
                 const items = requirements!.filter((item) => item.extractionId === extractionId);
                 const calculationBlocked = items.some((item) => item.field === 'requiredParserField' || item.field === 'unsupportedCalculation');
-                return <div key={extractionId} className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">{items.map((item) => <ReviewField key={requirementKey(item)} item={item} borrowers={contextState?.borrowers ?? []} value={reviewValues[requirementKey(item)] ?? ''} onChange={(value) => setReviewValues((values) => ({ ...values, [requirementKey(item)]: value }))} />)}<button type="button" disabled={calculationBlocked || busy !== null} onClick={() => void submitReview(extractionId)} className="mt-1 rounded bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'REVIEW' ? 'Saving...' : 'Confirm reviewed metadata'}</button></div>;
+                return <div key={extractionId} className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">{items.map((item) => <ReviewField key={requirementKey(item)} item={item} entityLabel={reviewEntityLabel(contextState, item)} borrowers={contextState?.borrowers ?? []} program={contextState?.loan.program ?? null} iraNotes={iraReviewNotes(contextState, item, reviewValues)} value={reviewValues[requirementKey(item)] ?? ''} onChange={(value) => setReviewValues((values) => ({ ...values, [requirementKey(item)]: value }))} />)}<button type="button" disabled={calculationBlocked || busy !== null} onClick={() => void submitReview(extractionId)} className="mt-1 rounded bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === 'REVIEW' ? 'Saving...' : 'Confirm assignments and reviewed data'}</button></div>;
               })}
             </div>
 
@@ -610,9 +616,32 @@ function ProtectedProductUnavailable({ onBack }: { onBack: () => void }) {
   );
 }
 
-function ReviewField({ item, borrowers, value, onChange }: { item: MetadataRequirement; borrowers: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[]; value: string; onChange: (value: string) => void }) {
+function iraReviewNotes(context: ConsoleContext | null, item: MetadataRequirement, values: Record<string, string>): string[] | undefined {
+  if (item.field !== 'iraContinuance') return undefined;
+  const amounts = readIraReturnAmounts(context, item);
+  if (!amounts) return undefined;
+  const balanceKey = requirementKey({ ...item, field: 'iraAccountBalance' });
+  return describeIraContinuance(amounts, values[balanceKey] ?? storedIraBalance(context, item), context?.loan.program);
+}
+
+function storedIraBalance(context: ConsoleContext | null, item: MetadataRequirement): string | undefined {
+  const assignments = context?.extractions.find((extraction) => extraction.id === item.extractionId)?.metadataReview?.assignments;
+  const stored = Array.isArray(assignments) ? assignments.find((entry) => entry && typeof entry === 'object' && (entry as { entityId?: unknown }).entityId === item.entityId) as { iraAccountBalance?: unknown } | undefined : undefined;
+  return typeof stored?.iraAccountBalance === 'number' ? String(stored.iraAccountBalance) : undefined;
+}
+
+function ReviewField({ item, entityLabel, borrowers, program, iraNotes, value, onChange }: { item: MetadataRequirement; entityLabel: string; borrowers: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[]; program: string | null; iraNotes?: string[]; value: string; onChange: (value: string) => void }) {
   const selectClass = 'mt-1 block w-full rounded border border-slate-300 bg-white p-2';
-  return <label className="mb-2 block text-xs font-medium text-slate-700">{item.form} / {item.entityId} / {item.field}{item.field === 'employmentRole' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Select reviewed role</option>{EMPLOYMENT_ROLES.map((role) => <option key={role}>{role}</option>)}</select> : item.field === 'borrowerAssignment' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Assign borrower</option>{borrowers.map((borrower) => <option key={borrower.borrowerKey} value={borrower.borrowerKey}>{borrower.role === 'PRIMARY' ? 'Primary' : 'Co-borrower'} {borrower.borrowerKey}</option>)}</select> : item.field === 'assetElection' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Asset election</option><option value="INCLUDE">Include in qualifying income</option><option value="EXCLUDE">Exclude from qualifying income</option></select> : item.field === 'payFrequency' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Pay frequency</option>{PAY_FREQUENCIES.map((frequency) => <option key={frequency}>{frequency}</option>)}</select> : item.field === 'baseIncomeMethod' ? <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Base method</option>{BASE_METHODS.map((method) => <option key={method}>{method}</option>)}</select> : item.field === 'requiredParserField' ? <span className="mt-1 block rounded bg-red-50 p-2 text-red-700">The persisted extraction lacks a required parser field and cannot be repaired in the browser.</span> : item.field === 'unsupportedCalculation' ? <span className="mt-1 block rounded bg-amber-50 p-2 text-amber-800">This document was extracted for review, but it is not yet an authoritative calculation input. The controlled-pilot calculation remains blocked for this extraction.</span> : <input type="number" step={item.field === 'elapsedMonths' ? '0.1' : '1'} min={item.field === 'taxYear' ? 1990 : 0} max={item.field === 'taxYear' ? 2100 : item.field === 'elapsedMonths' ? 12 : 100} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass} />}</label>;
+  const fieldLabel = reviewFieldLabel(item.field);
+  const grossUpPercent = Math.round((programGrossUpMultiplier(program) - 1) * 100);
+  return <label className="mb-3 block rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-700"><span className="block font-bold text-slate-900">{entityLabel}</span><span className="mt-0.5 block text-[11px] font-medium text-slate-500">{fieldLabel}</span>{iraNotes?.length ? <span className="mt-1 block rounded bg-indigo-50 p-2 text-[11px] text-indigo-900" data-testid="ira-continuance-notes">{iraNotes.map((note) => <span key={note} className="block">{note}</span>)}</span> : null}{item.field === 'iraContinuance' ? <select aria-label={`${entityLabel} ${fieldLabel}`} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Confirm continuance and gross-up</option><option value="CONFIRMED_GROSS_UP">{`Confirmed 36+ months · gross up non-taxable portion ${grossUpPercent}% (${program ?? 'program'})`}</option><option value="CONFIRMED">Confirmed 36+ months · no gross-up</option><option value="NOT_CONFIRMED">Not confirmed · exclude from qualifying income</option></select> : item.field === 'employmentRole' ? <select aria-label={`${entityLabel} ${fieldLabel}`} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Select employment status</option>{EMPLOYMENT_ROLES.map((role) => <option key={role} value={role}>{role.charAt(0) + role.slice(1).toLowerCase()}</option>)}</select> : item.field === 'borrowerAssignment' ? <select aria-label={`${entityLabel} ${fieldLabel}`} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Select borrower</option>{borrowers.map((borrower) => <option key={borrower.borrowerKey} value={borrower.borrowerKey}>{borrowerDisplayLabel(borrowers, borrower)}</option>)}</select> : item.field === 'assetElection' ? <select aria-label={`${entityLabel} ${fieldLabel}`} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Choose whether to use this income</option><option value="INCLUDE">Include in qualifying income</option><option value="EXCLUDE">Exclude from qualifying income</option></select> : item.field === 'payFrequency' ? <select aria-label={`${entityLabel} ${fieldLabel}`} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Select pay frequency</option>{PAY_FREQUENCIES.map((frequency) => <option key={frequency} value={frequency}>{frequency.charAt(0) + frequency.slice(1).toLowerCase()}</option>)}</select> : item.field === 'baseIncomeMethod' ? <select aria-label={`${entityLabel} ${fieldLabel}`} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}><option value="">Select base income method</option>{BASE_METHODS.map((method) => <option key={method} value={method}>{method.charAt(0).toUpperCase() + method.slice(1)}</option>)}</select> : item.field === 'requiredParserField' ? <span className="mt-2 block rounded bg-red-50 p-2 text-red-700">Required document data was not extracted. Upload a clearer document or review the source before continuing.</span> : item.field === 'unsupportedCalculation' ? <span className="mt-2 block rounded bg-amber-50 p-2 text-amber-800">This document can be reviewed, but its income type is not yet supported for the authoritative calculation.</span> : <input aria-label={`${entityLabel} ${fieldLabel}`} type="number" step={item.field === 'elapsedMonths' ? '0.1' : item.field === 'iraAccountBalance' ? '0.01' : '1'} min={item.field === 'taxYear' ? 1990 : 0} max={item.field === 'taxYear' ? 2100 : item.field === 'elapsedMonths' ? 12 : item.field === 'iraAccountBalance' ? 1_000_000_000 : 100} value={value} onChange={(event) => onChange(event.target.value)} className={selectClass} />}</label>;
+}
+
+function borrowerDisplayLabel(borrowers: readonly { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }[], borrower: { borrowerKey: string; role: 'PRIMARY' | 'CO_BORROWER' }): string {
+  if (borrower.role === 'PRIMARY') return 'Primary borrower';
+  const coBorrowers = borrowers.filter((candidate) => candidate.role === 'CO_BORROWER');
+  const ordinal = coBorrowers.findIndex((candidate) => candidate.borrowerKey === borrower.borrowerKey) + 1;
+  return coBorrowers.length > 1 ? `Co-borrower ${ordinal}` : 'Co-borrower';
 }
 
 function requirementKey(value: MetadataRequirement): string { return `${value.extractionId}:${value.entityId}:${value.field}`; }

@@ -91,6 +91,7 @@ export function tabForMappedForm(form: string): string | null {
   if (form === 'Form 1120') return 'CCORP';
   if (form === 'Schedule F') return 'SCHEDULE_F';
   if (form === 'Schedule B' || form === 'Schedule D') return 'ASSET_INCOME';
+  if (form === 'Form 1040') return 'RETIREMENT';
   if (form === 'Schedule E') return 'SCHEDULE_E';
   return null;
 }
@@ -103,6 +104,7 @@ const TAB_PAGE_PATTERNS: Record<string, RegExp[]> = {
   PARTNERSHIP: [/Form 1065 \(Partnership/i, /Schedule K-1 \(1065\)/i],
   SCHEDULE_F: [/Schedule F/i],
   ASSET_INCOME: [/Schedule B/i, /Schedule D/i],
+  RETIREMENT: [/Form 1040 \(Individual Return\)/i],
   SCHEDULE_E: [/Schedule E/i],
 };
 
