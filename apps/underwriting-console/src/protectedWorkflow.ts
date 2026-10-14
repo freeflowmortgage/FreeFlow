@@ -13,7 +13,7 @@ export type ProtectedWorkflowState =
 export type MetadataRequirement = Readonly<{
   extractionId: string;
   entityId: string;
-  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod' | 'iraAccountBalance' | 'iraContinuance';
+  field: 'taxYear' | 'employmentRole' | 'ownershipPercentage' | 'requiredParserField' | 'unsupportedCalculation' | 'borrowerAssignment' | 'assetElection' | 'elapsedMonths' | 'payFrequency' | 'baseIncomeMethod' | 'iraAccountBalance' | 'iraContinuance' | 'wvoeVariableMethod';
   form: string;
 }>;
 
@@ -90,7 +90,7 @@ export function applyRequirementValue(
     assignment.hasThreeYearIraContinuance = raw === 'CONFIRMED_GROSS_UP' || raw === 'CONFIRMED';
     assignment.grossUpIraNonTaxable = raw === 'CONFIRMED_GROSS_UP';
   }
-  else if (field === 'employmentRole' || field === 'payFrequency' || field === 'baseIncomeMethod') assignment[field] = raw;
+  else if (field === 'employmentRole' || field === 'payFrequency' || field === 'baseIncomeMethod' || field === 'wvoeVariableMethod') assignment[field] = raw;
   else assignment[field] = Number(raw);
 }
 
@@ -107,6 +107,7 @@ const REVIEW_FIELD_LABELS: Record<MetadataRequirement['field'], string> = {
   baseIncomeMethod: 'Base income method',
   iraAccountBalance: 'IRA account balance from the most recent statement',
   iraContinuance: 'Underwriter: IRA 36-month continuance',
+  wvoeVariableMethod: 'Underwriter: verification variable pay method',
 };
 
 /** Program gross-up for the non-taxable portion of benefit and retirement income. */

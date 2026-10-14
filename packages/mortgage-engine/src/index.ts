@@ -9,6 +9,8 @@ export * from './income-calculation-dispatcher';
 export * from './mismoD1cMapper';
 export * from './paystubMismoMapper';
 export * from './paystubAnnualization';
+export * from './paystubCoverage';
+export * from './wvoeAnnualization';
 export * from './encompass-urla-map';
 export * from './encompass-custom-fields';
 export * from './w2-income-methods';

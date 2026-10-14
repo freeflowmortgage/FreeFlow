@@ -297,6 +297,297 @@ test('a newer reviewed metadata version invalidates calculation provenance', () 
   assert.equal(hasCurrentCalculationExtractions([binding]), false);
 });
 
+const ROSTER = { borrowerRoster: ['borrower-1', 'borrower-2'] };
+const WVOE_META = { employmentRole: 'CURRENT' as const, borrowerKey: 'borrower-1' };
+
+function fields(values: Record<string, string | number>) {
+  return Object.entries(values).map(([sourceFieldId, value]) => (
+    typeof value === 'number' ? { sourceFieldId, numericValue: value } : { sourceFieldId, value }
+  ));
+}
+
+test('a year-end stub is read off its own period end instead of a reviewed divisor', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000201';
+  // A biweekly year closes on 12/20: no further 2025 period ends after it, so
+  // the year-to-date column already holds all twelve months.
+  const normalizedInput = { formRecords: [{
+    entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+    fields: fields({
+      'ps-employer-name': 'Synthetic Employer',
+      'ps-pay-frequency': 'Biweekly',
+      'ps-period-end': '12/20/2025',
+      'ps-base-ytd': 96000,
+    }),
+  }] };
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput,
+    metadataAssignments: [{ entityId: 'Paystub:paystub-p0', ...WVOE_META, taxYear: 2025, baseIncomeMethod: 'ytd' as const }],
+  }], ROSTER);
+  assert.equal(projected.w2Employers?.[0].annualBaseIncome, 96000);
+});
+
+test('a stub dated mid-year still divides by the share of the year it covers', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000202';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: fields({
+        'ps-employer-name': 'Synthetic Employer',
+        'ps-pay-frequency': 'Biweekly',
+        'ps-period-end': '06/30/2025',
+        'ps-base-ytd': 48000,
+      }),
+    }] },
+    metadataAssignments: [{ entityId: 'Paystub:paystub-p0', ...WVOE_META, taxYear: 2025, baseIncomeMethod: 'ytd' as const }],
+  }], ROSTER);
+  // A column struck on 06/30 covers exactly six months.
+  assert.equal(projected.w2Employers?.[0].annualBaseIncome, 96000);
+});
+
+test('a reviewed divisor that contradicts the stub is a contradiction to settle', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000203';
+  const record = {
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: fields({
+        'ps-employer-name': 'Synthetic Employer',
+        'ps-pay-frequency': 'Biweekly',
+        'ps-period-end': '12/20/2025',
+        'ps-base-ytd': 96000,
+      }),
+    }] },
+    metadataAssignments: [{ entityId: 'Paystub:paystub-p0', ...WVOE_META, taxYear: 2025, elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const }],
+  };
+  assert.throws(() => mergeAuthoritativeExtractionInputs([record], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements.map((item) => item.field), ['elapsedMonths']);
+    return true;
+  });
+});
+
+test('a stub dated outside its reviewed tax year blocks on the year, not the divisor', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000204';
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: fields({ 'ps-employer-name': 'Synthetic Employer', 'ps-period-end': '01/05/2026', 'ps-base-ytd': 4000 }),
+    }] },
+    metadataAssignments: [{ entityId: 'Paystub:paystub-p0', ...WVOE_META, taxYear: 2025, baseIncomeMethod: 'ytd' as const }],
+  }], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.ok(error.requirements.some((item) => item.field === 'taxYear'));
+    return true;
+  });
+});
+
+test('a Form 1005 verification reaches the calculation on its own', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000205';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+      fields: fields({
+        'wvoe-employer-name': 'Acme Manufacturing Inc',
+        'wvoe-base': 5200, 'wvoe-base-period': 'Monthly',
+        'wvoe-base-ytd': 46800, 'wvoe-ot': 4500, 'wvoe-bonus': 12000, 'wvoe-commission': 0,
+        'wvoe-ytd-thru': '09/30/2024', 'wvoe-hire-date': '03/15/2019', 'wvoe-months': 66,
+      }),
+    }] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024 }],
+  }], ROSTER);
+  const row = projected.w2Employers?.[0];
+  assert.equal(row?.employerName, 'Acme Manufacturing Inc');
+  assert.equal(row?.annualBaseIncome, 62400);
+  // Nine months elapsed at 09/30, derived from the thru date the form prints
+  // rather than taken from a reviewer.
+  assert.equal(row?.annualOvertimeIncome, 6000);
+  assert.equal(row?.annualBonusIncome, 15999.96);
+  assert.equal(row?.entityId, `${extractionId}:WVOE:wvoe-p0`);
+});
+
+const WVOE_WITH_PRIOR_YEAR = {
+  entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+  fields: fields({
+    'wvoe-employer-name': 'Acme Manufacturing Inc',
+    'wvoe-base': 5200, 'wvoe-base-period': 'Monthly',
+    'wvoe-base-ytd': 46800, 'wvoe-ot': 4500, 'wvoe-bonus': 12000,
+    'wvoe-ot-prior': 3000, 'wvoe-bonus-prior': 6000,
+    'wvoe-ytd-thru': '09/30/2024', 'wvoe-months': 66,
+  }),
+};
+
+test('a verification with a prior year asks the underwriter how to average variable pay', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000210';
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024 }],
+  }], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements, [{ extractionId, entityId: 'WVOE:wvoe-p0', field: 'wvoeVariableMethod', form: 'WVOE' }]);
+    return true;
+  });
+});
+
+test('the reviewed 24-month method averages year to date with the prior year', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000211';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024, wvoeVariableMethod: 'avg24' as const }],
+  }], ROSTER);
+  const row = projected.w2Employers?.[0];
+  // (4,500 + 3,000) / 21 months and (12,000 + 6,000) / 21 months, annualized.
+  assert.equal(row?.annualOvertimeIncome, 4285.68);
+  assert.equal(row?.annualBonusIncome, 10285.68);
+  assert.equal(row?.annualBaseIncome, 62400);
+});
+
+test('the reviewed current method keeps variable pay to the year to date', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000212';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [WVOE_WITH_PRIOR_YEAR] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024, wvoeVariableMethod: 'current' as const }],
+  }], ROSTER);
+  assert.equal(projected.w2Employers?.[0].annualOvertimeIncome, 6000);
+  assert.equal(projected.w2Employers?.[0].annualBonusIncome, 15999.96);
+});
+
+test('an hourly verification annualizes over the cycle its hours were counted on', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000206';
+  // The Work Number: $17.42 an hour, 86 hours a semi-monthly period. Reading
+  // 86 as weekly hours returns $77,902 instead of $35,955.
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+      fields: fields({
+        'wvoe-employer-name': 'Enterprise USA',
+        'wvoe-base': 17.42, 'wvoe-base-period': 'Hourly',
+        'wvoe-pay-cycle': 'Semi Monthly', 'wvoe-hours-period': 86,
+        'wvoe-months': 103,
+      }),
+    }] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2024 }],
+  }], ROSTER);
+  assert.equal(projected.w2Employers?.[0].annualBaseIncome, 35954.88);
+});
+
+test('a verification with no usable hours is a gap rather than a number', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000207';
+  // Truework states an hourly rate and "Average Hours Worked Per Week: N/A".
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+      fields: fields({
+        'wvoe-employer-name': 'Wall Greens', 'wvoe-base': 45, 'wvoe-base-period': 'Hourly',
+        'wvoe-pay-cycle': 'Monthly',
+      }),
+    }] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2023 }],
+  }], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements.map((item) => item.field), ['unsupportedCalculation']);
+    return true;
+  });
+});
+
+test('a verification whose column year contradicts the reviewed tax year blocks', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000208';
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+      fields: fields({
+        'wvoe-employer-name': 'Wall Greens', 'wvoe-base': 5000, 'wvoe-base-period': 'Monthly',
+        'wvoe-base-ytd': 12300, 'wvoe-ytd-year': 2020, 'wvoe-ytd-thru': '03/04/2023',
+      }),
+    }] },
+    metadataAssignments: [{ entityId: 'WVOE:wvoe-p0', ...WVOE_META, taxYear: 2023 }],
+  }], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.ok(error.requirements.some((item) => item.field === 'taxYear'));
+    return true;
+  });
+});
+
+test('a verification with no reviewed metadata fails closed on every missing fact', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000209';
+  assert.throws(() => mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'WVOE:wvoe-p0', form: 'WVOE', pageIndex: 0,
+      fields: fields({ 'wvoe-employer-name': 'Acme Manufacturing Inc', 'wvoe-base-ytd': 46800 }),
+    }] },
+  }], ROSTER), (error) => {
+    assert.ok(error instanceof ExtractionMetadataRequiredError);
+    assert.deepEqual(error.requirements.map((item) => item.field), ['borrowerAssignment', 'elapsedMonths', 'employmentRole', 'taxYear']);
+    return true;
+  });
+});
+
+test('Schedule L reaches the partnership it was printed in rather than failing the packet', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000230';
+  const scheduleL = {
+    entityId: 'form-1065-p4', form: 'Form 1065' as const, pageIndex: 4, fields: [
+      { sourceFieldId: 'sch-l-cash', numericValue: 180000 },
+      { sourceFieldId: 'sch-l-ar', numericValue: 20000 },
+      { sourceFieldId: 'sch-l-ap', numericValue: 50000 },
+      { sourceFieldId: 'sch-l-notes', numericValue: 30000 },
+    ],
+  };
+  const result = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [
+      { entityId: 'form-1065-k1', form: 'Form 1065' as const, pageIndex: 3, fields: [
+        { sourceFieldId: 'pt-ord', numericValue: 120000 },
+        { sourceFieldId: 'pt-dist', numericValue: 30000 },
+      ] },
+      scheduleL,
+    ] },
+    metadataAssignments: [
+      { entityId: 'form-1065-k1', taxYear: 2024, ownershipPercentage: 50, hasStableDistributions: true },
+      { entityId: 'form-1065-p4', taxYear: 2024 },
+    ],
+  }]);
+
+  // A Schedule L page carries no K-1 income, and must not be read as a missing one.
+  assert.equal(result.form1065?.length, 1);
+  assert.deepEqual(result.form1065?.[0].scheduleL, {
+    cash: 180000, accountsReceivable: 20000, accountsPayable: 50000, notesPayableLt1Yr: 30000,
+  });
+});
+
+test('two partnerships in one packet leave the balance sheet unassigned rather than guessing', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000231';
+  const sheet = (entityId: string, pageIndex: number, cash: number) => ({
+    entityId, form: 'Form 1065' as const, pageIndex,
+    fields: [{ sourceFieldId: 'sch-l-cash', numericValue: cash }, { sourceFieldId: 'sch-l-ap', numericValue: 10000 }],
+  });
+  const result = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [
+      { entityId: 'form-1065-k1', form: 'Form 1065' as const, pageIndex: 3, fields: [{ sourceFieldId: 'pt-ord', numericValue: 120000 }] },
+      sheet('form-1065-p4', 4, 180000),
+      sheet('form-1065-p9', 9, 2000),
+    ] },
+    metadataAssignments: [
+      { entityId: 'form-1065-k1', taxYear: 2024, ownershipPercentage: 50, hasStableDistributions: true },
+      { entityId: 'form-1065-p4', taxYear: 2024 },
+      { entityId: 'form-1065-p9', taxYear: 2024 },
+    ],
+  }]);
+
+  // One business's liquidity must never carry another's income.
+  assert.equal(result.form1065?.[0].scheduleL, undefined);
+});
+
 test('Form 1040 IRA distributions require entered balance and underwriter continuance before projecting', () => {
   const entityId = 'form-1040-p0';
   const record = {

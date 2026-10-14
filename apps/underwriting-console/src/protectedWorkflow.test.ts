@@ -49,6 +49,13 @@ test('maps reviewed requirement fields onto borrower-scoped assignment keys', ()
   });
 });
 
+test('records the reviewed WVOE variable pay method as the method name', () => {
+  const assignment: Record<string, string | number | boolean> = { entityId: 'WVOE:wvoe-p0' };
+  applyRequirementValue(assignment, 'wvoeVariableMethod', 'avg24');
+  assert.deepEqual(assignment, { entityId: 'WVOE:wvoe-p0', wvoeVariableMethod: 'avg24' });
+  assert.equal(reviewFieldLabel('wvoeVariableMethod'), 'Underwriter: verification variable pay method');
+});
+
 test('accepts only bounded persisted coordinate evidence', () => {
   assert.deepEqual(readEvidenceFields({ fields: [
     { collection: 'formExtracts', entityId: 'entity', field: 'ent1-net', pageIndex: 2, box: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 } },

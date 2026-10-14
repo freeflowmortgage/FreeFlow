@@ -2,6 +2,17 @@ import { createHash } from 'node:crypto';
 
 export const INCOME_EXTRACTION_SCHEMA_VERSION = 'income-extraction-v2';
 
+/**
+ * Schedule L balance-sheet lines. The parser tags them with whichever return
+ * they were printed in, so both the 1065 and the 1120-S set carries them. They
+ * are the only evidence the liquidity test runs on, and a K-1 whose business
+ * income outruns its distributions has nothing else to stand on.
+ */
+export const SCHEDULE_L_FIELD_IDS = [
+  'sch-l-cash', 'sch-l-ar', 'sch-l-securities', 'sch-l-ap', 'sch-l-notes',
+  'sch-l-other-current', 'sch-l-current-liabilities',
+] as const;
+
 const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   'Schedule C': new Set(['ent1-name', 'ent1-ein', 'ent1-net', 'ent1-dep', 'ent1-depletion', 'ent1-meals', 'ent1-home', 'ent1-other-income', 'ent1-amort']),
   'Schedule F': new Set(['schedule-f-name', 'schedule-f-ein', 'schedule-f-net', 'schedule-f-coop-ccc', 'schedule-f-other', 'schedule-f-depreciation', 'schedule-f-other-expense', 'schedule-f-home', 'schedule-f-amort']),
@@ -9,11 +20,16 @@ const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Obje
     'scorp-name', 'scorp-ein', 'scorp-ord', 'scorp-rre', 'scorp-onr', 'scorp-dist', 'scorp-own-pct', 'scorp-depletion', 'scorp-meals',
     'scorp-return-name', 'scorp-return-ein', 'scorp-return-gross', 'scorp-return-wages', 'scorp-return-ord',
     'scorp-return-4797', 'scorp-return-other', 'scorp-return-dep', 'scorp-return-depletion', 'scorp-return-meals',
+    ...SCHEDULE_L_FIELD_IDS,
   ]),
   'Form 1065': new Set([
     'pt-name', 'pt-ein', 'pt-ord', 'pt-rre', 'pt-onr', 'pt-gp', 'pt-dist', 'pt-profit-pct', 'pt-capital-pct', 'pt-depletion', 'pt-meals',
     'pt-return-name', 'pt-return-ein', 'pt-return-gross', 'pt-return-wages', 'pt-return-ord', 'pt-return-gp',
     'pt-return-4797', 'pt-return-other', 'pt-return-dep', 'pt-return-depletion', 'pt-return-meals',
+    // Line 16b, the depreciation deducted through cost of goods sold. It is
+    // disjoint from the 16c net on 'pt-return-dep' and reduced line 23 as well.
+    'pt-return-dep-1125a',
+    ...SCHEDULE_L_FIELD_IDS,
   ]),
   'Form 1120': new Set(['c1120-name', 'c1120-ein', 'c1120-taxable', 'c1120-tax', 'c1120-dep', 'c1120-depletion', 'c1120-amort', 'c1120-meals', 'c1120-nol']),
   'Form 1040': new Set(['f1040-ira-total', 'f1040-ira-taxable', 'f1040-ss-total', 'f1040-ss-taxable', 'f1040-pensions-total', 'f1040-pensions-taxable']),
@@ -22,6 +38,15 @@ const FORM_FIELD_ALLOWLIST: Readonly<Record<string, ReadonlySet<string>>> = Obje
   'Paystub': new Set([
     'ps-employee-name', 'ps-employer-name', 'ps-hourly-rate', 'ps-hours-week', 'ps-current-base', 'ps-base-ytd',
     'ps-bonus-ytd', 'ps-ot-ytd', 'ps-tips-ytd', 'ps-commission-ytd', 'ps-rsu-ytd', 'ps-other-ytd', 'ps-pay-frequency',
+    // The period the stub covers. Without it the elapsed-months divisor every
+    // year-to-date figure is divided by rests on reviewer recall alone, and a
+    // December stub left at the mid-year default overstates income by 60%.
+    'ps-period-end', 'ps-period-start', 'ps-pay-date',
+  ]),
+  'WVOE': new Set([
+    'wvoe-employer-name', 'wvoe-base', 'wvoe-base-period', 'wvoe-pay-cycle', 'wvoe-hours-week', 'wvoe-hours-period',
+    'wvoe-base-ytd', 'wvoe-base-ytd-prior', 'wvoe-ot', 'wvoe-ot-prior', 'wvoe-bonus', 'wvoe-bonus-prior',
+    'wvoe-commission', 'wvoe-commission-prior', 'wvoe-ytd-thru', 'wvoe-ytd-year', 'wvoe-hire-date', 'wvoe-months',
   ]),
 });
 

@@ -28,7 +28,7 @@ import {
 import { PAYSTUB_HIGHLIGHT_BOXES } from '../paystubLayout';
 import type { LiveDocument, LiveParseSession, ScheduleEExpenseDetermination, ScheduleEPropertyExtract } from '../parseTypes';
 import { mapIncomeFields, RENTAL_YEAR_KEY_TO_SOURCE, reviewNotesForPage, scheduleEGridFieldId } from '../incomeFieldMap';
-import { liveAssetPatch, liveBorrowerName, liveScheduleLPatch } from '../liveHydrate';
+import { liveAssetPatch, liveBorrowerName, liveScheduleLPatch, owningBusinessReturns } from '../liveHydrate';
 import {
   calculateRetirementIncome,
   EMPTY_RETIREMENT_RETURN,
@@ -100,8 +100,10 @@ import {
   chosenMonthly,
   cCorpBusinessAnnual,
   corpBusinessAnnual,
-  corpDistributionCapped,
+  corpDistributionSupport,
   corpMinorityAnnual,
+  distributionShortfallBadge,
+  distributionShortfallMessage,
   liquidityReason,
   monthlyFromYears,
   schCAnnual,
@@ -254,12 +256,8 @@ const EMPTY_SCHEDULE_L: ScheduleL = {
 
 function scheduleLFromFields(
   fields: Parameters<typeof liveScheduleLPatch>[0],
-  pages: Array<{ documentId: string; index: number; formIds: string[] }>,
-  pattern: RegExp,
+  allowed: Set<string>,
 ): ScheduleL {
-  const allowed = new Set(
-    pages.filter((page) => pattern.test(page.formIds.join(' '))).map((page) => `${page.documentId}:${page.index}`),
-  );
   const patch = liveScheduleLPatch(
     fields.filter((field) => (field.sourceFieldId ?? '').startsWith('sch-l-') && allowed.has(`${field.documentId ?? ''}:${field.pageIndex}`)),
   );
@@ -1301,14 +1299,23 @@ export default function UnderwriterSplitViewDemo({
       doc.result.pages.map((page) => ({ documentId: doc.id, index: page.index, formIds: page.formIds })),
     );
     const businessCount = [scorpSeeds, partnershipSeeds, ccorpSeeds].filter((seeds) => seeds.length > 0).length;
+    const returnOwners = owningBusinessReturns(schedulePages);
+    const pageKeys = (matches: (page: { documentId: string; index: number; formIds: string[] }) => boolean) =>
+      new Set(schedulePages.filter(matches).map((page) => `${page.documentId}:${page.index}`));
     const sheetFor = (pattern: RegExp, seedCount: number): ScheduleL => {
       if (seedCount !== 1) return { ...EMPTY_SCHEDULE_L };
-      const specific = scheduleLFromFields(mappedFields, schedulePages, pattern);
-      const generic = scheduleLFromFields(mappedFields, schedulePages, /schedule\s*l/i);
+      const owned = scheduleLFromFields(
+        mappedFields,
+        new Set([...returnOwners].filter(([, owner]) => pattern.test(owner)).map(([key]) => key)),
+      );
       const used = (sheet: ScheduleL) =>
         Boolean(sheet.cash || sheet.receivables || sheet.taxExempt || sheet.accountsPayable || sheet.notesLt1Yr || sheet.otherCurrentLiab || sheet.currentLiabilities);
-      if (used(specific)) return specific;
-      if (businessCount === 1 && used(generic)) return generic;
+      if (used(owned)) return owned;
+      // No masthead reached the balance sheet: a partial upload, or a title the
+      // classifier could not read. One business in the packet leaves only one
+      // return the sheet can belong to.
+      const loose = scheduleLFromFields(mappedFields, pageKeys((page) => /schedule\s*l/i.test(page.formIds.join(' '))));
+      if (businessCount === 1 && used(loose)) return loose;
       return { ...EMPTY_SCHEDULE_L };
     };
     const scorpSheet = sheetFor(/1120-?s/i, scorpSeeds.length);
@@ -1573,22 +1580,27 @@ export default function UnderwriterSplitViewDemo({
         dropped: false,
         isMinority: true,
         wasCapped: m1.wasCapped || m2.wasCapped,
+        shortfall: null,
       };
     }
 
     const y1BizRaw = corpBusinessAnnual(sCorpYears[0], sCorpShareholderPct);
     const y2BizRaw = corpBusinessAnnual(sCorpYears[1], sCorpShareholderPct);
-    const y1Biz = activeSCorp.hasStableDistributions ? y1BizRaw : Math.min(y1BizRaw, sCorpYears[0].distributions);
-    const y2Biz = activeSCorp.hasStableDistributions ? y2BizRaw : Math.min(y2BizRaw, sCorpYears[1].distributions);
+    // A balance sheet that was never read is no liquidity route, so pass null
+    // rather than its failing ratio: the two lead to different advice.
+    const liquidity = sCorpLRatio.provided || sCorpLRatio.overridden ? sCorpLRatio.passes : null;
+    const s1 = corpDistributionSupport(sCorpYears[0], y1BizRaw, activeSCorp.hasStableDistributions, liquidity);
+    const s2 = corpDistributionSupport(sCorpYears[1], y2BizRaw, activeSCorp.hasStableDistributions, liquidity);
     return {
-      y1: y1Biz + y1W2,
-      y2: y2Biz + y2W2,
+      y1: s1.annual + y1W2,
+      y2: s2.annual + y2W2,
       w2Monthly,
       dropped: !sCorpLRatio.passes,
       isMinority: false,
-      wasCapped: y1Biz < y1BizRaw || y2Biz < y2BizRaw,
+      wasCapped: s1.annual < y1BizRaw || s2.annual < y2BizRaw,
+      shortfall: s1.shortfall ?? s2.shortfall,
     };
-  }, [sCorpYears, sCorpShareholderPct, twoYearScorp, sCorpLRatio.passes, activeSCorp.hasStableDistributions]);
+  }, [sCorpYears, sCorpShareholderPct, twoYearScorp, sCorpLRatio, activeSCorp.hasStableDistributions]);
 
   const partnershipFlow = useMemo(() => {
     const isMinority = partnershipPct < 25;
@@ -1608,22 +1620,25 @@ export default function UnderwriterSplitViewDemo({
         dropped: false,
         isMinority: true,
         wasCapped: m1.wasCapped || m2.wasCapped,
+        shortfall: null,
       };
     }
 
     const y1Raw = corpBusinessAnnual(partnershipYears[0], partnershipPct);
     const y2Raw = corpBusinessAnnual(partnershipYears[1], partnershipPct);
-    const y1 = activePartnership.hasStableDistributions ? y1Raw : corpDistributionCapped(partnershipYears[0], y1Raw);
-    const y2 = activePartnership.hasStableDistributions ? y2Raw : corpDistributionCapped(partnershipYears[1], y2Raw);
+    const liquidity = partnershipLRatio.provided || partnershipLRatio.overridden ? partnershipLRatio.passes : null;
+    const s1 = corpDistributionSupport(partnershipYears[0], y1Raw, activePartnership.hasStableDistributions, liquidity);
+    const s2 = corpDistributionSupport(partnershipYears[1], y2Raw, activePartnership.hasStableDistributions, liquidity);
     return {
-      y1,
-      y2,
+      y1: s1.annual,
+      y2: s2.annual,
       gpMonthly,
       dropped: !partnershipLRatio.passes,
       isMinority: false,
-      wasCapped: y1 < y1Raw || y2 < y2Raw,
+      wasCapped: s1.annual < y1Raw || s2.annual < y2Raw,
+      shortfall: s1.shortfall ?? s2.shortfall,
     };
-  }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio.passes, activePartnership.hasStableDistributions]);
+  }, [partnershipYears, partnershipPct, twoYearPartnership, partnershipLRatio, activePartnership.hasStableDistributions]);
 
   const cCorpLRatio = useMemo(() => scheduleLQuickRatio(cCorpL), [cCorpL]);
   const cCorpFlow = useMemo(() => {
@@ -2320,6 +2335,23 @@ export default function UnderwriterSplitViewDemo({
         id: 'PARTNERSHIP_LIQUIDITY',
         type: 'ERROR',
         message: `Partnership ${liquidityReason(partnershipLRatio)}. Ordinary income is excluded; guaranteed payments still count.`,
+      });
+    }
+
+    // A recorded distribution history the K-1 contradicts. Without it the
+    // income needs the liquidity route, so say which one is holding it up.
+    if (sCorpFlow.shortfall) {
+      list.push({
+        id: 'SCORP_DISTRIBUTIONS_BELOW_INCOME',
+        type: sCorpFlow.shortfall.restsOnLiquidity ? 'WARNING' : 'ERROR',
+        message: distributionShortfallMessage('S-Corp', 'Box 16D', sCorpFlow.shortfall, sCorpLRatio),
+      });
+    }
+    if (partnershipFlow.shortfall) {
+      list.push({
+        id: 'PARTNERSHIP_DISTRIBUTIONS_BELOW_INCOME',
+        type: partnershipFlow.shortfall.restsOnLiquidity ? 'WARNING' : 'ERROR',
+        message: distributionShortfallMessage('Partnership', 'Box 19A', partnershipFlow.shortfall, partnershipLRatio),
       });
     }
 
@@ -3994,6 +4026,11 @@ export default function UnderwriterSplitViewDemo({
                       }
                     />
                     Stable distribution history
+                    {distributionShortfallBadge(sCorpFlow.shortfall) && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800">
+                        {distributionShortfallBadge(sCorpFlow.shortfall)}
+                      </span>
+                    )}
                   </label>
                 </label>
               }
@@ -4186,6 +4223,11 @@ export default function UnderwriterSplitViewDemo({
                       }
                     />
                     Stable distribution history
+                    {distributionShortfallBadge(partnershipFlow.shortfall) && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800">
+                        {distributionShortfallBadge(partnershipFlow.shortfall)}
+                      </span>
+                    )}
                   </label>
                 </div>
               }

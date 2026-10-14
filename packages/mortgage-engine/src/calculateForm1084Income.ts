@@ -496,6 +496,49 @@ export function scheduleLQuickRatioFromInput(sheet?: ScheduleLLiquidityInput): {
   return { ratio: assets.div(liabilities), assets, liabilities };
 }
 
+export interface DistributionSupport {
+  /** The business income the evidence actually supports. */
+  eligibleIncome: Decimal;
+  /** Distributions reported on the K-1, or null when the box was not read. */
+  reported: Decimal | null;
+  /** Set when a recorded distribution history is contradicted by the K-1. */
+  shortfall: { required: Decimal; restsOnLiquidity: boolean } | null;
+}
+
+/**
+ * How much business income the distribution evidence supports.
+ *
+ * Distributions are evidence only up to what was distributed, so a recorded
+ * history that outruns the K-1 does not justify the excess. Fannie Mae's other
+ * route is business liquidity, which is why a passing Schedule L still carries
+ * the income; with no balance sheet to test, nothing is left holding up the
+ * shortfall and the income falls back to what was actually distributed.
+ *
+ * `liquidityPasses` is null when the return carried no Schedule L. An absent
+ * distributions box is likewise null rather than zero: a figure that was never
+ * read contradicts nothing, and capping on it would zero a supported business.
+ */
+export function distributionSupport(
+  businessIncome: Decimal,
+  reportedDistributions: number | undefined,
+  recordedStableHistory: boolean | undefined,
+  liquidityPasses: boolean | null,
+): DistributionSupport {
+  const reported = reportedDistributions === undefined ? null : new Decimal(reportedDistributions);
+  if (!recordedStableHistory) {
+    return { eligibleIncome: Decimal.min(businessIncome, reported ?? new Decimal(0)), reported, shortfall: null };
+  }
+  if (reported === null || reported.gte(businessIncome)) {
+    return { eligibleIncome: businessIncome, reported, shortfall: null };
+  }
+  const restsOnLiquidity = liquidityPasses === true;
+  return {
+    eligibleIncome: restsOnLiquidity ? businessIncome : reported,
+    reported,
+    shortfall: { required: businessIncome, restsOnLiquidity },
+  };
+}
+
 interface ComputedPropertyCashFlow {
   totalAnnualCashFlow: Decimal;
   monthsInService: number;
@@ -684,6 +727,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const k1Income = ordinary.add(rentalRealEstate).add(otherRental);
 
     let k1EligibleIncome = new Decimal(0);
+    let distributionShortfall = false;
 
     // FNMA S-Corp Liquidity Exception & Stable Distribution Triggers
     if (entry.ownershipPercentage >= 25) {
@@ -706,10 +750,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
 
       const borrowerShareOfAdjustments = k1Income.add(returnAdjustments.mul(shareFactor));
 
-      if (entry.hasStableDistributions) {
-        k1EligibleIncome = borrowerShareOfAdjustments;
-      } else {
-        k1EligibleIncome = Decimal.min(borrowerShareOfAdjustments, distributions);
+      const support = distributionSupport(
+        borrowerShareOfAdjustments,
+        entry.k1Distributions,
+        entry.hasStableDistributions,
+        liquidity ? passesLiquidity : null,
+      );
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+
+      if (support.shortfall) {
+        warnings.push({
+          code: 'SCORP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: support.shortfall.restsOnLiquidity
+            ? `S-Corporation Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 16D reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income. The $${borrowerShareOfAdjustments.sub(distributions).toFixed(2)} shortfall is not supported by distributions and rests on the Schedule L quick ratio of ${liquidity!.ratio.toFixed(2)} instead. Evidence the distribution history or qualify the business on liquidity.`
+            : `S-Corporation Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 16D reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income, and the return carried no Schedule L to test liquidity. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      } else if (!entry.hasStableDistributions) {
         warnings.push({
           code: 'SCORP_DISTRIBUTION_LIMITATION_ACTIVE',
           severity: 'WARNING',
@@ -722,14 +780,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // ordinary income — no business-level non-cash add-backs, no liquidity test —
       // capped at actual distributions received unless a stable history is documented.
       const minorityK1Income = k1Income;
-      k1EligibleIncome = entry.hasStableDistributions
-        ? minorityK1Income
-        : Decimal.min(minorityK1Income, distributions);
+      // No liquidity route under 25%: the borrower is not self-employed, so a
+      // recorded history the K-1 contradicts leaves only what was distributed.
+      const support = distributionSupport(minorityK1Income, entry.k1Distributions, entry.hasStableDistributions, null);
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+      const capped = support.eligibleIncome.lt(minorityK1Income);
       warnings.push({
         code: 'SCORP_MINORITY_K1_INCOME',
         severity: 'WARNING',
-        message: `S-Corporation Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) with no business add-backs${entry.hasStableDistributions ? '' : `, capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history.`
+        message: `S-Corporation Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) with no business add-backs${capped ? `, capped at distributions received ($${distributions.toFixed(2)})` : ''}. Document a 2-year receipt history.`
       });
+      if (support.shortfall) {
+        warnings.push({
+          code: 'SCORP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: `S-Corporation Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 16D reports distributions of $${distributions.toFixed(2)} against $${minorityK1Income.toFixed(2)} of K-1 income. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      }
     }
 
     const totalCombined = w2.add(k1EligibleIncome);
@@ -744,7 +812,10 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       k1EligibleIncome: k1EligibleIncome.toNumber(),
       totalCombinedQualifying: totalCombined.toNumber(),
       quickRatio: entry.ownershipPercentage >= 25 && liquidity ? liquidity.ratio.toDecimalPlaces(2).toNumber() : null,
-      passesLiquidity: entry.ownershipPercentage >= 25 && liquidity ? passesLiquidity : null
+      passesLiquidity: entry.ownershipPercentage >= 25 && liquidity ? passesLiquidity : null,
+      distributionsReported: entry.k1Distributions ?? null,
+      // True when a recorded distribution history is contradicted by Box 16D.
+      distributionShortfall
     };
   });
 
@@ -779,6 +850,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const k1Income = ordinary.add(rentalRealEstate).add(otherRental);
 
     let k1EligibleIncome = new Decimal(0);
+    let distributionShortfall = false;
 
     if (ownershipPercentage >= 25) {
       if (liquidity && !passesLiquidity) {
@@ -800,10 +872,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
 
       const borrowerShareOfAdjustments = k1Income.add(returnAdjustments.mul(shareFactor));
 
-      if (entry.hasStableDistributions) {
-        k1EligibleIncome = borrowerShareOfAdjustments;
-      } else {
-        k1EligibleIncome = Decimal.min(borrowerShareOfAdjustments, distributions);
+      const support = distributionSupport(
+        borrowerShareOfAdjustments,
+        entry.k1Distributions,
+        entry.hasStableDistributions,
+        liquidity ? passesLiquidity : null,
+      );
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+
+      if (support.shortfall) {
+        warnings.push({
+          code: 'PARTNERSHIP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: support.shortfall.restsOnLiquidity
+            ? `Partnership Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 19A reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income. The $${borrowerShareOfAdjustments.sub(distributions).toFixed(2)} shortfall is not supported by distributions and rests on the Schedule L quick ratio of ${liquidity!.ratio.toFixed(2)} instead. Evidence the distribution history or qualify the business on liquidity.`
+            : `Partnership Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 19A reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income, and the return carried no Schedule L to test liquidity. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      } else if (!entry.hasStableDistributions) {
         warnings.push({
           code: 'PARTNERSHIP_DISTRIBUTION_LIMITATION_ACTIVE',
           severity: 'WARNING',
@@ -817,14 +903,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // business add-backs, no liquidity test — capped at distributions received
       // unless a stable history is documented.
       const minorityK1Income = k1Income;
-      k1EligibleIncome = entry.hasStableDistributions
-        ? minorityK1Income
-        : Decimal.min(minorityK1Income, distributions);
+      // No liquidity route under 25%: the borrower is not self-employed, so a
+      // recorded history the K-1 contradicts leaves only what was distributed.
+      const support = distributionSupport(minorityK1Income, entry.k1Distributions, entry.hasStableDistributions, null);
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+      const capped = support.eligibleIncome.lt(minorityK1Income);
       warnings.push({
         code: 'PARTNERSHIP_MINORITY_K1_INCOME',
         severity: 'WARNING',
-        message: `Partnership Year ${entry.year}: Ownership ${ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${entry.hasStableDistributions ? '' : ` and capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
+        message: `Partnership Year ${entry.year}: Ownership ${ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${capped ? ` and capped at distributions received ($${distributions.toFixed(2)})` : ''}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
       });
+      if (support.shortfall) {
+        warnings.push({
+          code: 'PARTNERSHIP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: `Partnership Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 19A reports distributions of $${distributions.toFixed(2)} against $${minorityK1Income.toFixed(2)} of K-1 income. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      }
     }
 
     const totalCombined = k1EligibleIncome.add(guaranteed);
@@ -840,7 +936,10 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       k1EligibleIncome: k1EligibleIncome.toNumber(),
       totalCombinedQualifying: totalCombined.toNumber(),
       quickRatio: ownershipPercentage >= 25 && liquidity ? liquidity.ratio.toDecimalPlaces(2).toNumber() : null,
-      passesLiquidity: ownershipPercentage >= 25 && liquidity ? passesLiquidity : null
+      passesLiquidity: ownershipPercentage >= 25 && liquidity ? passesLiquidity : null,
+      distributionsReported: entry.k1Distributions ?? null,
+      // True when a recorded distribution history is contradicted by Box 19A.
+      distributionShortfall
     };
   });
 

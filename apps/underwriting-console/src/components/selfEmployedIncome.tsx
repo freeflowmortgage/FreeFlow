@@ -312,6 +312,43 @@ export function corpDistributionCapped(row: CorpYear, annual: number) {
   return Math.min(annual - row.guaranteedPayments, row.distributions) + row.guaranteedPayments;
 }
 
+export interface CorpDistributionSupport {
+  /** The annual figure the evidence supports, guaranteed payments included. */
+  annual: number;
+  /** Set when a recorded distribution history is contradicted by the K-1. */
+  shortfall: { businessIncome: number; distributed: number; restsOnLiquidity: boolean } | null;
+}
+
+/**
+ * A 25%-or-more owner's business income rests on either a documented
+ * distribution history or business liquidity. A history the K-1 contradicts is
+ * not evidence of one, so the income falls back to what was actually
+ * distributed unless a passing Schedule L carries the shortfall instead.
+ *
+ * `liquidityPasses` is null when there is no balance sheet to test. It mirrors
+ * `distributionSupport` in the engine, which the protected path runs; the panel
+ * computes its own 1084 and would otherwise take the checkbox at its word.
+ */
+export function corpDistributionSupport(
+  row: CorpYear,
+  annual: number,
+  claimedStableHistory: boolean,
+  liquidityPasses: boolean | null,
+): CorpDistributionSupport {
+  if (!claimedStableHistory) {
+    return { annual: corpDistributionCapped(row, annual), shortfall: null };
+  }
+  // Guaranteed payments are a contractual draw, never limited by distributions,
+  // so only the business share is held against Box 19A / Box 16D.
+  const businessIncome = annual - row.guaranteedPayments;
+  if (row.distributions >= businessIncome) return { annual, shortfall: null };
+  const restsOnLiquidity = liquidityPasses === true;
+  return {
+    annual: restsOnLiquidity ? annual : corpDistributionCapped(row, annual),
+    shortfall: { businessIncome, distributed: row.distributions, restsOnLiquidity },
+  };
+}
+
 /**
  * Under-25% ownership: borrower is not self-employed. Usable income is limited to
  * the K-1 income boxes (1, 2, 3 and guaranteed payments) with NO business-level
@@ -490,6 +527,33 @@ export function liquidityReason(ratio: ReturnType<typeof scheduleLQuickRatio>): 
   if (ratio.overridden) return 'liquidity was marked failed by the underwriter';
   if (!ratio.provided) return 'Schedule L liquidity was not provided';
   return `Schedule L quick ratio ${ratio.quickRatio.toFixed(2)} is below 1.0`;
+}
+
+/** Badge for the stable-history checkbox once the K-1 has contradicted it. */
+export function distributionShortfallBadge(shortfall: CorpDistributionSupport['shortfall']): string | null {
+  if (!shortfall) return null;
+  return shortfall.restsOnLiquidity ? 'K-1 below income · carried by Schedule L' : 'K-1 below income · capped';
+}
+
+/** Names the figures behind a contradicted distribution history and what now carries the income. */
+export function distributionShortfallMessage(
+  entity: string,
+  k1Box: string,
+  shortfall: NonNullable<CorpDistributionSupport['shortfall']>,
+  ratio: ReturnType<typeof scheduleLQuickRatio>,
+): string {
+  const reported = `K-1 ${k1Box} reports distributions of ${usd(shortfall.distributed)} against ${usd(shortfall.businessIncome)} of business income`;
+  if (shortfall.restsOnLiquidity) {
+    return (
+      `${entity}: a stable distribution history is recorded, but ${reported}. The ` +
+      `${usd(shortfall.businessIncome - shortfall.distributed)} shortfall rests on the Schedule L quick ratio of ` +
+      `${ratio.quickRatio.toFixed(2)} instead. Evidence the distribution history or qualify the business on liquidity.`
+    );
+  }
+  return (
+    `${entity}: a stable distribution history is recorded, but ${reported}, and ` +
+    `${liquidityReason(ratio)}. Business income is capped at the ${usd(shortfall.distributed)} actually distributed.`
+  );
 }
 
 export function LiquidityBlock({

@@ -73,6 +73,7 @@ export type LiveCorpPatch = {
   profitPctEnd?: number;
   capitalPctEnd?: number;
   depreciation?: number;
+  depreciation1125A?: number;
   depreciation8825?: number;
   gain4797?: number;
   otherIncome?: number;
@@ -283,11 +284,57 @@ export function livePartnershipPatch(fields: MappedIncomeField[]): LiveCorpPatch
     gain4797: num(fields, 'pt-return-4797'),
     otherIncome: num(fields, 'pt-return-other'),
     depreciation: num(fields, 'pt-return-dep') ?? num(fields, 'form-8825-dep') ?? num(fields, 'form-4562-dep'),
+    // Line 16b. Line 16c holds only what was deducted on line 16 itself, so
+    // without this the addback is short by the depreciation that reached line
+    // 23 through cost of goods sold.
+    depreciation1125A: num(fields, 'pt-return-dep-1125a'),
     depreciation8825: num(fields, 'pt-return-dep') != null ? num(fields, 'form-8825-dep') : undefined,
     mealsM1: num(fields, 'pt-return-meals'),
     section179: num(fields, 'pt-179') ?? num(fields, 'form-4562-179'),
     depletion: num(fields, 'pt-return-depletion') ?? num(fields, 'pt-depletion'),
   });
+}
+
+/** A page of the packet as the classifier labelled it. */
+export interface ClassifiedPage {
+  documentId?: string;
+  index: number;
+  formIds: string[];
+}
+
+/**
+ * The label the classifier puts on page 1 of a business return. Only that page
+ * carries it: "U.S. Return of Partnership Income" is printed once, so the
+ * balance sheet five pages later is labelled `Schedule L` and says nothing
+ * about the return it belongs to.
+ */
+const RETURN_MASTHEAD = /^Form (?:1065|1120S|1120) \(/;
+
+/**
+ * Resolve the business return each page was printed in, keyed
+ * `${documentId}:${index}`. Pages ahead of the first masthead are left out.
+ *
+ * Schedule L, M-1 and M-2 are attributed to the nearest masthead before them in
+ * the same document, which holds whether each return was uploaded on its own or
+ * several were concatenated into one file. Matching on the page's own labels
+ * instead never reaches a balance sheet, and falling back to "the only business
+ * in the packet" silently gives up as soon as there are two.
+ */
+export function owningBusinessReturns(pages: ClassifiedPage[]): Map<string, string> {
+  const owners = new Map<string, string>();
+  const byDocument = new Map<string, ClassifiedPage[]>();
+  for (const page of pages) {
+    const key = page.documentId ?? '';
+    byDocument.set(key, [...(byDocument.get(key) ?? []), page]);
+  }
+  for (const [documentId, group] of byDocument) {
+    let current: string | undefined;
+    for (const page of [...group].sort((left, right) => left.index - right.index)) {
+      current = page.formIds.find((label) => RETURN_MASTHEAD.test(label)) ?? current;
+      if (current) owners.set(`${documentId}:${page.index}`, current);
+    }
+  }
+  return owners;
 }
 
 export function liveScheduleLPatch(fields: MappedIncomeField[]): LiveScheduleLPatch | null {
