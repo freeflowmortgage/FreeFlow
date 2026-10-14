@@ -1,4 +1,5 @@
 import { Decimal } from 'decimal.js';
+import { bonusMonthsCovered, type BonusFrequency } from './bonusTiming';
 
 /**
  * Annualize a written verification of employment (Fannie Mae Form 1005).
@@ -63,6 +64,12 @@ export type WvoeAnnualizationInput = Readonly<{
   monthsEmployed?: number;
   baseMethod?: WvoeBaseMethod;
   variableMethod?: WvoeVariableMethod;
+  /**
+   * How often the employer pays its bonus. When set, the year-to-date bonus
+   * divides by the months the bonuses paid within `elapsedMonths` cover; the
+   * prior full year column always covers twelve.
+   */
+  bonusFrequency?: BonusFrequency;
 }>;
 
 export type WvoeComponentMonthly = Readonly<{
@@ -86,6 +93,8 @@ export type WvoeAnnualization = Readonly<{
   methods: Readonly<{ current: number | null; ytd: number | null }>;
   /** The divisor the variable components were averaged over. */
   variableMonths: number | null;
+  /** The divisor the bonus was averaged over; equals `variableMonths` without a bonus frequency. */
+  bonusMonths: number | null;
 }>;
 
 export function wvoeBasePeriodsPerYear(period: Exclude<WvoeBasePayPeriod, 'HOURLY'>): number {
@@ -202,19 +211,26 @@ export function annualizeWvoe(input: WvoeAnnualizationInput): WvoeAnnualization 
     gaps.push('PRIOR_YEAR_UNAVAILABLE');
   }
 
-  const variableMonths = elapsedOk
-    ? (variableMethod === 'avg24' ? new Decimal(elapsed as number).add(12) : new Decimal(elapsed as number))
+  const windowMonths = (ytdMonths: number) =>
+    variableMethod === 'avg24' ? new Decimal(ytdMonths).add(12) : new Decimal(ytdMonths);
+  const variableMonths = elapsedOk ? windowMonths(elapsed as number) : null;
+  const bonusMonths = elapsedOk
+    ? windowMonths(input.bonusFrequency ? bonusMonthsCovered(elapsed as number, input.bonusFrequency) : (elapsed as number))
     : null;
-  const monthlyVariableComponent = (ytdAmount: number | undefined, priorAmount: number | undefined): number => {
-    if (variableMonths === null) return 0;
+  const monthlyVariableComponent = (
+    ytdAmount: number | undefined,
+    priorAmount: number | undefined,
+    months: Decimal | null = variableMonths,
+  ): number => {
+    if (months === null) return 0;
     const total = new Decimal(ytdAmount ?? 0).add(variableMethod === 'avg24' ? (priorAmount ?? 0) : 0);
-    return money(total.div(variableMonths));
+    return money(total.div(months));
   };
 
   const components: WvoeComponentMonthly = {
     base: selectedBase ? methods[selectedBase] ?? 0 : 0,
     overtime: monthlyVariableComponent(input.overtimeYtd, input.overtimePriorYear),
-    bonus: monthlyVariableComponent(input.bonusYtd, input.bonusPriorYear),
+    bonus: monthlyVariableComponent(input.bonusYtd, input.bonusPriorYear, bonusMonths),
     commission: monthlyVariableComponent(input.commissionYtd, input.commissionPriorYear),
   };
   const monthlyVariable = money(
@@ -243,6 +259,7 @@ export function annualizeWvoe(input: WvoeAnnualizationInput): WvoeAnnualization 
     },
     methods,
     variableMonths: variableMonths === null ? null : variableMonths.toNumber(),
+    bonusMonths: bonusMonths === null ? null : bonusMonths.toNumber(),
   };
 }
 

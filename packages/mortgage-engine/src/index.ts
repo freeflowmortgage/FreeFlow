@@ -8,6 +8,7 @@ export * from './usda-ssi-rules-engine';
 export * from './income-calculation-dispatcher';
 export * from './mismoD1cMapper';
 export * from './paystubMismoMapper';
+export * from './bonusTiming';
 export * from './paystubAnnualization';
 export * from './paystubCoverage';
 export * from './wvoeAnnualization';
