@@ -3953,12 +3953,12 @@ export default function UnderwriterSplitViewDemo({
                 />
                 <div className="flex justify-between rounded bg-slate-50 p-3 text-xs">
                   <span className="font-semibold text-slate-500">Current monthly variable average</span>
-                  <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo</span>
+                  <span className="font-black text-slate-800">${variableContinuityCalculations.currentMonthlyVariableAvg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo</span>
                 </div>
                 <div className="flex justify-between rounded bg-slate-50 p-3 text-xs">
                   <span className="font-semibold text-slate-500">Prior monthly variable average</span>
                   <span className={`font-black text-slate-800 ${!mergePreviousEmployerVariable ? 'opacity-40' : ''}`}>
-                    ${variableContinuityCalculations.previousMonthlyVariableAvg.toLocaleString(undefined, {minimumFractionDigits: 2})}/mo
+                    ${variableContinuityCalculations.previousMonthlyVariableAvg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo
                   </span>
                 </div>
                 <IncomeChoicePanel
