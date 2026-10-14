@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:5c546c873970e79e5c9152cd9c8a9c7013824352bc89071d21feb15ad68496aa
+FROM python:3.11-slim-bookworm@sha256:0a310eeecf4e1f5a0743f9a6520c90c88d089c903ca5fd283f501e3a805f5f89
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -6,23 +6,26 @@ ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-# AL2023 locks packages to the image's release; --releasever=latest pulls current security fixes.
-RUN microdnf --releasever=latest update -y \
-    && microdnf --releasever=latest install -y \
-        libgomp \
-        libX11 \
-        libxcb \
-        mesa-libGL \
-        python3.11 \
-        python3.11-pip \
-        shadow-utils \
-    && microdnf clean all \
-    && rm -rf /var/cache/dnf
+# Upgrade the minimal Debian base before installing OpenCV's bounded native
+# runtime dependencies. Build tools remain outside the final image.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+        libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN --mount=type=cache,id=freeflow-pip-cache,target=/root/.cache/pip,sharing=locked \
-    python3.11 -m pip install -r requirements.txt \
-    && python3.11 -m pip check
+    python3.11 -m pip install --no-compile -r requirements.txt \
+    && python3.11 -m pip check \
+    && rm -rf /usr/local/lib/python3.11/site-packages/pip* \
+        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
 
 COPY src/ ./
 COPY templates /app/templates
