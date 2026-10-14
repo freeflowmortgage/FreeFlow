@@ -15,7 +15,8 @@ const FREQUENCIES = new Set(['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY']);
 const BASE_METHODS = new Set(['hourly', 'period', 'ytd', 'prior']);
 const WVOE_BASE_METHODS = new Set(['current', 'ytd']);
 const WVOE_VARIABLE_METHODS = new Set(['current', 'avg24']);
-const ASSIGNMENT_FIELDS = ['entityId', 'taxYear', 'employmentRole', 'ownershipPercentage', 'borrowerKey', 'elapsedMonths', 'payFrequency', 'baseIncomeMethod', 'wvoeBaseMethod', 'wvoeVariableMethod', 'includeInQualifyingIncome', 'hasThreeYearAssetSupport', 'hasStableDistributions', 'cash', 'currentLiabilities', 'iraAccountBalance', 'hasThreeYearIraContinuance', 'grossUpIraNonTaxable'];
+const BONUS_FREQUENCIES = new Set(['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL']);
+const ASSIGNMENT_FIELDS = ['entityId', 'taxYear', 'employmentRole', 'ownershipPercentage', 'borrowerKey', 'elapsedMonths', 'payFrequency', 'baseIncomeMethod', 'wvoeBaseMethod', 'wvoeVariableMethod', 'bonusFrequency', 'includeInQualifyingIncome', 'hasThreeYearAssetSupport', 'hasStableDistributions', 'cash', 'currentLiabilities', 'iraAccountBalance', 'hasThreeYearIraContinuance', 'grossUpIraNonTaxable'];
 /** Forms whose year-to-date figures are divided by a reviewed elapsed-months count. */
 const YTD_FORMS = ['Paystub', 'WVOE'];
 
@@ -97,6 +98,7 @@ function parseAssignment(value: unknown): ExtractionMetadataAssignment {
     borrowerKey?: string; elapsedMonths?: number; payFrequency?: ExtractionMetadataAssignment['payFrequency'];
     baseIncomeMethod?: ExtractionMetadataAssignment['baseIncomeMethod']; includeInQualifyingIncome?: boolean;
     wvoeBaseMethod?: ExtractionMetadataAssignment['wvoeBaseMethod']; wvoeVariableMethod?: ExtractionMetadataAssignment['wvoeVariableMethod'];
+    bonusFrequency?: ExtractionMetadataAssignment['bonusFrequency'];
     hasThreeYearAssetSupport?: boolean; hasStableDistributions?: boolean; cash?: number; currentLiabilities?: number;
     iraAccountBalance?: number; hasThreeYearIraContinuance?: boolean; grossUpIraNonTaxable?: boolean;
   } = { entityId: value.entityId };
@@ -109,6 +111,7 @@ function parseAssignment(value: unknown): ExtractionMetadataAssignment {
   if (value.baseIncomeMethod !== undefined) { if (typeof value.baseIncomeMethod !== 'string' || !BASE_METHODS.has(value.baseIncomeMethod)) throw new ApiError(400, 'INVALID_BASE_METHOD', 'The base income method is not allowed.'); assignment.baseIncomeMethod = value.baseIncomeMethod as ExtractionMetadataAssignment['baseIncomeMethod']; }
   if (value.wvoeBaseMethod !== undefined) { if (typeof value.wvoeBaseMethod !== 'string' || !WVOE_BASE_METHODS.has(value.wvoeBaseMethod)) throw new ApiError(400, 'INVALID_BASE_METHOD', 'The verification base method is not allowed.'); assignment.wvoeBaseMethod = value.wvoeBaseMethod as ExtractionMetadataAssignment['wvoeBaseMethod']; }
   if (value.wvoeVariableMethod !== undefined) { if (typeof value.wvoeVariableMethod !== 'string' || !WVOE_VARIABLE_METHODS.has(value.wvoeVariableMethod)) throw new ApiError(400, 'INVALID_VARIABLE_METHOD', 'The verification variable method is not allowed.'); assignment.wvoeVariableMethod = value.wvoeVariableMethod as ExtractionMetadataAssignment['wvoeVariableMethod']; }
+  if (value.bonusFrequency !== undefined) { if (typeof value.bonusFrequency !== 'string' || !BONUS_FREQUENCIES.has(value.bonusFrequency)) throw new ApiError(400, 'INVALID_BONUS_FREQUENCY', 'The bonus frequency is not allowed.'); assignment.bonusFrequency = value.bonusFrequency as ExtractionMetadataAssignment['bonusFrequency']; }
   if (value.includeInQualifyingIncome !== undefined) { if (typeof value.includeInQualifyingIncome !== 'boolean') throw new ApiError(400, 'INVALID_ASSET_ELECTION', 'Asset inclusion must be true or false.'); assignment.includeInQualifyingIncome = value.includeInQualifyingIncome; }
   if (value.hasThreeYearAssetSupport !== undefined) { if (typeof value.hasThreeYearAssetSupport !== 'boolean') throw new ApiError(400, 'INVALID_ASSET_ELECTION', 'Asset continuance must be true or false.'); assignment.hasThreeYearAssetSupport = value.hasThreeYearAssetSupport; }
   if (value.hasStableDistributions !== undefined) { if (typeof value.hasStableDistributions !== 'boolean') throw new ApiError(400, 'INVALID_METADATA_ASSIGNMENT', 'Distribution stability must be true or false.'); assignment.hasStableDistributions = value.hasStableDistributions; }
@@ -133,6 +136,7 @@ function validateAssignment(item: ExtractionMetadataAssignment, entities: Map<st
   if (form === 'W-2' && (item.taxYear !== undefined || item.ownershipPercentage !== undefined || item.elapsedMonths !== undefined || item.payFrequency !== undefined || item.includeInQualifyingIncome !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'W-2 metadata only accepts employment role and borrower assignment.');
   if (form !== 'W-2' && !YTD_FORMS.includes(form) && item.employmentRole !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Employment role only applies to W-2, paystub, and verification records.');
   if (!YTD_FORMS.includes(form) && item.elapsedMonths !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Elapsed months only applies to a year-to-date wage document.');
+  if (!YTD_FORMS.includes(form) && item.bonusFrequency !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Bonus frequency only applies to a year-to-date wage document.');
   if (form !== 'Paystub' && (item.payFrequency !== undefined || item.baseIncomeMethod !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Paystub annualization metadata only applies to paystubs.');
   if (form !== 'WVOE' && (item.wvoeBaseMethod !== undefined || item.wvoeVariableMethod !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Verification annualization metadata only applies to a verification of employment.');
   if (item.ownershipPercentage !== undefined && !['Form 1120-S', 'Form 1065', 'Form 1120'].includes(form)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Ownership metadata is not accepted for this form.');

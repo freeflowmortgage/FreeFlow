@@ -7,6 +7,7 @@ import {
   parseWvoeBasePayPeriod,
   parseWvoePayCycle,
   paystubCoverage,
+  type BonusFrequency,
   type PayFrequency,
   type PaystubBaseMethod,
   type UnifiedIncomeCalculationPayload,
@@ -139,6 +140,12 @@ export type ExtractionMetadataAssignment = Readonly<{
   baseIncomeMethod?: PaystubBaseMethod;
   wvoeBaseMethod?: WvoeBaseMethod;
   wvoeVariableMethod?: WvoeVariableMethod;
+  /**
+   * How often the employer pays its bonus, so year-to-date bonus divides by
+   * the months its payouts cover. Optional: unreviewed, bonus divides by the
+   * elapsed months like every other variable component.
+   */
+  bonusFrequency?: BonusFrequency;
   includeInQualifyingIncome?: boolean;
   hasThreeYearAssetSupport?: boolean;
   hasStableDistributions?: boolean;
@@ -549,6 +556,7 @@ function projectWvoe(
     monthsEmployed: n('wvoe-months'),
     baseMethod: meta?.wvoeBaseMethod,
     variableMethod: meta?.wvoeVariableMethod,
+    bonusFrequency: meta?.bonusFrequency,
   });
   const gaps = new Set(annualized.gaps);
   if (gaps.delete('ELAPSED_MONTHS_REQUIRED')) {
@@ -634,6 +642,7 @@ function projectPaystub(
     elapsedMonths,
     priorYearW2Wages: method === 'prior' ? priorW2Wages(borrowerKey, employerKey) : undefined,
     baseMethod: method,
+    bonusFrequency: meta?.bonusFrequency,
   });
   const gaps = new Set(annualized.gaps);
   if (gaps.has('ELAPSED_MONTHS_REQUIRED')) {

@@ -74,6 +74,34 @@ test('IRA continuance metadata is typed and cannot gross up an unconfirmed distr
   assert.throws(() => parseMetadataReviewBody(body({ hasThreeYearIraContinuance: false, grossUpIraNonTaxable: true })), ApiError);
 });
 
+test('bonus frequency metadata is allowlisted', () => {
+  const body = (assignment: Record<string, unknown>) => ({ expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW', reasonCode: 'DOCUMENT_METADATA_CONFIRMED', assignments: [{ entityId: 'Paystub:paystub-p0', ...assignment }] });
+  for (const bonusFrequency of ['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL']) {
+    assert.deepEqual(parseMetadataReviewBody(body({ bonusFrequency })).assignments, [{ entityId: 'Paystub:paystub-p0', bonusFrequency }]);
+  }
+  for (const bonusFrequency of ['WEEKLY', 'quarterly', '', 4]) {
+    assert.throws(() => parseMetadataReviewBody(body({ bonusFrequency })), (error) => error instanceof ApiError && error.code === 'INVALID_BONUS_FREQUENCY');
+  }
+});
+
+test('bonus frequency metadata is only accepted on a paystub or verification', async () => {
+  const reviewOn = (form: string, entityId: string) => reviewExtractionMetadata({
+    $executeRaw: async () => 0, apiIdempotencyKey: { findFirst: async () => null },
+    loanApplication: { findFirst: async () => ({ id: LOAN, version: 1 }) },
+    incomeExtraction: { findFirst: async () => ({
+      id: EXTRACTION, status: 'ACTIVE', normalizedInput: form === 'W-2' ? { w2Records: [{ entityId }] } : { formRecords: [{ entityId, form }] }, canonicalHash: HASH,
+      sourceDocumentId: DOCUMENT, sourceDocumentVersion: 1, sourceContentHash: HASH,
+      sourceDocument: { version: 1, sourceContentHash: HASH }, metadataReviews: [],
+    }) },
+  } as never, context, {
+    loanId: LOAN, extractionId: EXTRACTION, expectedLoanVersion: 1, expectedMetadataVersion: 0, source: 'DOCUMENT_VISUAL_REVIEW',
+    reasonCode: 'DOCUMENT_METADATA_CONFIRMED', reasonNarrative: null, idempotencyKey: 'review-key-12345678',
+    assignments: [{ entityId, bonusFrequency: 'QUARTERLY' }],
+  });
+  await assert.rejects(reviewOn('W-2', 'w2-p0-0'), (error) => error instanceof ApiError && error.code === 'METADATA_FIELD_NOT_ALLOWED');
+  await assert.rejects(reviewOn('Schedule C', 'schedule-c-p0'), (error) => error instanceof ApiError && error.code === 'METADATA_FIELD_NOT_ALLOWED');
+});
+
 test('IRA continuance metadata is only accepted on a Form 1040 record', async () => {
   const transaction = {
     $executeRaw: async () => 0, apiIdempotencyKey: { findFirst: async () => null },
