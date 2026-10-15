@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import UrarLiveDocument from './UrarLiveDocument';
+import { scrollIntoViewWithin } from '../scrollWithin';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -68,6 +69,9 @@ function NativePdfPage({
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const activeHighlightKey = activeHighlight
+    ? `${activeHighlight.pageIndex}:${activeHighlight.box.join(',')}`
+    : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -125,12 +129,12 @@ function NativePdfPage({
   }, [pageNumber, ready]);
 
   useEffect(() => {
-    if (!activeHighlight || !highlightRef.current) return undefined;
+    if (!activeHighlightKey || !highlightRef.current) return undefined;
     const timer = window.setTimeout(() => {
-      highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      scrollIntoViewWithin(highlightRef.current);
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [activeHighlight, pageNumber]);
+  }, [activeHighlightKey, pageNumber]);
 
   if (failed) {
     if (!allowFallbackMock) {
@@ -234,14 +238,17 @@ export const PdfCoordinateCanvas: React.FC<PdfCoordinateCanvasProps> = ({
   const highlightRef = useRef<HTMLDivElement>(null);
   const category = resolveCategory(documentCategory, documentType);
   const native = Boolean(documentUrl);
+  const activeHighlightKey = activeHighlight
+    ? `${activeHighlight.pageIndex}:${activeHighlight.box.join(',')}`
+    : '';
 
   useEffect(() => {
-    if (native || !activeHighlight || !highlightRef.current) return undefined;
+    if (native || !activeHighlightKey || !highlightRef.current) return undefined;
     const timer = window.setTimeout(() => {
-      highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      scrollIntoViewWithin(highlightRef.current);
     }, 100);
     return () => window.clearTimeout(timer);
-  }, [activeHighlight, currentPage, native]);
+  }, [activeHighlightKey, currentPage, native]);
 
   const renderMockDocumentContent = () => {
     if (category === 'PAYSTUB') {
