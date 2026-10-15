@@ -49,8 +49,9 @@ def test_every_box_sits_beside_its_caption(field_map: dict, form: str) -> None:
     document = fitz.open(TEMPLATES / spec["blank"])
     try:
         for name, field in spec["fields"].items():
-            caption = caption_beside(document[field["page"]], field["box"])
-            assert field["caption"].lower() in caption.lower(), (form, name, caption)
+            for cell in (field, *(field.get("fallbacks") or [])):
+                caption = caption_beside(document[cell["page"]], cell["box"])
+                assert cell["caption"].lower() in caption.lower(), (form, name, cell["line"], caption)
     finally:
         document.close()
 
@@ -78,6 +79,20 @@ def test_meals_is_on_schedule_m1_not_schedule_k(field_map: dict) -> None:
         meals = field_map["forms"][form]["fields"]["meals"]
         assert meals["caption"] == "Travel and entertainment"
         assert meals["page"] > 0
+
+
+def test_1065_depreciation_covers_every_cell_on_line_16(field_map: dict) -> None:
+    """16b and 16c are disjoint parts of 16a, and 16a stands in for a blank 16c.
+
+    Reading 16c alone was short by the depreciation deducted through cost of
+    goods sold on 16b, and missed the whole figure on a return that fills 16a
+    and leaves the 16c net blank.
+    """
+    fields = field_map["forms"]["1065"]["fields"]
+    assert fields["depreciation"]["line"] == "Line 16c"
+    assert [cell["line"] for cell in fields["depreciation"]["fallbacks"]] == ["Line 16a"]
+    assert fields["depreciation_1125a"]["line"] == "Line 16b"
+    assert "fallbacks" not in fields["depreciation_1125a"]
 
 
 def test_other_income_is_flagged_for_review(field_map: dict) -> None:

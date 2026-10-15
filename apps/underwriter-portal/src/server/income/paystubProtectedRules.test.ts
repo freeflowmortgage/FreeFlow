@@ -215,6 +215,21 @@ test('rule 7 variable continuity is YTD divided by elapsed months', () => {
   assert.notEqual(row?.annualOvertimeIncome, 2600);
 });
 
+test('rule 7 a reviewed bonus frequency divides bonus by the months its payouts cover', () => {
+  const base = { entityId: 'paystub-1', employmentRole: 'CURRENT' as const, taxYear: 2025, borrowerKey: 'borrower-1', elapsedMonths: 7.5, baseIncomeMethod: 'ytd' as const };
+  const project = (assignment: ExtractionMetadataAssignment) =>
+    mergeAuthoritativeExtractionInputs([paystub({ assignment })], { borrowerRoster: KEYS }).w2Employers?.[0];
+  const unreviewed = project(base);
+  const quarterly = project({ ...base, bonusFrequency: 'QUARTERLY' });
+  const annual = project({ ...base, bonusFrequency: 'ANNUAL' });
+  // $1,500 over 7.5 months, then over the two quarters paid, then over the year one annual payout covers.
+  assert.equal(unreviewed?.annualBonusIncome, 2400);
+  assert.equal(quarterly?.annualBonusIncome, 3000);
+  assert.equal(annual?.annualBonusIncome, 1500);
+  assert.equal(quarterly?.annualOvertimeIncome, unreviewed?.annualOvertimeIncome);
+  assert.equal(quarterly?.annualVariableIncome, (unreviewed?.annualVariableIncome ?? 0) + 600);
+});
+
 test('rule 8 fail closed until annualizePaystub is READY', () => {
   const incomplete = paystub({
     fields: [

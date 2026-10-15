@@ -177,6 +177,28 @@ describe('AI 1003 / URLA Encompass mapping', () => {
     expect(patch).not.toHaveProperty('otherIncome');
   });
 
+  test('retirement and Social Security components reach their own custom fields and URLA other income', () => {
+    const patch = buildEncompassFieldUpdatePayload('loan-1', {
+      qualifyingMonthlyIncome: 4200,
+      trendingAnalysis: 'Stable',
+      yearsAnalyzed: [2025],
+      auditUrl: 'https://app.example.com/audit/3',
+      socialSecurityMonthly: 2156.25,
+      retirementIncomeMonthly: 2043.75,
+    });
+    expect(patch.customFields.find((field) => field.fieldName === 'CX.FREEFLOW.SOCIAL.SECURITY')?.value).toBe('2156.25');
+    expect(patch.customFields.find((field) => field.fieldName === 'CX.FREEFLOW.RETIREMENT')?.value).toBe('2043.75');
+
+    const update = buildEncompassLoanUpdate({
+      income1084: { qualifyingMonthlyIncome: 4200, socialSecurityMonthly: 2156.25, retirementIncomeMonthly: 2043.75 },
+      syncedAt: '2026-10-14T00:00:00.000Z',
+    });
+    expect(update.fieldWriter.fields['CX.FREEFLOW.SOCIAL.SECURITY']).toBe('2156.25');
+    expect(update.fieldWriter.fields['CX.FREEFLOW.RETIREMENT']).toBe('2043.75');
+    expect(update.fieldWriter.fields[ENCOMPASS_URLA_FIELD_IDS.INCOME_OTHER]).toBe('4200.00');
+    expect(encompassCustomFieldNames()).toEqual(expect.arrayContaining(['CX.FREEFLOW.SOCIAL.SECURITY', 'CX.FREEFLOW.RETIREMENT']));
+  });
+
   test('lender field overrides are closed, validated, and collision-free', () => {
     const overridden = buildEncompassFieldUpdatePayload('loan-1', {
       qualifyingMonthlyIncome: 5000,

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "node scripts/assert-runtime-mode.mjs && tsc -b && vite build",
     "start:production": "node scripts/serve-production.mjs",
-    "test:runtime": "tsx --test src/pdfScrollTarget.test.ts src/salesHost.test.ts src/runtimeMode.test.ts src/protectedWorkflow.test.ts src/protectedWorkspace.test.ts src/api/portalClient.test.ts src/encompass-host/bridge.test.ts src/encompass-host/runtimeHost.test.ts src/encompass-host/testHost.test.ts && node scripts/serve-production.test.mjs",
+    "test:runtime": "tsx --test src/pdfScrollTarget.test.ts src/salesHost.test.ts src/runtimeMode.test.ts src/protectedWorkflow.test.ts src/protectedWorkspace.test.ts src/retirementIncome.test.ts src/corpDistributionSupport.test.ts src/legalRoute.test.ts src/api/portalClient.test.ts src/encompass-host/bridge.test.ts src/encompass-host/runtimeHost.test.ts src/encompass-host/testHost.test.ts && node scripts/serve-production.test.mjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:protected": "playwright test --config playwright.protected.config.ts",

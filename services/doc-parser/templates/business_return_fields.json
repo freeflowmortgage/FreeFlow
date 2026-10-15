@@ -54,6 +54,31 @@
             438.0
           ],
           "caption": "depreciation reported on Form 1125-A",
+          "use": "add_back",
+          "fallbacks": [
+            {
+              "line": "Line 16a",
+              "page": 0,
+              "box": [
+                410.4,
+                414.0,
+                481.65,
+                426.0
+              ],
+              "caption": "Depreciation (if required, attach Form 4562)"
+            }
+          ]
+        },
+        "depreciation_1125a": {
+          "line": "Line 16b",
+          "page": 0,
+          "box": [
+            410.4,
+            426.0,
+            481.65,
+            438.0
+          ],
+          "caption": "Less depreciation reported on Form 1125-A",
           "use": "add_back"
         },
         "meals": {

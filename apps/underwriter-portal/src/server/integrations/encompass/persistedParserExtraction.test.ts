@@ -129,3 +129,30 @@ test('accepts allowlisted Form 1120-S return evidence without persisting unrelat
   }] });
   assert.equal(JSON.stringify(result).includes('000-00-0000'), false);
 });
+
+test('persists the Schedule L balance sheet the liquidity test runs on', () => {
+  // Without these the quick ratio can never be computed in the protected path,
+  // leaving a recorded distribution history as the only thing holding the
+  // business income in.
+  const result = selectPersistableParserExtraction({ formExtracts: [
+    { form: 'Form 1065', pageIndex: 4, entityId: 'form-1065-p4', sourceFieldId: 'sch-l-cash', value: '180000.00', numericValue: 180000 },
+    { form: 'Form 1065', pageIndex: 4, entityId: 'form-1065-p4', sourceFieldId: 'sch-l-current-liabilities', value: '50000.00', numericValue: 50000 },
+    { form: 'Form 1065', pageIndex: 4, entityId: 'form-1065-p4', sourceFieldId: 'borrower-ssn', value: '000-00-0000' },
+  ] });
+
+  assert.deepEqual(result.normalizedInput?.formRecords?.[0].fields.map((field) => field.sourceFieldId), [
+    'sch-l-cash', 'sch-l-current-liabilities',
+  ]);
+  assert.equal(JSON.stringify(result).includes('000-00-0000'), false);
+});
+
+test('persists Form 1065 line 16b so the depreciation addback is not short', () => {
+  const result = selectPersistableParserExtraction({ formExtracts: [
+    { form: 'Form 1065', pageIndex: 0, entityId: 'form-1065-p0', sourceFieldId: 'pt-return-dep', value: '50000.00', numericValue: 50000 },
+    { form: 'Form 1065', pageIndex: 0, entityId: 'form-1065-p0', sourceFieldId: 'pt-return-dep-1125a', value: '14500.00', numericValue: 14500 },
+  ] });
+
+  assert.deepEqual(result.normalizedInput?.formRecords?.[0].fields.map((field) => field.sourceFieldId), [
+    'pt-return-dep', 'pt-return-dep-1125a',
+  ]);
+});

@@ -185,6 +185,7 @@ export interface ScheduleFEntry {
 }
 
 export interface Form1040BenefitInput {
+  entityId?: string;
   year: number;
   totalSocialSecurity?: number;
   taxableSocialSecurity?: number;
@@ -194,6 +195,25 @@ export interface Form1040BenefitInput {
   isNonGovernmentPension?: boolean; // FHA strictly requires continuance on private
   vaDisabilityMonthly?: number;
 }
+
+/**
+ * Form 1040 Line 4a/4b IRA distributions for one tax year. Only the most
+ * recent year qualifies, and only after an underwriter confirms continuance.
+ */
+export interface IraDistributionInput {
+  entityId?: string;
+  year: number;
+  totalDistributions?: number;   // Form 1040 Line 4a
+  taxableDistributions?: number; // Form 1040 Line 4b
+  /** Vested balance from the most recent retirement account statement. */
+  accountBalance?: number;
+  /** Underwriter confirmed the distributions continue at least 36 months. */
+  hasThreeYearContinuance?: boolean;
+  /** Underwriter documented the Line 4a − 4b portion as non-taxable and elects the program gross-up. */
+  grossUpNonTaxable?: boolean;
+}
+
+export const IRA_CONTINUANCE_MONTHS = 36;
 
 export interface ScheduleBAndDInput {
   year: number;
@@ -259,6 +279,7 @@ export interface UnifiedIncomeCalculationPayload {
   form1065?: Form1065Entry[];
   form1120?: Form1120Entry[];
   benefits?: Form1040BenefitInput[];
+  iraDistributions?: IraDistributionInput[];
   assets?: ScheduleBAndDInput[];
   trusts?: ScheduleEPartIIIInput[];
   scheduleEProperties?: ScheduleEPage1PropertyInput[]; // Added Schedule E Page 1
@@ -278,6 +299,112 @@ function getMonthsInService(entry: ScheduleEPage1PropertyInput): number {
     return Math.max(1, Math.min(12, Math.ceil(entry.fairRentalDays / 30)));
   }
   return 12; // Default to standard 12 months if no days rented is specified
+}
+
+export interface IraDistributionBreakdown {
+  year: number;
+  priorYearsReported: number[];
+  totalDistributions: number;
+  taxableDistributions: number;
+  nonTaxableDistributions: number;
+  monthlyDistribution: number;
+  accountBalance: number | null;
+  monthsOfContinuance: number | null;
+  hasThreeYearContinuance: boolean;
+  grossUpNonTaxable: boolean;
+  appliedGrossUpMultiplier: number;
+  monthlyGrossUpBenefit: number;
+  includedInQualifyingIncome: boolean;
+  qualifyingMonthlyIncome: number;
+}
+
+function calculateIraDistributions(
+  entries: IraDistributionInput[],
+  grossUpMultiplier: Decimal,
+  warnings: WarningMessage[],
+  conditions: GeneratedCondition[],
+): IraDistributionBreakdown | null {
+  // Fully taxable distributions are reported on Line 4b alone with 4a blank.
+  const totalOf = (entry: IraDistributionInput) => Decimal.max(
+    new Decimal(entry.totalDistributions || 0),
+    new Decimal(entry.taxableDistributions || 0),
+  );
+  const reported = entries
+    .filter((entry) => totalOf(entry).gt(0))
+    .sort((a, b) => b.year - a.year);
+  if (reported.length === 0) return null;
+  const latest = reported[0];
+  if (reported.filter((entry) => entry.year === latest.year).length > 1) {
+    warnings.push({
+      code: 'IRA_DUPLICATE_TAX_YEAR',
+      severity: 'WARNING',
+      message: `More than one Form 1040 reported IRA distributions for ${latest.year}. Only the first was used; confirm the duplicate return before relying on this figure.`
+    });
+  }
+
+  const total = totalOf(latest);
+  const taxable = Decimal.min(total, Decimal.max(0, new Decimal(latest.taxableDistributions || 0)));
+  const nonTaxable = total.sub(taxable);
+  if (taxable.eq(0)) {
+    warnings.push({
+      code: 'IRA_DISTRIBUTION_NOT_TAXABLE',
+      severity: 'WARNING',
+      message: `The ${latest.year} Form 1040 reports $${total.toFixed(2)} on Line 4a with no taxable amount on Line 4b. A rollover, Roth conversion, or qualified charitable distribution is not recurring income; confirm the distributions are ongoing before relying on them.`
+    });
+  }
+  const monthly = total.div(12);
+  const balance = latest.accountBalance !== undefined && latest.accountBalance !== null && latest.accountBalance >= 0
+    ? new Decimal(latest.accountBalance)
+    : null;
+  const monthsOfContinuance = balance ? balance.div(monthly).toDecimalPlaces(1, Decimal.ROUND_DOWN) : null;
+  const confirmed = latest.hasThreeYearContinuance === true;
+  const grossUp = confirmed && latest.grossUpNonTaxable === true && nonTaxable.gt(0);
+  const multiplier = grossUp ? grossUpMultiplier : new Decimal(1);
+  const qualifyingAnnual = confirmed ? taxable.add(nonTaxable.mul(multiplier)) : new Decimal(0);
+
+  if (!confirmed) {
+    warnings.push({
+      code: 'IRA_DISTRIBUTION_EXCLUDED_PENDING_CONTINUANCE',
+      severity: 'WARNING',
+      message: `IRA distributions of $${total.toFixed(2)} were reported on the ${latest.year} Form 1040 (Line 4a) but are excluded until an underwriter confirms at least ${IRA_CONTINUANCE_MONTHS} months of continuance.`
+    });
+    conditions.push({
+      title: 'IRA Distribution 36-Month Continuance',
+      category: 'INCOME',
+      description: `Form 1040 Line 4a reports $${total.toFixed(2)} of IRA distributions for ${latest.year}. Obtain the most recent retirement account statement and evidence of the distribution schedule, then confirm the vested balance supports at least ${IRA_CONTINUANCE_MONTHS} months of continued distributions.`,
+      requiredDocType: 'RETIREMENT_ACCOUNT_STATEMENT'
+    });
+  } else if (!balance) {
+    conditions.push({
+      title: 'IRA Account Balance Documentation',
+      category: 'INCOME',
+      description: `Underwriter confirmed ${IRA_CONTINUANCE_MONTHS}-month continuance of IRA distributions without a recorded account balance. Retain the most recent retirement account statement supporting the confirmation.`,
+      requiredDocType: 'RETIREMENT_ACCOUNT_STATEMENT'
+    });
+  } else if (monthsOfContinuance && monthsOfContinuance.lt(IRA_CONTINUANCE_MONTHS)) {
+    warnings.push({
+      code: 'IRA_CONTINUANCE_BALANCE_SHORTFALL',
+      severity: 'CRITICAL',
+      message: `The recorded IRA balance of $${balance.toFixed(2)} supports ${monthsOfContinuance.toString()} months at the ${latest.year} distribution rate of $${monthly.toFixed(2)}/mo, short of the ${IRA_CONTINUANCE_MONTHS} months the underwriter confirmed.`
+    });
+  }
+
+  return {
+    year: latest.year,
+    priorYearsReported: reported.slice(1).map((entry) => entry.year).filter((year) => year !== latest.year),
+    totalDistributions: total.toNumber(),
+    taxableDistributions: taxable.toNumber(),
+    nonTaxableDistributions: nonTaxable.toNumber(),
+    monthlyDistribution: monthly.toDecimalPlaces(2).toNumber(),
+    accountBalance: balance ? balance.toNumber() : null,
+    monthsOfContinuance: monthsOfContinuance ? monthsOfContinuance.toNumber() : null,
+    hasThreeYearContinuance: confirmed,
+    grossUpNonTaxable: grossUp,
+    appliedGrossUpMultiplier: multiplier.toNumber(),
+    monthlyGrossUpBenefit: nonTaxable.mul(multiplier.sub(1)).div(12).toDecimalPlaces(2).toNumber(),
+    includedInQualifyingIncome: confirmed,
+    qualifyingMonthlyIncome: qualifyingAnnual.div(12).toDecimalPlaces(2).toNumber()
+  };
 }
 
 function isActiveW2Role(role: W2EmploymentRole): boolean {
@@ -367,6 +494,49 @@ export function scheduleLQuickRatioFromInput(sheet?: ScheduleLLiquidityInput): {
     return { ratio: assets.gt(0) ? new Decimal(999) : new Decimal(0), assets, liabilities };
   }
   return { ratio: assets.div(liabilities), assets, liabilities };
+}
+
+export interface DistributionSupport {
+  /** The business income the evidence actually supports. */
+  eligibleIncome: Decimal;
+  /** Distributions reported on the K-1, or null when the box was not read. */
+  reported: Decimal | null;
+  /** Set when a recorded distribution history is contradicted by the K-1. */
+  shortfall: { required: Decimal; restsOnLiquidity: boolean } | null;
+}
+
+/**
+ * How much business income the distribution evidence supports.
+ *
+ * Distributions are evidence only up to what was distributed, so a recorded
+ * history that outruns the K-1 does not justify the excess. Fannie Mae's other
+ * route is business liquidity, which is why a passing Schedule L still carries
+ * the income; with no balance sheet to test, nothing is left holding up the
+ * shortfall and the income falls back to what was actually distributed.
+ *
+ * `liquidityPasses` is null when the return carried no Schedule L. An absent
+ * distributions box is likewise null rather than zero: a figure that was never
+ * read contradicts nothing, and capping on it would zero a supported business.
+ */
+export function distributionSupport(
+  businessIncome: Decimal,
+  reportedDistributions: number | undefined,
+  recordedStableHistory: boolean | undefined,
+  liquidityPasses: boolean | null,
+): DistributionSupport {
+  const reported = reportedDistributions === undefined ? null : new Decimal(reportedDistributions);
+  if (!recordedStableHistory) {
+    return { eligibleIncome: Decimal.min(businessIncome, reported ?? new Decimal(0)), reported, shortfall: null };
+  }
+  if (reported === null || reported.gte(businessIncome)) {
+    return { eligibleIncome: businessIncome, reported, shortfall: null };
+  }
+  const restsOnLiquidity = liquidityPasses === true;
+  return {
+    eligibleIncome: restsOnLiquidity ? businessIncome : reported,
+    reported,
+    shortfall: { required: businessIncome, restsOnLiquidity },
+  };
 }
 
 interface ComputedPropertyCashFlow {
@@ -557,6 +727,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const k1Income = ordinary.add(rentalRealEstate).add(otherRental);
 
     let k1EligibleIncome = new Decimal(0);
+    let distributionShortfall = false;
 
     // FNMA S-Corp Liquidity Exception & Stable Distribution Triggers
     if (entry.ownershipPercentage >= 25) {
@@ -579,10 +750,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
 
       const borrowerShareOfAdjustments = k1Income.add(returnAdjustments.mul(shareFactor));
 
-      if (entry.hasStableDistributions) {
-        k1EligibleIncome = borrowerShareOfAdjustments;
-      } else {
-        k1EligibleIncome = Decimal.min(borrowerShareOfAdjustments, distributions);
+      const support = distributionSupport(
+        borrowerShareOfAdjustments,
+        entry.k1Distributions,
+        entry.hasStableDistributions,
+        liquidity ? passesLiquidity : null,
+      );
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+
+      if (support.shortfall) {
+        warnings.push({
+          code: 'SCORP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: support.shortfall.restsOnLiquidity
+            ? `S-Corporation Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 16D reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income. The $${borrowerShareOfAdjustments.sub(distributions).toFixed(2)} shortfall is not supported by distributions and rests on the Schedule L quick ratio of ${liquidity!.ratio.toFixed(2)} instead. Evidence the distribution history or qualify the business on liquidity.`
+            : `S-Corporation Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 16D reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income, and the return carried no Schedule L to test liquidity. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      } else if (!entry.hasStableDistributions) {
         warnings.push({
           code: 'SCORP_DISTRIBUTION_LIMITATION_ACTIVE',
           severity: 'WARNING',
@@ -595,14 +780,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // ordinary income — no business-level non-cash add-backs, no liquidity test —
       // capped at actual distributions received unless a stable history is documented.
       const minorityK1Income = k1Income;
-      k1EligibleIncome = entry.hasStableDistributions
-        ? minorityK1Income
-        : Decimal.min(minorityK1Income, distributions);
+      // No liquidity route under 25%: the borrower is not self-employed, so a
+      // recorded history the K-1 contradicts leaves only what was distributed.
+      const support = distributionSupport(minorityK1Income, entry.k1Distributions, entry.hasStableDistributions, null);
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+      const capped = support.eligibleIncome.lt(minorityK1Income);
       warnings.push({
         code: 'SCORP_MINORITY_K1_INCOME',
         severity: 'WARNING',
-        message: `S-Corporation Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) with no business add-backs${entry.hasStableDistributions ? '' : `, capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history.`
+        message: `S-Corporation Year ${entry.year}: Ownership ${entry.ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) with no business add-backs${capped ? `, capped at distributions received ($${distributions.toFixed(2)})` : ''}. Document a 2-year receipt history.`
       });
+      if (support.shortfall) {
+        warnings.push({
+          code: 'SCORP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: `S-Corporation Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 16D reports distributions of $${distributions.toFixed(2)} against $${minorityK1Income.toFixed(2)} of K-1 income. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      }
     }
 
     const totalCombined = w2.add(k1EligibleIncome);
@@ -617,7 +812,10 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       k1EligibleIncome: k1EligibleIncome.toNumber(),
       totalCombinedQualifying: totalCombined.toNumber(),
       quickRatio: entry.ownershipPercentage >= 25 && liquidity ? liquidity.ratio.toDecimalPlaces(2).toNumber() : null,
-      passesLiquidity: entry.ownershipPercentage >= 25 && liquidity ? passesLiquidity : null
+      passesLiquidity: entry.ownershipPercentage >= 25 && liquidity ? passesLiquidity : null,
+      distributionsReported: entry.k1Distributions ?? null,
+      // True when a recorded distribution history is contradicted by Box 16D.
+      distributionShortfall
     };
   });
 
@@ -652,6 +850,7 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     const k1Income = ordinary.add(rentalRealEstate).add(otherRental);
 
     let k1EligibleIncome = new Decimal(0);
+    let distributionShortfall = false;
 
     if (ownershipPercentage >= 25) {
       if (liquidity && !passesLiquidity) {
@@ -673,10 +872,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
 
       const borrowerShareOfAdjustments = k1Income.add(returnAdjustments.mul(shareFactor));
 
-      if (entry.hasStableDistributions) {
-        k1EligibleIncome = borrowerShareOfAdjustments;
-      } else {
-        k1EligibleIncome = Decimal.min(borrowerShareOfAdjustments, distributions);
+      const support = distributionSupport(
+        borrowerShareOfAdjustments,
+        entry.k1Distributions,
+        entry.hasStableDistributions,
+        liquidity ? passesLiquidity : null,
+      );
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+
+      if (support.shortfall) {
+        warnings.push({
+          code: 'PARTNERSHIP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: support.shortfall.restsOnLiquidity
+            ? `Partnership Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 19A reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income. The $${borrowerShareOfAdjustments.sub(distributions).toFixed(2)} shortfall is not supported by distributions and rests on the Schedule L quick ratio of ${liquidity!.ratio.toFixed(2)} instead. Evidence the distribution history or qualify the business on liquidity.`
+            : `Partnership Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 19A reports distributions of $${distributions.toFixed(2)} against $${borrowerShareOfAdjustments.toFixed(2)} of business income, and the return carried no Schedule L to test liquidity. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      } else if (!entry.hasStableDistributions) {
         warnings.push({
           code: 'PARTNERSHIP_DISTRIBUTION_LIMITATION_ACTIVE',
           severity: 'WARNING',
@@ -690,14 +903,24 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // business add-backs, no liquidity test — capped at distributions received
       // unless a stable history is documented.
       const minorityK1Income = k1Income;
-      k1EligibleIncome = entry.hasStableDistributions
-        ? minorityK1Income
-        : Decimal.min(minorityK1Income, distributions);
+      // No liquidity route under 25%: the borrower is not self-employed, so a
+      // recorded history the K-1 contradicts leaves only what was distributed.
+      const support = distributionSupport(minorityK1Income, entry.k1Distributions, entry.hasStableDistributions, null);
+      k1EligibleIncome = support.eligibleIncome;
+      distributionShortfall = support.shortfall !== null;
+      const capped = support.eligibleIncome.lt(minorityK1Income);
       warnings.push({
         code: 'PARTNERSHIP_MINORITY_K1_INCOME',
         severity: 'WARNING',
-        message: `Partnership Year ${entry.year}: Ownership ${ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${entry.hasStableDistributions ? '' : ` and capped at distributions received ($${distributions.toFixed(2)})`}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
+        message: `Partnership Year ${entry.year}: Ownership ${ownershipPercentage}% is under 25% — borrower is not self-employed. Usable income limited to K-1 boxes 1/2/3 ($${minorityK1Income.toFixed(2)}) plus guaranteed payments, with no business add-backs${capped ? ` and capped at distributions received ($${distributions.toFixed(2)})` : ''}. Document a 2-year receipt history. Note: qualify on the END-of-year percentage — Freddie Mac uses the Item J profit %, FNMA uses the capital %.`
       });
+      if (support.shortfall) {
+        warnings.push({
+          code: 'PARTNERSHIP_DISTRIBUTIONS_BELOW_INCOME',
+          severity: 'WARNING',
+          message: `Partnership Year ${entry.year}: a stable distribution history is recorded, but K-1 Box 19A reports distributions of $${distributions.toFixed(2)} against $${minorityK1Income.toFixed(2)} of K-1 income. Business income has been capped at the $${distributions.toFixed(2)} actually distributed.`
+        });
+      }
     }
 
     const totalCombined = k1EligibleIncome.add(guaranteed);
@@ -713,7 +936,10 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       k1EligibleIncome: k1EligibleIncome.toNumber(),
       totalCombinedQualifying: totalCombined.toNumber(),
       quickRatio: ownershipPercentage >= 25 && liquidity ? liquidity.ratio.toDecimalPlaces(2).toNumber() : null,
-      passesLiquidity: ownershipPercentage >= 25 && liquidity ? passesLiquidity : null
+      passesLiquidity: ownershipPercentage >= 25 && liquidity ? passesLiquidity : null,
+      distributionsReported: entry.k1Distributions ?? null,
+      // True when a recorded distribution history is contradicted by Box 19A.
+      distributionShortfall
     };
   });
 
@@ -786,9 +1012,17 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
   // ──────────────────────────────────────────────────────────────────────
   // E. FORM 1040 BENEFIT INPUTS (SOCIAL SECURITY, DISABILITY, AND PENSIONS)
   // ──────────────────────────────────────────────────────────────────────
+  const benefitsBreakdown: Array<{
+    entityId: string | null;
+    year: number;
+    qualifyingSocialSecurity: number;
+    qualifyingPensionsAndAnnuities: number;
+    qualifyingVaDisability: number;
+  }> = [];
   if (payload.benefits && payload.benefits.length > 0) {
     payload.benefits.forEach((entry) => {
       let benefitFlow = new Decimal(0);
+      let vaQualifyingAnnual = new Decimal(0);
 
       // 1. Social Security Retirement & Disability OASDI Gross-Up Math
       const ssTotal = new Decimal(entry.totalSocialSecurity || 0);
@@ -829,11 +1063,18 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
       // 3. VA Disability & Benefits (100% Tax-Free, grossed up)
       const vaDisability = new Decimal(entry.vaDisabilityMonthly || 0);
       if (vaDisability.gt(0)) {
-        const vaQualifyingAnnual = vaDisability.mul(grossUpMultiplier).mul(12);
+        vaQualifyingAnnual = vaDisability.mul(grossUpMultiplier).mul(12);
         benefitFlow = benefitFlow.add(vaQualifyingAnnual);
       }
 
       addFlowToYear(entry.year, benefitFlow);
+      benefitsBreakdown.push({
+        entityId: entry.entityId ?? null,
+        year: entry.year,
+        qualifyingSocialSecurity: ssQualifying.toNumber(),
+        qualifyingPensionsAndAnnuities: pensionQualifying.toNumber(),
+        qualifyingVaDisability: vaQualifyingAnnual.toNumber(),
+      });
     });
   }
 
@@ -1236,8 +1477,15 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     }
   }
 
-  // Combine military and rental impact
+  // IRA distributions qualify from the most recent return only, so they are
+  // added after trending rather than averaged with prior years.
+  const iraDistributionBreakdown = calculateIraDistributions(
+    payload.iraDistributions || [], grossUpMultiplier, warnings, conditions,
+  );
+
+  // Combine military, IRA, and rental impact
   totalQualifyingMonthlyIncome = totalQualifyingMonthlyIncome.add(totalQualifyingMilitaryMonthly);
+  totalQualifyingMonthlyIncome = totalQualifyingMonthlyIncome.add(iraDistributionBreakdown?.qualifyingMonthlyIncome ?? 0);
   totalQualifyingMonthlyIncome = totalQualifyingMonthlyIncome.add(finalRentalIncomeImpact);
 
   return {
@@ -1263,7 +1511,9 @@ export function calculateUnifiedIncome(payload: UnifiedIncomeCalculationPayload)
     form1065Breakdown,
     form1120Breakdown,
     assetIncomeBreakdown,
+    benefitsBreakdown,
     scheduleEPropertiesBreakdown,
-    militaryBreakdown
+    militaryBreakdown,
+    iraDistributionBreakdown
   };
 }

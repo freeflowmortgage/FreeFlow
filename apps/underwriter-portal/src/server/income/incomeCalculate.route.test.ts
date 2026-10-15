@@ -92,6 +92,47 @@ test('calculation loads persisted extraction and writes cryptographic provenance
   assert.deepEqual((state.body as { extractionWarnings: string[] }).extractionWarnings, []);
 });
 
+test('Form 1040 Social Security and continuance-confirmed IRA persist as their own export components', async () => {
+  let calculationData: Record<string, unknown> | undefined;
+  let queryCount = 0;
+  const extraction = {
+    ...currentExtraction(),
+    warnings: [],
+    normalizedInput: { formRecords: [{ entityId: 'f1040-2025', form: 'Form 1040', pageIndex: 0, fields: [
+      { sourceFieldId: 'f1040-ira-total', numericValue: 24000 }, { sourceFieldId: 'f1040-ira-taxable', numericValue: 18000 },
+      { sourceFieldId: 'f1040-ss-total', numericValue: 26400 }, { sourceFieldId: 'f1040-ss-taxable', numericValue: 22440 },
+    ] }] },
+    metadataReviews: [{ id: REVIEW, metadataVersion: 1, canonicalHash: REVIEW_HASH, extractionHash: EXTRACTION_HASH, sourceDocumentVersion: 1, sourceContentHash: SOURCE_HASH, assignments: [
+      { entityId: 'f1040-2025', taxYear: 2025, iraAccountBalance: 400000, hasThreeYearIraContinuance: true, grossUpIraNonTaxable: true },
+    ] }],
+  };
+  const transaction = {
+    loanApplication: { findFirst: async () => ({ id: LOAN, version: 1, loanProgram: 'CONVENTIONAL' }) },
+    loanBorrower: { findMany: async () => [] },
+    incomeExtraction: { findMany: async () => [extraction] },
+    $queryRaw: async () => (++queryCount === 1 ? [{ version: 1 }] : [{
+      id: EXTRACTION, status: 'ACTIVE', canonicalHash: EXTRACTION_HASH, sourceDocumentId: DOCUMENT,
+      sourceDocumentVersion: 1, sourceContentHash: SOURCE_HASH, sourceAttachmentId: 'attachment-1',
+      documentVersion: 1, documentHash: SOURCE_HASH, documentAttachmentId: 'attachment-1',
+    }]),
+    form1084Audit: { create: async ({ data }: { data: Record<string, unknown> }) => { calculationData = data; return { id: CALCULATION }; } },
+    incomeCalculationExtraction: { createMany: async () => ({ count: 1 }) },
+    incomeExtractionMetadataReview: { findMany: async () => [{ id: REVIEW, extractionId: EXTRACTION, metadataVersion: 1, canonicalHash: REVIEW_HASH }] },
+    $executeRaw: async () => 0,
+    auditEvent: { findFirst: async () => null, create: async ({ data }: { data: Record<string, unknown> }) => data },
+  };
+  const handler = createIncomeCalculationHandler({
+    withTenantTransaction: (async (_scope, operation) => operation(transaction as never)) as never,
+  });
+  const { response, state } = recorder();
+  await handler(request({ loanId: LOAN, extractionIds: [EXTRACTION] }), response, context);
+  assert.equal(state.status, 200, JSON.stringify(state.body));
+  // Social Security 22,440 + 3,960 × 1.25 and IRA 18,000 + 6,000 × 1.25, each over 12 months.
+  assert.equal(calculationData?.socialSecurityMonthly, 2282.5);
+  assert.equal(calculationData?.retirementIncomeMonthly, 2125);
+  assert.equal(calculationData?.qualifyingMonthlyIncome, 4407.5);
+});
+
 test('superseded and source-version-stale extractions fail before calculation', async () => {
   for (const [record, code] of [
     [{ ...currentExtraction(), status: 'SUPERSEDED' }, 'EXTRACTION_SUPERSEDED'],

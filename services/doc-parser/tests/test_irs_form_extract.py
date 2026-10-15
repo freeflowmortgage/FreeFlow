@@ -781,3 +781,90 @@ def test_paystub_employer_skips_a_browser_print_header() -> None:
     fields = extract_irs_form_fields(data, page_indices=[0])
     employer = [field["value"] for field in fields if field["sourceFieldId"] == "ps-employer-name"]
     assert employer == ["Riverside Medical Center"]
+
+
+def _form_1040_income_pdf(rows: list[tuple[str, str, str | None, str | None]]) -> bytes:
+    """Lines 4-6 the way the IRS prints them: "Na label . . Na [amt]  b Taxable amount . . Nb [amt]"."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 50), "Form 1040 U.S. Individual Income Tax Return 2024", fontsize=11)
+    for offset, (line, label, total, taxable) in enumerate(rows):
+        y = 200 + offset * 20
+        page.insert_text((40, y), f"{line} {label} . . . .", fontsize=8)
+        page.insert_text((170, y), line, fontsize=7)
+        if total:
+            page.insert_text((190, y), total, fontsize=8)
+        page.insert_text((300, y), "b Taxable amount . . . .", fontsize=8)
+        page.insert_text((450, y), f"{line[0]}b", fontsize=7)
+        if taxable:
+            page.insert_text((480, y), taxable, fontsize=8)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def test_form_1040_reads_ira_pension_and_social_security_rows_separately() -> None:
+    fields = extract_irs_form_fields(
+        _form_1040_income_pdf(
+            [
+                ("4a", "IRA distributions", "24,000.00", "18,000.00"),
+                ("5a", "Pensions and annuities", "30,000.00", "27,500.00"),
+                ("6a", "Social security benefits", "26,400.00", "22,440.00"),
+            ]
+        )
+    )
+    values = {row["sourceFieldId"]: row["numericValue"] for row in fields}
+    assert values == {
+        "f1040-ira-total": 24000.0,
+        "f1040-ira-taxable": 18000.0,
+        "f1040-pensions-total": 30000.0,
+        "f1040-pensions-taxable": 27500.0,
+        "f1040-ss-total": 26400.0,
+        "f1040-ss-taxable": 22440.0,
+    }, fields
+    lines = {row["sourceFieldId"]: row["lineNum"] for row in fields}
+    assert lines["f1040-ira-total"] == "Line 4a"
+    assert lines["f1040-ira-taxable"] == "Line 4b"
+
+
+def test_form_1040_blank_taxable_cell_does_not_borrow_a_neighbor() -> None:
+    fields = extract_irs_form_fields(
+        _form_1040_income_pdf(
+            [
+                ("4a", "IRA distributions", "50,000.00", None),
+                ("5a", "Pensions and annuities", "30,000.00", "27,500.00"),
+            ]
+        )
+    )
+    values = {row["sourceFieldId"]: row["numericValue"] for row in fields}
+    assert values["f1040-ira-total"] == 50000.0, fields
+    assert "f1040-ira-taxable" not in values, fields
+    assert values["f1040-pensions-taxable"] == 27500.0, fields
+
+
+def test_form_1040_ocr_taxable_amount_is_read_on_its_own_row() -> None:
+    def row(y: float, *label: str, total: str, taxable: str) -> list[OcrWord]:
+        words = [OcrWord(part, 0.06 + 0.08 * index, y, 0.07, 0.015, 99) for index, part in enumerate(label)]
+        return words + [
+            OcrWord(total, 0.32, y, 0.10, 0.015, 99),
+            OcrWord("b", 0.48, y, 0.01, 0.015, 99),
+            OcrWord("Taxable", 0.50, y, 0.07, 0.015, 99),
+            OcrWord("amount", 0.58, y, 0.07, 0.015, 99),
+            OcrWord(taxable, 0.78, y, 0.10, 0.015, 99),
+        ]
+
+    fields = extract_irs_form_fields(
+        _blank_pdf(),
+        ocr_pages=[
+            _ocr_page(
+                OcrWord("Form 1040 U.S. Individual Income Tax Return", 0.08, 0.05, 0.55, 0.03, 99),
+                *row(0.30, "4a", "IRA", "distributions", total="12,000.00", taxable="9,000.00"),
+                *row(0.33, "6a", "Social", "security", "benefits", total="20,000.00", taxable="17,000.00"),
+            )
+        ],
+    )
+    values = {row["sourceFieldId"]: row["numericValue"] for row in fields}
+    assert values["f1040-ira-total"] == 12000.0, fields
+    assert values["f1040-ira-taxable"] == 9000.0, fields
+    assert values["f1040-ss-total"] == 20000.0, fields
+    assert values["f1040-ss-taxable"] == 17000.0, fields

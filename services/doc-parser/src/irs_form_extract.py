@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from business_return_grid import extract_business_return_page, form_key_for_page
-from form_signatures import PAYSTUB_TITLE, PRINT_CHROME_LINE, W2_FRONT_LABELS, W2_TITLE, WVOE_TITLE
+from form_signatures import (
+    PAYSTUB_TITLE,
+    PRINT_CHROME_LINE,
+    W2_FRONT_LABELS,
+    W2_TITLE,
+    WVOE_NOTICE_PAGE,
+    WVOE_TITLE,
+)
 from ocr_match import pattern_matches
 from paystub_row_rules import (
     EXCLUDE_ROW as _PAYSTUB_EXCLUDE_ROW,
@@ -39,6 +46,17 @@ from schedule_e_grid import (
 logger = logging.getLogger("freeflow.irs_extract")
 
 EIN_TOKEN = re.compile(r"\b(\d{2}-\d{7}|\d{9})\b")
+_MONTH_NAME = r"jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+# Vendors spell dates out: Truework prints "March 4, 2023" and, for a hire
+# date, "May, 25 2018" with the comma after the month.
+DATE_TOKEN = re.compile(
+    r"\b(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}"
+    rf"|(?:{_MONTH_NAME})[a-z]*\.?,?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}})\b",
+    re.IGNORECASE,
+)
+_MONTH_INDEX = {name: index + 1 for index, name in enumerate(_MONTH_NAME.split("|"))}
+_DURATION_YEARS = re.compile(r"(\d{1,2})\s*(?:yrs?|years?)\b", re.IGNORECASE)
+_DURATION_MONTHS = re.compile(r"(\d{1,3})\s*(?:mos?|months?)\b", re.IGNORECASE)
 PERCENT_TOKEN = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*%")
 MONEY_TOKEN = re.compile(
     r"(?:\$\s*)?(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?|\((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?\))"
@@ -55,6 +73,9 @@ class FieldSpec:
     line_num: str
     labels: tuple[str, ...]
     capture: str = "money"
+    # Labels that repeat on every row ("Taxable amount" on 1040 lines 4b/5b/6b)
+    # are only read on the row that starts with one of these labels.
+    row_anchor: tuple[str, ...] = ()
 
 
 W2_FIELDS = (
@@ -127,12 +148,132 @@ PAYSTUB_FIELDS = (
     FieldSpec("ps-tips-ytd", "Paystub", "wages", "Tips YTD", "Tips YTD", "Tips", ("Tips YTD", "YTD tips"), "money"),
     FieldSpec("ps-commission-ytd", "Paystub", "wages", "Commission YTD", "Commission YTD", "Commission", ("Commission YTD", "YTD commission"), "money"),
     FieldSpec("ps-rsu-ytd", "Paystub", "wages", "RSU YTD", "RSU / Stock Award YTD", "RSU", ("RSU", "Restricted stock", "Stock award"), "money"),
+    # How much of the year the YTD column covers, and whether any pay period
+    # of that year closes after this one, both follow from the period end.
+    FieldSpec("ps-period-end", "Paystub", "identity", "Period End", "Pay Period End", "Period End", ("Pay Period End", "Period End", "Period Ending", "Pay Period Ending"), "date"),
+    FieldSpec("ps-period-start", "Paystub", "identity", "Period Start", "Pay Period Start", "Period Start", ("Pay Period Begin", "Period Start", "Period Beginning", "Pay Period Beginning"), "date"),
+    FieldSpec("ps-pay-date", "Paystub", "identity", "Pay Date", "Pay Date", "Pay Date", ("Check Date", "Pay Date", "Payment Date"), "date"),
 )
 
+_WVOE_CURRENT_BASE_LABELS = (
+    "Current Gross Base Pay",
+    "Current Gross Pay",
+    "Employee Rate of Pay",
+    "Current base pay",
+    "Current Rate of Pay",
+    "Rate of Pay",
+    "Base Pay Rate",
+    "Annual Salary",
+)
+"""Where the rate of pay is stated, as distinct from the earnings history."""
+
+# A verification states several money columns per earnings figure, so a spec
+# that takes one amount from a row cannot say which year it read. The grid
+# readers below own every earnings amount; the specs here cover the identity
+# and rate-of-pay fields, which are stated one to a row. The ids wvoe-base,
+# wvoe-bonus and wvoe-ot keep the meanings the console field map and
+# liveHydrate already assume.
+#
+# Labels cover Form 1005 and the two vendor reports that arrive in its place,
+# The Work Number and Truework, which carry the same figures under their own
+# wording. The most specific label of a group comes first, because _first_hit
+# returns the first one that lands on the page.
 WVOE_FIELDS = (
-    FieldSpec("wvoe-base", "WVOE", "wages", "Base", "WVOE Base Pay", "Base", ("Base pay", "Current base"), "money"),
-    FieldSpec("wvoe-bonus", "WVOE", "wages", "Bonus", "WVOE Bonus History", "Bonus", ("Bonus", "Commission"), "money"),
-    FieldSpec("wvoe-ot", "WVOE", "wages", "OT", "WVOE Overtime History", "OT", ("Overtime",), "money"),
+    FieldSpec("wvoe-employer-name", "WVOE", "identity", "Employer", "Employer Name", "Employer", ("Name and address of employer", "Employer Name", "Company Name", "Employer"), "text"),
+    FieldSpec("wvoe-base", "WVOE", "wages", "Rate", "Current Gross Base Pay", "Rate", _WVOE_CURRENT_BASE_LABELS, "money"),
+    # The unit the rate is quoted in, which is not the paycheck cycle. The
+    # readers prefer the word printed alongside the amount itself ("$45.00
+    # Hourly"); this label only covers the vendors that give it its own row.
+    FieldSpec("wvoe-base-period", "WVOE", "identity", "Rate Basis", "Base Pay Period", "Rate Basis", ("Employee Pay Frequency", "Rate of Pay Frequency", "Salary Frequency"), "text"),
+    FieldSpec("wvoe-pay-cycle", "WVOE", "identity", "Pay Cycle", "Paycheck Cycle", "Pay Cycle", ("Pay Cycle", "Paycheck Frequency", "Pay Period Frequency", "Payroll Frequency"), "text"),
+    FieldSpec("wvoe-hours-week", "WVOE", "wages", "Hrs/Wk", "Average Hours per Week", "Hrs/Wk", ("average hours per week", "hours per week", "Weekly Hours", "Hours Worked"), "integer"),
+    # The Work Number counts hours over the pay period rather than the week.
+    FieldSpec("wvoe-hours-period", "WVOE", "wages", "Hrs/Period", "Average Hours per Pay Period", "Hrs/Period", ("Avg. Hrs. Worked / Pay Period", "Hrs. Worked / Pay Period", "Hours Worked Per Pay Period", "Hours Per Pay Period"), "integer"),
+    FieldSpec("wvoe-ytd-thru", "WVOE", "identity", "Thru", "Year to Date Through", "Thru", ("Year To Date Thru", "Current As Of", "Data as of", "As of Date", "Verification Date", "Report Date", "Most Recent Pay Date", "Thru", "Through"), "date"),
+    FieldSpec("wvoe-hire-date", "WVOE", "identity", "Hire Date", "Date of Employment", "Hire Date", ("Applicant's Date of Employment", "Dates of Employment", "Date of Employment", "Original Hire Date", "Most Recent Start Date", "Employment Start Date", "Date of hire", "Date Hired", "Hire Date", "Start Date"), "date"),
+    # Both vendors print the tenure outright, which is a surer read than
+    # differencing the hire date against the date the report was struck.
+    FieldSpec("wvoe-months", "WVOE", "wages", "Tenure", "Months Employed", "Tenure", ("Total Time With Employer", "Total Length of Employment", "Length of Employment", "Time With Employer"), "duration"),
+    # Carries no labels: the grid readers resolve it from the column headings,
+    # and the calendar year of the current column is not stated anywhere else.
+    FieldSpec("wvoe-ytd-year", "WVOE", "identity", "Year", "Year to Date Year", "Year", (), "integer"),
+)
+
+_WVOE_EARNING_SPECS: dict[str, FieldSpec] = {
+    "wvoe-base-ytd": FieldSpec("wvoe-base-ytd", "WVOE", "wages", "Base", "Base Pay Year to Date", "Base", (), "money"),
+    "wvoe-ot": FieldSpec("wvoe-ot", "WVOE", "wages", "OT", "Overtime Year to Date", "OT", (), "money"),
+    "wvoe-bonus": FieldSpec("wvoe-bonus", "WVOE", "wages", "Bonus", "Bonus Year to Date", "Bonus", (), "money"),
+    "wvoe-commission": FieldSpec("wvoe-commission", "WVOE", "wages", "Commission", "Commission Year to Date", "Commission", (), "money"),
+}
+"""Earnings categories, keyed by the field id that holds their current column.
+
+The history columns are emitted as `<id>-prior` and `<id>-prior-2`, so the
+two-year average in `annualizeWvoe` reads a column the document actually
+printed rather than one inferred from the current year.
+"""
+
+_WVOE_GRID_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("wvoe-base-ytd", ("Total Base Pay", "Base Salary", "Base Pay", "Base earnings", "Regular Pay", "Base")),
+    ("wvoe-ot", ("Total Overtime", "Overtime")),
+    ("wvoe-bonus", ("Total Bonus", "Bonus")),
+    ("wvoe-commission", ("Total Commission", "Commissions", "Commission", "Commision")),
+)
+"""Row labels of a grid that runs earnings down the page and years across it.
+
+Form 1005 item 12B and Truework's income table are laid out this way. The
+trailing bare labels catch Truework, which heads the rows "Base" and
+"Commision" -- the misspelling is Truework's own.
+"""
+
+_WVOE_CATEGORY_RUNS: dict[str, str | None] = {
+    "basesalary": "wvoe-base-ytd",
+    "basepay": "wvoe-base-ytd",
+    "baseearnings": "wvoe-base-ytd",
+    "regularpay": "wvoe-base-ytd",
+    "base": "wvoe-base-ytd",
+    "salary": "wvoe-base-ytd",
+    "overtime": "wvoe-ot",
+    "overtimepay": "wvoe-ot",
+    "bonus": "wvoe-bonus",
+    "bonuses": "wvoe-bonus",
+    "commission": "wvoe-commission",
+    "commissions": "wvoe-commission",
+    "commision": "wvoe-commission",
+    "commisions": "wvoe-commission",
+    # Anchors for columns that are deliberately not read. Without them the
+    # amount under "Other" binds to whichever category column sits nearest,
+    # and The Work Number prints both an Other and a Total column.
+    "other": None,
+    "otherpay": None,
+    "total": None,
+    "totalpay": None,
+    "grosspay": None,
+    "grossearnings": None,
+    "netpay": None,
+    "tips": None,
+}
+"""Column headings of a grid that runs years down the page and earnings across it.
+
+The Work Number's Annual Income Summary is laid out this way, transposed from
+Form 1005: a row per year, a column per category.
+"""
+
+_WVOE_BASE_PERIODS: tuple[tuple[str, str], ...] = (
+    ("semi-monthly", "SemiMonthly"),
+    ("semimonthly", "SemiMonthly"),
+    ("semi monthly", "SemiMonthly"),
+    ("bi-weekly", "Biweekly"),
+    ("biweekly", "Biweekly"),
+    ("bi weekly", "Biweekly"),
+    ("annual", "Annual"),
+    ("yearly", "Annual"),
+    ("per year", "Annual"),
+    ("monthly", "Monthly"),
+    ("per month", "Monthly"),
+    ("weekly", "Weekly"),
+    ("per week", "Weekly"),
+    ("hourly", "Hourly"),
+    ("per hour", "Hourly"),
 )
 
 SCHEDULE_F_FIELDS = (
@@ -189,10 +330,12 @@ FORM_1120_FIELDS = (
 
 FORM_1040_FIELDS = (
     FieldSpec("f1040-wages", "Form 1040", "wages", "Line 1z", "Wages, Salaries, Tips", "Line 1z", ("1z Add lines 1a through 1h", "Wages, salaries, tips, etc."), "money"),
+    FieldSpec("f1040-ira-total", "Form 1040", "income", "Line 4a", "IRA Distributions", "Line 4a", ("IRA distributions",), "money"),
+    FieldSpec("f1040-ira-taxable", "Form 1040", "income", "Line 4b", "Taxable IRA Distributions", "Line 4b", ("Taxable amount",), "money", ("IRA distributions",)),
+    FieldSpec("f1040-pensions-total", "Form 1040", "income", "Line 5a", "Pensions and Annuities", "Line 5a", ("Pensions and annuities",), "money"),
+    FieldSpec("f1040-pensions-taxable", "Form 1040", "income", "Line 5b", "Taxable Pensions", "Line 5b", ("Taxable amount",), "money", ("Pensions and annuities",)),
     FieldSpec("f1040-ss-total", "Form 1040", "income", "Line 6a", "Social Security Benefits", "Line 6a", ("Social security benefits",), "money"),
-    FieldSpec("f1040-ss-taxable", "Form 1040", "income", "Line 6b", "Taxable Social Security", "Line 6b", ("Taxable amount",), "money"),
-    FieldSpec("f1040-pensions-total", "Form 1040", "income", "Line 5a", "Pensions and Annuities", "Line 5a", ("IRA distributions", "Pensions and annuities"), "money"),
-    FieldSpec("f1040-pensions-taxable", "Form 1040", "income", "Line 5b", "Taxable Pensions", "Line 5b", ("Taxable amount",), "money"),
+    FieldSpec("f1040-ss-taxable", "Form 1040", "income", "Line 6b", "Taxable Social Security", "Line 6b", ("Taxable amount",), "money", ("Social security benefits",)),
 )
 
 SCHEDULE_B_FIELDS = (
@@ -304,7 +447,11 @@ PARTNERSHIP_RETURN_FIELDS = (
     FieldSpec("pt-return-ord", "Form 1065", "income", "Line 23", "Ordinary Business Income (Loss)", "Line 23", ("Ordinary business income (loss)", "Ordinary business income"), "money"),
     FieldSpec("pt-return-gp", "Form 1065", "income", "Line 10", "Guaranteed Payments to Partners", "Line 10", ("Guaranteed payments to partners", "Guaranteed payments"), "money"),
     FieldSpec("pt-return-wages", "Form 1065", "income", "Line 9", "Salaries and Wages", "Line 9", ("Salaries and wages",), "money"),
-    FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16c", "Depreciation", "Line 16c", ("Depreciation, if required", "Depreciation"), "money"),
+    # Anchored on the line 16a caption, so it reports the whole depreciation
+    # claimed rather than the 16c net. This catalog only runs on a page the
+    # template could not read at all, where 16b is not available to add to the
+    # net, so the 16a total is the closest figure in reach.
+    FieldSpec("pt-return-dep", "Form 1065", "addback", "Line 16a", "Depreciation", "Line 16a", ("Depreciation, if required", "Depreciation"), "money"),
     FieldSpec("pt-return-depletion", "Form 1065", "addback", "Line 17", "Depletion", "Line 17", ("Depletion",), "money"),
     FieldSpec("pt-return-gross", "Form 1065", "income", "Line 1c", "Gross Receipts or Sales", "Line 1c", ("Gross receipts or sales",), "money"),
 )
@@ -324,8 +471,12 @@ FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
     (re.compile(r"Schedule B.*Interest and Ordinary Dividends", re.I), SCHEDULE_B_FIELDS),
     (re.compile(r"Schedule D.*Capital Gains and Losses", re.I), SCHEDULE_D_FIELDS),
     (re.compile(r"Form 8825.*Rental Real Estate Income|Form\s+8825", re.I), FORM_8825_FIELDS),
-    (PAYSTUB_TITLE, PAYSTUB_FIELDS),
+    # WVOE stays ahead of the pay stub catalog. A Form 1005 reports the same
+    # earnings vocabulary a stub does -- gross earnings, year to date, overtime,
+    # bonus -- and the first matching catalog wins, so a verification read by the
+    # stub catalog had its prior-year column taken for a current one.
     (WVOE_TITLE, WVOE_FIELDS),
+    (PAYSTUB_TITLE, PAYSTUB_FIELDS),
 )
 
 SUPPORTING_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
@@ -601,6 +752,29 @@ def _first_hit(page: Any, labels: tuple[str, ...], words: list[dict[str, Any]] |
     return _hit_from_words(words, labels)
 
 
+def _on_row_right_of(anchor: Any, hit: Any) -> bool:
+    anchor_mid = (float(anchor.y0) + float(anchor.y1)) / 2.0
+    hit_mid = (float(hit.y0) + float(hit.y1)) / 2.0
+    tolerance = max(4.0, (float(anchor.y1) - float(anchor.y0)) * 0.75)
+    return abs(hit_mid - anchor_mid) <= tolerance and float(hit.x0) >= float(anchor.x1)
+
+
+def _row_hit(page: Any, spec: FieldSpec, words: list[dict[str, Any]] | None):
+    anchor = _first_hit(page, spec.row_anchor, words)
+    if anchor is None:
+        return None
+    for label in spec.labels:
+        for variant in _label_variants(label):
+            for hit in page.search_for(variant):
+                if _on_row_right_of(anchor, hit):
+                    return hit
+    row_words = [
+        word for word in _word_items(words)
+        if _on_row_right_of(anchor, _Hit(word["x0"], word["y0"], word["x1"], word["y1"]))
+    ]
+    return _hit_from_words(row_words, spec.labels)
+
+
 def _nearest_widget_box(page: Any, hit: Any, pymupdf: Any) -> list[float] | None:
     """Snap a label to the live AcroForm cell in the same column, then right / below."""
     widgets = list(page.widgets() or [])
@@ -668,6 +842,38 @@ def _same_column_money(words: list[dict[str, Any]], box: list[float], hit: Any) 
     return candidates[0][1]
 
 
+def normalize_date(raw: str) -> str | None:
+    """One MM/DD/YYYY spelling for every date form a verification prints."""
+    text = re.sub(r"\s+", " ", raw or "").strip().rstrip(".")
+    named = re.match(r"([A-Za-z]{3,9})\.?,?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$", text)
+    if named:
+        month = _MONTH_INDEX.get(named.group(1)[:3].lower())
+        return f"{month:02d}/{int(named.group(2)):02d}/{named.group(3)}" if month else None
+    iso = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})$", text)
+    if iso:
+        return f"{int(iso.group(2)):02d}/{int(iso.group(3)):02d}/{iso.group(1)}"
+    us = re.match(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$", text)
+    if not us:
+        return None
+    year = int(us.group(3))
+    if len(us.group(3)) == 2:
+        year += 2000 if year <= 69 else 1900
+    month, day = int(us.group(1)), int(us.group(2))
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return None
+    return f"{month:02d}/{day:02d}/{year:04d}"
+
+
+def duration_months(raw: str) -> int | None:
+    """Months from a stated tenure: "8 Yrs 7 Months", "2 Years, 9 Months"."""
+    years = _DURATION_YEARS.search(raw or "")
+    months = _DURATION_MONTHS.search(raw or "")
+    if not years and not months:
+        return None
+    total = (int(years.group(1)) * 12 if years else 0) + (int(months.group(1)) if months else 0)
+    return total if 0 < total <= 720 else None
+
+
 def _parse_capture(raw: str, capture: str) -> tuple[str, float] | None:
     text = re.sub(r"\s+", " ", raw or "").strip()
     if not text:
@@ -708,6 +914,17 @@ def _parse_capture(raw: str, capture: str) -> tuple[str, float] | None:
         if numeric > 100:
             return None
         return f"{numeric}% (ending)", numeric
+    if capture == "date":
+        match = DATE_TOKEN.search(text)
+        if not match:
+            return None
+        normalized = normalize_date(match.group(0))
+        return (normalized, 0.0) if normalized else None
+    if capture == "duration":
+        months = duration_months(text)
+        if months is None:
+            return None
+        return f"{months:,}", float(months)
     if capture == "integer":
         match = re.search(r"(\d{1,3}(?:,\d{3})+|\d+)\s*$", text)
         if not match:
@@ -772,6 +989,30 @@ def _field_record(
     }
 
 
+_WVOE_NOTICE_WORDS = re.compile(
+    r"\b(?:consumer report|FCRA|permissible purpose|trademark|subsidiary|copyright"
+    r"|all rights reserved|registered|disclaimer|wholly owned)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_wvoe_prose(value: str) -> bool:
+    """Running text from a verification's FCRA notice, not a field value.
+
+    The Work Number closes its report with a page of notice, and the loose
+    "Employer" label that a vendor's two-column table needs also lands on the
+    footer line "Employers: workforce@equifax.com" and on "the employer's
+    payroll system". A field value is short, starts where a name starts, and
+    is not a sentence, a mail address or a link.
+    """
+    text = (value or "").strip()
+    if len(text) > 48 or len(text.split()) > 6:
+        return True
+    if text[:1].islower():
+        return True
+    return bool(re.search(r"[@•]|https?:|\bwww\.|\.com\b", text) or _WVOE_NOTICE_WORDS.search(text))
+
+
 def _extract_spec(
     page: Any,
     pymupdf: Any,
@@ -786,7 +1027,7 @@ def _extract_spec(
     if spec.source_id.startswith("sch-l-") or spec.source_id.startswith("form-4562-"):
         form = _corporate_form(blob, spec.form)
         entity_id = f"{_form_slug(form)}-p{page_index}"
-    hit = _first_hit(page, spec.labels, words)
+    hit = _row_hit(page, spec, words) if spec.row_anchor else _first_hit(page, spec.labels, words)
     if hit is None:
         return None
     boxes: list[list[float]] = []
@@ -801,19 +1042,37 @@ def _extract_spec(
                 float(hit.y1) + 3.0,
             ]
         )
+    if spec.form == "WVOE":
+        # A verification is a two-column table and the vendors right-align the
+        # value, so the 220pt clip stops short of it. Reaching the page edge
+        # along the label's own row is what keeps the fallbacks below from
+        # answering with the row above: "Employer" read "Full Name".
+        boxes.append(
+            [
+                float(hit.x1) + 2.0,
+                float(hit.y0) - 3.0,
+                _page_width(page) - 8.0,
+                float(hit.y1) + 3.0,
+            ]
+        )
     widget_box = _nearest_widget_box(page, hit, pymupdf)
     if widget_box:
         boxes.append(widget_box)
     if spec.form == "W-2":
         boxes.append(_clip_w2_column(page, hit))
-    boxes.extend(
-        [
-            _clip_right(page, hit),
-            _clip_below(page, hit),
-            _clip_left(page, hit),
-            _clip_above(page, hit),
-        ]
-    )
+    if spec.row_anchor:
+        # A blank "b" cell must stay blank, not borrow the "a" amount on its
+        # left or the next row's amount below.
+        boxes.append(_clip_right(page, hit))
+    else:
+        boxes.extend(
+            [
+                _clip_right(page, hit),
+                _clip_below(page, hit),
+                _clip_left(page, hit),
+                _clip_above(page, hit),
+            ]
+        )
     parsed = None
     used_box = boxes[0]
     for box in boxes:
@@ -837,6 +1096,9 @@ def _extract_spec(
             if _is_business_caption(parsed[0]):
                 parsed = None
                 continue
+        if parsed and spec.form == "WVOE" and spec.capture == "text" and _is_wvoe_prose(parsed[0]):
+            parsed = None
+            continue
         if parsed:
             used_box = box
             break
@@ -957,6 +1219,485 @@ def _paystub_value_box(
     if matching:
         return matching[-1][3]
     return label_box
+
+
+def _wvoe_row_amounts(
+    page: Any,
+    pymupdf: Any,
+    hit: Any,
+    words: list[dict[str, Any]] | None,
+) -> list[tuple[float, str, float, list[float]]]:
+    """Money tokens of one earnings row, left to right.
+
+    A verification is typed by a payroll clerk or rendered by a vendor rather
+    than printed by a payroll engine, so cents are often absent. Currency
+    tokens are tried first and plain numbers only when the row yielded none,
+    which keeps a cent-bearing row from picking up a stray item number.
+    """
+    amounts = _row_money_amounts(page, pymupdf, hit, words)
+    if amounts:
+        return amounts
+    return _row_money_amounts(page, pymupdf, hit, words, currency_only=False)
+
+
+_WVOE_YTD_HEADERS = ("yeartodate", "ytd", "currentyear", "thisyear")
+_WVOE_PRIOR_HEADERS = ("pastyear", "prioryear", "previousyear", "lastyear")
+_YEAR_HEADER_TOKEN = re.compile(r"^\(?(19|20)\d{2}\)?$")
+_WVOE_COLUMN_TOLERANCE = 46.0
+
+
+@dataclass(frozen=True)
+class _WvoeColumns:
+    """Which earnings year each column holds, and where its heading was printed.
+
+    ``roles`` is ``(x_center, role)`` left to right, where role is ``ytd``,
+    ``prior`` or ``prior-2``. Empty roles mean no heading was found, which
+    leaves the caller on Form 1005's column order. ``header_bottom`` is the
+    baseline below which the grid rows start.
+    """
+
+    roles: tuple[tuple[float, str], ...]
+    header_bottom: float | None
+    ytd_year: int | None = None
+
+
+def _wvoe_header_rows(items: list[dict[str, Any]]) -> list[list[tuple[float, float, str, int | None]]]:
+    """Column headings per reading line, as ``(y_bottom, x_center, kind, year)``.
+
+    A heading splits across words ("Year To Date"), so each token is joined with
+    the few after it and the run is tested whole. The x reported is the center
+    of the matched run rather than of its first word, because that is what the
+    amounts beneath it line up with.
+    """
+    rows: list[list[tuple[float, float, str, int | None]]] = []
+    for line in _cluster_reading_lines(items):
+        folded = [(_fold_label(str(item["text"])), item) for item in line]
+        found: list[tuple[float, float, str, int | None]] = []
+        for index, (token, item) in enumerate(folded):
+            if not token:
+                continue
+            raw = str(item["text"]).strip()
+            if _YEAR_HEADER_TOKEN.match(raw):
+                center = (float(item["x0"]) + float(item["x1"])) / 2
+                found.append((float(item["y1"]), center, "year", int(re.sub(r"\D", "", raw))))
+                continue
+            run = ""
+            for offset, (following, next_item) in enumerate(folded[index : index + 4]):
+                run += following
+                kind = (
+                    "ytd"
+                    if run in _WVOE_YTD_HEADERS
+                    else "prior"
+                    if run in _WVOE_PRIOR_HEADERS
+                    else None
+                )
+                if kind is None:
+                    continue
+                center = (float(item["x0"]) + float(next_item["x1"])) / 2
+                found.append((float(next_item["y1"]), center, kind, None))
+                break
+        if found:
+            rows.append(found)
+    return rows
+
+
+def _wvoe_columns(page: Any, words: list[dict[str, Any]] | None) -> _WvoeColumns:  # noqa: C901
+    """Resolve the earnings columns from the headings the document printed.
+
+    Position alone cannot say which year a column holds. Form 1005 runs year to
+    date, prior year, then the year before, but a vendor report does not: The
+    Work Number and Truework head their income tables with the year itself and
+    may run oldest to newest, so the leftmost column there can be the stalest
+    figure on the page. Reading the headings is what keeps a two-year-old total
+    out of the current-year box.
+    """
+    items = _wvoe_items(page, words)
+    if not items:
+        return _WvoeColumns((), None)
+
+    # A lone year in body text ("for tax year 2023") is not a column, so only
+    # lines carrying two or more headings are read as the grid header.
+    header_rows = [row for row in _wvoe_header_rows(items) if len(row) >= 2]
+    if not header_rows:
+        return _WvoeColumns((), None)
+
+    # Form 1005 prints its header over two lines, "Year To Date / Past Year /
+    # Past Year" above "Thru __ / 2023 / 2022", so headings are merged by x
+    # before roles are handed out.
+    merged: list[dict[str, Any]] = []
+    for y_bottom, x_center, kind, year in sorted(
+        (candidate for row in header_rows for candidate in row), key=lambda candidate: candidate[1]
+    ):
+        if merged and abs(merged[-1]["x"] - x_center) <= _WVOE_COLUMN_TOLERANCE:
+            column = merged[-1]
+            column["x"] = (column["x"] + x_center) / 2
+            column["kinds"].add(kind)
+            column["bottom"] = max(column["bottom"], y_bottom)
+            if year is not None:
+                column["year"] = max(column["year"] or 0, year)
+            continue
+        merged.append({"x": x_center, "kinds": {kind}, "year": year, "bottom": y_bottom})
+    if len(merged) < 2:
+        return _WvoeColumns((), None)
+
+    current = next((column for column in merged if "ytd" in column["kinds"]), None)
+    if current is not None:
+        history = [column for column in merged if column is not current]
+        # The history columns run newest first: by printed year when every one
+        # carries one, otherwise in Form 1005's left-to-right order.
+        if history and all(column["year"] is not None for column in history):
+            history.sort(key=lambda column: column["year"], reverse=True)
+        ordered = [current, *history]
+    else:
+        dated = [column for column in merged if column["year"] is not None]
+        if len(dated) < 2:
+            return _WvoeColumns((), None)
+        ordered = sorted(dated, key=lambda column: column["year"], reverse=True)
+
+    roles = tuple(
+        (column["x"], role) for column, role in zip(ordered, ("ytd", "prior", "prior-2"))
+    )
+    return _WvoeColumns(
+        tuple(sorted(roles, key=lambda role: role[0])),
+        max(column["bottom"] for column in merged),
+        ordered[0]["year"],
+    )
+
+
+def _wvoe_assign_columns(
+    amounts: list[tuple[float, str, float, list[float]]],
+    roles: tuple[tuple[float, str], ...],
+) -> list[tuple[str, str, float, list[float]]]:
+    """Bind each amount on a row to a column role."""
+    if not roles:
+        order = ("ytd", "prior", "prior-2")
+        return [
+            (order[index], value, numeric, box)
+            for index, (_, value, numeric, box) in enumerate(amounts[:3])
+        ]
+    assigned: list[tuple[str, str, float, list[float]]] = []
+    claimed: set[str] = set()
+    for x0, value, numeric, box in amounts:
+        center = (x0 + float(box[2])) / 2 if len(box) > 2 else x0
+        role = min(roles, key=lambda item: abs(item[0] - center))[1]
+        if role in claimed:
+            continue
+        claimed.add(role)
+        assigned.append((role, value, numeric, box))
+    return assigned
+
+
+def _wvoe_items(page: Any, words: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    native = page.get_text("words") or []
+    if native:
+        return [
+            {"text": str(word[4]), "x0": float(word[0]), "y0": float(word[1]), "x1": float(word[2]), "y1": float(word[3])}
+            for word in native
+        ]
+    return _word_items(words) if words else []
+
+
+def _wvoe_category_columns(
+    items: list[dict[str, Any]],
+) -> tuple[list[tuple[float, str | None]], float] | None:
+    """Earnings categories across the top, as anchors plus the heading baseline.
+
+    The Work Number transposes the Form 1005 grid: a column per category and a
+    row per year. An anchor is kept for the columns the calculation does not
+    use, so the amount under "Other" cannot drift into the nearest category it
+    does use.
+    """
+    best: tuple[list[tuple[float, str | None]], float, int] | None = None
+    for line in _cluster_reading_lines(items):
+        folded = [(_fold_label(str(item["text"])), item) for item in line]
+        anchors: list[tuple[float, str | None]] = []
+        bottom = 0.0
+        for index, (token, item) in enumerate(folded):
+            if not token:
+                continue
+            # Longest run first, so "Base Salary" is one column and not the
+            # word "Base" with the column center placed over its first word.
+            for length in (3, 2, 1):
+                window = folded[index : index + length]
+                if len(window) < length:
+                    continue
+                run = "".join(part for part, _ in window)
+                if run not in _WVOE_CATEGORY_RUNS:
+                    continue
+                last = window[-1][1]
+                anchors.append(((float(item["x0"]) + float(last["x1"])) / 2, _WVOE_CATEGORY_RUNS[run]))
+                bottom = max(bottom, float(last["y1"]))
+                break
+        named = len({field_id for _, field_id in anchors if field_id})
+        if named >= 2 and (best is None or named > best[2]):
+            best = (anchors, bottom, named)
+    return (best[0], best[1]) if best else None
+
+
+def _wvoe_year_rows(
+    items: list[dict[str, Any]],
+    header_bottom: float,
+) -> list[tuple[int, list[dict[str, Any]]]]:
+    """Lines under the heading that open with a four-digit year, newest first.
+
+    A redacted sample prints "20XX" where the year belongs. Those rows are
+    skipped rather than ordered by position, because nothing on the page then
+    says which of them is the current year.
+    """
+    rows: list[tuple[int, list[dict[str, Any]]]] = []
+    for line in _cluster_reading_lines(items):
+        ordered = sorted(line, key=lambda item: float(item["x0"]))
+        if not ordered or float(ordered[0]["y1"]) <= header_bottom:
+            continue
+        raw = str(ordered[0]["text"]).strip()
+        if not _YEAR_HEADER_TOKEN.match(raw):
+            continue
+        rows.append((int(re.sub(r"\D", "", raw)), ordered[1:]))
+    rows.sort(key=lambda row: row[0], reverse=True)
+    return rows[:3]
+
+
+def _wvoe_grid_hits(page: Any, labels: tuple[str, ...], words: list[dict[str, Any]] | None):
+    """Every place an earnings label appears, for the most specific label that lands.
+
+    "Base Pay" is printed twice on Form 1005: once in the current pay item and
+    once as a grid row. Taking the first hit reads the rate of pay into the
+    year-to-date box, so the caller needs all of them.
+    """
+    for label in labels:
+        hits: list[Any] = []
+        for variant in _label_variants(label):
+            hits.extend(page.search_for(variant) or [])
+        if hits:
+            return hits
+    hit = _hit_from_words(words, labels)
+    return [hit] if hit is not None else []
+
+
+_WVOE_ROLE_LABELS = {"ytd": "Year to Date", "prior": "Prior Year", "prior-2": "Second Prior Year"}
+
+
+def _extract_wvoe_grid(
+    page: Any,
+    pymupdf: Any,
+    *,
+    page_index: int,
+    blob: str,
+    words: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Read the rate of pay and the earnings history of a verification.
+
+    Covers Form 1005 items 12A and 12B, Truework's income table, which is laid
+    out the same way, and The Work Number's Annual Income Summary, which is the
+    same figures transposed.
+    """
+    extracted: list[dict[str, Any]] = []
+    entity_id = f"{_form_slug('WVOE')}-p{page_index}"
+    spec_by_id = {spec.source_id: spec for spec in WVOE_FIELDS}
+    emitted: set[str] = set()
+    last_box: list[float] = [0.0, 0.0, 0.0, 0.0]
+
+    def emit(source_id: str, label: str, value: str, numeric: float, box: list[float]) -> None:
+        nonlocal last_box
+        if source_id in emitted:
+            return
+        emitted.add(source_id)
+        last_box = box
+        spec = spec_by_id.get(source_id) or _WVOE_EARNING_SPECS.get(source_id)
+        if spec is None:
+            parent = _WVOE_EARNING_SPECS.get(source_id.rsplit("-prior", 1)[0])
+            spec = FieldSpec(
+                source_id,
+                "WVOE",
+                "wages",
+                parent.box_label if parent else "Earnings",
+                label,
+                parent.line_num if parent else "Earnings",
+                (),
+                "money",
+            )
+        extracted.append(
+            _field_record(
+                page=page,
+                page_index=page_index,
+                spec=spec,
+                form="WVOE",
+                entity_id=entity_id,
+                value=value,
+                numeric=numeric,
+                used_box=box,
+            )
+        )
+
+    current_hit = _first_hit(page, _WVOE_CURRENT_BASE_LABELS, words)
+    if current_hit is not None:
+        amounts = _wvoe_row_amounts(page, pymupdf, current_hit, words)
+        if amounts:
+            _, value, numeric, box = amounts[0]
+            emit("wvoe-base", "Current Gross Base Pay", value, numeric, box)
+        # Only the rate's own row. The nearby paycheck cycle is a different
+        # fact -- The Work Number pairs an hourly rate with a semi-monthly
+        # cycle -- and reading it here would quote the rate in the wrong unit.
+        row_text = _clip_text(
+            page,
+            pymupdf,
+            [float(current_hit.x0) - 4.0, float(current_hit.y0) - 5.0, _page_width(page) - 8.0, float(current_hit.y1) + 5.0],
+            words,
+        )
+        period = _wvoe_base_period(row_text)
+        if period:
+            emit(
+                "wvoe-base-period",
+                "Base Pay Period",
+                period,
+                0.0,
+                [float(current_hit.x0), float(current_hit.y0), float(current_hit.x1), float(current_hit.y1)],
+            )
+
+    items = _wvoe_items(page, words)
+    transposed = _wvoe_category_columns(items)
+    ytd_year: int | None = None
+    if transposed is not None:
+        anchors, header_bottom = transposed
+        rows = _wvoe_year_rows(items, header_bottom)
+        for role, (year, cells) in zip(("ytd", "prior", "prior-2"), rows):
+            if role == "ytd":
+                ytd_year = year
+            for cell in cells:
+                parsed = _parse_paystub_token(str(cell["text"]))
+                if not parsed:
+                    continue
+                value, numeric = parsed
+                center = (float(cell["x0"]) + float(cell["x1"])) / 2
+                field_id = min(anchors, key=lambda anchor: abs(anchor[0] - center))[1]
+                if field_id is None:
+                    continue
+                emit(
+                    field_id if role == "ytd" else f"{field_id}-{role}",
+                    f"{_WVOE_ROLE_LABELS[role]} ({year})",
+                    value,
+                    numeric,
+                    [float(cell["x0"]), float(cell["y0"]), float(cell["x1"]), float(cell["y1"])],
+                )
+    if transposed is None or not any(field.startswith("wvoe-base-ytd") for field in emitted):
+        columns = _wvoe_columns(page, words)
+        ytd_year = ytd_year or columns.ytd_year
+        for source_id, labels in _WVOE_GRID_ROWS:
+            best: tuple[Any, list[tuple[float, str, float, list[float]]]] | None = None
+            for hit in _wvoe_grid_hits(page, labels, words):
+                if columns.header_bottom is not None and float(hit.y0) < columns.header_bottom:
+                    continue
+                amounts = _wvoe_row_amounts(page, pymupdf, hit, words)
+                if amounts and (best is None or len(amounts) > len(best[1])):
+                    best = (hit, amounts)
+            if best is None:
+                continue
+            # The base row shares its label with the rate of pay item, so a row
+            # carrying a single amount under no heading is that item instead.
+            if source_id == "wvoe-base-ytd" and len(best[1]) < 2 and not columns.roles:
+                continue
+            for role, value, numeric, box in _wvoe_assign_columns(best[1], columns.roles):
+                emit(
+                    source_id if role == "ytd" else f"{source_id}-{role}",
+                    f"{_WVOE_ROLE_LABELS[role]} ({source_id})",
+                    value,
+                    numeric,
+                    box,
+                )
+
+    if ytd_year is not None and extracted:
+        emit("wvoe-ytd-year", "Year to Date Year", str(ytd_year), float(ytd_year), last_box)
+    return extracted
+
+
+def _wvoe_base_period(text: str) -> str | None:
+    folded = re.sub(r"\s+", " ", (text or "")).lower()
+    for needle, label in _WVOE_BASE_PERIODS:
+        if needle in folded:
+            return label
+    return None
+
+
+def _wvoe_months_record(
+    page: Any,
+    page_index: int,
+    records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Months employed, derived from the hire date and the date the report was struck.
+
+    The divisor for verified overtime and bonus is bounded by how long the
+    borrower has worked there. Both vendors usually print the tenure outright
+    and the wvoe-months spec reads it; this covers Form 1005, which states the
+    date of hire and the date the year-to-date column was struck but not the
+    count between them.
+    """
+    by_id = {record["sourceFieldId"]: record for record in records}
+    if "wvoe-months" in by_id:
+        return None
+    hire = by_id.get("wvoe-hire-date")
+    thru = by_id.get("wvoe-ytd-thru")
+    if not hire or not thru:
+        return None
+    start = _parse_normalized_date(str(hire.get("value") or ""))
+    end = _parse_normalized_date(str(thru.get("value") or ""))
+    if not start or not end:
+        return None
+    months = (end[0] - start[0]) * 12 + (end[1] - start[1]) - (1 if end[2] < start[2] else 0)
+    if months <= 0 or months > 720:
+        return None
+    record = _field_record(
+        page=page,
+        page_index=page_index,
+        spec=FieldSpec("wvoe-months", "WVOE", "wages", "Tenure", "Months Employed", "Tenure", (), "integer"),
+        form="WVOE",
+        entity_id=str(thru["entityId"]),
+        value=f"{months:,}",
+        numeric=float(months),
+        used_box=[0.0, 0.0, 0.0, 0.0],
+    )
+    record["box"] = thru["box"]
+    return record
+
+
+def _parse_normalized_date(value: str) -> tuple[int, int, int] | None:
+    """(year, month, day) from a value already put through normalize_date."""
+    match = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", (value or "").strip())
+    if not match:
+        return None
+    return int(match.group(3)), int(match.group(1)), int(match.group(2))
+
+
+def _merge_wvoe_pages(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One verification spans pages, so its fields belong to one entity.
+
+    Truework puts the employer and the dates on page 1 and the income table on
+    page 2; The Work Number runs to three pages. Leaving the parser's per-page
+    entity id in place hands the portal two half-filled verifications, neither
+    of which can be annualized. Pages are joined only while no field repeats,
+    so two different employers' verifications in one packet stay apart.
+    """
+    by_page: dict[int, list[dict[str, Any]]] = {}
+    for row in fields:
+        if row.get("form") == "WVOE":
+            by_page.setdefault(int(row["pageIndex"]), []).append(row)
+    pages = sorted(by_page)
+    if len(pages) < 2:
+        return fields
+    anchors: dict[int, int] = {}
+    anchor = pages[0]
+    claimed: set[str] = set()
+    for index, page in enumerate(pages):
+        ids = {row["sourceFieldId"] for row in by_page[page]}
+        contiguous = index == 0 or page == pages[index - 1] + 1
+        if index and (not contiguous or ids & claimed):
+            anchor, claimed = page, set()
+        anchors[page] = anchor
+        claimed |= ids
+    for page, rows in by_page.items():
+        entity_id = f"{_form_slug('WVOE')}-p{anchors[page]}"
+        for row in rows:
+            row["entityId"] = entity_id
+    return fields
 
 
 def _extract_8825_columns(
@@ -1728,6 +2469,19 @@ def extract_page_fields(
         w2_from_labels = specs is W2_FIELDS and sum(bool(label.search(blob)) for label in W2_FRONT_LABELS) >= 2
         if not pattern_matches(matcher, blob) and not w2_from_labels:
             continue
+        if specs is WVOE_FIELDS:
+            if WVOE_NOTICE_PAGE.search(blob):
+                break
+            # The grid reader resolves every earnings amount against the printed
+            # column headings, so it runs before the specs and keeps what it
+            # read; the specs then fill the identity fields it does not cover.
+            for row in _extract_wvoe_grid(
+                page, pymupdf, page_index=page_index, blob=row_blob or blob, words=words
+            ):
+                if row["sourceFieldId"] in seen:
+                    continue
+                seen.add(row["sourceFieldId"])
+                extracted.append(row)
         if specs is PAYSTUB_FIELDS:
             delegated = _paystub_fields_from_parser(pdf_bytes, page_index)
             if delegated is not None:
@@ -1750,6 +2504,11 @@ def extract_page_fields(
                 continue
             seen.add(row["sourceFieldId"])
             extracted.append(row)
+        if specs is WVOE_FIELDS:
+            derived = _wvoe_months_record(page, page_index, extracted)
+            if derived is not None and derived["sourceFieldId"] not in seen:
+                seen.add(derived["sourceFieldId"])
+                extracted.append(derived)
         person = PERSON_NAME_SPECS.get(id(specs))
         if person and person.spec.source_id not in seen:
             row = _person_name_row(page, pymupdf, person, page_index=page_index, words=words)
@@ -1902,6 +2661,7 @@ def extract_irs_form_fields(
                 for row in page_fields:
                     row["box"] = _remap_overlay_box(row.get("box"), rotation)
             fields.extend(page_fields)
+        fields = _merge_wvoe_pages(fields)
         logger.info("irs_form_extract fields=%s", len(fields))
         return fields
     finally:

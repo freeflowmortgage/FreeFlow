@@ -181,6 +181,60 @@ def test_1120s_k1_counts_only_code_d_in_box_16() -> None:
     assert found["scorp-dist"]["lineNum"] == "Box 16D"
 
 
+_1065_LINE_16 = {
+    "16a": [410.4, 414.0, 481.65, 426.0],
+    "16b": [410.4, 426.0, 481.65, 438.0],
+    "16c": [504.0, 426.0, 576.0, 438.0],
+}
+
+
+def _1065_depreciation(line_16: dict[str, str]) -> dict[str, tuple[str, float]]:
+    """Every depreciation row a 1065 with this line 16 yields, by line."""
+    cells = [(0, _1065_LINE_16[line], value) for line, value in line_16.items()]
+    cells += _field_cells("1065", {"ordinary_income": "515400"})
+    rows = _by_id(extract_irs_form_fields(_fill("f1065.pdf", cells), page_indices=[0]))
+    return {
+        row["lineNum"]: (row["sourceFieldId"], row["numericValue"])
+        for row in rows.values()
+        if row["sourceFieldId"].startswith("pt-return-dep")
+    }
+
+
+def test_depreciation_deducted_through_cost_of_goods_sold_is_added_back() -> None:
+    """16b and 16c are disjoint parts of 16a and both reduced line 23.
+
+    A partnership that ran $14,500 of its depreciation through Form 1125-A
+    reports $64,500 on 16a, $14,500 on 16b and the $50,000 remainder on 16c.
+    Reading 16c alone left $14,500 of a non-cash expense out of the addback.
+    """
+    rows = _1065_depreciation({"16a": "64500", "16b": "14500", "16c": "50000"})
+    assert rows == {
+        "Line 16c": ("pt-return-dep", 50000),
+        "Line 16b": ("pt-return-dep-1125a", 14500),
+    }
+
+
+def test_depreciation_on_16a_alone_is_read() -> None:
+    """With nothing in cost of goods sold, preparers leave the 16c net blank."""
+    assert _1065_depreciation({"16a": "64500"}) == {"Line 16a": ("pt-return-dep", 64500)}
+
+
+def test_the_16a_total_is_not_added_to_the_cost_of_goods_sold_part() -> None:
+    """16a already contains 16b, so the two must never both be added back."""
+    rows = _1065_depreciation({"16a": "64500", "16b": "14500"})
+    assert rows == {"Line 16a": ("pt-return-dep", 64500)}
+
+
+def test_only_the_16c_net_is_read_when_that_is_all_the_form_carries() -> None:
+    """A substitute form that prints just the net is still worth reading."""
+    assert _1065_depreciation({"16c": "50000"}) == {"Line 16c": ("pt-return-dep", 50000)}
+
+
+def test_an_unclaimed_depreciation_line_stays_empty() -> None:
+    """No cell on line 16 may be filled with the line number printed beside it."""
+    assert _1065_depreciation({}) == {}
+
+
 def test_dot_leaders_do_not_abort_the_packet() -> None:
     """A '3....4..' dot leader used to raise, and the caller dropped every field."""
     pdf = _fill("f1065.pdf", _field_cells("1065", {"ordinary_income": "70000"}))

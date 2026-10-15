@@ -47,6 +47,8 @@ export type ApprovedIncomeSnapshot = Readonly<{
       form1065Monthly: string | null;
       form1120Monthly: string | null;
       assetIncomeMonthly: string | null;
+      socialSecurityMonthly: string | null;
+      retirementIncomeMonthly: string | null;
       rentalMonthly: string | null;
       rentalLiabilityMonthly: string | null;
       housingExpenseAdjustment: string | null;
@@ -147,6 +149,8 @@ export async function loadApprovedIncomeSnapshot(
       form1065MonthlyTotal: true,
       form1120MonthlyTotal: true,
       assetIncomeMonthly: true,
+      socialSecurityMonthly: true,
+      retirementIncomeMonthly: true,
       rentalMonthly: true,
       rentalLiabilityMonthly: true,
       housingExpenseAdjustment: true,
@@ -237,6 +241,8 @@ export async function loadApprovedIncomeSnapshot(
         form1065Monthly: optionalMoney(calculation.form1065MonthlyTotal),
         form1120Monthly: optionalMoney(calculation.form1120MonthlyTotal),
         assetIncomeMonthly: optionalMoney(calculation.assetIncomeMonthly),
+        socialSecurityMonthly: optionalMoney(calculation.socialSecurityMonthly),
+        retirementIncomeMonthly: optionalMoney(calculation.retirementIncomeMonthly),
         rentalMonthly: optionalMoney(calculation.rentalMonthly),
         rentalLiabilityMonthly: optionalMoney(calculation.rentalLiabilityMonthly),
         housingExpenseAdjustment: optionalMoney(calculation.housingExpenseAdjustment),
