@@ -3180,6 +3180,9 @@ export default function UnderwriterSplitViewDemo({
               type="button"
               title={doc.fileName}
               onClick={() => {
+                setHighlightFieldId(null);
+                setInspectOverlay(null);
+                viewer.clearHighlight();
                 if (group.wageDocKind) setWageDocKind(group.wageDocKind);
                 setInspectDocId(doc.id);
                 const employer = w2Employers.find((entry) => entry.documentIds?.includes(doc.id));

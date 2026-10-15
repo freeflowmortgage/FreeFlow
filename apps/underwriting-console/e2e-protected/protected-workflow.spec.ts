@@ -237,6 +237,53 @@ test('protected Income appends multiple uploaded PDFs to Nate\'s document worksp
   await expect(page.getByTitle('schedule-c.pdf')).toBeVisible();
 });
 
+test('switching source documents clears the previous PDF highlight', async ({ page }) => {
+  const attachmentIds: string[] = [];
+  await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
+    testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
+  } }));
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v1/encompass-host/launch') {
+      return route.fulfill({ json: { loanId: LOAN, loanVersion: 1, integrationMode: 'ENCOMPASS_HOSTED', created: true } });
+    }
+    if (path === `/api/v1/loans/${LOAN}/income-documents`) {
+      const attachmentId = `schedule-c-${attachmentIds.length + 1}`;
+      attachmentIds.push(attachmentId);
+      return route.fulfill({ status: 201, json: { source: 'UPLOAD', attachmentId, status: 'PROCESSED' } });
+    }
+    if (path === `/api/v1/loans/${LOAN}/console-context`) {
+      return route.fulfill({ json: sameTabScheduleCContext(attachmentIds) });
+    }
+    if (path.endsWith('/metadata-requirements')) {
+      return route.fulfill({ json: { extractionId: path.includes('schedule-c-2') ? 'extraction-2' : 'extraction-1', status: 'ACTIVE', review: null, requirements: [] } });
+    }
+    return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
+  const first = await PDFDocument.create(); first.addPage([612, 792]);
+  const second = await PDFDocument.create(); second.addPage([612, 792]);
+  await page.getByTestId('live-pdf-input').setInputFiles([
+    { name: 'schedule-c-2024.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await first.save()) },
+    { name: 'schedule-c-2025.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await second.save()) },
+  ]);
+  await expect.poll(() => attachmentIds.length).toBe(2);
+  await page.getByRole('button', { name: 'Sch C', exact: true }).click();
+
+  await page.getByTitle('schedule-c-2024.pdf').click();
+  await page.locator('button[data-box-id="ent1-net"]').click();
+  await expect(page.getByTestId('pdf-highlight')).toHaveAttribute('data-box', '0.2,0.3,0.2,0.03');
+
+  await page.getByTitle('schedule-c-2025.pdf').click();
+  await expect(page.getByTestId('pdf-highlight')).toHaveCount(0);
+  await expect(page.locator('button[data-box-id="ent1-net"]')).toHaveAttribute('data-overlay-visible', 'false');
+
+  await page.locator('button[data-box-id="ent1-net"]').click();
+  await expect(page.getByTestId('pdf-highlight')).toHaveAttribute('data-box', '0.45,0.55,0.18,0.025');
+});
+
 test('protected Income dual monitor opens only the synchronized source document pane', async ({ page, context: browserContext }) => {
   await page.route('**/runtime-config.json', (route) => route.fulfill({ json: {
     testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' },
@@ -532,6 +579,57 @@ function multiUploadContext(attachmentIds: readonly string[]) {
     id: 'extraction-2', attachmentId, sourceDocumentVersion: 1, parserVersion: 'income-parser-v5', schemaVersion: 'income-extraction-v2', status: 'ACTIVE', warnings: [], confidence: 99,
     normalizedInput: { formRecords: [{ entityId: 'Schedule C:business-1', form: 'Schedule C', pageIndex: 0, fields: [{ sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' }, { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 }] }] },
     evidence: { fields: [{ collection: 'formExtracts', entityId: 'Schedule C:business-1', field: 'ent1-net', pageIndex: 0, box: { x: 0.2, y: 0.3, w: 0.2, h: 0.03 } }] }, metadataReview: null,
+  });
+  return {
+    loan: { id: LOAN, version: 1 + attachmentIds.length, status: attachmentIds.length ? 'DOCS_UPLOADED' : 'DRAFT', program: 'CONVENTIONAL', borrowerName: 'Synthetic Borrower' },
+    borrowers: [{ borrowerKey: 'borrower-1', ordinal: 0, role: 'PRIMARY' }],
+    attachments,
+    extractions,
+    calculation: null,
+    approval: null,
+    hostWrite: null,
+  };
+}
+
+function sameTabScheduleCContext(attachmentIds: readonly string[]) {
+  const boxes = [
+    { x: 0.2, y: 0.3, w: 0.2, h: 0.03 },
+    { x: 0.45, y: 0.55, w: 0.18, h: 0.025 },
+  ];
+  const attachments = attachmentIds.map((attachmentId) => ({
+    attachmentId,
+    category: 'Schedule C',
+    version: 1,
+    pageCount: 1,
+    parserVersion: 'income-parser-v7',
+  }));
+  const extractions = attachmentIds.map((attachmentId, index) => {
+    const entityId = `Schedule C:business-${index + 1}`;
+    return {
+      id: `extraction-${index + 1}`,
+      attachmentId,
+      sourceDocumentVersion: 1,
+      parserVersion: 'income-parser-v7',
+      schemaVersion: 'income-extraction-v2',
+      status: 'ACTIVE',
+      warnings: [],
+      confidence: 99,
+      normalizedInput: {
+        formRecords: [{
+          entityId,
+          form: 'Schedule C',
+          pageIndex: 0,
+          fields: [
+            { sourceFieldId: 'ent1-name', value: `Synthetic Consulting ${index + 1}` },
+            { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 },
+          ],
+        }],
+      },
+      evidence: {
+        fields: [{ collection: 'formExtracts', entityId, field: 'ent1-net', pageIndex: 0, box: boxes[index] }],
+      },
+      metadataReview: null,
+    };
   });
   return {
     loan: { id: LOAN, version: 1 + attachmentIds.length, status: attachmentIds.length ? 'DOCS_UPLOADED' : 'DRAFT', program: 'CONVENTIONAL', borrowerName: 'Synthetic Borrower' },
