@@ -27,7 +27,7 @@ test('parser adapter keeps only bounded metadata', async () => {
   });
   assert.equal(parsed.pageCount, 2);
   assert.equal(parsed.documentCategory, 'W2_WAGE');
-  assert.equal(parsed.parserVersion, 'income-parser-v6');
+  assert.equal(parsed.parserVersion, 'income-parser-v7');
   assert.equal(parsed.confidence, 95);
   assert.equal(parsed.extraction.schemaVersion, 'income-extraction-v2');
   assert.equal(JSON.stringify(parsed).includes('ssn'), false);

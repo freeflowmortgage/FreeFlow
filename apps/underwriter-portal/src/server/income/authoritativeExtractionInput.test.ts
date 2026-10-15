@@ -346,6 +346,33 @@ test('a stub dated mid-year still divides by the share of the year it covers', (
   assert.equal(projected.w2Employers?.[0].annualBaseIncome, 96000);
 });
 
+test('a paystub period end supplies its tax year and elapsed months without reviewer input', () => {
+  const extractionId = '00000000-0000-4000-8000-000000000206';
+  const projected = mergeAuthoritativeExtractionInputs([{
+    extractionId,
+    normalizedInput: { formRecords: [{
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: fields({
+        'ps-employer-name': 'Synthetic Employer',
+        'ps-pay-frequency': 'Weekly',
+        'ps-period-end': '12/03/2022',
+        'ps-base-ytd': 104741.32,
+      }),
+    }] },
+    metadataAssignments: [{
+      entityId: 'Paystub:paystub-p0',
+      ...WVOE_META,
+      baseIncomeMethod: 'ytd' as const,
+    }],
+  }], ROSTER);
+
+  const row = projected.w2Employers?.[0];
+  assert.equal(row?.year, 2022);
+  // The calculator rounds the monthly average to cents before annualizing:
+  // 104741.32 / 11.08 = 9453.19 monthly, then * 12 = 113438.28.
+  assert.equal(row?.annualBaseIncome, 113438.28);
+});
+
 test('a reviewed divisor that contradicts the stub is a contradiction to settle', () => {
   const extractionId = '00000000-0000-4000-8000-000000000203';
   const record = {
@@ -553,10 +580,11 @@ test('a verification with no reviewed metadata fails closed on every missing fac
   });
 });
 
-test('Schedule L reaches the partnership it was printed in rather than failing the packet', () => {
+test('a mixed Form 1065 return and Schedule L page supports the K-1 without becoming another calc row', () => {
   const extractionId = '00000000-0000-4000-8000-000000000230';
   const scheduleL = {
     entityId: 'form-1065-p4', form: 'Form 1065' as const, pageIndex: 4, fields: [
+      { sourceFieldId: 'pt-return-meals', numericValue: 800 },
       { sourceFieldId: 'sch-l-cash', numericValue: 180000 },
       { sourceFieldId: 'sch-l-ar', numericValue: 20000 },
       { sourceFieldId: 'sch-l-ap', numericValue: 50000 },
@@ -573,12 +601,12 @@ test('Schedule L reaches the partnership it was printed in rather than failing t
       scheduleL,
     ] },
     metadataAssignments: [
-      { entityId: 'form-1065-k1', taxYear: 2024, ownershipPercentage: 50, hasStableDistributions: true },
-      { entityId: 'form-1065-p4', taxYear: 2024 },
+      { entityId: 'form-1065-k1', borrowerKey: 'borrower-1', taxYear: 2024, ownershipPercentage: 50, hasStableDistributions: true },
     ],
-  }]);
+  }], ROSTER);
 
-  // A Schedule L page carries no K-1 income, and must not be read as a missing one.
+  // Return lines and Schedule L can share a page. Neither is another K-1 row
+  // or a separate borrower/tax-year review card on a multi-borrower loan.
   assert.equal(result.form1065?.length, 1);
   assert.deepEqual(result.form1065?.[0].scheduleL, {
     cash: 180000, accountsReceivable: 20000, accountsPayable: 50000, notesPayableLt1Yr: 30000,

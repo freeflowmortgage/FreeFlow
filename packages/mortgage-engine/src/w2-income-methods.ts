@@ -131,7 +131,13 @@ export function w2VariableMethods(employer: W2EmployerWageInput, context: W2Meth
   const otherVariable = fromWvoe
     ? employer.wvoeOvertime
     : employer.overtimeYtd + employer.tipsYtd + employer.commissionYtd;
-  const variableMonths = Math.max(fromWvoe ? employer.wvoeMonths : employer.monthsAtJob, 1);
+  // Paystub variable earnings are year-to-date amounts and must use the same
+  // document-derived coverage as base YTD. `monthsAtJob` remains the legacy
+  // fallback and still owns the prior-employer continuity window.
+  const variableMonths = Math.max(
+    fromWvoe ? employer.wvoeMonths : context.ytdMonthsElapsed ?? employer.monthsAtJob,
+    1,
+  );
   const frequency = employer.bonusFrequency;
   const bonusMonths = frequency ? bonusMonthsCovered(variableMonths, frequency) : variableMonths;
   // Without a bonus frequency this is the console's original single division,

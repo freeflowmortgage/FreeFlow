@@ -117,6 +117,16 @@ describe('W-2 base methods', () => {
     expect(methods.options.find((option) => option.id === 'ytd')?.monthly).toBeCloseTo(6000, 10);
   });
 
+  test('a December 3 paystub uses its 11.08-month coverage for base and variable YTD', () => {
+    const context = { ownedByPrimary: false, ytdMonthsElapsed: 11.08 };
+    const employer = { ...apex, baseYtd: 104741.32, bonusYtd: 1108, overtimeYtd: 2216, monthsAtJob: 12 };
+    expect(w2BaseMethods(employer, context).options.find((option) => option.id === 'ytd')?.monthly)
+      .toBeCloseTo(104741.32 / 11.08, 10);
+    const variable = w2VariableMethods(employer, context);
+    expect(variable.variableMonths).toBe(11.08);
+    expect(variable.options.find((option) => option.id === 'current')?.monthly).toBeCloseTo(300, 10);
+  });
+
   test('prior-year base falls back to the 1003 previous employer only for the primary borrower', () => {
     const noW2 = { ...meridian, w2Year1Box5: 0 };
     const prior = (ownedByPrimary: boolean) =>

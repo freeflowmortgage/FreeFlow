@@ -82,11 +82,20 @@ describe('live worksheet hydration', () => {
           pageIndex: 2,
           id: 'ps-hourly-rate--paystub-p2',
         }),
+        { ...field('ps-period-end', 0, {
+          form: 'Paystub', entityId: 'paystub-p2', pageIndex: 2, id: 'ps-period-end--paystub-p2',
+        }), value: '12/03/2022' },
+        { ...field('ps-pay-frequency', 0, {
+          form: 'Paystub', entityId: 'paystub-p2', pageIndex: 2, id: 'ps-pay-frequency--paystub-p2',
+        }), value: 'Weekly' },
       ]),
     ).toMatchObject({
       currentPeriodBasePay: 4159.65,
       baseYtd: 104741.32,
       hourlyRate: 51.9953,
+      payFrequency: 'WEEKLY',
+      periodEnd: '12/03/2022',
+      ytdMonthsElapsed: 11.08,
     });
   });
 
