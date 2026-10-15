@@ -36,7 +36,7 @@ resource "aws_ecs_task_definition" "parser" {
       image                  = var.parser_image
       essential              = true
       readonlyRootFilesystem = true
-      user                   = "8888"
+      user                   = "8888:8888"
       linuxParameters = {
         initProcessEnabled = true
         capabilities       = { add = [], drop = ["ALL"] }

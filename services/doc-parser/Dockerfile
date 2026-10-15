@@ -1,44 +1,50 @@
-FROM python:3.11-slim-trixie@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
+FROM python:3.11-slim-bookworm@sha256:0a310eeecf4e1f5a0743f9a6520c90c88d089c903ca5fd283f501e3a805f5f89 AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
 
-WORKDIR /app
+WORKDIR /build
 
-# Upgrade the minimal Debian base before installing OpenCV's bounded native
-# runtime dependencies. Build tools remain outside the final image.
+# Keep package installation and build tooling out of the final runtime. The
+# headless OpenCV wheel provides the same cv2 API without X11/GL libraries.
 RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends \
-        libgl1 \
-        libglib2.0-0 \
-        libgomp1 \
-        libsm6 \
-        libxext6 \
-        libxrender1 \
-        libxcb1 \
+    && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+# RapidOCR declares the GUI OpenCV distribution even though it only consumes
+# the cv2 API. Resolve its transitive dependencies first, then replace that
+# payload with the ABI-compatible headless wheel and remove the GUI artifacts.
 RUN --mount=type=cache,id=freeflow-pip-cache,target=/root/.cache/pip,sharing=locked \
-    python3.11 -m pip install --no-compile -r requirements.txt \
-    && python3.11 -m pip check \
-    && rm -rf /usr/local/lib/python3.11/site-packages/pip* \
-        /usr/local/lib/python3.11/site-packages/setuptools* \
-        /usr/local/lib/python3.11/site-packages/wheel* \
-        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11 \
-        /usr/local/bin/wheel
+    python3.11 -m pip install --no-compile --target /opt/parser -r requirements.txt \
+    && python3.11 -m pip install --no-compile --target /opt/parser --upgrade --force-reinstall --no-deps \
+        opencv-python-headless==4.14.0.94 \
+    && rm -rf /opt/parser/opencv_python-*.dist-info /opt/parser/opencv_python.libs \
+    && PYTHONPATH=/opt/parser python3.11 -c "import cv2, fitz, numpy, onnxruntime, pypdfium2"
 
-COPY src/ ./
-COPY templates /app/templates
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:fe18d1ee02440b6480eb4a045be052e9aeaf9bf5029368f09d3425ddab2bfa0a
 
-RUN groupadd -g 8888 appgroup && \
-    useradd -u 8888 -g appgroup -s /bin/false -M appuser && \
-    mkdir -p /tmp/freeflow && \
-    chown -R appuser:appgroup /app /tmp/freeflow
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/opt/parser:/app
 
-USER appuser
+WORKDIR /app
+
+RUN microdnf --releasever=latest update -y \
+    && microdnf --releasever=latest install -y libgomp python3.11 \
+    && microdnf clean all \
+    && rm -rf /var/cache/dnf
+
+COPY --from=builder --chown=8888:8888 /opt/parser /opt/parser
+COPY --chown=8888:8888 src/ ./
+COPY --chown=8888:8888 templates /app/templates
+
+RUN mkdir -p /tmp/freeflow \
+    && chown -R 8888:8888 /app /opt/parser /tmp/freeflow
+
+USER 8888:8888
+
+VOLUME ["/tmp/freeflow"]
 
 EXPOSE 8080
 
