@@ -1,5 +1,6 @@
 import type { MappedIncomeField } from './parseTypes';
 import { uiPayFrequencyFromMismo } from '../../../packages/mortgage-engine/src/paystubMismoMapper';
+import { parseStubDate, paystubCoverage } from '../../../packages/mortgage-engine/src/paystubCoverage';
 
 function bySource(fields: MappedIncomeField[], sourceId: string, entityId?: string): MappedIncomeField | undefined {
   return fields.find(
@@ -34,6 +35,10 @@ export type LiveWagePatch = {
   rsuYtd?: number;
   otherYtd?: number;
   payFrequency?: 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
+  periodEnd?: string;
+  payDate?: string;
+  /** Date-derived coverage of the paystub's year-to-date earnings column. */
+  ytdMonthsElapsed?: number;
   wvoeBonus?: number;
   wvoeOvertime?: number;
   w2Year1Box5?: number;
@@ -158,6 +163,8 @@ export function liveBorrowerName(fields: MappedIncomeField[]): string | undefine
 const WAGE_SOURCE_IDS = [
   'ps-employer-name',
   'ps-pay-frequency',
+  'ps-period-end',
+  'ps-pay-date',
   'ps-hourly-rate',
   'ps-hours-week',
   'ps-current-base',
@@ -177,6 +184,13 @@ export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null
   const entityId = firstEntity(fields, 'w2-box5') ?? firstEntity(fields, 'w2-employer-name');
   const paystubEntity = latestPaystubEntity(fields);
   const fromWvoe = fields.some((field) => field.form === 'WVOE');
+  const periodEnd = text(fields, 'ps-period-end', paystubEntity);
+  const payDate = text(fields, 'ps-pay-date', paystubEntity);
+  const payFrequency = uiPayFrequencyFromMismo(text(fields, 'ps-pay-frequency', paystubEntity));
+  const periodEndDate = parseStubDate(periodEnd);
+  const coverage = periodEndDate
+    ? paystubCoverage({ taxYear: periodEndDate.year, periodEnd, payFrequency })
+    : null;
   const extractedFieldIds = WAGE_SOURCE_IDS.filter((sourceId) =>
     fields.some((field) => field.sourceFieldId === sourceId),
   );
@@ -198,7 +212,10 @@ export function liveWagePatch(fields: MappedIncomeField[]): LiveWagePatch | null
     commissionYtd: num(fields, 'ps-commission-ytd', paystubEntity),
     rsuYtd: num(fields, 'ps-rsu-ytd', paystubEntity),
     otherYtd: num(fields, 'ps-other-ytd', paystubEntity),
-    payFrequency: uiPayFrequencyFromMismo(text(fields, 'ps-pay-frequency', paystubEntity)),
+    payFrequency,
+    periodEnd,
+    payDate,
+    ytdMonthsElapsed: coverage?.status === 'READY' ? coverage.elapsedMonths ?? undefined : undefined,
     wvoeBonus: num(fields, 'wvoe-bonus'),
     wvoeOvertime: num(fields, 'wvoe-ot'),
     w2Year1Box5: w2GrossWages(fields, entityId),

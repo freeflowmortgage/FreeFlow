@@ -125,6 +125,7 @@ import {
   splitIncomeByBorrower,
   w2BaseMethods,
   w2VariableMethods,
+  DEFAULT_YTD_MONTHS_ELAPSED,
   BONUS_FREQUENCIES,
   bonusFrequencyLabel,
   bonusMonthsCovered,
@@ -169,6 +170,8 @@ interface W2Employer {
   role: 'PRIMARY' | 'SECONDARY';
   monthsAtJob: number;
   payFrequency: 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
+  /** Coverage of the paystub YTD column derived from its pay-period end date. */
+  ytdMonthsElapsed?: number;
   wageDocSource: 'PAYSTUB' | 'WVOE';
   hourlyRate: number;
   weeklyHours: number;
@@ -194,6 +197,10 @@ interface W2Employer {
   w2Year2Box5: number;
   w2Year2Bonus: number;
   w2Year2Ot: number;
+}
+
+function formatElapsedMonths(value: number): string {
+  return String(Number(value.toFixed(2)));
 }
 
 function emptyW2Employer(id: string, patch: Partial<W2Employer> = {}): W2Employer {
@@ -1494,6 +1501,7 @@ export default function UnderwriterSplitViewDemo({
   const w2ContextFor = (entry: W2Employer): W2MethodContext => ({
     ownedByPrimary: ownedByPrimary(entry),
     priorEmployer: prevEmployerW2,
+    ytdMonthsElapsed: entry.ytdMonthsElapsed,
   });
   const baseWageReconciliation = useMemo(() => {
     const methods = w2BaseMethods(activeW2Employer, w2ContextFor(activeW2Employer));
@@ -1504,6 +1512,7 @@ export default function UnderwriterSplitViewDemo({
       ytdAverageMethod: monthly('ytd'),
       priorYearW2Average: monthly('prior'),
       maxVariancePct: methods.maxVariancePct,
+      ytdMonthsElapsed: activeW2Employer.ytdMonthsElapsed ?? DEFAULT_YTD_MONTHS_ELAPSED,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ownedByPrimary reads borrowers
   }, [activeW2Employer, prevEmployerW2, borrowers]);
@@ -1516,7 +1525,10 @@ export default function UnderwriterSplitViewDemo({
       : currentBonusYtd + currentOtYtd + currentTipsYtd + currentCommissionYtd;
     const currentMonths = fromWvoe ? Math.max(activeW2Employer.wvoeMonths, 1) : monthsAtCurrentJob;
     const currentMonthlyVariableAvg =
-      w2VariableMethods(activeW2Employer, { ownedByPrimary: false }).options.find((option) => option.id === 'current')?.monthly ?? 0;
+      w2VariableMethods(activeW2Employer, {
+        ownedByPrimary: false,
+        ytdMonthsElapsed: activeW2Employer.ytdMonthsElapsed,
+      }).options.find((option) => option.id === 'current')?.monthly ?? 0;
 
     const previousBonusOtTotal = prevEmployerW2.box12Bonus + prevEmployerW2.box14Overtime;
     const previousMonthlyVariableAvg = previousBonusOtTotal / 12;
@@ -1981,7 +1993,7 @@ export default function UnderwriterSplitViewDemo({
     const options = [
       { id: 'hourly', label: 'Hourly rate', monthly: baseWageReconciliation.hourlyMethod, formula: '(Rate × hours × 52) / 12' },
       { id: 'period', label: 'Pay period annualized', monthly: baseWageReconciliation.periodAnnualizedMethod, formula: '(Period pay × 24) / 12' },
-      { id: 'ytd', label: 'YTD average', monthly: baseWageReconciliation.ytdAverageMethod, formula: 'YTD base / 7.5 months elapsed' },
+      { id: 'ytd', label: 'YTD average', monthly: baseWageReconciliation.ytdAverageMethod, formula: `YTD base / ${formatElapsedMonths(baseWageReconciliation.ytdMonthsElapsed)} months elapsed` },
       { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: '2025 W-2 Box 5 / 12' },
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];

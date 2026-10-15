@@ -3,7 +3,7 @@ import { selectPersistableParserExtraction, type PersistableIncomeExtraction } f
 // This versions the bounded persistence projection as well as the private
 // parser response. Advance it whenever normalized fields or evidence change so
 // an older extraction is superseded instead of failing the determinism guard.
-const PERSISTED_PARSER_VERSION = 'income-parser-v6';
+const PERSISTED_PARSER_VERSION = 'income-parser-v7';
 
 export type EncompassAttachment = Readonly<{ id: string }>;
 export type ParsedAttachment = Readonly<{

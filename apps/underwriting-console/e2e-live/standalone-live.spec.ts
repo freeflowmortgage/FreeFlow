@@ -17,7 +17,9 @@ const SYNTHETIC_PAYSTUB_SHA256 = '0c32930fafb11d3ad5ddeb205518974209468552314497
 const FIXTURE_EXPECTATION = Object.freeze({
   baseYtd: 29_380,
   variableYtd: 1_950 + 3_000,
-  elapsedMonths: 6,
+  // 06/18/2023 is day 169 of 365: (169 / 365) * 12 = 5.56.
+  // This is derived independently from the fixture's printed period end.
+  elapsedMonths: 5.56,
 });
 const EXPECTED_BASE_MONTHLY = money(FIXTURE_EXPECTATION.baseYtd / FIXTURE_EXPECTATION.elapsedMonths);
 const EXPECTED_VARIABLE_MONTHLY = money(FIXTURE_EXPECTATION.variableYtd / FIXTURE_EXPECTATION.elapsedMonths);
@@ -73,10 +75,10 @@ test.describe('live standalone lifecycle - no business API mocks', () => {
       const review = page.getByRole('heading', { name: '3. Borrower assignment and data review' }).locator('..');
       const confirmReview = page.getByRole('button', { name: 'Confirm assignments and reviewed data' });
       await expect(confirmReview).toBeVisible();
-      await expect(review.locator('label')).toHaveCount(3);
+      await expect(review.locator('label')).toHaveCount(1);
+      await expect(review.locator('label').filter({ hasText: 'Tax year' })).toHaveCount(0);
+      await expect(review.locator('label').filter({ hasText: 'Months elapsed year to date' })).toHaveCount(0);
       await reviewedField(review, 'employmentRole', 'select').selectOption('CURRENT');
-      await reviewedField(review, 'taxYear', 'input').fill('2023');
-      await reviewedField(review, 'elapsedMonths', 'input').fill(String(FIXTURE_EXPECTATION.elapsedMonths));
       await confirmReview.click();
       await expect(page.getByText('Borrower assignments and required data are complete.')).toBeVisible();
 
