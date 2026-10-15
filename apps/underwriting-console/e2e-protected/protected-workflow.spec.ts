@@ -327,6 +327,55 @@ test('protected white workflow binds, uploads, reviews, calculates, approves, an
   await expect(page.getByTestId('b2b-landing')).toBeVisible();
 });
 
+test('Submit and approve review fields preserve the outer scroll position', async ({ page }) => {
+  let stage: 'bound' | 'uploaded' = 'bound';
+  await page.route('**/runtime-config.json', (route) => route.fulfill({
+    json: { testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' } },
+  }));
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v1/encompass-host/launch') {
+      return route.fulfill({ json: { loanId: LOAN, loanVersion: 1, integrationMode: 'ENCOMPASS_HOSTED', created: true } });
+    }
+    if (path === `/api/v1/loans/${LOAN}/console-context`) return route.fulfill({ json: context(stage) });
+    if (path === `/api/v1/loans/${LOAN}/income-documents`) {
+      stage = 'uploaded';
+      return route.fulfill({ status: 201, json: { source: 'UPLOAD', attachmentId: 'upload-1', status: 'PROCESSED' } });
+    }
+    if (path.endsWith('/metadata-requirements')) {
+      return route.fulfill({ json: {
+        extractionId: EXTRACTION,
+        status: 'ACTIVE',
+        review: null,
+        requirements: stage === 'uploaded'
+          ? [{ extractionId: EXTRACTION, entityId: 'w2-p0-0', field: 'employmentRole', form: 'W-2' }]
+          : [],
+      } });
+    }
+    return route.fulfill({ status: 404, json: { error: { code: 'UNEXPECTED_TEST_ROUTE' } } });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
+  const pdf = await PDFDocument.create();
+  pdf.addPage([612, 792]);
+  await page.getByTestId('live-pdf-input').setInputFiles({
+    name: 'synthetic-income.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await pdf.save()),
+  });
+  await expect(page.getByTestId('workflow-state')).toHaveText('REVIEW REQUIRED');
+  await page.getByTestId('authoritative-workflow-tab').click();
+
+  const employmentReview = page.getByRole('combobox');
+  await employmentReview.scrollIntoViewIfNeeded();
+  const scrollBeforeReview = await page.evaluate(() => window.scrollY);
+  expect(scrollBeforeReview).toBeGreaterThan(0);
+  await employmentReview.selectOption('CURRENT');
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeReview);
+});
+
 test('protected white workflow visibly preserves a backend launch failure', async ({ page }) => {
   await page.route('**/runtime-config.json', (route) => route.fulfill({
     json: { testHost: { enabled: true, loanGuid: '00000000-0000-4000-8000-00000000d001' } },

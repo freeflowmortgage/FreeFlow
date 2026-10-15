@@ -4,6 +4,7 @@ import {
   annualizeWvoe,
   elapsedMonthsAgree,
   parsePayFrequency,
+  parseStubDate,
   parseWvoeBasePayPeriod,
   parseWvoePayCycle,
   paystubCoverage,
@@ -280,6 +281,16 @@ function projectPersistedInput(
       projectWvoe(extractionId, record, metadata, requirements, requireBorrower, roster, projected);
       continue;
     }
+    const fields = new Map(record.fields.map((field) => [field.sourceFieldId, field]));
+    // Return pages and Schedule L are evidence for a K-1 row, not independent
+    // borrower income. Skip them before the metadata gate so a multi-borrower
+    // loan does not ask the reviewer to assign the same business twice.
+    if (record.form === 'Form 1120-S'
+      && !hasAny(fields, S_CORP_K1_INCOME_FIELD_IDS)
+      && isBusinessReturnSupportEvidenceOnly(record.fields, 'scorp-return-')) continue;
+    if (record.form === 'Form 1065'
+      && !hasAny(fields, PARTNERSHIP_K1_INCOME_FIELD_IDS)
+      && isBusinessReturnSupportEvidenceOnly(record.fields, 'pt-return-')) continue;
     const meta = metadata.get(record.entityId);
     const borrowerBlocked = requireBorrower && (!meta?.borrowerKey || !roster.has(meta.borrowerKey));
     let blocked = false;
@@ -292,7 +303,6 @@ function projectPersistedInput(
       blocked = true;
     }
     if (blocked || !meta?.taxYear) continue;
-    const fields = new Map(record.fields.map((field) => [field.sourceFieldId, field]));
     const n = (id: string) => fields.get(id)?.numericValue;
     const t = (id: string) => fields.get(id)?.value;
     const base = { entityId: record.entityId, year: meta.taxYear };
@@ -306,7 +316,7 @@ function projectPersistedInput(
       if (!hasAny(fields, S_CORP_K1_INCOME_FIELD_IDS)) {
         // Return pages persist scorp-return-* lines as evidence for the K-1.
         // They are not an independent borrower income calculation row.
-        if (isSCorpReturnEvidenceOnly(record.fields) || isScheduleLEvidenceOnly(record.fields)) continue;
+        if (isBusinessReturnSupportEvidenceOnly(record.fields, 'scorp-return-')) continue;
         requireParserField(requirements, extractionId, record);
         continue;
       }
@@ -317,7 +327,7 @@ function projectPersistedInput(
       if (!hasAny(fields, PARTNERSHIP_K1_INCOME_FIELD_IDS)) {
         // Return pages persist entity-level pt-return-* lines on their own formRecord.
         // They are evidence for the K-1 extraction, not a calc row, and must not fail-close.
-        if (isPartnershipReturnEvidenceOnly(record.fields) || isScheduleLEvidenceOnly(record.fields)) continue;
+        if (isBusinessReturnSupportEvidenceOnly(record.fields, 'pt-return-')) continue;
         requireParserField(requirements, extractionId, record);
         continue;
       }
@@ -384,11 +394,6 @@ function hasAny(fields: ReadonlyMap<string, unknown>, ids: readonly string[]): b
   return ids.some((id) => fields.has(id));
 }
 
-/** True when a record carries only Schedule L lines, which are not a calc row of their own. */
-function isScheduleLEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?: string }>): boolean {
-  return fields.length > 0 && fields.every((field) => (field.sourceFieldId ?? '') in SCHEDULE_L_LINES);
-}
-
 /**
  * The balance sheet a return's K-1 is tested against.
  *
@@ -403,7 +408,8 @@ function scheduleLFor(
   records: ReadonlyArray<z.infer<typeof persistedFormRecord>>,
   form: 'Form 1065' | 'Form 1120-S',
 ): Record<string, number> | undefined {
-  const sheets = records.filter((record) => record.form === form && isScheduleLEvidenceOnly(record.fields));
+  const sheets = records.filter((record) =>
+    record.form === form && record.fields.some((field) => (field.sourceFieldId ?? '') in SCHEDULE_L_LINES));
   if (sheets.length !== 1) return undefined;
   const sheet: Record<string, number> = {};
   for (const field of sheets[0].fields) {
@@ -413,29 +419,20 @@ function scheduleLFor(
   return Object.keys(sheet).length > 0 ? sheet : undefined;
 }
 
-/** True when every captured field is a partnership return id (pt-return-*) and none are K-1 income boxes. */
-function isPartnershipReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?: string }>): boolean {
-  if (fields.length === 0) return false;
-  const k1Income = new Set<string>(PARTNERSHIP_K1_INCOME_FIELD_IDS);
-  let returnField = false;
-  for (const field of fields) {
-    if (k1Income.has(field.sourceFieldId)) return false;
-    if (!field.sourceFieldId.startsWith('pt-return-')) return false;
-    returnField = true;
-  }
-  return returnField;
-}
-/** True when every captured field is an S-corporation return id and none are K-1 income boxes. */
-function isSCorpReturnEvidenceOnly(fields: ReadonlyArray<{ sourceFieldId?: string }>): boolean {
-  if (fields.length === 0) return false;
-  const k1Income = new Set<string>(S_CORP_K1_INCOME_FIELD_IDS);
-  let returnField = false;
-  for (const field of fields) {
-    if (k1Income.has(field.sourceFieldId)) return false;
-    if (!field.sourceFieldId?.startsWith('scorp-return-')) return false;
-    returnField = true;
-  }
-  return returnField;
+/**
+ * Return and Schedule L lines are supporting evidence for a K-1, not another
+ * borrower-income row. The parser can place both kinds on the same return
+ * page, so the gate must recognize their union while still failing closed on
+ * any K-1-ish field that lacks an authoritative income box.
+ */
+function isBusinessReturnSupportEvidenceOnly(
+  fields: ReadonlyArray<{ sourceFieldId?: string }>,
+  returnPrefix: 'pt-return-' | 'scorp-return-',
+): boolean {
+  return fields.length > 0 && fields.every((field) => {
+    const id = field.sourceFieldId ?? '';
+    return id.startsWith(returnPrefix) || id in SCHEDULE_L_LINES;
+  });
 }
 function requireParserField(target: ExtractionMetadataRequirement[], extractionId: string, record: z.infer<typeof persistedFormRecord>): void {
   target.push({ extractionId, entityId: record.entityId, field: 'requiredParserField', form: record.form });
@@ -608,7 +605,14 @@ function projectPaystub(
   const employerName = t('ps-employer-name');
   const employerKey = employerIdentityKey(employerName);
   const role = meta?.employmentRole;
-  const year = meta?.taxYear;
+  const periodEnd = t('ps-period-end');
+  const payDate = t('ps-pay-date');
+  // The period end is part of the paystub evidence and identifies the YTD
+  // accumulation year. Prefer it when the reviewer has not supplied a year;
+  // a pay date alone is not sufficient because a December period may be paid
+  // in January of the following year.
+  const documentYear = parseStubDate(periodEnd)?.year;
+  const year = meta?.taxYear ?? documentYear;
   const borrowerKey = meta?.borrowerKey;
   const borrowerBlocked = requireBorrower && (!borrowerKey || !roster.has(borrowerKey));
   if (!employerName || !employerKey) {
@@ -621,8 +625,8 @@ function projectPaystub(
   }
   const payFrequency = meta?.payFrequency ?? parsePayFrequency(t('ps-pay-frequency'));
   const elapsedMonths = resolveElapsedMonths(extractionId, record, meta?.elapsedMonths, year, {
-    periodEnd: t('ps-period-end'),
-    payDate: t('ps-pay-date'),
+    periodEnd,
+    payDate,
     payFrequency,
   }, requirements);
   const baseYtd = n('ps-base-ytd');
