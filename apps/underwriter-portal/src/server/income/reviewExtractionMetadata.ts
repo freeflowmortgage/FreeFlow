@@ -13,7 +13,12 @@ const REASONS = new Set(['DOCUMENT_METADATA_CONFIRMED', 'LOS_METADATA_CONFIRMED'
 const ROLES = new Set(['CURRENT', 'CONCURRENT', 'PRIOR', 'PRIMARY', 'SECONDARY']);
 const FREQUENCIES = new Set(['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY']);
 const BASE_METHODS = new Set(['hourly', 'period', 'ytd', 'prior']);
-const ASSIGNMENT_FIELDS = ['entityId', 'taxYear', 'employmentRole', 'ownershipPercentage', 'borrowerKey', 'elapsedMonths', 'payFrequency', 'baseIncomeMethod', 'includeInQualifyingIncome', 'hasThreeYearAssetSupport', 'hasStableDistributions', 'cash', 'currentLiabilities'];
+const WVOE_BASE_METHODS = new Set(['current', 'ytd']);
+const WVOE_VARIABLE_METHODS = new Set(['current', 'avg24']);
+const BONUS_FREQUENCIES = new Set(['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL']);
+const ASSIGNMENT_FIELDS = ['entityId', 'taxYear', 'employmentRole', 'ownershipPercentage', 'borrowerKey', 'elapsedMonths', 'payFrequency', 'baseIncomeMethod', 'wvoeBaseMethod', 'wvoeVariableMethod', 'bonusFrequency', 'includeInQualifyingIncome', 'hasThreeYearAssetSupport', 'hasStableDistributions', 'cash', 'currentLiabilities', 'iraAccountBalance', 'hasThreeYearIraContinuance', 'grossUpIraNonTaxable'];
+/** Forms whose year-to-date figures are divided by a reviewed elapsed-months count. */
+const YTD_FORMS = ['Paystub', 'WVOE'];
 
 export type MetadataReviewRequest = Readonly<{
   loanId: string; extractionId: string; expectedLoanVersion: number; expectedMetadataVersion: number;
@@ -92,7 +97,10 @@ function parseAssignment(value: unknown): ExtractionMetadataAssignment {
     entityId: string; taxYear?: number; employmentRole?: ExtractionMetadataAssignment['employmentRole']; ownershipPercentage?: number;
     borrowerKey?: string; elapsedMonths?: number; payFrequency?: ExtractionMetadataAssignment['payFrequency'];
     baseIncomeMethod?: ExtractionMetadataAssignment['baseIncomeMethod']; includeInQualifyingIncome?: boolean;
+    wvoeBaseMethod?: ExtractionMetadataAssignment['wvoeBaseMethod']; wvoeVariableMethod?: ExtractionMetadataAssignment['wvoeVariableMethod'];
+    bonusFrequency?: ExtractionMetadataAssignment['bonusFrequency'];
     hasThreeYearAssetSupport?: boolean; hasStableDistributions?: boolean; cash?: number; currentLiabilities?: number;
+    iraAccountBalance?: number; hasThreeYearIraContinuance?: boolean; grossUpIraNonTaxable?: boolean;
   } = { entityId: value.entityId };
   if (value.taxYear !== undefined) assignment.taxYear = boundedInteger(value.taxYear, 1990, 2100, 'taxYear');
   if (value.employmentRole !== undefined) { if (typeof value.employmentRole !== 'string' || !ROLES.has(value.employmentRole)) throw new ApiError(400, 'INVALID_EMPLOYMENT_ROLE', 'The employment role is not allowed.'); assignment.employmentRole = value.employmentRole as ExtractionMetadataAssignment['employmentRole']; }
@@ -101,11 +109,18 @@ function parseAssignment(value: unknown): ExtractionMetadataAssignment {
   if (value.elapsedMonths !== undefined) { if (typeof value.elapsedMonths !== 'number' || !Number.isFinite(value.elapsedMonths) || value.elapsedMonths <= 0 || value.elapsedMonths > 12) throw new ApiError(400, 'INVALID_ELAPSED_MONTHS', 'Elapsed months must be greater than 0 and at most 12.'); assignment.elapsedMonths = value.elapsedMonths; }
   if (value.payFrequency !== undefined) { if (typeof value.payFrequency !== 'string' || !FREQUENCIES.has(value.payFrequency)) throw new ApiError(400, 'INVALID_PAY_FREQUENCY', 'The pay frequency is not allowed.'); assignment.payFrequency = value.payFrequency as ExtractionMetadataAssignment['payFrequency']; }
   if (value.baseIncomeMethod !== undefined) { if (typeof value.baseIncomeMethod !== 'string' || !BASE_METHODS.has(value.baseIncomeMethod)) throw new ApiError(400, 'INVALID_BASE_METHOD', 'The base income method is not allowed.'); assignment.baseIncomeMethod = value.baseIncomeMethod as ExtractionMetadataAssignment['baseIncomeMethod']; }
+  if (value.wvoeBaseMethod !== undefined) { if (typeof value.wvoeBaseMethod !== 'string' || !WVOE_BASE_METHODS.has(value.wvoeBaseMethod)) throw new ApiError(400, 'INVALID_BASE_METHOD', 'The verification base method is not allowed.'); assignment.wvoeBaseMethod = value.wvoeBaseMethod as ExtractionMetadataAssignment['wvoeBaseMethod']; }
+  if (value.wvoeVariableMethod !== undefined) { if (typeof value.wvoeVariableMethod !== 'string' || !WVOE_VARIABLE_METHODS.has(value.wvoeVariableMethod)) throw new ApiError(400, 'INVALID_VARIABLE_METHOD', 'The verification variable method is not allowed.'); assignment.wvoeVariableMethod = value.wvoeVariableMethod as ExtractionMetadataAssignment['wvoeVariableMethod']; }
+  if (value.bonusFrequency !== undefined) { if (typeof value.bonusFrequency !== 'string' || !BONUS_FREQUENCIES.has(value.bonusFrequency)) throw new ApiError(400, 'INVALID_BONUS_FREQUENCY', 'The bonus frequency is not allowed.'); assignment.bonusFrequency = value.bonusFrequency as ExtractionMetadataAssignment['bonusFrequency']; }
   if (value.includeInQualifyingIncome !== undefined) { if (typeof value.includeInQualifyingIncome !== 'boolean') throw new ApiError(400, 'INVALID_ASSET_ELECTION', 'Asset inclusion must be true or false.'); assignment.includeInQualifyingIncome = value.includeInQualifyingIncome; }
   if (value.hasThreeYearAssetSupport !== undefined) { if (typeof value.hasThreeYearAssetSupport !== 'boolean') throw new ApiError(400, 'INVALID_ASSET_ELECTION', 'Asset continuance must be true or false.'); assignment.hasThreeYearAssetSupport = value.hasThreeYearAssetSupport; }
   if (value.hasStableDistributions !== undefined) { if (typeof value.hasStableDistributions !== 'boolean') throw new ApiError(400, 'INVALID_METADATA_ASSIGNMENT', 'Distribution stability must be true or false.'); assignment.hasStableDistributions = value.hasStableDistributions; }
   if (value.cash !== undefined) assignment.cash = boundedMoney(value.cash, 'cash');
   if (value.currentLiabilities !== undefined) assignment.currentLiabilities = boundedMoney(value.currentLiabilities, 'currentLiabilities');
+  if (value.iraAccountBalance !== undefined) assignment.iraAccountBalance = boundedMoney(value.iraAccountBalance, 'iraAccountBalance');
+  if (value.hasThreeYearIraContinuance !== undefined) { if (typeof value.hasThreeYearIraContinuance !== 'boolean') throw new ApiError(400, 'INVALID_IRA_CONTINUANCE', 'IRA continuance must be true or false.'); assignment.hasThreeYearIraContinuance = value.hasThreeYearIraContinuance; }
+  if (value.grossUpIraNonTaxable !== undefined) { if (typeof value.grossUpIraNonTaxable !== 'boolean') throw new ApiError(400, 'INVALID_IRA_CONTINUANCE', 'IRA gross-up must be true or false.'); assignment.grossUpIraNonTaxable = value.grossUpIraNonTaxable; }
+  if (assignment.grossUpIraNonTaxable === true && assignment.hasThreeYearIraContinuance === false) throw new ApiError(400, 'INVALID_IRA_CONTINUANCE', 'IRA distributions cannot be grossed up without confirmed continuance.');
   if (keys.length === 1) throw new ApiError(400, 'EMPTY_METADATA_ASSIGNMENT', 'Each assignment must supply metadata.');
   return assignment;
 }
@@ -119,10 +134,14 @@ function readMetadataEntities(value: unknown): Map<string, string> {
 function validateAssignment(item: ExtractionMetadataAssignment, entities: Map<string, string>): void {
   const form = entities.get(item.entityId); if (!form) throw new ApiError(422, 'UNKNOWN_EXTRACTION_ENTITY', 'An assignment does not match this extraction.');
   if (form === 'W-2' && (item.taxYear !== undefined || item.ownershipPercentage !== undefined || item.elapsedMonths !== undefined || item.payFrequency !== undefined || item.includeInQualifyingIncome !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'W-2 metadata only accepts employment role and borrower assignment.');
-  if (form !== 'W-2' && form !== 'Paystub' && item.employmentRole !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Employment role only applies to W-2 and paystub records.');
-  if (form !== 'Paystub' && (item.elapsedMonths !== undefined || item.payFrequency !== undefined || item.baseIncomeMethod !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Paystub annualization metadata only applies to paystubs.');
+  if (form !== 'W-2' && !YTD_FORMS.includes(form) && item.employmentRole !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Employment role only applies to W-2, paystub, and verification records.');
+  if (!YTD_FORMS.includes(form) && item.elapsedMonths !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Elapsed months only applies to a year-to-date wage document.');
+  if (!YTD_FORMS.includes(form) && item.bonusFrequency !== undefined) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Bonus frequency only applies to a year-to-date wage document.');
+  if (form !== 'Paystub' && (item.payFrequency !== undefined || item.baseIncomeMethod !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Paystub annualization metadata only applies to paystubs.');
+  if (form !== 'WVOE' && (item.wvoeBaseMethod !== undefined || item.wvoeVariableMethod !== undefined)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Verification annualization metadata only applies to a verification of employment.');
   if (item.ownershipPercentage !== undefined && !['Form 1120-S', 'Form 1065', 'Form 1120'].includes(form)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Ownership metadata is not accepted for this form.');
   if ((item.includeInQualifyingIncome !== undefined || item.hasThreeYearAssetSupport !== undefined) && !['Schedule B', 'Schedule D'].includes(form)) throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Asset election only applies to Schedule B or D.');
+  if ((item.iraAccountBalance !== undefined || item.hasThreeYearIraContinuance !== undefined || item.grossUpIraNonTaxable !== undefined) && form !== 'Form 1040') throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'IRA continuance only applies to Form 1040.');
   if ((item.cash !== undefined || item.currentLiabilities !== undefined) && form !== 'Form 1120') throw new ApiError(422, 'METADATA_FIELD_NOT_ALLOWED', 'Balance-sheet facts only apply to Form 1120.');
 }
 async function assertBorrowerKeys(

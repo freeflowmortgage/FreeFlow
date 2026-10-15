@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BONUS_FREQUENCIES } from './bonusTiming';
 import type { Form1084BorrowerIncome } from './encompass-urla-map';
 import {
   W2_INCOME_RULE_VERSION,
@@ -44,6 +45,8 @@ export const W2EmployerRequestSchema = z.object({
   wvoeMonths: months.default(0),
   monthsAtJob: months.default(12),
   w2Year1Box5: amount.default(0),
+  /** How often the employer pays its bonus; omitted divides the bonus like overtime. */
+  bonusFrequency: z.enum(BONUS_FREQUENCIES).optional(),
   /** The underwriter's method; omitted means the guideline recommendation. */
   baseMethod: z.enum(['hourly', 'period', 'ytd', 'prior', 'not_used']).optional(),
   variableMethod: z.enum(['current', 'avg24', 'not_used']).optional(),

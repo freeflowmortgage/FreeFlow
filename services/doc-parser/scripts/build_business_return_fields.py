@@ -20,6 +20,7 @@ The same items sit at different line numbers on the two forms:
     gain or loss, Form 4797   line 6       line 4
     other income or loss      line 7       line 5
     depreciation              line 16c     line 14
+    depreciation in COGS      line 16b     --
     ordinary business income  line 23      line 22
     meals and entertainment   M-1 line 4b  M-1 line 3b
 """
@@ -49,6 +50,8 @@ FIELDS: dict[str, dict] = {
              "Other income", "subtract_with_review"),
             ("depreciation", "Line 16c", 0, [504.0, 426.0, 576.0, 438.0],
              "depreciation reported on Form 1125-A", "add_back"),
+            ("depreciation_1125a", "Line 16b", 0, [410.4, 426.0, 481.65, 438.0],
+             "Less depreciation reported on Form 1125-A", "add_back"),
             ("meals", "Schedule M-1 line 4b", 5, [165.6, 648.0, 223.2, 660.0],
              "Travel and entertainment", "deduct"),
         ],
@@ -68,6 +71,25 @@ FIELDS: dict[str, dict] = {
              "Travel and entertainment", "deduct"),
         ],
     },
+}
+
+# Cells a figure falls back to when its own cell is blank, best first.
+#
+# Form 1065 splits depreciation over three cells: 16a is every dollar of
+# trade-or-business depreciation the partnership claimed, 16b the part of that
+# already deducted through cost of goods sold on Form 1125-A, and 16c the
+# remainder, deducted on line 16 itself. Reading 16c alone was short by 16b,
+# and a return with nothing in cost of goods sold often carries the figure on
+# 16a with the 16c net left blank, which was read as no depreciation at all.
+#
+# 16b is read alongside 16c so the two add up to 16a, and 16a stands in when
+# 16c is blank. A return cannot need both: 16c is blank only when there is no
+# 16b to subtract from 16a.
+FALLBACK_CELLS: dict[tuple[str, str], list[tuple[str, int, list[float], str]]] = {
+    ("1065", "depreciation"): [
+        ("Line 16a", 0, [410.4, 414.0, 481.65, 426.0],
+         "Depreciation (if required, attach Form 4562)"),
+    ],
 }
 
 ROW_TOLERANCE = 4.0
@@ -223,13 +245,27 @@ def build() -> tuple[dict, list[str]]:
                         f"{form} {field}: box on page {page_index} sits beside "
                         f"{found[-90:]!r}, expected {expected!r}"
                     )
-                entries[field] = {
+                entry = {
                     "line": line,
                     "page": page_index,
                     "box": box,
                     "caption": expected,
                     "use": use,
                 }
+                fallbacks = []
+                for alt_line, alt_page, alt_box, alt_caption in FALLBACK_CELLS.get((form, field), []):
+                    ok, found = _check(document[alt_page], alt_box, "left", alt_caption)
+                    if not ok:
+                        failures.append(
+                            f"{form} {field}: fallback box on page {alt_page} sits beside "
+                            f"{found[-90:]!r}, expected {alt_caption!r}"
+                        )
+                    fallbacks.append(
+                        {"line": alt_line, "page": alt_page, "box": alt_box, "caption": alt_caption}
+                    )
+                if fallbacks:
+                    entry["fallbacks"] = fallbacks
+                entries[field] = entry
             out["forms"][form] = {"blank": spec["blank"], "fields": entries}
         finally:
             document.close()

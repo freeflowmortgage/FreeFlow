@@ -15,7 +15,7 @@ const context = { requestId: 'request-1', tenantId: TENANT, membershipId: USER }
 const input = { loanId: LOAN, approvalEventId: APPROVAL, expectedLoanVersion: 2, idempotencyKey: 'host-write-key-0001', appOrigin: 'https://freeflow.example' };
 const decimal = (value: number) => ({ toNumber: () => value });
 
-function transaction(overrides: Record<string, unknown> = {}) {
+function transaction(overrides: Record<string, unknown> = {}, calculationOverrides: Record<string, unknown> = {}) {
   let storedWrite: Record<string, unknown> | null = null;
   const storedKeys: Array<Record<string, unknown>> = [];
   const tx = {
@@ -30,7 +30,9 @@ function transaction(overrides: Record<string, unknown> = {}) {
       qualifyingMonthlyIncome: decimal(8125.5), trendingResult: 'CONVENTIONAL_STABLE_OR_INCREASING', yearsAnalyzed: [2025, 2024],
       scheduleCMonthlyTotal: null, form1120SMonthlyTotal: null, form1065MonthlyTotal: null, form1120MonthlyTotal: null,
       w2BaseMonthly: decimal(7600), w2VariableMonthly: decimal(400), scheduleFMonthlyTotal: null, assetIncomeMonthly: decimal(125.5),
+      socialSecurityMonthly: null, retirementIncomeMonthly: null,
       rentalMonthly: null, rentalLiabilityMonthly: null, housingExpenseAdjustment: null,
+      ...calculationOverrides,
       extractionBindings: [{ extractionId: 'e', extractionHash: 'a'.repeat(64), sourceDocumentId: 'd', sourceDocumentVersion: 1, sourceContentHash: 'b'.repeat(64), metadataReviewId: null, metadataReviewVersion: null, metadataReviewHash: null, extraction: { status: 'ACTIVE', canonicalHash: 'a'.repeat(64), sourceDocumentVersion: 1, sourceContentHash: 'b'.repeat(64), sourceDocument: { version: 1, sourceContentHash: 'b'.repeat(64) }, metadataReviews: [] } }],
     }) },
     apiIdempotencyKey: {
@@ -60,6 +62,17 @@ test('approved host map is durable and stores no borrower identity or field valu
   assert.equal('primaryBorrowerName' in persisted, false);
   assert.equal('primaryBorrowerEmail' in persisted, false);
   assert.equal(persisted.tenantId, TENANT);
+});
+
+test('approved Social Security and retirement components write their own Encompass custom fields', async () => {
+  const state = transaction({}, { socialSecurityMonthly: decimal(2156.25), retirementIncomeMonthly: decimal(2043.75) });
+  const result = await authorizeHostWrite(state.tx as never, context, input);
+  assert.equal(result.fields['CX.FREEFLOW.SOCIAL.SECURITY'], '2156.25');
+  assert.equal(result.fields['CX.FREEFLOW.RETIREMENT'], '2043.75');
+
+  const withoutRetirement = await authorizeHostWrite(transaction().tx as never, context, input);
+  assert.equal('CX.FREEFLOW.SOCIAL.SECURITY' in withoutRetirement.fields, false);
+  assert.equal('CX.FREEFLOW.RETIREMENT' in withoutRetirement.fields, false);
 });
 
 test('repeated authorization key returns the same hosted write', async () => {

@@ -7,10 +7,13 @@ import ParserLab from './components/ParserLab';
 import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
 import B2BLanding from './components/B2BLanding';
 import BrandLogo from './components/BrandLogo';
+import LegalPage from './components/LegalPage';
+import { noticeFor } from './legal/notices';
+import { legalSlugFromHash } from './legalRoute';
 import Conversational1003 from './components/Conversational1003';
 import SplitDocPane from './components/SplitDocPane';
 import AppraisalDocPane from './components/AppraisalDocPane';
-import type { ConsoleView, SourceMode, Surface } from './appTypes';
+import type { ConsoleView, LegalSlug, SourceMode, Surface } from './appTypes';
 import type { LiveDocument } from './parseTypes';
 import { postParsePdf } from '@console-document-loader';
 import { findDuplicate } from './livePacket';
@@ -26,8 +29,13 @@ const NAV: { id: ConsoleView; label: string; icon: typeof ShieldCheck }[] = [
   { id: 'usda', label: 'USDA', icon: ToggleRight },
 ];
 
-function parseHash(): { surface: Surface; view: ConsoleView; demo: boolean } {
+function parseHash(): { surface: Surface; view: ConsoleView; demo: boolean; legal: LegalSlug } {
   const hash = window.location.hash.replace(/^#/, '');
+
+  const legal = legalSlugFromHash(hash);
+  if (legal) {
+    return { surface: 'legal', view: 'split', demo: false, legal };
+  }
 
   // Standalone demo routes: one service, no workspace chrome (#demo-income, #demo-1003, …)
   if (hash.startsWith('demo-')) {
@@ -46,18 +54,18 @@ function parseHash(): { surface: Surface; view: ConsoleView; demo: boolean } {
                 : service === 'usda'
                   ? 'usda'
                   : 'split';
-    return { surface: 'workspace', view, demo: true };
+    return { surface: 'workspace', view, demo: true, legal: 'legal' };
   }
 
-  if (hash === 'appraisal') return { surface: 'workspace', view: 'appraisal', demo: false };
-  if (hash === '1003' || hash === 'intake') return { surface: 'workspace', view: 'intake', demo: false };
-  if (hash === 'parser') return { surface: 'workspace', view: 'parser', demo: false };
-  if (hash === 'audit') return { surface: 'workspace', view: 'audit', demo: false };
-  if (hash === 'usda') return { surface: 'workspace', view: 'usda', demo: false };
+  if (hash === 'appraisal') return { surface: 'workspace', view: 'appraisal', demo: false, legal: 'legal' };
+  if (hash === '1003' || hash === 'intake') return { surface: 'workspace', view: 'intake', demo: false, legal: 'legal' };
+  if (hash === 'parser') return { surface: 'workspace', view: 'parser', demo: false, legal: 'legal' };
+  if (hash === 'audit') return { surface: 'workspace', view: 'audit', demo: false, legal: 'legal' };
+  if (hash === 'usda') return { surface: 'workspace', view: 'usda', demo: false, legal: 'legal' };
   if (hash === 'workspace' || hash === 'console' || hash === 'split' || hash === 'income') {
-    return { surface: 'workspace', view: 'split', demo: false };
+    return { surface: 'workspace', view: 'split', demo: false, legal: 'legal' };
   }
-  return { surface: 'landing', view: 'split', demo: false };
+  return { surface: 'landing', view: 'split', demo: false, legal: 'legal' };
 }
 
 const DEMO_LABELS: Record<ConsoleView, string> = {
@@ -98,6 +106,7 @@ export default function App() {
   const [surface, setSurface] = useState<Surface>(initial.surface);
   const [view, setView] = useState<ConsoleView>(initial.view);
   const [demoMode, setDemoMode] = useState<boolean>(initial.demo);
+  const [legalSlug, setLegalSlug] = useState<LegalSlug>(initial.legal);
   const [session, setSession] = useState<LiveDocument | null>(null);
   const [documents, setDocuments] = useState<LiveDocument[]>([]);
   const documentsRef = useRef<LiveDocument[]>([]);
@@ -107,8 +116,13 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.classList.remove('dark');
-    document.title = surface === 'landing' ? 'FreeFlow Mortgage Solutions' : 'FreeFlow';
-  }, [surface]);
+    document.title =
+      surface === 'landing'
+        ? 'FreeFlow Mortgage Solutions'
+        : surface === 'legal'
+          ? `${noticeFor(legalSlug).title} · FreeFlow`
+          : 'FreeFlow';
+  }, [surface, legalSlug]);
 
   useEffect(() => {
     const onHash = () => {
@@ -116,6 +130,7 @@ export default function App() {
       setSurface(next.surface);
       setView(next.view);
       setDemoMode(next.demo);
+      setLegalSlug(next.legal);
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -188,6 +203,10 @@ export default function App() {
   }
   if (docPaneKind === 'appraisal') {
     return <AppraisalDocPane />;
+  }
+
+  if (surface === 'legal') {
+    return <LegalPage slug={legalSlug} onHome={backToSite} />;
   }
 
   if (surface === 'landing') {

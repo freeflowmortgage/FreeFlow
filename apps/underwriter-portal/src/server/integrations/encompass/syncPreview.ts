@@ -129,6 +129,8 @@ export async function loadApprovedEncompassSyncPreview(
       w2BaseMonthly: true,
       w2VariableMonthly: true,
       assetIncomeMonthly: true,
+      socialSecurityMonthly: true,
+      retirementIncomeMonthly: true,
       rentalMonthly: true,
       borrowerIncome: true,
       extractionBindings: { select: {
@@ -170,6 +172,8 @@ export async function loadApprovedEncompassSyncPreview(
     w2BaseMonthly: numberOrUndefined(calculation.w2BaseMonthly),
     w2VariableMonthly: numberOrUndefined(calculation.w2VariableMonthly),
     assetIncomeMonthly: numberOrUndefined(calculation.assetIncomeMonthly),
+    socialSecurityMonthly: numberOrUndefined(calculation.socialSecurityMonthly),
+    retirementIncomeMonthly: numberOrUndefined(calculation.retirementIncomeMonthly),
     rentalMonthly: numberOrUndefined(calculation.rentalMonthly),
     borrowerIncome: calculation.borrowerIncome,
     auditUrl: `${configuration.appOrigin}/audit/${approval.id}`,
