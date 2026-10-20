@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { ConsoleContext } from './protectedWorkflow';
 import { mapIncomeFields } from './incomeFieldMap';
 import { liveSchCPatch, liveWagePatch } from './liveHydrate';
-import { fieldForInspection, inspectFieldIds, inspectOverlayFromField } from './livePacket';
+import { fieldForInspection, inspectFieldIds, inspectOverlayFromField, kindsOf, pickDocumentForTab, tabForKinds } from './livePacket';
 import {
   protectedWorkspaceContext,
   protectedWorkspaceDocuments,
@@ -121,6 +121,21 @@ test('preserves a live parser box through field mapping into the PDF highlight o
     pageIndex: 0,
     box: { x: 0.11, y: 0.22, w: 0.33, h: 0.044 },
   });
+});
+
+test('routes a rehydrated Form 1120 to the C-corp tab and keeps Form 1120-S on the S-corp tab', () => {
+  const corporate = (form: string, fieldId: string): ConsoleContext['extractions'][number] => ({
+    ...extraction,
+    normalizedInput: { formRecords: [{ entityId: `${form}:p0`, form, pageIndex: 0, fields: [{ sourceFieldId: fieldId, numericValue: 250000 }] }] },
+    evidence: { fields: [] },
+  });
+  const cCorp = rehydrateProtectedParseResponse(corporate('Form 1120', 'c1120-taxable'), 1);
+  assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: cCorp }), ['ccorp']);
+  assert.equal(tabForKinds(kindsOf({ fileName: 'upload.pdf', result: cCorp })).tab, 'CCORP');
+  assert.equal(pickDocumentForTab([{ id: 'c', sha256: 'c', file: new File([], 'upload.pdf'), fileName: 'upload.pdf', result: cCorp }], 'CCORP')?.id, 'c');
+
+  const sCorp = rehydrateProtectedParseResponse(corporate('Form 1120-S', 'scorp-return-ord'), 1);
+  assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: sCorp }), ['scorp']);
 });
 
 test('maps worksheet highlight ids back to parser ids across supported income families', () => {

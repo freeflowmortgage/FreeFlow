@@ -33,6 +33,13 @@ export type DuplicateMatch = {
   reason: string;
 };
 
+/**
+ * The parser labels a C-corporation page "Form 1120 (C-Corporation Return)";
+ * a page rehydrated from a persisted extraction carries only the bare form
+ * name. Both name the C-corp return, and neither may match Form 1120-S.
+ */
+const CCORP_LABEL = /1120 \(C-Corporation|C-Corporation Return|\bForm 1120(?![-\s]?S\b)/i;
+
 function labelsOf(result: ParseResponse): string {
   return [
     ...(result.pages ?? []).flatMap((page) => page.formIds),
@@ -75,7 +82,7 @@ export function classifyDocument(result: ParseResponse, fileName = ''): DocKind[
   if (/Schedule C/i.test(labels)) kinds.push('schedule-c');
   if (/1120-?S|S-Corporation|K-1 \(1120-?S\)/i.test(labels)) kinds.push('scorp');
   if (/Form 1065|K-1 \(1065\)|Schedule K-1 \(1065\)/i.test(labels)) kinds.push('partnership');
-  if (/1120 \(C-Corporation|C-Corporation Return/i.test(labels) && !/1120-?S/i.test(labels)) kinds.push('ccorp');
+  if (CCORP_LABEL.test(labels) && !/1120-?S/i.test(labels)) kinds.push('ccorp');
   if (/Schedule F/i.test(labels)) kinds.push('schedule-f');
   if (/Schedule B|Schedule D/i.test(labels)) kinds.push('asset');
   if (reportsRetirementIncome(result)) kinds.push('retirement');
@@ -166,7 +173,7 @@ function pageMatchesKind(page: ParsePage, kind: DocKind): boolean {
   if (kind === 'schedule-e') return /Schedule E/i.test(ids);
   if (kind === 'schedule-c') return /Schedule C/i.test(ids);
   if (kind === 'scorp') return /1120-?S|S-Corporation/i.test(ids);
-  if (kind === 'ccorp') return /1120 \(C-Corporation|C-Corporation Return/i.test(ids);
+  if (kind === 'ccorp') return CCORP_LABEL.test(ids);
   if (kind === 'partnership') return /Form 1065|K-1 \(1065\)/i.test(ids);
   if (kind === 'schedule-f') return /Schedule F/i.test(ids);
   if (kind === 'asset') return /Schedule B|Schedule D/i.test(ids);
