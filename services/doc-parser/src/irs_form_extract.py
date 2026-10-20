@@ -457,7 +457,6 @@ PARTNERSHIP_RETURN_FIELDS = (
 )
 
 FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
-    (W2_TITLE, W2_FIELDS),
     (re.compile(r"Schedule C.*Profit or Loss From Business|Profit or Loss From Business", re.I), SCHEDULE_C_FIELDS),
     (re.compile(r"Profit or Loss From Farming", re.I), SCHEDULE_F_FIELDS),
     # K-1 patterns stay ahead of the return faces: a K-1 page often repeats the
@@ -471,6 +470,9 @@ FORM_CATALOGS: tuple[tuple[re.Pattern[str], tuple[FieldSpec, ...]], ...] = (
     (re.compile(r"Schedule B.*Interest and Ordinary Dividends", re.I), SCHEDULE_B_FIELDS),
     (re.compile(r"Schedule D.*Capital Gains and Losses", re.I), SCHEDULE_D_FIELDS),
     (re.compile(r"Form 8825.*Rental Real Estate Income|Form\s+8825", re.I), FORM_8825_FIELDS),
+    # Returns cite "Form W-2" in their own line captions (Schedule C line 1),
+    # so the return titles above claim their pages before the W-2 title can.
+    (W2_TITLE, W2_FIELDS),
     # WVOE stays ahead of the pay stub catalog. A Form 1005 reports the same
     # earnings vocabulary a stub does -- gross earnings, year to date, overtime,
     # bonus -- and the first matching catalog wins, so a verification read by the
@@ -2414,11 +2416,18 @@ def _person_name_row(
     width = _page_width(page)
     x0 = max(8.0, float(hit.x0) + person.dx0)
     x1 = min(width - 8.0, float(hit.x0) + person.dx1)
-    if person.below:
-        band = [x0, float(hit.y1) + 1.0, x1, float(hit.y1) + 14.0]
-    else:
-        band = [float(hit.x1) + 2.0, float(hit.y0) - 3.0, min(width - 8.0, float(hit.x1) + person.dx1), float(hit.y1) + 3.0]
-    name = _person_name(_band_text(page, pymupdf, band, words))
+    below_band = [x0, float(hit.y1) + 1.0, x1, float(hit.y1) + 14.0]
+    bands = [below_band]
+    if not person.below:
+        # Plain "Name of proprietor: ..." layouts put the name on the caption's
+        # row; the IRS blank prints it in the entry line under the caption.
+        bands.insert(0, [float(hit.x1) + 2.0, float(hit.y0) - 3.0, min(width - 8.0, float(hit.x1) + person.dx1), float(hit.y1) + 3.0])
+    name = None
+    band = bands[0]
+    for band in bands:
+        name = _person_name(_band_text(page, pymupdf, band, words))
+        if name:
+            break
     if not name:
         return None
     return _field_record(

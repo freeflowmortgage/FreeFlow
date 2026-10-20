@@ -28,7 +28,7 @@ TEMPLATES = ROOT / "templates"
 FIELD_MAP = json.loads((TEMPLATES / "business_return_fields.json").read_text())
 
 pytestmark = pytest.mark.skipif(
-    not all((TEMPLATES / name).exists() for name in ("f1065.pdf", "f1120s.pdf", "f1065sk1.pdf", "f1120ssk.pdf")),
+    not all((TEMPLATES / name).exists() for name in ("f1065.pdf", "f1120s.pdf", "f1065sk1.pdf", "f1120ssk.pdf", "f1040sc.pdf")),
     reason="official fillable blanks are required",
 )
 
@@ -261,6 +261,47 @@ def test_an_entry_beats_the_printed_line_number() -> None:
     assert rows["pt-return-ord"]["numericValue"] == 22
 
 
+SCHEDULE_C_VALUES = {
+    "business_name": "Venture Consulting LLC",
+    "ein": "824471065",
+    "depreciation": "8,500",
+    "meals": "1,800",
+    "net_profit": "115,000",
+}
+PROPRIETOR_BOX = [36.0, 94.0, 445.6, 108.0]
+
+
+def _schedule_c(*, baked: bool) -> bytes:
+    cells = [
+        *_field_cells("schc", SCHEDULE_C_VALUES),
+        *_field_cells("schc-2", {"business_miles": "4,500"}),
+        (0, PROPRIETOR_BOX, "Sarah K. Vance"),
+    ]
+    pdf = _fill("f1040sc.pdf", cells)
+    return _baked(pdf) if baked else pdf
+
+
+@pytest.mark.parametrize("baked", [False, True])
+def test_schedule_c_is_read_from_the_official_blank(baked: bool) -> None:
+    everything = extract_irs_form_fields(_schedule_c(baked=baked))
+    rows = _by_id(everything)
+    assert rows["ent1-name"]["value"] == "Venture Consulting LLC"
+    assert rows["ent1-ein"]["value"] == "82-4471065"
+    assert rows["ent1-dep"]["numericValue"] == 8500
+    assert rows["ent1-meals"]["numericValue"] == 1800
+    assert rows["ent1-net"]["numericValue"] == 115000
+    assert rows["ent1-net"]["fieldLabel"] == "Net Profit or Loss (Line 31)"
+    assert rows["ent1-miles"]["value"] == "4,500"
+    assert rows["ent1-miles"]["pageIndex"] == 1
+    by_id = {row["sourceFieldId"]: row for row in everything}
+    assert by_id["ent1-proprietor"]["value"] == "Sarah K. Vance"
+    # Lines 6, 12 and 30 were left blank; their printed line numbers and
+    # instructions ("enter on line 30") are not amounts.
+    assert not {"ent1-other-income", "ent1-depletion", "ent1-home"} & set(by_id)
+    # Line 1 cites "Form W-2", which must not hand the page to the W-2 catalog.
+    assert not [row for row in everything if row["form"] == "W-2"]
+
+
 def test_a_page_without_the_caption_yields_nothing() -> None:
     """A substitute form or another revision falls back to the label catalog."""
     document = fitz.open()
@@ -294,6 +335,8 @@ def test_a_scan_a_few_points_off_is_re_anchored_on_its_caption() -> None:
         ("Schedule K-1 (Form 1120-S) Shareholder's Share", "1120s-k1"),
         ("Form 1065 (2025) Page 5 Schedule M-1 Reconciliation", "1065"),
         ("Form 1120-S (2025) Page 4 Schedule M-1", "1120s"),
+        ("SCHEDULE C (Form 1040) 2025 Profit or Loss From Business", "schc"),
+        ("Schedule C (Form 1040) 2025\nPage 2\nPart III Cost of Goods Sold", "schc-2"),
         ("Schedule E Supplemental Income and Loss", None),
     ],
 )

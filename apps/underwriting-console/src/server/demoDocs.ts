@@ -38,6 +38,8 @@ function loadBlank(file: string): Promise<Uint8Array> {
   if (!cached) {
     cached = readFirstExisting(file);
     blankCache.set(file, cached);
+    // A failed read must not pin the error until the server restarts.
+    cached.catch(() => blankCache.delete(file));
   }
   return cached;
 }

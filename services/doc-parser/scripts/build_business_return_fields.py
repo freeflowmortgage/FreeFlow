@@ -142,6 +142,48 @@ K1_FIELDS: dict[str, dict] = {
     },
 }
 
+# Schedule C sets its expenses in two columns, so a label read finds the
+# neighbouring column's line number ("13" for depreciation is printed beside
+# line 22) and the instructions printed after each caption ("line 30"). Line
+# 13's caption also wraps over three rows above its cell; the row the cell sits
+# on carries only "instructions) . . . 13", and OCR drops the leaders and reads
+# the 13 as "3", so the check is the word alone. No other row within drift of
+# that cell has "instructions" to its left. Line 27a is not mapped: on the 2025
+# revision it is the Form 7205 energy deduction, not other expenses.
+# Identity captions use the blank's full wording: a plain "Business name"
+# caption also sits above the next row on other layouts, and a located cell
+# that reads empty stops the label catalog from reading the field.
+SCHEDULE_C_FIELDS: dict[str, dict] = {
+    "schc": {
+        "blank": "f1040sc.pdf",
+        "fields": [
+            ("business_name", "Line C", 0, [36.0, 142.0, 445.6, 156.0],
+             [("above", "If no separate business name, leave blank")], "identity"),
+            ("ein", "Line D", 0, [446.4, 142.0, 576.0, 156.0],
+             [("above", "Employer ID number (EIN)")], "identity"),
+            ("other_income", "Line 6", 0, [475.2, 324.0, 576.0, 336.0],
+             [("left", "gasoline or fuel tax credit")], "subtract_with_review"),
+            ("depletion", "Line 12", 0, [194.4, 420.0, 294.5, 432.0],
+             [("left", "12 Depletion")], "add_back"),
+            ("depreciation", "Line 13", 0, [194.4, 456.0, 294.5, 468.0],
+             [("left", "instructions)")], "add_back"),
+            ("meals", "Line 24b", 0, [475.2, 480.0, 576.0, 492.0],
+             [("left", "Deductible meals")], "deduct"),
+            ("home_office", "Line 30", 0, [475.2, 624.0, 576.0, 636.0],
+             [("left", "amount to enter on line 30")], "add_back"),
+            ("net_profit", "Line 31", 0, [475.2, 660.0, 576.0, 672.0],
+             [("left", "Estates and trusts")], "base"),
+        ],
+    },
+    "schc-2": {
+        "blank": "f1040sc.pdf",
+        "fields": [
+            ("business_miles", "Line 44a", 1, [100.8, 408.0, 201.6, 420.0],
+             [("left", "a Business")], "add_back"),
+        ],
+    },
+}
+
 # Distributions sit in coded boxes, where each row is a code cell plus an
 # amount cell and only some codes are distributions. Reading the first amount
 # in the box, or every amount in it, gets this wrong in both directions:
@@ -270,7 +312,7 @@ def build() -> tuple[dict, list[str]]:
         finally:
             document.close()
 
-    for form, spec in K1_FIELDS.items():
+    for form, spec in {**K1_FIELDS, **SCHEDULE_C_FIELDS}.items():
         document = fitz.open(TEMPLATES / spec["blank"])
         try:
             entries = {}

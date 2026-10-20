@@ -1,4 +1,4 @@
-"""Form 1065 / 1120-S return and Schedule K-1 cells from the official blanks.
+"""Form 1065 / 1120-S return, Schedule K-1 and Schedule C cells from the official blanks.
 
 templates/business_return_fields.json pins every figure the Form 1084
 business-income calculation reads to its cell on the IRS fillable blank, next
@@ -89,6 +89,36 @@ SOURCE_IDS: dict[str, tuple[str, dict[str, str]]] = {
             "distributions": "scorp-dist",
         },
     ),
+    "schc": (
+        "Schedule C",
+        {
+            "business_name": "ent1-name",
+            "ein": "ent1-ein",
+            "other_income": "ent1-other-income",
+            "depletion": "ent1-depletion",
+            "depreciation": "ent1-dep",
+            "meals": "ent1-meals",
+            "home_office": "ent1-home",
+            "net_profit": "ent1-net",
+        },
+    ),
+    "schc-2": ("Schedule C", {"business_miles": "ent1-miles"}),
+}
+
+# Schedule C rows keep the labels and categories the label catalog gives the
+# same source ids, so a page read either way maps to the same worksheet line.
+FORM_FIELD_LABELS: dict[str, dict[str, tuple[str, str]]] = {
+    "schc": {
+        "business_name": ("identity", "Business Name"),
+        "ein": ("identity", "Employer Identification Number (EIN)"),
+        "other_income": ("income", "Other Income (Line 6)"),
+        "depletion": ("addback", "Depletion (Line 12)"),
+        "depreciation": ("addback", "Depreciation Expense (Line 13)"),
+        "meals": ("addback", "Meals Exclusion (Line 24b)"),
+        "home_office": ("addback", "Business Use of Home (Line 30)"),
+        "net_profit": ("income", "Net Profit or Loss (Line 31)"),
+    },
+    "schc-2": {"business_miles": ("mileage", "Business Miles Driven (Line 44a)")},
 }
 
 FIELD_LABELS = {
@@ -111,6 +141,10 @@ FIELD_LABELS = {
 }
 
 PERCENT_FIELDS = {"profit_pct_end", "capital_pct_end", "profit_pct_begin", "capital_pct_begin", "allocation_pct"}
+TEXT_FIELDS = {"business_name"}
+EIN_FIELDS = {"ein"}
+COUNT_FIELDS = {"business_miles"}
+EIN = re.compile(r"\b(\d{2})-?(\d{7})\b")
 
 M1_PAGE = re.compile(r"Schedule\s+M-1", re.I)
 
@@ -245,8 +279,9 @@ def _record(
     value: str,
     numeric: float,
     box: list[float],
+    form_key: str = "",
 ) -> dict[str, Any]:
-    category, label = FIELD_LABELS[field]
+    category, label = FORM_FIELD_LABELS.get(form_key, {}).get(field) or FIELD_LABELS[field]
     slug = re.sub(r"[^a-z0-9]+", "-", form.lower()).strip("-")
     return {
         "pageIndex": page_index,
@@ -286,6 +321,7 @@ def _read_field(
     *,
     page_index: int,
     form: str,
+    form_key: str = "",
     source_id: str,
     field: str,
     spec: dict[str, Any],
@@ -295,23 +331,38 @@ def _read_field(
         box = locate(words, _scale(page, cell["box"], size), _checks_for(cell))
         if box is None:
             continue
-        raw = _clip_text(page, pymupdf, box, ocr_words, money=True)
-        if field in PERCENT_FIELDS:
-            pct = _percent(raw)
-            if pct is None:
-                continue
-            return _record(
-                page, page_index=page_index, form=form, source_id=source_id, field=field,
-                line=cell["line"], value=f"{pct:g}%", numeric=pct, box=box,
-            )
-        amount = _money(raw)
-        if amount is None:
+        numeric_cell = field not in TEXT_FIELDS and field not in EIN_FIELDS
+        raw = _clip_text(page, pymupdf, box, ocr_words, money=numeric_cell)
+        parsed = _parse_cell(field, raw)
+        if parsed is None:
             continue
+        value, numeric = parsed
         return _record(
             page, page_index=page_index, form=form, source_id=source_id, field=field,
-            line=cell["line"], value=_dollars(amount), numeric=amount, box=box,
+            line=cell["line"], value=value, numeric=numeric, box=box, form_key=form_key,
         )
     return None
+
+
+def _parse_cell(field: str, raw: str) -> tuple[str, float] | None:
+    if field in PERCENT_FIELDS:
+        pct = _percent(raw)
+        return None if pct is None else (f"{pct:g}%", pct)
+    if field in TEXT_FIELDS:
+        text = re.sub(r"\s+", " ", raw or "").strip(" ,;:-")
+        return (text, 0.0) if len(text) >= 2 else None
+    if field in EIN_FIELDS:
+        # The IRS blank prints the EIN in a comb field, one digit per cell.
+        match = EIN.search(re.sub(r"\s+", "", raw or ""))
+        return (f"{match.group(1)}-{match.group(2)}", 0.0) if match else None
+    if field in COUNT_FIELDS:
+        match = re.search(r"\d{1,3}(?:,\d{3})+|\d+", raw or "")
+        if not match:
+            return None
+        count = float(match.group(0).replace(",", ""))
+        return f"{int(count):,}", count
+    amount = _money(raw)
+    return None if amount is None else (_dollars(amount), amount)
 
 
 def _read_coded(
@@ -425,6 +476,9 @@ _PAGE_TITLES = (
     (re.compile(r"Schedule K-1\s*\(Form\s*1065\)", re.I), "1065-k1"),
     (re.compile(r"U\.S\. Income Tax Return for an S Corporation", re.I), "1120s"),
     (re.compile(r"U\.S\. Return of Partnership Income", re.I), "1065"),
+    # Page 2 repeats the form name in its header but not the page 1 title.
+    (re.compile(r"Schedule C\s*\(Form\s*1040\)\s*(?:\d{4})?\s*Page\s*2", re.I), "schc-2"),
+    (re.compile(r"Profit or Loss From Business", re.I), "schc"),
 )
 _M1_FORMS = (
     (re.compile(r"Form\s*1120-?S", re.I), "1120s"),
@@ -483,7 +537,7 @@ def extract_business_return_page(
         ):
             found.add(source_id)
         row = _read_field(
-            page, pymupdf, words, ocr_words, page_index=page_index, form=form,
+            page, pymupdf, words, ocr_words, page_index=page_index, form=form, form_key=form_key,
             source_id=source_id, field=field, spec=spec, size=size,
         )
         if row is not None:

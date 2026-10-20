@@ -59,7 +59,7 @@ export type LiveSchCPatch = {
   line31?: number;
   line13?: number;
   line12?: number;
-  line24b?: number;
+  line24bMeals?: number;
   line30?: number;
   line6?: number;
   line27a?: number;
@@ -256,7 +256,7 @@ export function liveSchCPatch(fields: MappedIncomeField[]): LiveSchCPatch | null
     line31: num(fields, 'ent1-net'),
     line13: num(fields, 'ent1-dep'),
     line12: num(fields, 'ent1-depletion'),
-    line24b: num(fields, 'ent1-meals'),
+    line24bMeals: num(fields, 'ent1-meals'),
     line30: num(fields, 'ent1-home'),
     line6: num(fields, 'ent1-other-income'),
     line27a: num(fields, 'ent1-amort'),

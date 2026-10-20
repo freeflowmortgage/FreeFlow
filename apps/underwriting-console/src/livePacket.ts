@@ -33,6 +33,13 @@ export type DuplicateMatch = {
   reason: string;
 };
 
+/**
+ * The parser labels a C-corporation page "Form 1120 (C-Corporation Return)";
+ * a page rehydrated from a persisted extraction carries only the bare form
+ * name. Both name the C-corp return, and neither may match Form 1120-S.
+ */
+const CCORP_LABEL = /1120 \(C-Corporation|C-Corporation Return|\bForm 1120(?![-\s]?S\b)/i;
+
 function labelsOf(result: ParseResponse): string {
   return [
     ...(result.pages ?? []).flatMap((page) => page.formIds),
@@ -75,7 +82,7 @@ export function classifyDocument(result: ParseResponse, fileName = ''): DocKind[
   if (/Schedule C/i.test(labels)) kinds.push('schedule-c');
   if (/1120-?S|S-Corporation|K-1 \(1120-?S\)/i.test(labels)) kinds.push('scorp');
   if (/Form 1065|K-1 \(1065\)|Schedule K-1 \(1065\)/i.test(labels)) kinds.push('partnership');
-  if (/1120 \(C-Corporation|C-Corporation Return/i.test(labels) && !/1120-?S/i.test(labels)) kinds.push('ccorp');
+  if (CCORP_LABEL.test(labels) && !/1120-?S/i.test(labels)) kinds.push('ccorp');
   if (/Schedule F/i.test(labels)) kinds.push('schedule-f');
   if (/Schedule B|Schedule D/i.test(labels)) kinds.push('asset');
   if (reportsRetirementIncome(result)) kinds.push('retirement');
@@ -99,18 +106,30 @@ export function kindsOf(doc: Pick<LiveDocument, 'fileName' | 'result'>): DocKind
   return classifyDocument(doc.result, doc.fileName);
 }
 
-function scheduleEKeys(result: ParseResponse): string[] {
-  return [
-    ...new Set(
-      (result.scheduleEProperties ?? [])
-        .map((prop) => {
-          const address = normalizeAddress(prop.address);
-          if (prop.year == null && !address) return '';
-          return `${prop.year ?? ''}:${address}`;
-        })
-        .filter(Boolean),
-    ),
-  ];
+function scheduleEKey(prop: ScheduleEPropertyExtract): string {
+  const address = normalizeAddress(prop.address);
+  if (prop.year == null && !address) return '';
+  return `${prop.year ?? ''}:${address}`;
+}
+
+/**
+ * The same return read twice reports the same amounts. Only lines both reads
+ * carry are compared, since a scan or a different PDF can miss a line the other
+ * caught; a co-borrower's separate return for a shared property differs on them.
+ */
+function sameScheduleEFigures(left: ScheduleEPropertyExtract, right: ScheduleEPropertyExtract): boolean {
+  const a = left.financials ?? {};
+  const b = right.financials ?? {};
+  const shared = Object.keys(a).filter((line) => Boolean(a[line]) && Boolean(b[line]));
+  return shared.every((line) => Math.abs((a[line] ?? 0) - (b[line] ?? 0)) < 1);
+}
+
+function sameScheduleEReturn(existing: ParseResponse, incoming: ParseResponse): boolean {
+  const rows = (existing.scheduleEProperties ?? []).filter((prop) => scheduleEKey(prop));
+  return (incoming.scheduleEProperties ?? []).some((prop) => {
+    const key = scheduleEKey(prop);
+    return Boolean(key) && rows.some((row) => scheduleEKey(row) === key && sameScheduleEFigures(row, prop));
+  });
 }
 
 export function taxReturnFingerprint(result: ParseResponse): string | null {
@@ -137,15 +156,16 @@ export function findDuplicate(
       reason: `Duplicate file — already loaded as ${sameBytes.fileName}`,
     };
   }
-  const incomingKeys = scheduleEKeys(incoming.result);
-  if (incomingKeys.length) {
-    const overlapping = existing.find((doc) => scheduleEKeys(doc.result).some((key) => incomingKeys.includes(key)));
-    if (overlapping) {
-      return {
-        existingName: overlapping.fileName,
-        reason: `Duplicate tax return — same Schedule E year/address as ${overlapping.fileName}`,
-      };
-    }
+  if ((incoming.result.scheduleEProperties ?? []).some((prop) => scheduleEKey(prop))) {
+    // Two borrowers filing separately can each report the same property for
+    // the same year, so year and address alone do not make a duplicate.
+    const overlapping = existing.find((doc) => sameScheduleEReturn(doc.result, incoming.result));
+    return overlapping
+      ? {
+          existingName: overlapping.fileName,
+          reason: `Duplicate tax return — same Schedule E year, address and amounts as ${overlapping.fileName}`,
+        }
+      : null;
   }
   const incomingPrint = taxReturnFingerprint(incoming.result);
   if (!incomingPrint) return null;
@@ -166,7 +186,7 @@ function pageMatchesKind(page: ParsePage, kind: DocKind): boolean {
   if (kind === 'schedule-e') return /Schedule E/i.test(ids);
   if (kind === 'schedule-c') return /Schedule C/i.test(ids);
   if (kind === 'scorp') return /1120-?S|S-Corporation/i.test(ids);
-  if (kind === 'ccorp') return /1120 \(C-Corporation|C-Corporation Return/i.test(ids);
+  if (kind === 'ccorp') return CCORP_LABEL.test(ids);
   if (kind === 'partnership') return /Form 1065|K-1 \(1065\)/i.test(ids);
   if (kind === 'schedule-f') return /Schedule F/i.test(ids);
   if (kind === 'asset') return /Schedule B|Schedule D/i.test(ids);
@@ -394,4 +414,45 @@ export function allScheduleEExtracts(documents: LiveDocument[]): Array<ScheduleE
   return documents.flatMap((doc) =>
     (doc.result.scheduleEProperties ?? []).map((prop) => ({ ...prop, documentId: doc.id })),
   );
+}
+
+export type ScheduleEFiling<T extends ScheduleEPropertyExtract> = { latest: T; prior?: T; ownerId?: string };
+
+/**
+ * One rental history per property and owner: the newest year and the year
+ * before it. Two returns for the same address and year are two filings, not a
+ * correction of one another; co-borrowers who file separately each report
+ * their share of a jointly owned property, so the second one gets its own
+ * history instead of replacing the first.
+ */
+export function scheduleEFilings<T extends ScheduleEPropertyExtract>(
+  extracts: T[],
+  ownerOf: (extract: T) => string | undefined = () => undefined,
+): Array<ScheduleEFiling<T>> {
+  const groups = new Map<string, { ownerId?: string; rows: T[] }>();
+  for (const extract of extracts) {
+    const address = extract.address.trim().toLowerCase().replace(/\s+/g, ' ');
+    const ownerId = ownerOf(extract);
+    const key = `${address || `column-${extract.column}-p${extract.pageIndex}`}|${ownerId ?? ''}`;
+    const group = groups.get(key) ?? { ownerId, rows: [] };
+    group.rows.push(extract);
+    groups.set(key, group);
+  }
+
+  const filings: Array<ScheduleEFiling<T>> = [];
+  for (const { ownerId, rows } of groups.values()) {
+    const lanes: Array<Map<number, T>> = [];
+    const newestFirst = [...rows].sort((left, right) => (right.year ?? 0) - (left.year ?? 0));
+    for (const row of newestFirst) {
+      const year = row.year ?? 0;
+      const lane = lanes.find((candidate) => !candidate.has(year));
+      if (lane) lane.set(year, row);
+      else lanes.push(new Map([[year, row]]));
+    }
+    for (const lane of lanes) {
+      const [latest, prior] = [...lane.values()];
+      filings.push({ latest, prior, ownerId });
+    }
+  }
+  return filings;
 }

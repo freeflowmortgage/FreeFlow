@@ -3,7 +3,16 @@ import test from 'node:test';
 import type { ConsoleContext } from './protectedWorkflow';
 import { mapIncomeFields } from './incomeFieldMap';
 import { liveSchCPatch, liveWagePatch } from './liveHydrate';
-import { fieldForInspection, inspectFieldIds, inspectOverlayFromField } from './livePacket';
+import {
+  fieldForInspection,
+  inspectFieldIds,
+  inspectOverlayFromField,
+  kindsOf,
+  pickDocumentForTab,
+  scheduleEFilings,
+  tabForKinds,
+} from './livePacket';
+import type { ScheduleEPropertyExtract } from './parseTypes';
 import {
   protectedWorkspaceContext,
   protectedWorkspaceDocuments,
@@ -26,6 +35,7 @@ const extraction: ConsoleContext['extractions'][number] = {
       fields: [
         { sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' },
         { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 },
+        { sourceFieldId: 'ent1-meals', value: '1800.00', numericValue: 1800 },
       ],
     }],
     scheduleEProperties: [{ year: 2025, propertyAddress: '100 Synthetic Lane', propertyType: 'RENTAL', rentsReceived: 24000, netIncomeLoss: 12000, pageIndex: 2, column: 'B' }],
@@ -78,6 +88,8 @@ test('rehydrates persisted fields and coordinate evidence for Nate\'s workspace 
   const mapped = mapIncomeFields(result);
   assert.equal(liveWagePatch(mapped)?.w2Year1Box5, 96000);
   assert.equal(liveSchCPatch(mapped)?.line31, 120000);
+  // The worksheet row spreads this patch, so the key must be the row's own.
+  assert.equal(liveSchCPatch(mapped)?.line24bMeals, 1800);
   assert.deepEqual(mapped.find((field) => field.sourceFieldId === 'ent1-net')?.box, { x: 0.2, y: 0.3, w: 0.2, h: 0.03 });
 });
 
@@ -121,6 +133,61 @@ test('preserves a live parser box through field mapping into the PDF highlight o
     pageIndex: 0,
     box: { x: 0.11, y: 0.22, w: 0.33, h: 0.044 },
   });
+});
+
+test('routes a rehydrated Form 1120 to the C-corp tab and keeps Form 1120-S on the S-corp tab', () => {
+  const corporate = (form: string, fieldId: string): ConsoleContext['extractions'][number] => ({
+    ...extraction,
+    normalizedInput: { formRecords: [{ entityId: `${form}:p0`, form, pageIndex: 0, fields: [{ sourceFieldId: fieldId, numericValue: 250000 }] }] },
+    evidence: { fields: [] },
+  });
+  const cCorp = rehydrateProtectedParseResponse(corporate('Form 1120', 'c1120-taxable'), 1);
+  assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: cCorp }), ['ccorp']);
+  assert.equal(tabForKinds(kindsOf({ fileName: 'upload.pdf', result: cCorp })).tab, 'CCORP');
+  assert.equal(pickDocumentForTab([{ id: 'c', sha256: 'c', file: new File([], 'upload.pdf'), fileName: 'upload.pdf', result: cCorp }], 'CCORP')?.id, 'c');
+
+  const sCorp = rehydrateProtectedParseResponse(corporate('Form 1120-S', 'scorp-return-ord'), 1);
+  assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: sCorp }), ['scorp']);
+});
+
+test('keeps a second Schedule E for the same address and year as its own filing', () => {
+  const rental = (documentId: string, year: number, rents: number): ScheduleEPropertyExtract & { documentId: string } => ({
+    documentId,
+    year,
+    pageIndex: 0,
+    column: 'A',
+    address: '742 Evergreen Terrace, Springfield, IL 62704',
+    propertyType: '1',
+    fairRentalDays: 365,
+    financials: { '3': rents },
+  });
+  const borrower2025 = rental('borrower-2025', 2025, 12000);
+  const borrower2024 = rental('borrower-2024', 2024, 11000);
+  const coBorrower2025 = rental('co-borrower-2025', 2025, 12000);
+
+  const unassigned = scheduleEFilings([borrower2025, borrower2024, coBorrower2025]);
+  assert.equal(unassigned.length, 2);
+  assert.deepEqual(
+    unassigned.map((filing) => [filing.latest.documentId, filing.prior?.documentId]),
+    [['borrower-2025', 'borrower-2024'], ['co-borrower-2025', undefined]],
+  );
+
+  const owners: Record<string, string> = {
+    'borrower-2025': 'borrower-1',
+    'borrower-2024': 'borrower-1',
+    'co-borrower-2025': 'borrower-2',
+  };
+  // Listed so that, without owners, the co-borrower's 2025 would take the 2024 prior.
+  const assigned = scheduleEFilings([coBorrower2025, borrower2025, borrower2024], (row) => owners[row.documentId]);
+  assert.deepEqual(
+    assigned.map((filing) => [filing.ownerId, filing.latest.documentId, filing.prior?.documentId]),
+    [['borrower-2', 'co-borrower-2025', undefined], ['borrower-1', 'borrower-2025', 'borrower-2024']],
+  );
+
+  const twoYears = scheduleEFilings([borrower2024, borrower2025]);
+  assert.equal(twoYears.length, 1);
+  assert.equal(twoYears[0].latest.year, 2025);
+  assert.equal(twoYears[0].prior?.year, 2024);
 });
 
 test('maps worksheet highlight ids back to parser ids across supported income families', () => {

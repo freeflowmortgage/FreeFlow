@@ -48,6 +48,7 @@ import {
   kindsOf,
   pageForKind,
   pickDocumentForTab,
+  scheduleEFilings,
   tabForKinds,
   type DocKind,
   type InspectOverlay,
@@ -62,6 +63,7 @@ import {
   seedW2FromLocation,
 } from '../hydrateFromUrlA';
 import {
+  assignmentKey,
   locateIncomeEntities,
   pagesFromParsePages,
   discoveredSelectId,
@@ -386,6 +388,8 @@ interface RentalPropertyYear {
 
 interface RentalProperty {
   id: string;
+  /** Borrower whose return this is, when the Schedule E was assigned to one. */
+  ownerId?: string;
   address: string;
   propertyType: 'SFR' | 'DUPLEX' | 'TRIPLEX' | 'FOURPLEX' | 'COMMERCIAL' | 'VACATION';
   isSubjectProperty: boolean;
@@ -495,33 +499,17 @@ function rentalYearFromExtract(extract: ScheduleEPropertyExtract & { documentId?
   };
 }
 
-/** Group every Schedule E column by address so two tax years become year1 / year2. */
-function rentalPropertiesFromExtracts(
-  extracts: Array<ScheduleEPropertyExtract & { documentId?: string }>,
+/** Group every Schedule E column by address and owner so two tax years become year1 / year2. */
+function rentalPropertiesFromExtracts<T extends ScheduleEPropertyExtract & { documentId?: string }>(
+  extracts: T[],
+  ownerOf?: (extract: T) => string | undefined,
 ): RentalProperty[] {
-  const grouped = new Map<string, ScheduleEPropertyExtract[]>();
-  for (const extract of extracts) {
-    const address = extract.address.trim();
-    const key = address
-      ? address.toLowerCase().replace(/\s+/g, ' ')
-      : `column-${extract.column}-p${extract.pageIndex}`;
-    const rows = grouped.get(key) ?? [];
-    rows.push(extract);
-    grouped.set(key, rows);
-  }
-
-  return [...grouped.values()].map((rows, index) => {
-    const byYear = new Map<number, ScheduleEPropertyExtract>();
-    for (const row of rows) {
-      byYear.set(row.year ?? 0, row);
-    }
-    const newestFirst = [...byYear.values()].sort((left, right) => (right.year ?? 0) - (left.year ?? 0));
-    const latest = newestFirst[0];
-    const prior = newestFirst[1];
+  return scheduleEFilings(extracts, ownerOf).map(({ latest, prior, ownerId }, index) => {
     const address = latest.address.trim() || `Schedule E ${latest.column} · page ${latest.pageIndex + 1}`;
     const encompassPitia = pitiaFromApp(address);
     return {
       id: `live-e-${index + 1}`,
+      ownerId,
       address,
       propertyType: mapScheduleEPropertyType(latest.propertyType),
       isSubjectProperty: false,
@@ -759,6 +747,9 @@ export default function UnderwriterSplitViewDemo({
   }, [availableTabs, activeTab]);
 
   const [canvasYearIndex, setCanvasYearIndex] = useState<0 | 1>(0);
+  // The only Schedule E blank is the 2025 revision, so a "prior year" fill of it
+  // is a second 2025 return. The template packet shows one Schedule E.
+  const docYearIndex: 0 | 1 = activeTab === 'SCHEDULE_E' ? 0 : canvasYearIndex;
   /** Left-pane document style: interactive facsimile or the real filled source PDF. */
   const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('pdf');
   const [wageDocKind, setWageDocKind] = useState<'paystub' | 'w2'>('paystub');
@@ -857,16 +848,25 @@ export default function UnderwriterSplitViewDemo({
     });
   });
 
+  const scheduleEOwners = useMemo(
+    () =>
+      scheduleEExtracts.map(
+        (extract) =>
+          borrowerAssignments[assignmentKey({ documentId: extract.documentId, pageIndex: extract.pageIndex, form: 'Schedule E' })] ?? '',
+      ),
+    [scheduleEExtracts, borrowerAssignments],
+  );
+  const scheduleEOwnerKey = scheduleEOwners.join('|');
   useEffect(() => {
     const extracts = scheduleEExtracts;
     if (!isLive || !extracts.length) return;
-    const next = rentalPropertiesFromExtracts(extracts);
+    const next = rentalPropertiesFromExtracts(extracts, (extract) => scheduleEOwners[extracts.indexOf(extract)] || undefined);
     setRentalProperties(next);
     setTwoYearRental(next.some((property) => {
       const prior = property.year2;
       return Boolean(prior.rentsReceived || prior.totalExpenses || prior.netIncomeLoss || prior.fairRentalDays);
     }));
-  }, [isLive, scheduleEExtracts]);
+  }, [isLive, scheduleEExtracts, scheduleEOwnerKey]);
 
   const [w2BaseChoices, setW2BaseChoices] = useState<Record<string, string | null>>({});
   const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
@@ -2753,7 +2753,7 @@ export default function UnderwriterSplitViewDemo({
           : activeTab === 'SCHEDULE_F'
             ? twoYearScheduleF
           : activeTab === 'SCHEDULE_E'
-            ? twoYearRental
+            ? false
             : true;
 
   const docSnapshot = useMemo<DocPaneSnapshot>(
@@ -2762,7 +2762,7 @@ export default function UnderwriterSplitViewDemo({
       loanId: borrowerMetadata.loanId,
       borrowerName: borrowerMetadata.borrowerName,
       activeTab,
-      yearIndex: canvasYearIndex,
+      yearIndex: docYearIndex,
       twoYear: twoYearForCanvas,
       selectedId: highlightFieldId,
       schC: schCYears[canvasYearIndex],
@@ -2795,6 +2795,7 @@ export default function UnderwriterSplitViewDemo({
       canvasDoc,
       activeTab,
       canvasYearIndex,
+      docYearIndex,
       twoYearForCanvas,
       highlightFieldId,
       schCYears,
@@ -3084,10 +3085,9 @@ export default function UnderwriterSplitViewDemo({
           })}`,
         };
       case 'SCHEDULE_E': {
-        const yearKey = canvasYearIndex === 0 ? 'year1' : 'year2';
-        const props: Record<string, string | number> = { year: canvasYearIndex === 0 ? 2025 : 2024 };
+        const props: Record<string, string | number> = { year: 2025 };
         (['a', 'b'] as const).forEach((prefix, i) => {
-          const y = rentalProperties[i]?.[yearKey];
+          const y = rentalProperties[i]?.year1;
           if (!y) return;
           props[`${prefix}Rents`] = y.rentsReceived;
           props[`${prefix}Insurance`] = y.insurance;
@@ -3427,8 +3427,8 @@ export default function UnderwriterSplitViewDemo({
               </p>
             ) : docMode === 'pdf' && fixturePdf ? (
               <div className="space-y-2">
-                {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
-                  (activeTab === 'SCHEDULE_E' || (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : activeTab === 'CCORP' ? twoYearCCorp : twoYearPartnership)) && (
+                {(activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
+                  (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : activeTab === 'CCORP' ? twoYearCCorp : twoYearPartnership) && (
                     <div className="flex gap-1">
                       {[0, 1].map((i) => (
                         <button
@@ -3535,7 +3535,7 @@ export default function UnderwriterSplitViewDemo({
             ) : (
               <DemoDocumentCanvas
                 tab={activeTab}
-                yearIndex={canvasYearIndex}
+                yearIndex={docYearIndex}
                 onYearIndex={setCanvasYearIndex}
                 twoYear={
                   activeTab === 'SCHEDULE_C'
@@ -3544,7 +3544,9 @@ export default function UnderwriterSplitViewDemo({
                       ? twoYearScorp
                       : activeTab === 'CCORP'
                         ? twoYearCCorp
-                        : twoYearPartnership
+                        : activeTab === 'SCHEDULE_E'
+                          ? false
+                          : twoYearPartnership
                 }
                 selectedId={highlightFieldId}
                 onSelect={handleInspectField}
@@ -4639,6 +4641,26 @@ export default function UnderwriterSplitViewDemo({
                         <span className="rounded bg-slate-200 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600">
                           Property {propIdx + 1}
                         </span>
+                        {multipleBorrowers && prop.ownerId ? (
+                          <span className="rounded bg-indigo-100 px-2 py-0.5 text-[9px] font-black uppercase text-indigo-700">
+                            {borrowerName(prop.ownerId)}
+                          </span>
+                        ) : null}
+                        {prop.year1.source && rentalProperties.some(
+                          (other) =>
+                            other.id !== prop.id &&
+                            Boolean(other.year1.source) &&
+                            other.year1.year === prop.year1.year &&
+                            other.address.trim().toLowerCase() === prop.address.trim().toLowerCase() &&
+                            other.ownerId === prop.ownerId,
+                        ) ? (
+                          <span
+                            className="rounded bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800"
+                            title="Another Schedule E reports this address for the same tax year. Assign each return to its borrower, or remove a duplicate."
+                          >
+                            Separate {prop.year1.year || ''} return
+                          </span>
+                        ) : null}
                         {/* Address */}
                         <input
                           type="text"

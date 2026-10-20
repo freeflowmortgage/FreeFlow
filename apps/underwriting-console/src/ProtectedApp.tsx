@@ -558,7 +558,7 @@ function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' 
       }
     } finally {
       setParseBusy(false);
-      if (errors.length) setParseError([...new Set(errors)].join(' Â· '));
+      if (errors.length) setParseError([...new Set(errors)].join(' · '));
     }
   };
 
@@ -572,7 +572,9 @@ function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' 
         <button data-testid="demo-back-to-products" type="button" onClick={onBack} className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-900">Back to products</button>
       </div>
       <div className="h-[calc(100vh-8rem)] min-h-[780px]">
+        {/* Worksheets seed once from the mounting source, so a switch must remount. */}
         <UnderwriterSplitViewDemo
+          key={showLive && documents.length ? 'live' : 'demo'}
           source={showLive && documents.length ? 'live' : 'demo'}
           liveDocuments={documents}
           parseBusy={parseBusy}

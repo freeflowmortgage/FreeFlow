@@ -564,6 +564,180 @@
           ]
         }
       }
+    },
+    "schc": {
+      "blank": "f1040sc.pdf",
+      "fields": {
+        "business_name": {
+          "line": "Line C",
+          "page": 0,
+          "box": [
+            36.0,
+            142.0,
+            445.6,
+            156.0
+          ],
+          "caption": "If no separate business name, leave blank",
+          "checks": [
+            [
+              "above",
+              "If no separate business name, leave blank"
+            ]
+          ],
+          "use": "identity"
+        },
+        "ein": {
+          "line": "Line D",
+          "page": 0,
+          "box": [
+            446.4,
+            142.0,
+            576.0,
+            156.0
+          ],
+          "caption": "Employer ID number (EIN)",
+          "checks": [
+            [
+              "above",
+              "Employer ID number (EIN)"
+            ]
+          ],
+          "use": "identity"
+        },
+        "other_income": {
+          "line": "Line 6",
+          "page": 0,
+          "box": [
+            475.2,
+            324.0,
+            576.0,
+            336.0
+          ],
+          "caption": "gasoline or fuel tax credit",
+          "checks": [
+            [
+              "left",
+              "gasoline or fuel tax credit"
+            ]
+          ],
+          "use": "subtract_with_review"
+        },
+        "depletion": {
+          "line": "Line 12",
+          "page": 0,
+          "box": [
+            194.4,
+            420.0,
+            294.5,
+            432.0
+          ],
+          "caption": "12 Depletion",
+          "checks": [
+            [
+              "left",
+              "12 Depletion"
+            ]
+          ],
+          "use": "add_back"
+        },
+        "depreciation": {
+          "line": "Line 13",
+          "page": 0,
+          "box": [
+            194.4,
+            456.0,
+            294.5,
+            468.0
+          ],
+          "caption": "instructions)",
+          "checks": [
+            [
+              "left",
+              "instructions)"
+            ]
+          ],
+          "use": "add_back"
+        },
+        "meals": {
+          "line": "Line 24b",
+          "page": 0,
+          "box": [
+            475.2,
+            480.0,
+            576.0,
+            492.0
+          ],
+          "caption": "Deductible meals",
+          "checks": [
+            [
+              "left",
+              "Deductible meals"
+            ]
+          ],
+          "use": "deduct"
+        },
+        "home_office": {
+          "line": "Line 30",
+          "page": 0,
+          "box": [
+            475.2,
+            624.0,
+            576.0,
+            636.0
+          ],
+          "caption": "amount to enter on line 30",
+          "checks": [
+            [
+              "left",
+              "amount to enter on line 30"
+            ]
+          ],
+          "use": "add_back"
+        },
+        "net_profit": {
+          "line": "Line 31",
+          "page": 0,
+          "box": [
+            475.2,
+            660.0,
+            576.0,
+            672.0
+          ],
+          "caption": "Estates and trusts",
+          "checks": [
+            [
+              "left",
+              "Estates and trusts"
+            ]
+          ],
+          "use": "base"
+        }
+      },
+      "coded_boxes": {}
+    },
+    "schc-2": {
+      "blank": "f1040sc.pdf",
+      "fields": {
+        "business_miles": {
+          "line": "Line 44a",
+          "page": 1,
+          "box": [
+            100.8,
+            408.0,
+            201.6,
+            420.0
+          ],
+          "caption": "a Business",
+          "checks": [
+            [
+              "left",
+              "a Business"
+            ]
+          ],
+          "use": "add_back"
+        }
+      },
+      "coded_boxes": {}
     }
   }
 }
