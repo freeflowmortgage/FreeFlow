@@ -3,7 +3,16 @@ import test from 'node:test';
 import type { ConsoleContext } from './protectedWorkflow';
 import { mapIncomeFields } from './incomeFieldMap';
 import { liveSchCPatch, liveWagePatch } from './liveHydrate';
-import { fieldForInspection, inspectFieldIds, inspectOverlayFromField, kindsOf, pickDocumentForTab, tabForKinds } from './livePacket';
+import {
+  fieldForInspection,
+  inspectFieldIds,
+  inspectOverlayFromField,
+  kindsOf,
+  pickDocumentForTab,
+  scheduleEFilings,
+  tabForKinds,
+} from './livePacket';
+import type { ScheduleEPropertyExtract } from './parseTypes';
 import {
   protectedWorkspaceContext,
   protectedWorkspaceDocuments,
@@ -136,6 +145,46 @@ test('routes a rehydrated Form 1120 to the C-corp tab and keeps Form 1120-S on t
 
   const sCorp = rehydrateProtectedParseResponse(corporate('Form 1120-S', 'scorp-return-ord'), 1);
   assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: sCorp }), ['scorp']);
+});
+
+test('keeps a second Schedule E for the same address and year as its own filing', () => {
+  const rental = (documentId: string, year: number, rents: number): ScheduleEPropertyExtract & { documentId: string } => ({
+    documentId,
+    year,
+    pageIndex: 0,
+    column: 'A',
+    address: '742 Evergreen Terrace, Springfield, IL 62704',
+    propertyType: '1',
+    fairRentalDays: 365,
+    financials: { '3': rents },
+  });
+  const borrower2025 = rental('borrower-2025', 2025, 12000);
+  const borrower2024 = rental('borrower-2024', 2024, 11000);
+  const coBorrower2025 = rental('co-borrower-2025', 2025, 12000);
+
+  const unassigned = scheduleEFilings([borrower2025, borrower2024, coBorrower2025]);
+  assert.equal(unassigned.length, 2);
+  assert.deepEqual(
+    unassigned.map((filing) => [filing.latest.documentId, filing.prior?.documentId]),
+    [['borrower-2025', 'borrower-2024'], ['co-borrower-2025', undefined]],
+  );
+
+  const owners: Record<string, string> = {
+    'borrower-2025': 'borrower-1',
+    'borrower-2024': 'borrower-1',
+    'co-borrower-2025': 'borrower-2',
+  };
+  // Listed so that, without owners, the co-borrower's 2025 would take the 2024 prior.
+  const assigned = scheduleEFilings([coBorrower2025, borrower2025, borrower2024], (row) => owners[row.documentId]);
+  assert.deepEqual(
+    assigned.map((filing) => [filing.ownerId, filing.latest.documentId, filing.prior?.documentId]),
+    [['borrower-2', 'co-borrower-2025', undefined], ['borrower-1', 'borrower-2025', 'borrower-2024']],
+  );
+
+  const twoYears = scheduleEFilings([borrower2024, borrower2025]);
+  assert.equal(twoYears.length, 1);
+  assert.equal(twoYears[0].latest.year, 2025);
+  assert.equal(twoYears[0].prior?.year, 2024);
 });
 
 test('maps worksheet highlight ids back to parser ids across supported income families', () => {

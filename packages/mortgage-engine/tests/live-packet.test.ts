@@ -320,6 +320,29 @@ describe('live packet routing', () => {
     };
     expect(findDuplicate([standalone], fullReturn)?.reason).toMatch(/Duplicate tax return/);
   });
+
+  test("keeps a co-borrower's separate Schedule E for the same property and year", () => {
+    const rental = (rents: number, net: number) =>
+      response([page(0, ['Schedule E (Page 1 - Rentals)'])], {
+        scheduleEProperties: [
+          {
+            pageIndex: 0,
+            column: 'A',
+            year: 2025,
+            address: '100 Main Street',
+            propertyType: '1',
+            fairRentalDays: 365,
+            financials: { '3': rents, '21': net },
+          },
+        ],
+      });
+    const borrower = { fileName: 'borrower-2025-schedule-e.pdf', sha256: 'borrower', result: rental(12000, 4500) };
+    const coBorrower = { fileName: 'co-borrower-2025-schedule-e.pdf', sha256: 'co-borrower', result: rental(12000, 4750) };
+    expect(findDuplicate([borrower], coBorrower)).toBeNull();
+    expect(
+      findDuplicate([borrower], { fileName: 'rescan.pdf', sha256: 'rescan', result: rental(12000, 4500) })?.reason,
+    ).toMatch(/same Schedule E year, address and amounts/);
+  });
 });
 
 describe('Retirement routing', () => {

@@ -48,6 +48,7 @@ import {
   kindsOf,
   pageForKind,
   pickDocumentForTab,
+  scheduleEFilings,
   tabForKinds,
   type DocKind,
   type InspectOverlay,
@@ -62,6 +63,7 @@ import {
   seedW2FromLocation,
 } from '../hydrateFromUrlA';
 import {
+  assignmentKey,
   locateIncomeEntities,
   pagesFromParsePages,
   discoveredSelectId,
@@ -386,6 +388,8 @@ interface RentalPropertyYear {
 
 interface RentalProperty {
   id: string;
+  /** Borrower whose return this is, when the Schedule E was assigned to one. */
+  ownerId?: string;
   address: string;
   propertyType: 'SFR' | 'DUPLEX' | 'TRIPLEX' | 'FOURPLEX' | 'COMMERCIAL' | 'VACATION';
   isSubjectProperty: boolean;
@@ -495,33 +499,17 @@ function rentalYearFromExtract(extract: ScheduleEPropertyExtract & { documentId?
   };
 }
 
-/** Group every Schedule E column by address so two tax years become year1 / year2. */
-function rentalPropertiesFromExtracts(
-  extracts: Array<ScheduleEPropertyExtract & { documentId?: string }>,
+/** Group every Schedule E column by address and owner so two tax years become year1 / year2. */
+function rentalPropertiesFromExtracts<T extends ScheduleEPropertyExtract & { documentId?: string }>(
+  extracts: T[],
+  ownerOf?: (extract: T) => string | undefined,
 ): RentalProperty[] {
-  const grouped = new Map<string, ScheduleEPropertyExtract[]>();
-  for (const extract of extracts) {
-    const address = extract.address.trim();
-    const key = address
-      ? address.toLowerCase().replace(/\s+/g, ' ')
-      : `column-${extract.column}-p${extract.pageIndex}`;
-    const rows = grouped.get(key) ?? [];
-    rows.push(extract);
-    grouped.set(key, rows);
-  }
-
-  return [...grouped.values()].map((rows, index) => {
-    const byYear = new Map<number, ScheduleEPropertyExtract>();
-    for (const row of rows) {
-      byYear.set(row.year ?? 0, row);
-    }
-    const newestFirst = [...byYear.values()].sort((left, right) => (right.year ?? 0) - (left.year ?? 0));
-    const latest = newestFirst[0];
-    const prior = newestFirst[1];
+  return scheduleEFilings(extracts, ownerOf).map(({ latest, prior, ownerId }, index) => {
     const address = latest.address.trim() || `Schedule E ${latest.column} · page ${latest.pageIndex + 1}`;
     const encompassPitia = pitiaFromApp(address);
     return {
       id: `live-e-${index + 1}`,
+      ownerId,
       address,
       propertyType: mapScheduleEPropertyType(latest.propertyType),
       isSubjectProperty: false,
@@ -860,16 +848,25 @@ export default function UnderwriterSplitViewDemo({
     });
   });
 
+  const scheduleEOwners = useMemo(
+    () =>
+      scheduleEExtracts.map(
+        (extract) =>
+          borrowerAssignments[assignmentKey({ documentId: extract.documentId, pageIndex: extract.pageIndex, form: 'Schedule E' })] ?? '',
+      ),
+    [scheduleEExtracts, borrowerAssignments],
+  );
+  const scheduleEOwnerKey = scheduleEOwners.join('|');
   useEffect(() => {
     const extracts = scheduleEExtracts;
     if (!isLive || !extracts.length) return;
-    const next = rentalPropertiesFromExtracts(extracts);
+    const next = rentalPropertiesFromExtracts(extracts, (extract) => scheduleEOwners[extracts.indexOf(extract)] || undefined);
     setRentalProperties(next);
     setTwoYearRental(next.some((property) => {
       const prior = property.year2;
       return Boolean(prior.rentsReceived || prior.totalExpenses || prior.netIncomeLoss || prior.fairRentalDays);
     }));
-  }, [isLive, scheduleEExtracts]);
+  }, [isLive, scheduleEExtracts, scheduleEOwnerKey]);
 
   const [w2BaseChoices, setW2BaseChoices] = useState<Record<string, string | null>>({});
   const [w2VarChoices, setW2VarChoices] = useState<Record<string, string | null>>({});
@@ -4644,6 +4641,26 @@ export default function UnderwriterSplitViewDemo({
                         <span className="rounded bg-slate-200 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600">
                           Property {propIdx + 1}
                         </span>
+                        {multipleBorrowers && prop.ownerId ? (
+                          <span className="rounded bg-indigo-100 px-2 py-0.5 text-[9px] font-black uppercase text-indigo-700">
+                            {borrowerName(prop.ownerId)}
+                          </span>
+                        ) : null}
+                        {prop.year1.source && rentalProperties.some(
+                          (other) =>
+                            other.id !== prop.id &&
+                            Boolean(other.year1.source) &&
+                            other.year1.year === prop.year1.year &&
+                            other.address.trim().toLowerCase() === prop.address.trim().toLowerCase() &&
+                            other.ownerId === prop.ownerId,
+                        ) ? (
+                          <span
+                            className="rounded bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800"
+                            title="Another Schedule E reports this address for the same tax year. Assign each return to its borrower, or remove a duplicate."
+                          >
+                            Separate {prop.year1.year || ''} return
+                          </span>
+                        ) : null}
                         {/* Address */}
                         <input
                           type="text"
