@@ -76,3 +76,31 @@ def test_schedule_e_with_vector_captions_yields_every_property(parse) -> None:
     assert first["financials"]["18"] == 5000.0
     assert first["financials"]["20"] == 17800.0
     assert first["financials"]["21"] == 6200.0
+
+
+def _values(result: dict) -> dict[str, str]:
+    return {row["sourceFieldId"]: row["value"] for row in result["formExtracts"]}
+
+
+def test_blank_schedule_l_lines_do_not_borrow_the_neighbouring_row(parse) -> None:
+    values = _values(parse("form-1065.pdf"))
+
+    assert values["pt-return-ord"] == "-$18,000.00"
+    assert values["pt-return-dep"] == "$18,000.00"
+    assert values["pt-return-gross"] == "$180,000.00"
+    assert values["sch-l-cash"] == "$66,000.00"
+    assert values["sch-l-ap"] == "$26,400.00"
+    assert values["sch-l-notes"] == "$6,000.00"
+    # Lines 2a and 17 are blank; the rows above them hold 66000 and 6000.
+    assert "sch-l-ar" not in values
+    assert "sch-l-other-current" not in values
+
+
+def test_k1_reads_the_partner_share(parse) -> None:
+    values = _values(parse("schedule-k1.pdf"))
+
+    assert values["pt-ord"] == "-$10,800.00"
+    assert values["pt-gp"] == "$12,000.00"
+    assert values["pt-dist"] == "$11,040.00"
+    assert values["pt-profit-pct"] == "60%"
+    assert values["pt-partner-name"] == "Jordan Example"
