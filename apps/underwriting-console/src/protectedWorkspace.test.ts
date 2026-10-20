@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ConsoleContext } from './protectedWorkflow';
 import { mapIncomeFields } from './incomeFieldMap';
-import { liveSchCPatch, liveWagePatch } from './liveHydrate';
+import { liveSchCPatch, liveWagePatch, owningBusinessReturns } from './liveHydrate';
 import {
   fieldForInspection,
   inspectFieldIds,
@@ -148,6 +148,20 @@ test('routes a rehydrated Form 1120 to the C-corp tab and keeps Form 1120-S on t
 
   const sCorp = rehydrateProtectedParseResponse(corporate('Form 1120-S', 'scorp-return-ord'), 1);
   assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: sCorp }), ['scorp']);
+});
+
+test('a rehydrated return still owns the Schedule L printed pages after its masthead', () => {
+  const partnership = rehydrateProtectedParseResponse({
+    ...extraction,
+    normalizedInput: { formRecords: [
+      { entityId: 'Form 1065:p0', form: 'Form 1065', pageIndex: 0, fields: [{ sourceFieldId: 'pt-return-dep', numericValue: 18000 }] },
+      { entityId: 'Form 1065:p5', form: 'Form 1065', pageIndex: 5, fields: [{ sourceFieldId: 'sch-l-cash', numericValue: 66000 }] },
+    ] },
+    evidence: { fields: [] },
+  }, 6);
+  const owners = owningBusinessReturns(partnership.pages.map((page) => ({ documentId: 'return', index: page.index, formIds: page.formIds })));
+  assert.match(owners.get('return:5') ?? '', /^Form 1065 \(/);
+  assert.deepEqual(kindsOf({ fileName: 'upload.pdf', result: partnership }), ['partnership']);
 });
 
 test('keeps a second Schedule E for the same address and year as its own filing', () => {

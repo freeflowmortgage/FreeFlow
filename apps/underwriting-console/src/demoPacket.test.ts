@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { loadDemoPacket } from './demoPacket';
 import { mapIncomeFields } from './incomeFieldMap';
-import { livePartnershipPatches, liveScheduleLPatch, liveWagePatch } from './liveHydrate';
+import { livePartnershipPatches, liveScheduleLPatch, liveWagePatch, owningBusinessReturns } from './liveHydrate';
 import { kindsOf } from './livePacket';
 
 const PUBLIC = new URL('../public', import.meta.url);
@@ -75,7 +75,7 @@ test('demo Schedule E carries all five rental properties', async () => {
 });
 
 test('demo K-1 and Form 1065 hydrate the partnership worksheet', async () => {
-  const { fields } = await packet();
+  const { fields, byId } = await packet();
   const k1 = livePartnershipPatches(fields('sample-schedule-k1'));
   assert.equal(k1.length, 1);
   assert.equal(k1[0].ordinaryIncome, -10800);
@@ -85,6 +85,9 @@ test('demo K-1 and Form 1065 hydrate the partnership worksheet', async () => {
 
   const returnFields = fields('sample-form-1065');
   assert.equal(returnFields.find((f) => f.sourceFieldId === 'pt-return-dep')?.value, '$18,000.00');
+  const returnPages = byId.get('sample-form-1065')!.result.pages;
+  const owners = owningBusinessReturns(returnPages.map((page) => ({ documentId: 'return', index: page.index, formIds: page.formIds })));
+  assert.match(owners.get('return:5') ?? '', /^Form 1065 \(/);
   const scheduleL = liveScheduleLPatch(returnFields);
   assert.equal(scheduleL?.cash, 66000);
   assert.equal(scheduleL?.receivables, undefined);
