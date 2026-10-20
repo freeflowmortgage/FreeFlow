@@ -1,0 +1,17 @@
+{
+  "loan": {
+    "id": "DEMO-TRAINING-2025",
+    "program": "CONVENTIONAL",
+    "borrowerName": "Jordan Example"
+  },
+  "borrowers": [
+    { "borrowerKey": "borrower-1", "role": "PRIMARY" }
+  ],
+  "documents": [
+    { "attachmentId": "sample-paystub", "fileName": "paystub.pdf", "category": "PAYSTUB", "borrowerKey": "borrower-1" },
+    { "attachmentId": "sample-w2", "fileName": "w2.pdf", "category": "W2", "borrowerKey": "borrower-1" },
+    { "attachmentId": "sample-schedule-e", "fileName": "schedule-e.pdf", "category": "TAX_RETURN", "borrowerKey": "borrower-1" },
+    { "attachmentId": "sample-schedule-k1", "fileName": "schedule-k1.pdf", "category": "TAX_RETURN", "borrowerKey": "borrower-1" },
+    { "attachmentId": "sample-form-1065", "fileName": "form-1065.pdf", "category": "TAX_RETURN", "borrowerKey": "borrower-1" }
+  ]
+}

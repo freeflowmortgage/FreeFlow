@@ -1,0 +1,371 @@
+{
+ "classifications": {
+  "0": [
+   "Form 1065 (Partnership Return)",
+   "Form 4562 (Depreciation)"
+  ],
+  "1": [
+   "Schedule K-1"
+  ],
+  "4": [
+   "Form 4562 (Depreciation)"
+  ],
+  "5": [
+   "Schedule L",
+   "Schedule M-1",
+   "Schedule M-2"
+  ]
+ },
+ "document_id": "sha256:a1051b91cecb78d0edd3580cda204d9f3e2497880816a0b952bf47866ab13836",
+ "extracted_page_indices": [
+  0,
+  1,
+  4,
+  5
+ ],
+ "flags": [
+  "acroform_merged"
+ ],
+ "formExtracts": [
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.11764705882352941,
+    "x": 0.8235294117647058,
+    "y": 0.6445707070707071
+   },
+   "boxLabel": "Line 23",
+   "category": "income",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Ordinary Business Income (Loss)",
+   "form": "Form 1065",
+   "lineNum": "Line 23",
+   "numericValue": -18000.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "Other income (loss) is reported on Form 1065 line 7: $6,000.00. It is removed from qualifying income. Obtain the statement and confirm whether any of it is recurring before adding it back.",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "pt-return-ord",
+   "value": "-$18,000.00"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.11764705882352941,
+    "x": 0.8235294117647058,
+    "y": 0.37184343434343436
+   },
+   "boxLabel": "Line 6",
+   "category": "adjustment",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Net Gain (Loss) from Form 4797",
+   "form": "Form 1065",
+   "lineNum": "Line 6",
+   "numericValue": 4000.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "Other income (loss) is reported on Form 1065 line 7: $6,000.00. It is removed from qualifying income. Obtain the statement and confirm whether any of it is recurring before adding it back.",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "pt-return-4797",
+   "value": "$4,000.00"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.11764705882352941,
+    "x": 0.8235294117647058,
+    "y": 0.3869949494949495
+   },
+   "boxLabel": "Line 7",
+   "category": "adjustment",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Other Income (Loss)",
+   "form": "Form 1065",
+   "lineNum": "Line 7",
+   "numericValue": 6000.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "Other income (loss) is reported on Form 1065 line 7: $6,000.00. It is removed from qualifying income. Obtain the statement and confirm whether any of it is recurring before adding it back.",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "pt-return-other",
+   "value": "$6,000.00"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.11764705882352941,
+    "x": 0.8235294117647058,
+    "y": 0.538510101010101
+   },
+   "boxLabel": "Line 16c",
+   "category": "addback",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Depreciation",
+   "form": "Form 1065",
+   "lineNum": "Line 16c",
+   "numericValue": 18000.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "Other income (loss) is reported on Form 1065 line 7: $6,000.00. It is removed from qualifying income. Obtain the statement and confirm whether any of it is recurring before adding it back.",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "pt-return-dep",
+   "value": "$18,000.00"
+  },
+  {
+   "box": {
+    "h": 0.015152748184974748,
+    "w": 0.5971405303556155,
+    "x": 0.20163398942137076,
+    "y": 0.12121088817866162
+   },
+   "boxLabel": "Name",
+   "category": "identity",
+   "entityId": "form-1065-p0",
+   "fieldLabel": "Partnership Name",
+   "form": "Form 1065",
+   "lineNum": "Name",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-return-name",
+   "value": "Example Partners LLC"
+  },
+  {
+   "box": {
+    "h": 0.01515020505346433,
+    "w": 0.14117646061517056,
+    "x": 0.8000000099730648,
+    "y": 0.1287866457544192
+   },
+   "boxLabel": "Box D",
+   "category": "identity",
+   "entityId": "form-1065-p0",
+   "fieldLabel": "Employer Identification Number",
+   "form": "Form 1065",
+   "lineNum": "Box D",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-return-ein",
+   "value": "00-1234567"
+  },
+  {
+   "box": {
+    "h": 0.015150282118055556,
+    "w": 0.11764705882352941,
+    "x": 0.25882351943869997,
+    "y": 0.29545454545454547
+   },
+   "boxLabel": "Line 1c",
+   "category": "income",
+   "entityId": "form-1065-p0",
+   "fieldLabel": "Gross Receipts or Sales",
+   "form": "Form 1065",
+   "lineNum": "Line 1c",
+   "numericValue": 180000.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-return-gross",
+   "value": "$180,000.00"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.09411764705882351,
+    "x": 0.27058823529411763,
+    "y": 0.8188131313131313
+   },
+   "boxLabel": "Schedule M-1 line 4b",
+   "category": "adjustment",
+   "entityId": "form-1065-p5",
+   "extractor": "template",
+   "fieldLabel": "Travel, Meals and Entertainment (M-1)",
+   "form": "Form 1065",
+   "lineNum": "Schedule M-1 line 4b",
+   "numericValue": 600.0,
+   "pageIndex": 5,
+   "sourceFieldId": "pt-return-meals",
+   "value": "$600.00"
+  },
+  {
+   "box": {
+    "h": 0.020825742471097697,
+    "w": 0.837197708927728,
+    "x": 0.1431944479350171,
+    "y": 0.19426264907374527
+   },
+   "boxLabel": "Line 1",
+   "category": "asset",
+   "entityId": "form-1065-p5",
+   "fieldLabel": "Cash (End of Year)",
+   "form": "Form 1065",
+   "lineNum": "Line 1d",
+   "numericValue": 66000.0,
+   "pageIndex": 5,
+   "sourceFieldId": "sch-l-cash",
+   "value": "$66,000.00"
+  },
+  {
+   "box": {
+    "h": 0.020825742471097697,
+    "w": 0.7255359225802951,
+    "x": 0.25485623428244997,
+    "y": 0.2700139055348406
+   },
+   "boxLabel": "Line 4",
+   "category": "asset",
+   "entityId": "form-1065-p5",
+   "fieldLabel": "Tax-Exempt Securities (End of Year)",
+   "form": "Form 1065",
+   "lineNum": "Line 4",
+   "numericValue": 18000.0,
+   "pageIndex": 5,
+   "sourceFieldId": "sch-l-securities",
+   "value": "$18,000.00"
+  },
+  {
+   "box": {
+    "h": 0.020825742471097697,
+    "w": 0.7533006855085784,
+    "x": 0.22709147135416666,
+    "y": 0.4972941851375079
+   },
+   "boxLabel": "Line 16",
+   "category": "asset",
+   "entityId": "form-1065-p5",
+   "fieldLabel": "Accounts Payable (End of Year)",
+   "form": "Form 1065",
+   "lineNum": "Line 16",
+   "numericValue": 26400.0,
+   "pageIndex": 5,
+   "sourceFieldId": "sch-l-ap",
+   "value": "$26,400.00"
+  },
+  {
+   "box": {
+    "h": 0.020825742471097697,
+    "w": 0.5274770400103401,
+    "x": 0.45291511685240504,
+    "y": 0.5124444672555635
+   },
+   "boxLabel": "Line 17",
+   "category": "asset",
+   "entityId": "form-1065-p5",
+   "fieldLabel": "Mortgages and notes payable in less than 1 year (End of Year)",
+   "form": "Form 1065",
+   "lineNum": "Line 17",
+   "numericValue": 6000.0,
+   "pageIndex": 5,
+   "sourceFieldId": "sch-l-notes",
+   "value": "$6,000.00"
+  }
+ ],
+ "has_business_returns": true,
+ "ocr_page_count": 0,
+ "original_filename": "form-1065.pdf",
+ "pages": [
+  {
+   "flags": [
+    "acroform_merged"
+   ],
+   "formIds": [
+    "Form 1065 (Partnership Return)",
+    "Form 4562 (Depreciation)"
+   ],
+   "inKeepSet": true,
+   "index": 0,
+   "isNativeText": true,
+   "meanConfidence": 100.0,
+   "skewDegrees": 0.0,
+   "words": []
+  },
+  {
+   "flags": [
+    "blank_acroform_native_text"
+   ],
+   "formIds": [
+    "Schedule K-1"
+   ],
+   "inKeepSet": true,
+   "index": 1,
+   "isNativeText": true,
+   "meanConfidence": 100.0,
+   "skewDegrees": 0.0,
+   "words": []
+  },
+  {
+   "flags": [
+    "blank_acroform_native_text"
+   ],
+   "formIds": [],
+   "inKeepSet": false,
+   "index": 2,
+   "isNativeText": true,
+   "meanConfidence": 100.0,
+   "skewDegrees": 0.0,
+   "words": []
+  },
+  {
+   "flags": [
+    "blank_acroform_native_text"
+   ],
+   "formIds": [],
+   "inKeepSet": false,
+   "index": 3,
+   "isNativeText": true,
+   "meanConfidence": 90.0,
+   "skewDegrees": 0.0,
+   "words": []
+  },
+  {
+   "flags": [
+    "acroform_merged"
+   ],
+   "formIds": [
+    "Form 4562 (Depreciation)"
+   ],
+   "inKeepSet": true,
+   "index": 4,
+   "isNativeText": true,
+   "meanConfidence": 100.0,
+   "skewDegrees": 0.0,
+   "words": []
+  },
+  {
+   "flags": [
+    "acroform_merged"
+   ],
+   "formIds": [
+    "Schedule L",
+    "Schedule M-1",
+    "Schedule M-2"
+   ],
+   "inKeepSet": true,
+   "index": 5,
+   "isNativeText": true,
+   "meanConfidence": 100.0,
+   "skewDegrees": 0.0,
+   "words": []
+  }
+ ],
+ "pages_extracted_count": 4,
+ "scheduleEProperties": [],
+ "total_pages_scanned": 6,
+ "unresolved_statements": [],
+ "urlaBorrowers": [],
+ "w2Extracts": [],
+ "was_sandwich_applied": false
+}

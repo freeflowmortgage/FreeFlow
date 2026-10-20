@@ -1,0 +1,2271 @@
+{
+ "documents": [
+  {
+   "attachmentId": "sample-paystub",
+   "fileName": "paystub.pdf"
+  },
+  {
+   "attachmentId": "sample-w2",
+   "fileName": "w2.pdf"
+  },
+  {
+   "attachmentId": "sample-schedule-e",
+   "fileName": "schedule-e.pdf"
+  },
+  {
+   "attachmentId": "sample-schedule-k1",
+   "fileName": "schedule-k1.pdf"
+  },
+  {
+   "attachmentId": "sample-form-1065",
+   "fileName": "form-1065.pdf"
+  }
+ ],
+ "context": {
+  "loan": {
+   "id": "DEMO-TRAINING-2025",
+   "version": 1,
+   "status": "ACTIVE",
+   "program": "CONVENTIONAL",
+   "borrowerName": "Jordan Example"
+  },
+  "borrowers": [
+   {
+    "borrowerKey": "borrower-1",
+    "role": "PRIMARY"
+   }
+  ],
+  "attachments": [
+   {
+    "attachmentId": "sample-paystub",
+    "category": "PAYSTUB",
+    "version": 1,
+    "pageCount": 1,
+    "parserVersion": "demo-snapshot"
+   },
+   {
+    "attachmentId": "sample-w2",
+    "category": "W2",
+    "version": 1,
+    "pageCount": 1,
+    "parserVersion": "demo-snapshot"
+   },
+   {
+    "attachmentId": "sample-schedule-e",
+    "category": "TAX_RETURN",
+    "version": 1,
+    "pageCount": 2,
+    "parserVersion": "demo-snapshot"
+   },
+   {
+    "attachmentId": "sample-schedule-k1",
+    "category": "TAX_RETURN",
+    "version": 1,
+    "pageCount": 1,
+    "parserVersion": "demo-snapshot"
+   },
+   {
+    "attachmentId": "sample-form-1065",
+    "category": "TAX_RETURN",
+    "version": 1,
+    "pageCount": 6,
+    "parserVersion": "demo-snapshot"
+   }
+  ],
+  "extractions": [
+   {
+    "id": "extraction-sample-paystub",
+    "attachmentId": "sample-paystub",
+    "sourceDocumentVersion": 1,
+    "parserVersion": "demo-snapshot",
+    "schemaVersion": "income-extraction-v2",
+    "status": "ACTIVE",
+    "warnings": [
+     "AUTHORITATIVE_TAX_YEAR_REQUIRED",
+     "ocr_applied"
+    ],
+    "confidence": null,
+    "normalizedInput": {
+     "formRecords": [
+      {
+       "entityId": "Paystub:paystub-p0",
+       "form": "Paystub",
+       "pageIndex": 0,
+       "fields": [
+        {
+         "sourceFieldId": "ps-base-ytd",
+         "value": "82,656.00",
+         "numericValue": 82656
+        },
+        {
+         "sourceFieldId": "ps-current-base",
+         "value": "3,360.00",
+         "numericValue": 3360
+        },
+        {
+         "sourceFieldId": "ps-employee-name",
+         "value": "Jordan Example",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "ps-employer-name",
+         "value": "Example Services LLC",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "ps-hourly-rate",
+         "value": "42.0000",
+         "numericValue": 42
+        },
+        {
+         "sourceFieldId": "ps-hours-week",
+         "value": "40.00",
+         "numericValue": 40
+        },
+        {
+         "sourceFieldId": "ps-ot-ytd",
+         "value": "36.00",
+         "numericValue": 36
+        },
+        {
+         "sourceFieldId": "ps-pay-date",
+         "value": "10/28/2022",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "ps-pay-frequency",
+         "value": "Biweekly",
+         "numericValue": 26
+        },
+        {
+         "sourceFieldId": "ps-period-end",
+         "value": "10/22/2022",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "ps-period-start",
+         "value": "10/09/2022",
+         "numericValue": 0
+        }
+       ]
+      }
+     ]
+    },
+    "evidence": {
+     "fields": [
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.419629,
+        "y": 0.300837,
+        "w": 0.041973,
+        "h": 0.117065
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.552848,
+        "y": 0.279372,
+        "w": 0.047969,
+        "h": 0.13853
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-ot-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.573835,
+        "y": 0.343766,
+        "w": 0.026982,
+        "h": 0.020475
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hourly-rate",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.345666,
+        "y": 0.300837,
+        "w": 0.038975,
+        "h": 0.009742
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.325753,
+        "y": 0.300837,
+        "w": 0.011994,
+        "h": 0.117065
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-employer-name",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.236928,
+        "y": 0.18128,
+        "w": 0.112378,
+        "h": 0.010037
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-employee-name",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.060458,
+        "y": 0.18128,
+        "w": 0.080277,
+        "h": 0.010037
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-period-end",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.690315,
+        "y": 0.18128,
+        "w": 0.0556,
+        "h": 0.010037
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-period-start",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.690315,
+        "y": 0.18128,
+        "w": 0.0556,
+        "h": 0.010037
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-pay-date",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.690315,
+        "y": 0.18128,
+        "w": 0.0556,
+        "h": 0.010037
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-pay-frequency",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.690315,
+        "y": 0.18128,
+        "w": 0.0556,
+        "h": 0.010037
+       }
+      }
+     ]
+    },
+    "metadataReview": {
+     "id": "review-sample-paystub",
+     "metadataVersion": 1,
+     "assignments": [
+      {
+       "entityId": "Paystub:paystub-p0",
+       "borrowerKey": "borrower-1"
+      }
+     ],
+     "current": true
+    }
+   },
+   {
+    "id": "extraction-sample-w2",
+    "attachmentId": "sample-w2",
+    "sourceDocumentVersion": 1,
+    "parserVersion": "demo-snapshot",
+    "schemaVersion": "income-extraction-v2",
+    "status": "ACTIVE",
+    "warnings": [
+     "W2_EMPLOYMENT_ROLE_REVIEW_REQUIRED",
+     "ocr_applied"
+    ],
+    "confidence": null,
+    "normalizedInput": {
+     "w2Records": [
+      {
+       "entityId": "w2-p0-0",
+       "employerName": "Example Services LLC",
+       "ein": "00-7654321",
+       "year": 2021,
+       "annualWages": 90000,
+       "pageIndex": 0,
+       "box1Wages": 86400,
+       "box5Wages": 90000
+      }
+     ]
+    },
+    "evidence": {
+     "fields": [
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "box1",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.2369281045751634,
+        "y": 0.057757589552137584,
+        "w": 0.06274513793147467,
+        "h": 0.012616162348275234
+       }
+      },
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "box2",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.40032679738562094,
+        "y": 0.057757589552137584,
+        "w": 0.06274498833550347,
+        "h": 0.012616162348275234
+       }
+      },
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "box3",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.2369281045751634,
+        "y": 0.08149494787659307,
+        "w": 0.06274513793147467,
+        "h": 0.012616167164812184
+       }
+      },
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "box4",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.4035947712418301,
+        "y": 0.08149494787659307,
+        "w": 0.054901871026731004,
+        "h": 0.012616167164812184
+       }
+      },
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "box5",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.2369281045751634,
+        "y": 0.1025808218753699,
+        "w": 0.06274513793147467,
+        "h": 0.012616167164812184
+       }
+      },
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "box6",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.4035947712418301,
+        "y": 0.1025808218753699,
+        "w": 0.054901871026731004,
+        "h": 0.012616167164812184
+       }
+      },
+      {
+       "collection": "w2Extracts",
+       "index": 0,
+       "field": "employer_name",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.042483660130718956,
+        "y": 0.12505555393719914,
+        "w": 0.15686279496336294,
+        "h": 0.02524242979107481
+       }
+      }
+     ]
+    },
+    "metadataReview": {
+     "id": "review-sample-w2",
+     "metadataVersion": 1,
+     "assignments": [
+      {
+       "entityId": "w2-p0-0",
+       "borrowerKey": "borrower-1"
+      }
+     ],
+     "current": true
+    }
+   },
+   {
+    "id": "extraction-sample-schedule-e",
+    "attachmentId": "sample-schedule-e",
+    "sourceDocumentVersion": 1,
+    "parserVersion": "demo-snapshot",
+    "schemaVersion": "income-extraction-v2",
+    "status": "ACTIVE",
+    "warnings": [
+     "ocr_applied"
+    ],
+    "confidence": null,
+    "normalizedInput": {
+     "scheduleEProperties": [
+      {
+       "year": 2025,
+       "propertyAddress": "101 Example Lane, Example City, AZ 00000",
+       "propertyType": "RENTAL",
+       "pageIndex": 0,
+       "column": "A",
+       "rentsReceived": 24000,
+       "insurance": 950,
+       "mortgageInterest": 5600,
+       "taxes": 1800,
+       "depreciation": 5000,
+       "hoaDues": 1200,
+       "totalExpenses": 17800,
+       "netIncomeLoss": 6200,
+       "fairRentalDays": 365
+      },
+      {
+       "year": 2025,
+       "propertyAddress": "202 Sample Court, Example City, AZ 00000",
+       "propertyType": "RENTAL",
+       "pageIndex": 0,
+       "column": "B",
+       "rentsReceived": 30000,
+       "insurance": 1250,
+       "mortgageInterest": 7200,
+       "taxes": 2400,
+       "depreciation": 6500,
+       "hoaDues": 0,
+       "totalExpenses": 22400,
+       "netIncomeLoss": 7600,
+       "fairRentalDays": 365
+      },
+      {
+       "year": 2025,
+       "propertyAddress": "303 Demo Drive, Example City, AZ 00000",
+       "propertyType": "RENTAL",
+       "pageIndex": 0,
+       "column": "C",
+       "rentsReceived": 21600,
+       "insurance": 900,
+       "mortgageInterest": 5800,
+       "taxes": 1800,
+       "depreciation": 5000,
+       "hoaDues": 0,
+       "totalExpenses": 19000,
+       "netIncomeLoss": 2600,
+       "fairRentalDays": 365
+      },
+      {
+       "year": 2025,
+       "propertyAddress": "404 Practice Way, Example City, AZ 00000",
+       "propertyType": "RENTAL",
+       "pageIndex": 1,
+       "column": "A",
+       "rentsReceived": 36000,
+       "insurance": 1500,
+       "mortgageInterest": 8000,
+       "taxes": 3000,
+       "depreciation": 7000,
+       "hoaDues": 1600,
+       "totalExpenses": 26500,
+       "netIncomeLoss": 9500,
+       "fairRentalDays": 365
+      },
+      {
+       "year": 2025,
+       "propertyAddress": "505 Test Terrace, Example City, AZ 00000",
+       "propertyType": "RENTAL",
+       "pageIndex": 1,
+       "column": "B",
+       "rentsReceived": 26400,
+       "insurance": 1100,
+       "mortgageInterest": 6400,
+       "taxes": 2100,
+       "depreciation": 5800,
+       "hoaDues": 600,
+       "totalExpenses": 20100,
+       "netIncomeLoss": 6300,
+       "fairRentalDays": 365
+      }
+     ]
+    },
+    "evidence": {
+     "fields": [
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "address",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.10751634485581342,
+        "y": 0.22727272727272727,
+        "w": 0.8336601257324219,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "days",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6235294217377706,
+        "y": 0.30303161312835386,
+        "w": 0.11764705882352941,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "type",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.10588235792770885,
+        "y": 0.30303161312835386,
+        "w": 0.11764705882352941,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.10",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5530240222661182,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.11",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5681742658518781,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.12",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5833245094376381,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.13",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.598474753023398,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.14",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6136250351414536,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.15",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6287752787272135,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.16",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6439255223129735,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.17",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6590758044310291,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.18",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6742260865490846,
+        "w": 0.13995102028441586,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.19",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6893762916025489,
+        "w": 0.13995102028441586,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.20",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.7045264966560133,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.21",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.7499798090770992,
+        "w": 0.13995102028441586,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.3",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.43181822035047746,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.4",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.44696846393623735,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.5",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.47727276580502287,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.6",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.4924230093907828,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.7",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5075732529765428,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.8",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5227234965623028,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 0,
+       "field": "financials.9",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5378737786803582,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "address",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.10751634485581342,
+        "y": 0.24242300939078282,
+        "w": 0.8336601257324219,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "days",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6235294217377706,
+        "y": 0.3181818181818182,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "type",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.10588235792770885,
+        "y": 0.3181818181818182,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.10",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5530240222661182,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.11",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5681742658518781,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.12",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5833245094376381,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.13",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.598474753023398,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.14",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6136250351414536,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.15",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6287752787272135,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.16",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6439255223129735,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.17",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6590758044310291,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.18",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6742260865490846,
+        "w": 0.1399509704190921,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.19",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6893762916025489,
+        "w": 0.1399509704190921,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.20",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.7045264966560133,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.21",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.7499798090770992,
+        "w": 0.1399509704190921,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.3",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.43181822035047746,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.4",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.44696846393623735,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.5",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.47727276580502287,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.6",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.4924230093907828,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.7",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5075732529765428,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.8",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5227234965623028,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 1,
+       "field": "financials.9",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5378737786803582,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "address",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.10751634485581342,
+        "y": 0.2575732915088384,
+        "w": 0.8336601257324219,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "days",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.6235294217377706,
+        "y": 0.33333210029987376,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "type",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.10588235792770885,
+        "y": 0.33333210029987376,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.10",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.5530240222661182,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.11",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.5681742658518781,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.12",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.5833245094376381,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.13",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.598474753023398,
+        "w": 0.14117646061517056,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.14",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.6136250351414536,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.15",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.6287752787272135,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.16",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.6439255223129735,
+        "w": 0.14117646061517056,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.17",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.6590758044310291,
+        "w": 0.14117646061517056,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.18",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.6742260865490846,
+        "w": 0.14117646061517056,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.19",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.6893762916025489,
+        "w": 0.14117646061517056,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.20",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.7045264966560133,
+        "w": 0.14117646061517056,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.21",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.7499798090770992,
+        "w": 0.14117646061517056,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.3",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.43181822035047746,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.4",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.44696846393623735,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.5",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.47727276580502287,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.6",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.4924230093907828,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.7",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.5075732529765428,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.8",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.5227234965623028,
+        "w": 0.14117646061517056,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 2,
+       "field": "financials.9",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.5378737786803582,
+        "w": 0.14117646061517056,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "address",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.10751634485581342,
+        "y": 0.22727272727272727,
+        "w": 0.8336601257324219,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "days",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6235294217377706,
+        "y": 0.30303161312835386,
+        "w": 0.11764705882352941,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "type",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.10588235792770885,
+        "y": 0.30303161312835386,
+        "w": 0.11764705882352941,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.10",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5530240222661182,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.11",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5681742658518781,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.12",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5833245094376381,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.13",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.598474753023398,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.14",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6136250351414536,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.15",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6287752787272135,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.16",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6439255223129735,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.17",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6590758044310291,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.18",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6742260865490846,
+        "w": 0.13995102028441586,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.19",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.6893762916025489,
+        "w": 0.13995102028441586,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.20",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.7045264966560133,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.21",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.7499798090770992,
+        "w": 0.13995102028441586,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.3",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.43181822035047746,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.4",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.44696846393623735,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.5",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.47727276580502287,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.6",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.4924230093907828,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.7",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5075732529765428,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.8",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5227234965623028,
+        "w": 0.13995102028441586,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 3,
+       "field": "financials.9",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.5176470388773999,
+        "y": 0.5378737786803582,
+        "w": 0.13995102028441586,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "address",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.10751634485581342,
+        "y": 0.24242300939078282,
+        "w": 0.8336601257324219,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "days",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6235294217377706,
+        "y": 0.3181818181818182,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "type",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.10588235792770885,
+        "y": 0.3181818181818182,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.10",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5530240222661182,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.11",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5681742658518781,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.12",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5833245094376381,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.13",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.598474753023398,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.14",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6136250351414536,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.15",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6287752787272135,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.16",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6439255223129735,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.17",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6590758044310291,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.18",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6742260865490846,
+        "w": 0.1399509704190921,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.19",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.6893762916025489,
+        "w": 0.1399509704190921,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.20",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.7045264966560133,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.21",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.7499798090770992,
+        "w": 0.1399509704190921,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.3",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.43181822035047746,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.4",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.44696846393623735,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.5",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.47727276580502287,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.6",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.4924230093907828,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.7",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5075732529765428,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.8",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5227234965623028,
+        "w": 0.1399509704190921,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "scheduleEProperties",
+       "index": 4,
+       "field": "financials.9",
+       "pageIndex": 1,
+       "box": {
+        "x": 0.6588235493578942,
+        "y": 0.5378737786803582,
+        "w": 0.1399509704190921,
+        "h": 0.015150243585759943
+       }
+      }
+     ]
+    },
+    "metadataReview": {
+     "id": "review-sample-schedule-e",
+     "metadataVersion": 1,
+     "assignments": [],
+     "current": true
+    }
+   },
+   {
+    "id": "extraction-sample-schedule-k1",
+    "attachmentId": "sample-schedule-k1",
+    "sourceDocumentVersion": 1,
+    "parserVersion": "demo-snapshot",
+    "schemaVersion": "income-extraction-v2",
+    "status": "ACTIVE",
+    "warnings": [
+     "AUTHORITATIVE_TAX_YEAR_REQUIRED",
+     "acroform_merged"
+    ],
+    "confidence": null,
+    "normalizedInput": {
+     "formRecords": [
+      {
+       "entityId": "Form 1065:form-1065-p0",
+       "form": "Form 1065",
+       "pageIndex": 0,
+       "fields": [
+        {
+         "sourceFieldId": "pt-capital-pct",
+         "value": "60%",
+         "numericValue": 60
+        },
+        {
+         "sourceFieldId": "pt-dist",
+         "value": "$11,040.00",
+         "numericValue": 11040
+        },
+        {
+         "sourceFieldId": "pt-ein",
+         "value": "00-1234567",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "pt-gp",
+         "value": "$12,000.00",
+         "numericValue": 12000
+        },
+        {
+         "sourceFieldId": "pt-name",
+         "value": "Example Partners LLC 88 Demo Way Sample City, AZ 00000",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "pt-ord",
+         "value": "-$10,800.00",
+         "numericValue": -10800
+        },
+        {
+         "sourceFieldId": "pt-profit-pct",
+         "value": "60%",
+         "numericValue": 60
+        }
+       ]
+      }
+     ]
+    },
+    "evidence": {
+     "fields": [
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-ord",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5411764705882353,
+        "y": 0.10669191919191919,
+        "w": 0.1870098039215686,
+        "h": 0.017676767676767676
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-profit-pct",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.3176470588235294,
+        "y": 0.5625,
+        "w": 0.15294117647058822,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-capital-pct",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.3176470588235294,
+        "y": 0.5915404040404041,
+        "w": 0.15294117647058822,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-dist",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.7294117647058823,
+        "y": 0.4551767676767677,
+        "w": 0.20849673202614383,
+        "h": 0.017676767676767676
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-gp",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.5411764705882353,
+        "y": 0.1976010101010101,
+        "w": 0.18700980392156863,
+        "h": 0.01767676767676768
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-name",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.06209150326797386,
+        "y": 0.24242300939078282,
+        "w": 0.44379085964626735,
+        "h": 0.045454545454545456
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-ein",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.058823529411764705,
+        "y": 0.2121224451546717,
+        "w": 0.4470588335024765,
+        "h": 0.015150282118055556
+       }
+      }
+     ]
+    },
+    "metadataReview": {
+     "id": "review-sample-schedule-k1",
+     "metadataVersion": 1,
+     "assignments": [
+      {
+       "entityId": "Form 1065:form-1065-p0",
+       "borrowerKey": "borrower-1"
+      }
+     ],
+     "current": true
+    }
+   },
+   {
+    "id": "extraction-sample-form-1065",
+    "attachmentId": "sample-form-1065",
+    "sourceDocumentVersion": 1,
+    "parserVersion": "demo-snapshot",
+    "schemaVersion": "income-extraction-v2",
+    "status": "ACTIVE",
+    "warnings": [
+     "AUTHORITATIVE_TAX_YEAR_REQUIRED",
+     "acroform_merged"
+    ],
+    "confidence": null,
+    "normalizedInput": {
+     "formRecords": [
+      {
+       "entityId": "Form 1065:form-1065-p0",
+       "form": "Form 1065",
+       "pageIndex": 0,
+       "fields": [
+        {
+         "sourceFieldId": "pt-return-4797",
+         "value": "$4,000.00",
+         "numericValue": 4000
+        },
+        {
+         "sourceFieldId": "pt-return-dep",
+         "value": "$18,000.00",
+         "numericValue": 18000
+        },
+        {
+         "sourceFieldId": "pt-return-ein",
+         "value": "00-1234567",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "pt-return-gross",
+         "value": "$180,000.00",
+         "numericValue": 180000
+        },
+        {
+         "sourceFieldId": "pt-return-name",
+         "value": "Example Partners LLC",
+         "numericValue": 0
+        },
+        {
+         "sourceFieldId": "pt-return-ord",
+         "value": "-$18,000.00",
+         "numericValue": -18000
+        },
+        {
+         "sourceFieldId": "pt-return-other",
+         "value": "$6,000.00",
+         "numericValue": 6000
+        }
+       ]
+      },
+      {
+       "entityId": "Form 1065:form-1065-p5",
+       "form": "Form 1065",
+       "pageIndex": 5,
+       "fields": [
+        {
+         "sourceFieldId": "pt-return-meals",
+         "value": "$600.00",
+         "numericValue": 600
+        },
+        {
+         "sourceFieldId": "sch-l-ap",
+         "value": "$26,400.00",
+         "numericValue": 26400
+        },
+        {
+         "sourceFieldId": "sch-l-cash",
+         "value": "$66,000.00",
+         "numericValue": 66000
+        },
+        {
+         "sourceFieldId": "sch-l-notes",
+         "value": "$6,000.00",
+         "numericValue": 6000
+        },
+        {
+         "sourceFieldId": "sch-l-securities",
+         "value": "$18,000.00",
+         "numericValue": 18000
+        }
+       ]
+      }
+     ]
+    },
+    "evidence": {
+     "fields": [
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-ord",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8235294117647058,
+        "y": 0.6445707070707071,
+        "w": 0.11764705882352941,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-4797",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8235294117647058,
+        "y": 0.37184343434343436,
+        "w": 0.11764705882352941,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-other",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8235294117647058,
+        "y": 0.3869949494949495,
+        "w": 0.11764705882352941,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-dep",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8235294117647058,
+        "y": 0.538510101010101,
+        "w": 0.11764705882352941,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-name",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.20163398942137076,
+        "y": 0.12121088817866162,
+        "w": 0.5971405303556155,
+        "h": 0.015152748184974748
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-ein",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.8000000099730648,
+        "y": 0.1287866457544192,
+        "w": 0.14117646061517056,
+        "h": 0.01515020505346433
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p0",
+       "field": "pt-return-gross",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.25882351943869997,
+        "y": 0.29545454545454547,
+        "w": 0.11764705882352941,
+        "h": 0.015150282118055556
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p5",
+       "field": "pt-return-meals",
+       "pageIndex": 5,
+       "box": {
+        "x": 0.27058823529411763,
+        "y": 0.8188131313131313,
+        "w": 0.09411764705882351,
+        "h": 0.015151515151515152
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p5",
+       "field": "sch-l-cash",
+       "pageIndex": 5,
+       "box": {
+        "x": 0.1431944479350171,
+        "y": 0.19426264907374527,
+        "w": 0.837197708927728,
+        "h": 0.020825742471097697
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p5",
+       "field": "sch-l-securities",
+       "pageIndex": 5,
+       "box": {
+        "x": 0.25485623428244997,
+        "y": 0.2700139055348406,
+        "w": 0.7255359225802951,
+        "h": 0.020825742471097697
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p5",
+       "field": "sch-l-ap",
+       "pageIndex": 5,
+       "box": {
+        "x": 0.22709147135416666,
+        "y": 0.4972941851375079,
+        "w": 0.7533006855085784,
+        "h": 0.020825742471097697
+       }
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Form 1065:form-1065-p5",
+       "field": "sch-l-notes",
+       "pageIndex": 5,
+       "box": {
+        "x": 0.45291511685240504,
+        "y": 0.5124444672555635,
+        "w": 0.5274770400103401,
+        "h": 0.020825742471097697
+       }
+      }
+     ]
+    },
+    "metadataReview": {
+     "id": "review-sample-form-1065",
+     "metadataVersion": 1,
+     "assignments": [
+      {
+       "entityId": "Form 1065:form-1065-p0",
+       "borrowerKey": "borrower-1"
+      },
+      {
+       "entityId": "Form 1065:form-1065-p5",
+       "borrowerKey": "borrower-1"
+      }
+     ],
+     "current": true
+    }
+   }
+  ],
+  "calculation": null,
+  "approval": null,
+  "hostWrite": null
+ }
+}

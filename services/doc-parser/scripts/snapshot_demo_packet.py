@@ -1,15 +1,17 @@
 """Snapshot the parser's result for each document in the public income demo.
 
     python scripts/snapshot_demo_packet.py
+    pnpm --filter underwriter-portal exec tsx scripts/build-demo-console-context.ts
 
 The public demo cannot call the parser: the preview API sits behind sign-in.
 So the sample PDFs in apps/underwriting-console/public/demo-documents ship
-with the exact response ``POST /parse`` returns for them, and the console maps
-that response through the same code path as a live upload. Rerun this after
-any parser change that affects those documents, and commit the JSON with it.
+with what the live tool would have stored for them. This script records the
+``POST /parse`` response for each; the portal script then runs those through
+the same persistence projection a live upload goes through. Rerun both after
+any parser change that affects the samples, and commit the output.
 
-Only the sample PDFs listed in manifest.json are read. They are fabricated
-("SAMPLE - FICTIONAL DATA"); never add a real borrower's document here.
+Only the documents listed in demo-packet/manifest.json are read. They are
+fabricated ("SAMPLE - FICTIONAL DATA"); never add a real borrower's document.
 """
 
 from __future__ import annotations
@@ -22,10 +24,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-PACKET = ROOT.parents[1] / "apps" / "underwriting-console" / "public" / "demo-documents"
+CONSOLE = ROOT.parents[1] / "apps" / "underwriting-console"
+DOCUMENTS = CONSOLE / "public" / "demo-documents"
+PACKET = CONSOLE / "demo-packet"
 
-# Per-request values that would make every regeneration a diff.
-_VOLATILE = ("transaction_id",)
+# The persisted projection never reads OCR words, and the transaction id
+# changes every run.
+_DROP = ("transaction_id",)
 
 
 def main() -> None:
@@ -34,9 +39,11 @@ def main() -> None:
     import server
 
     manifest = json.loads((PACKET / "manifest.json").read_text())
+    out_dir = PACKET / "parse"
+    out_dir.mkdir(exist_ok=True)
     client = TestClient(server.app)
     for entry in manifest["documents"]:
-        pdf = PACKET / entry["fileName"]
+        pdf = DOCUMENTS / entry["fileName"]
         response = client.post(
             "/parse",
             files={"file": (pdf.name, pdf.read_bytes(), "application/pdf")},
@@ -44,12 +51,17 @@ def main() -> None:
         response.raise_for_status()
         result = response.json()
         result = result.get("result", result)
-        for key in _VOLATILE:
+        for key in _DROP:
             result.pop(key, None)
-        out = PACKET / entry["parseFile"]
-        out.write_text(json.dumps(result, separators=(",", ":")) + "\n")
-        forms = sorted({row.get("form") for row in result.get("formExtracts", [])})
-        print(f"{pdf.name}: {len(result.get('formExtracts', []))} fields {forms} -> {out.name}")
+        for page in result.get("pages", []):
+            page["words"] = []
+        out = out_dir / f"{entry['attachmentId']}.json"
+        out.write_text(json.dumps(result, indent=1, sort_keys=True) + "\n")
+        print(
+            f"{pdf.name}: {len(result.get('formExtracts', []))} form fields, "
+            f"{len(result.get('w2Extracts', []))} W-2, "
+            f"{len(result.get('scheduleEProperties', []))} Schedule E -> {out.name}"
+        )
 
 
 if __name__ == "__main__":

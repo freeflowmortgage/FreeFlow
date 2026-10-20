@@ -1,0 +1,248 @@
+{
+ "classifications": {
+  "0": [
+   "Schedule K-1 (1065)"
+  ]
+ },
+ "document_id": "sha256:13bbbd93db4653285d741c7c299f30641bba472a111823ea42c33f796fff61af",
+ "extracted_page_indices": [
+  0
+ ],
+ "flags": [
+  "acroform_merged"
+ ],
+ "formExtracts": [
+  {
+   "box": {
+    "h": 0.017676767676767676,
+    "w": 0.1870098039215686,
+    "x": 0.5411764705882353,
+    "y": 0.10669191919191919
+   },
+   "boxLabel": "Box 1",
+   "category": "income",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Ordinary Business Income (Loss)",
+   "form": "Form 1065",
+   "lineNum": "Box 1",
+   "numericValue": -10800.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-ord",
+   "value": "-$10,800.00"
+  },
+  {
+   "box": {
+    "h": 0.017676767676767676,
+    "w": 0.1870098039215686,
+    "x": 0.5411764705882353,
+    "y": 0.1976010101010101
+   },
+   "boxLabel": "Box 4a",
+   "category": "income",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Guaranteed Payments for Services",
+   "form": "Form 1065",
+   "lineNum": "Box 4a",
+   "numericValue": 12000.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-gp-services",
+   "value": "$12,000.00"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.15294117647058822,
+    "x": 0.3176470588235294,
+    "y": 0.5625
+   },
+   "boxLabel": "Item J",
+   "category": "ownership",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "End-of-Year Profit %",
+   "form": "Form 1065",
+   "lineNum": "Item J",
+   "numericValue": 60.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-profit-pct",
+   "value": "60%"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.15294117647058822,
+    "x": 0.3176470588235294,
+    "y": 0.5915404040404041
+   },
+   "boxLabel": "Item J",
+   "category": "ownership",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "End-of-Year Capital %",
+   "form": "Form 1065",
+   "lineNum": "Item J",
+   "numericValue": 60.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-capital-pct",
+   "value": "60%"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.16470588235294117,
+    "x": 0.12941176470588237,
+    "y": 0.5625
+   },
+   "boxLabel": "Item J",
+   "category": "ownership",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Beginning-of-Year Profit %",
+   "form": "Form 1065",
+   "lineNum": "Item J",
+   "numericValue": 60.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-profit-pct-begin",
+   "value": "60%"
+  },
+  {
+   "box": {
+    "h": 0.015151515151515152,
+    "w": 0.16470588235294117,
+    "x": 0.12941176470588237,
+    "y": 0.5915404040404041
+   },
+   "boxLabel": "Item J",
+   "category": "ownership",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Beginning-of-Year Capital %",
+   "form": "Form 1065",
+   "lineNum": "Item J",
+   "numericValue": 60.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-capital-pct-begin",
+   "value": "60%"
+  },
+  {
+   "box": {
+    "h": 0.017676767676767676,
+    "w": 0.20849673202614383,
+    "x": 0.7294117647058823,
+    "y": 0.4551767676767677
+   },
+   "boxLabel": "Box 19A",
+   "category": "income",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Distributions",
+   "form": "Form 1065",
+   "lineNum": "Box 19A",
+   "numericValue": 11040.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-dist",
+   "value": "$11,040.00"
+  },
+  {
+   "box": {
+    "h": 0.01767676767676768,
+    "w": 0.18700980392156863,
+    "x": 0.5411764705882353,
+    "y": 0.1976010101010101
+   },
+   "boxLabel": "Box 4a + 4b",
+   "category": "income",
+   "entityId": "form-1065-p0",
+   "extractor": "template",
+   "fieldLabel": "Guaranteed Payments",
+   "form": "Form 1065",
+   "lineNum": "Box 4a + 4b",
+   "numericValue": 12000.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-gp",
+   "value": "$12,000.00"
+  },
+  {
+   "box": {
+    "h": 0.045454545454545456,
+    "w": 0.44379085964626735,
+    "x": 0.06209150326797386,
+    "y": 0.24242300939078282
+   },
+   "boxLabel": "Box B",
+   "category": "identity",
+   "entityId": "form-1065-p0",
+   "fieldLabel": "Partnership's Name",
+   "form": "Form 1065",
+   "lineNum": "Box B",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-name",
+   "value": "Example Partners LLC 88 Demo Way Sample City, AZ 00000"
+  },
+  {
+   "box": {
+    "h": 0.015150282118055556,
+    "w": 0.4470588335024765,
+    "x": 0.058823529411764705,
+    "y": 0.2121224451546717
+   },
+   "boxLabel": "Box A",
+   "category": "identity",
+   "entityId": "form-1065-p0",
+   "fieldLabel": "Partnership's EIN",
+   "form": "Form 1065",
+   "lineNum": "Box A",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-ein",
+   "value": "00-1234567"
+  },
+  {
+   "box": {
+    "h": 0.016414141414141416,
+    "w": 0.4426107219621247,
+    "x": 0.013071895424836602,
+    "y": 0.3794128726227115
+   },
+   "boxLabel": "Box F",
+   "category": "identity",
+   "entityId": "form-1065-p0",
+   "fieldLabel": "Partner's Name",
+   "form": "Form 1065",
+   "lineNum": "Box F",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "pt-partner-name",
+   "value": "Jordan Example"
+  }
+ ],
+ "has_business_returns": true,
+ "ocr_page_count": 0,
+ "original_filename": "schedule-k1.pdf",
+ "pages": [
+  {
+   "flags": [
+    "acroform_merged"
+   ],
+   "formIds": [
+    "Schedule K-1 (1065)"
+   ],
+   "inKeepSet": true,
+   "index": 0,
+   "isNativeText": true,
+   "meanConfidence": 100.0,
+   "skewDegrees": 0.0,
+   "words": []
+  }
+ ],
+ "pages_extracted_count": 1,
+ "scheduleEProperties": [],
+ "total_pages_scanned": 1,
+ "unresolved_statements": [],
+ "urlaBorrowers": [],
+ "w2Extracts": [],
+ "was_sandwich_applied": false
+}
