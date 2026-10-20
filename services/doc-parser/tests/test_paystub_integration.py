@@ -219,3 +219,31 @@ def test_scanned_and_digital_pipelines_agree(
         assert scanned[source_id]["numericValue"] == pytest.approx(
             field["numericValue"], abs=0.01
         ), source_id
+
+
+def test_text_layer_without_labels_reads_labels_with_ocr() -> None:
+    """Amounts as text, row labels and headers drawn as vector outlines.
+
+    The text layer clears the character threshold, so the parser used to trust
+    it, find no labels, and decline; the fallback reader then took the Holiday
+    Pay amount for weekly hours and the OASDI taxable wages for base YTD.
+    """
+    pdf = (Path(__file__).resolve().parent / "fixtures" / "sample_paystub_vector_labels.pdf").read_bytes()
+
+    classifications, fields = run_pipeline(pdf)
+
+    assert classifications[0] == ["Paystub"]
+    values = {sid: field["value"] for sid, field in by_id(fields).items()}
+    assert values == {
+        "ps-employer-name": "Example Services LLC",
+        "ps-employee-name": "Jordan Example",
+        "ps-period-start": "10/09/2022",
+        "ps-period-end": "10/22/2022",
+        "ps-pay-date": "10/28/2022",
+        "ps-pay-frequency": "Biweekly",
+        "ps-hourly-rate": "42.0000",
+        "ps-hours-week": "40.00",
+        "ps-current-base": "3,360.00",
+        "ps-base-ytd": "82,656.00",
+        "ps-ot-ytd": "36.00",
+    }

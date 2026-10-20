@@ -19,7 +19,7 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from . import taxonomy
-from .extract import extract_page, group_rows
+from .extract import ExtractedPage, extract_page, extract_page_with_ocr_labels, group_rows
 from .layout import (
     assign_columns,
     column_anchors,
@@ -603,11 +603,20 @@ def parse_paystub(
     multi-document packet; the caller is expected to have classified it as a
     pay stub already.
     """
-    result = PaystubResult(page_index=page_index)
-
-    page = extract_page(
-        pdf_bytes, page_index=page_index, **({"dpi": dpi} if dpi else {})
+    dpi_arg = {"dpi": dpi} if dpi else {}
+    result = _parse_page(extract_page(pdf_bytes, page_index=page_index, **dpi_arg), page_index)
+    if result.text_source != "text" or (result.lines and result.reconciliation.balanced):
+        return result
+    retry = _parse_page(
+        extract_page_with_ocr_labels(pdf_bytes, page_index=page_index, **dpi_arg), page_index
     )
+    if retry.lines and (retry.reconciliation.balanced or not result.lines):
+        return retry
+    return result
+
+
+def _parse_page(page: ExtractedPage, page_index: int) -> PaystubResult:
+    result = PaystubResult(page_index=page_index)
     result.text_source = page.source
     if not page.tokens:
         result.warnings.append(

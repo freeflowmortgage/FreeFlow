@@ -10,13 +10,17 @@ Two paths, tried in order:
    RapidOCR, whose ONNX weights ship inside the wheel, so recognition is a
    local matrix multiply with no network call and no vendor retention.
 
-Both paths keep the document in RAM: PDFium parses from a bytes buffer, the
+A text layer that carries amounts but not labels gets both: see
+:func:`extract_page_with_ocr_labels`.
+
+Every path keep the document in RAM: PDFium parses from a bytes buffer, the
 raster lands in a NumPy array, and nothing is ever handed a file path.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -200,6 +204,79 @@ def extract_page(
         if tokens:
             return ExtractedPage(tokens, "text", width, height)
         return ExtractedPage(_ocr_tokens(page, scale), "ocr", width, height)
+    finally:
+        document.close()
+
+
+def _overlap(a: Token, b: Token) -> float:
+    """Intersection area as a share of the smaller box."""
+    width = min(a.x1, b.x1) - max(a.x0, b.x0)
+    height = min(a.y1, b.y1) - max(a.y0, b.y0)
+    if width <= 0 or height <= 0:
+        return 0.0
+    smaller = min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0))
+    return (width * height) / max(smaller, 1e-6)
+
+
+_TRAILING_VALUE = re.compile(r"[\d/\-\s.,]+$")
+
+
+def _label_head(ocr: Token, covered: list[Token]) -> Token | None:
+    """Keep the part of an OCR token left of the text-layer words it ran into.
+
+    OCR reads ``Basic EE Term Life`` and the date printed beside it as one
+    token; the date is already in the text layer, the label is not.
+    """
+    if not re.search(r"[A-Za-z]", ocr.text):
+        return None
+    cut = min(token.x0 for token in covered)
+    if cut <= ocr.x0:
+        return None
+    share = (cut - ocr.x0) / max(ocr.x1 - ocr.x0, 1e-6)
+    text = _TRAILING_VALUE.sub("", ocr.text[: int(len(ocr.text) * share)]).strip()
+    if not re.search(r"[A-Za-z]", text):
+        return None
+    return Token(text=text, x0=ocr.x0, y0=ocr.y0, x1=cut - 1, y1=ocr.y1, confidence=ocr.confidence)
+
+
+def extract_page_with_ocr_labels(
+    pdf_bytes: bytes | bytearray,
+    dpi: int = RENDER_DPI,
+    page_index: int = 0,
+) -> ExtractedPage:
+    """Text-layer tokens plus OCR for whatever the text layer is missing.
+
+    Some generators emit amounts as text but draw row labels and column
+    headers as vector outlines. That passes the character threshold yet leaves
+    the parser with numbers it cannot name. OCR alone is no substitute: it
+    merges tightly set columns (``10`` hours beside ``42.0000`` reads as
+    ``1042.0000``). So the text layer keeps every value it has, and OCR only
+    contributes the words it did not cover.
+    """
+    scale = dpi / 72
+    try:
+        document = pdfium.PdfDocument(bytes(pdf_bytes))
+    except pdfium.PdfiumError:
+        return ExtractedPage([], "invalid", 0.0, 0.0)
+    try:
+        if len(document) <= page_index:
+            return ExtractedPage([], "empty", 0.0, 0.0)
+        page = document[page_index]
+        width = page.get_width() * scale
+        height = page.get_height() * scale
+        text_tokens = _char_tokens(page, scale)
+        if not text_tokens:
+            return ExtractedPage(_ocr_tokens(page, scale), "ocr", width, height)
+        added: list[Token] = []
+        for token in _ocr_tokens(page, scale):
+            covered = [t for t in text_tokens if _overlap(token, t) > 0.3]
+            if not covered:
+                added.append(token)
+                continue
+            head = _label_head(token, covered)
+            if head is not None:
+                added.append(head)
+        return ExtractedPage(text_tokens + added, "text+ocr", width, height)
     finally:
         document.close()
 
