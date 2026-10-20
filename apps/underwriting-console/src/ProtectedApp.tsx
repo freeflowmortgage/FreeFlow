@@ -30,12 +30,13 @@ import {
   protectedWorkspaceContext,
   protectedWorkspaceDocuments,
   type ProtectedLocalDocument,
+  type ProtectedWorkspaceContext,
 } from './protectedWorkspace';
+import { loadDemoPacket } from './demoPacket';
 import { findDuplicate } from './livePacket';
 import { describeProtectedError } from './protectedErrorMessage';
 import type { LiveDocument, ParseResponse } from './parseTypes';
 import {
-  PUBLIC_DEMO_DOCUMENT_PREFIX,
   appWorkspaceHref,
   isPublicIncomeDemoHash,
   isSalesLandingHost,
@@ -313,7 +314,7 @@ function ProtectedWorkflowApp() {
     return null;
   }
   if (!window.location.pathname.startsWith('/workspace') && publicIncomeDemo) {
-    return <ProtectedIncomeDemo fixtureDocumentPrefix={PUBLIC_DEMO_DOCUMENT_PREFIX} onBack={leavePublicDemo} />;
+    return <ProtectedIncomeDemo allowUploads={false} onBack={leavePublicDemo} />;
   }
   if (!requestedView) {
     return (
@@ -326,7 +327,7 @@ function ProtectedWorkflowApp() {
     );
   }
   if (requestedView === 'split' && incomeDemo) {
-    return <ProtectedIncomeDemo onBack={backToProducts} />;
+    return <ProtectedIncomeDemo allowUploads onBack={backToProducts} />;
   }
   if (requestedView === 'intake' || requestedView === 'appraisal') {
     return (
@@ -516,12 +517,27 @@ function StandaloneLoanIntake({ onCreated, onBack }: {
   return <main className="mx-auto max-w-3xl px-6 py-12" data-testid="standalone-loan-intake"><div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between gap-3"><div><BrandLogo compact /><h1 className="mt-4 text-xl font-bold text-slate-950">Start a standalone income analysis</h1><p className="mt-2 text-sm text-slate-600">No Encompass, ICE, or external LOS connection is required.</p></div><button type="button" onClick={onBack} className="rounded border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700">Back</button></div>{error ? <div role="alert" className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div> : null}<form className="mt-6 grid gap-4" onSubmit={(event) => { event.preventDefault(); void submit(manualPayload()); }}><label className="text-sm font-medium text-slate-800">Loan program<select data-testid="standalone-program" value={loanProgram} onChange={(event) => setLoanProgram(event.target.value as StandaloneLoanRequest['loanProgram'])} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2"><option value="CONVENTIONAL">Conventional</option><option value="FHA">FHA</option><option value="VA">VA</option></select></label><label className="text-sm font-medium text-slate-800">Borrowers<select data-testid="standalone-borrower-count" value={borrowerCount} onChange={(event) => setBorrowerCount(Number(event.target.value))} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2">{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label><button data-testid="create-standalone-loan" type="submit" disabled={busy} className="rounded bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Creating...' : 'Create loan'}</button></form><div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />or import a supported file<span className="h-px flex-1 bg-slate-200" /></div><label className="block text-sm font-medium text-slate-800">FreeFlow standalone JSON v1<input data-testid="import-standalone-loan" type="file" accept="application/json,.json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void importFile(file); }} className="mt-2 block w-full text-xs" /></label><p className="mt-3 text-xs text-slate-500">The versioned file contains only loan program and stable borrower slots. Add supporting PDFs after the tenant-authorized loan is created.</p></div></main>;
 }
 
-function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' }: { onBack: () => void; fixtureDocumentPrefix?: string }) {
+function ProtectedIncomeDemo({ onBack, allowUploads }: { onBack: () => void; allowUploads: boolean }) {
   const [documents, setDocuments] = useState<LiveDocument[]>([]);
   const documentsRef = useRef<LiveDocument[]>([]);
-  const [showLive, setShowLive] = useState(false);
+  const [demoContext, setDemoContext] = useState<ProtectedWorkspaceContext | null>(null);
+  const [packetState, setPacketState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [parseBusy, setParseBusy] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDemoPacket()
+      .then((packet) => {
+        if (cancelled) return;
+        documentsRef.current = packet.documents;
+        setDocuments(packet.documents);
+        setDemoContext(packet.context);
+        setPacketState('ready');
+      })
+      .catch(() => { if (!cancelled) setPacketState('failed'); });
+    return () => { cancelled = true; };
+  }, []);
 
   const parsePdfs = async (files: File[]) => {
     if (!files.length) return;
@@ -551,7 +567,6 @@ function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' 
           const next: LiveDocument = { id: crypto.randomUUID(), sha256, file, fileName: file.name, result };
           documentsRef.current = [...documentsRef.current, next];
           setDocuments(documentsRef.current);
-          setShowLive(true);
         } catch (error) {
           errors.push(describeError(error, `Unable to process ${file.name}.`));
         }
@@ -566,24 +581,33 @@ function ProtectedIncomeDemo({ onBack, fixtureDocumentPrefix = '/fixtures/docs' 
     <main className="mx-auto max-w-[1500px] px-4 py-5 md:px-6" data-testid="protected-income-demo">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
         <div>
-          <p className="text-sm font-bold text-indigo-950">Income Intelligence · original synthetic demonstration</p>
-          <p className="text-xs text-indigo-800">Comparison mode only. Your PDFs are parsed in memory for page-and-box review; they are not persisted, assigned to a borrower, approved, or sent to the connector or Encompass.</p>
+          <p className="text-sm font-bold text-indigo-950">Income Intelligence · sample loan packet</p>
+          <p className="text-xs text-indigo-800">
+            Fabricated sample documents, parsed by the production parser and shown exactly as the live tool stores and maps them.
+            {allowUploads
+              ? ' PDFs you add are parsed in memory for page-and-box review; they are not persisted, assigned to a borrower, approved, or sent to the connector or Encompass.'
+              : ' No visitor document is uploaded, stored, or sent to Encompass.'}
+          </p>
         </div>
         <button data-testid="demo-back-to-products" type="button" onClick={onBack} className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-900">Back to products</button>
       </div>
       <div className="h-[calc(100vh-8rem)] min-h-[780px]">
-        {/* Worksheets seed once from the mounting source, so a switch must remount. */}
-        <UnderwriterSplitViewDemo
-          key={showLive && documents.length ? 'live' : 'demo'}
-          source={showLive && documents.length ? 'live' : 'demo'}
-          liveDocuments={documents}
-          parseBusy={parseBusy}
-          parseError={parseError}
-          onParseFiles={(files) => void parsePdfs(files)}
-          onUseDemo={() => setShowLive(false)}
-          onUseLive={() => setShowLive(true)}
-          fixtureDocumentPrefix={fixtureDocumentPrefix}
-        />
+        {packetState === 'ready' ? (
+          <UnderwriterSplitViewDemo
+            source="live"
+            liveDocuments={documents}
+            parseBusy={parseBusy}
+            parseError={parseError}
+            onParseFiles={allowUploads ? (files) => void parsePdfs(files) : undefined}
+            protectedContext={demoContext}
+          />
+        ) : (
+          <section className="grid h-full place-items-center rounded-xl border border-slate-200 bg-slate-50 p-6" data-testid="demo-packet-status">
+            <p className="text-sm font-medium text-slate-600">
+              {packetState === 'loading' ? 'Loading the sample loan packet…' : 'The sample loan packet could not be loaded. Refresh and try again.'}
+            </p>
+          </section>
+        )}
       </div>
     </main>
   );
