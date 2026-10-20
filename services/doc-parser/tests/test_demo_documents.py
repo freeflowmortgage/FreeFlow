@@ -44,6 +44,7 @@ def test_four_up_w2_reads_each_box_from_its_own_cell(parse) -> None:
     assert len(result["w2Extracts"]) == 1
     w2 = result["w2Extracts"][0]
     assert w2["employerName"] == "Example Services LLC"
+    assert w2["year"] == 2021
     assert w2["ein"] == "00-7654321"
     assert {key: w2[key] for key in ("box1", "box2", "box3", "box4", "box5", "box6")} == {
         "box1": 86400.0,

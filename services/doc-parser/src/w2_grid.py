@@ -1015,6 +1015,12 @@ def extract_w2_pages(
                 parsed = _apply_federal_fallbacks(page, page_words, parsed, index)
                 parsed = _fill_employer_identity(page, page_words, parsed)
             if _extract_is_plausible(parsed) and parsed:
+                if not parsed.get("year"):
+                    # The portal rejects a W-2 without its tax year, and the
+                    # coordinate matrix fallback does not read one.
+                    year_match = re.search(r"\b(20\d{2})\b", _combined_page_text(page, page_words))
+                    if year_match:
+                        parsed["year"] = int(year_match.group(1))
                 extracts.append(parsed)
         return extracts
     finally:
