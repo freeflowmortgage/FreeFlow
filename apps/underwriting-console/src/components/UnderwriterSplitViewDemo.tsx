@@ -759,6 +759,9 @@ export default function UnderwriterSplitViewDemo({
   }, [availableTabs, activeTab]);
 
   const [canvasYearIndex, setCanvasYearIndex] = useState<0 | 1>(0);
+  // The only Schedule E blank is the 2025 revision, so a "prior year" fill of it
+  // is a second 2025 return. The template packet shows one Schedule E.
+  const docYearIndex: 0 | 1 = activeTab === 'SCHEDULE_E' ? 0 : canvasYearIndex;
   /** Left-pane document style: interactive facsimile or the real filled source PDF. */
   const [docMode, setDocMode] = useState<'facsimile' | 'pdf'>('pdf');
   const [wageDocKind, setWageDocKind] = useState<'paystub' | 'w2'>('paystub');
@@ -2753,7 +2756,7 @@ export default function UnderwriterSplitViewDemo({
           : activeTab === 'SCHEDULE_F'
             ? twoYearScheduleF
           : activeTab === 'SCHEDULE_E'
-            ? twoYearRental
+            ? false
             : true;
 
   const docSnapshot = useMemo<DocPaneSnapshot>(
@@ -2762,7 +2765,7 @@ export default function UnderwriterSplitViewDemo({
       loanId: borrowerMetadata.loanId,
       borrowerName: borrowerMetadata.borrowerName,
       activeTab,
-      yearIndex: canvasYearIndex,
+      yearIndex: docYearIndex,
       twoYear: twoYearForCanvas,
       selectedId: highlightFieldId,
       schC: schCYears[canvasYearIndex],
@@ -2795,6 +2798,7 @@ export default function UnderwriterSplitViewDemo({
       canvasDoc,
       activeTab,
       canvasYearIndex,
+      docYearIndex,
       twoYearForCanvas,
       highlightFieldId,
       schCYears,
@@ -3084,10 +3088,9 @@ export default function UnderwriterSplitViewDemo({
           })}`,
         };
       case 'SCHEDULE_E': {
-        const yearKey = canvasYearIndex === 0 ? 'year1' : 'year2';
-        const props: Record<string, string | number> = { year: canvasYearIndex === 0 ? 2025 : 2024 };
+        const props: Record<string, string | number> = { year: 2025 };
         (['a', 'b'] as const).forEach((prefix, i) => {
-          const y = rentalProperties[i]?.[yearKey];
+          const y = rentalProperties[i]?.year1;
           if (!y) return;
           props[`${prefix}Rents`] = y.rentsReceived;
           props[`${prefix}Insurance`] = y.insurance;
@@ -3427,8 +3430,8 @@ export default function UnderwriterSplitViewDemo({
               </p>
             ) : docMode === 'pdf' && fixturePdf ? (
               <div className="space-y-2">
-                {(activeTab === 'SCHEDULE_E' || activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
-                  (activeTab === 'SCHEDULE_E' || (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : activeTab === 'CCORP' ? twoYearCCorp : twoYearPartnership)) && (
+                {(activeTab === 'SCHEDULE_C' || activeTab === 'SCORP' || activeTab === 'CCORP' || activeTab === 'PARTNERSHIP') &&
+                  (activeTab === 'SCHEDULE_C' ? twoYearSchC : activeTab === 'SCORP' ? twoYearScorp : activeTab === 'CCORP' ? twoYearCCorp : twoYearPartnership) && (
                     <div className="flex gap-1">
                       {[0, 1].map((i) => (
                         <button
@@ -3535,7 +3538,7 @@ export default function UnderwriterSplitViewDemo({
             ) : (
               <DemoDocumentCanvas
                 tab={activeTab}
-                yearIndex={canvasYearIndex}
+                yearIndex={docYearIndex}
                 onYearIndex={setCanvasYearIndex}
                 twoYear={
                   activeTab === 'SCHEDULE_C'
@@ -3544,7 +3547,9 @@ export default function UnderwriterSplitViewDemo({
                       ? twoYearScorp
                       : activeTab === 'CCORP'
                         ? twoYearCCorp
-                        : twoYearPartnership
+                        : activeTab === 'SCHEDULE_E'
+                          ? false
+                          : twoYearPartnership
                 }
                 selectedId={highlightFieldId}
                 onSelect={handleInspectField}
