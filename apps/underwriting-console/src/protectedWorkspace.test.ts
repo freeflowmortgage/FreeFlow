@@ -35,6 +35,7 @@ const extraction: ConsoleContext['extractions'][number] = {
       fields: [
         { sourceFieldId: 'ent1-name', value: 'Synthetic Consulting' },
         { sourceFieldId: 'ent1-net', value: '120000.00', numericValue: 120000 },
+        { sourceFieldId: 'ent1-meals', value: '1800.00', numericValue: 1800 },
       ],
     }],
     scheduleEProperties: [{ year: 2025, propertyAddress: '100 Synthetic Lane', propertyType: 'RENTAL', rentsReceived: 24000, netIncomeLoss: 12000, pageIndex: 2, column: 'B' }],
@@ -87,6 +88,8 @@ test('rehydrates persisted fields and coordinate evidence for Nate\'s workspace 
   const mapped = mapIncomeFields(result);
   assert.equal(liveWagePatch(mapped)?.w2Year1Box5, 96000);
   assert.equal(liveSchCPatch(mapped)?.line31, 120000);
+  // The worksheet row spreads this patch, so the key must be the row's own.
+  assert.equal(liveSchCPatch(mapped)?.line24bMeals, 1800);
   assert.deepEqual(mapped.find((field) => field.sourceFieldId === 'ent1-net')?.box, { x: 0.2, y: 0.3, w: 0.2, h: 0.03 });
 });
 
