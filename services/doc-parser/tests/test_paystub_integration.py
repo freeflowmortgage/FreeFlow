@@ -26,6 +26,8 @@ from irs_form_extract import extract_irs_form_fields  # noqa: E402
 from paystub_fixtures import build_paystub_pdf  # noqa: E402
 from pdf_splitter import pre_split_tax_returns, select_ocr_page_indices  # noqa: E402
 
+DEMO_DOCUMENTS = ROOT.parents[1] / "apps" / "underwriting-console" / "public" / "demo-documents"
+
 CONSOLE_MIN = 0.004
 """isUsableOverlayBox in apps/underwriting-console/src/overlayBox.ts."""
 
@@ -228,7 +230,7 @@ def test_text_layer_without_labels_reads_labels_with_ocr() -> None:
     it, find no labels, and decline; the fallback reader then took the Holiday
     Pay amount for weekly hours and the OASDI taxable wages for base YTD.
     """
-    pdf = (Path(__file__).resolve().parent / "fixtures" / "sample_paystub_vector_labels.pdf").read_bytes()
+    pdf = (DEMO_DOCUMENTS / "paystub.pdf").read_bytes()
 
     classifications, fields = run_pipeline(pdf)
 
