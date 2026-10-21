@@ -288,6 +288,27 @@ def _native_page_words(page: Any) -> list[dict[str, Any]]:
     return words
 
 
+def _overlap_share(a: dict[str, Any], b: dict[str, Any]) -> float:
+    width = min(float(a["x1"]), float(b["x1"])) - max(float(a["x0"]), float(b["x0"]))
+    height = min(float(a["y1"]), float(b["y1"])) - max(float(a["y0"]), float(b["y0"]))
+    if width <= 0 or height <= 0:
+        return 0.0
+    area = lambda w: max((float(w["x1"]) - float(w["x0"])) * (float(w["y1"]) - float(w["y0"])), 1e-6)  # noqa: E731
+    return (width * height) / min(area(a), area(b))
+
+
+def _with_native_values(native: list[dict[str, Any]], ocr: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Native words plus the OCR words they do not cover.
+
+    Some W-2 generators print the amounts as text and draw the box captions as
+    vector outlines. The captions only exist in OCR; the amounts are exact in
+    the text layer and OCR can garble them (``90000.00`` read as ``00*00006``).
+    """
+    if not native:
+        return ocr
+    return native + [word for word in ocr if not any(_overlap_share(word, n) > 0.3 for n in native)]
+
+
 _CURRENCY_PIECE = re.compile(r"\$?\d{1,3}(?:,\d{3})*\.\d{2}|\$?\d+\.\d{2}")
 
 
@@ -669,7 +690,13 @@ def _word_amount(word: dict[str, Any]) -> float | None:
     return amount if abs(amount) > 0.004 else None
 
 
-def _amount_near_label(lines: list[dict[str, Any]], line_index: int, page: Any, min_x: float = 0.0) -> tuple[float, dict[str, Any]] | None:
+def _amount_near_label(
+    lines: list[dict[str, Any]],
+    line_index: int,
+    page: Any,
+    min_x: float = 0.0,
+    max_x: float = float("inf"),
+) -> tuple[float, dict[str, Any]] | None:
     found: list[tuple[float, dict[str, Any]]] = []
     for offset in range(0, 3):
         if line_index + offset >= len(lines):
@@ -679,7 +706,7 @@ def _amount_near_label(lines: list[dict[str, Any]], line_index: int, page: Any, 
             break
         for word in line["words"]:
             x0 = float(word.get("x0") or 0)
-            if x0 < min_x:
+            if x0 < min_x or x0 >= max_x:
                 continue
             amount = _word_amount(word)
             if amount is None:
@@ -717,6 +744,32 @@ def _phrase_right_edge(line: dict[str, Any], pattern: re.Pattern[str]) -> float:
     return edge
 
 
+def _phrase_cell(line: dict[str, Any], pattern: re.Pattern[str]) -> tuple[float, float] | None:
+    """Horizontal extent of the box a caption heads: its left edge to the next caption.
+
+    W-2 amounts print under their caption, often left of where the caption
+    ends, so "right of the label" picks up the neighbouring box instead.
+    """
+    words = line.get("words") or []
+    for position, word in enumerate(words):
+        if not pattern.search(str(word.get("text") or "")) and not pattern.search(
+            " ".join(str(w.get("text") or "") for w in words[position : position + 6])
+        ):
+            continue
+        if position + 1 < len(words) and pattern.search(
+            " ".join(str(w.get("text") or "") for w in words[position + 1 : position + 7])
+        ):
+            continue
+        left = float(word.get("x0") or 0) - 8
+        right = float("inf")
+        for later in words[position + 1 :]:
+            if re.match(r"^\d{1,2}[a-z]?\b|^[a-f]\b", str(later.get("text") or ""), re.I):
+                right = float(later.get("x0") or 0) - 4
+                break
+        return left, right
+    return None
+
+
 def parse_w2_from_ocr_words(
     page: Any,
     words: list[dict[str, Any]] | None,
@@ -741,6 +794,9 @@ def parse_w2_from_ocr_words(
                 continue
             label_x = _phrase_right_edge(line, pattern)
             hit = _amount_near_label(lines, index, page, min_x=max(0.0, label_x - 8))
+            cell = _phrase_cell(line, pattern)
+            if cell and (not hit or not cell[0] <= float(hit[1].get("x0") or 0) < cell[1]):
+                hit = _amount_near_label(lines, index, page, min_x=cell[0], max_x=cell[1]) or hit
             if not hit:
                 hit = _amount_near_label(lines, index, page)
             if not hit:
@@ -909,6 +965,8 @@ def extract_w2_pages(
             convert_page = supplied.get(index)
             if convert_page is not None:
                 page_words = convert_relative_words(convert_page.words, page.rect.width, page.rect.height)
+                if not getattr(convert_page, "is_native_text", True):
+                    page_words = _with_native_values(_native_page_words(page), page_words)
             forms = mapping.get("forms") or []
             if page.rect.height < 500:
                 forms = forms[:1]
@@ -925,6 +983,8 @@ def extract_w2_pages(
                     if _extract_is_plausible(parsed):
                         break
                     parsed = None
+                if convert_page is not None and page_words and _should_ocr_w2(page, page_words, parsed):
+                    parsed = parse_w2_from_ocr_words(page, page_words, page_index=index) or parsed
             # The shared converter has already made the OCR/native-text
             # decision for every supplied page. Re-running the specialized
             # fallback here loads a second RapidOCR engine and can exhaust the
@@ -955,6 +1015,12 @@ def extract_w2_pages(
                 parsed = _apply_federal_fallbacks(page, page_words, parsed, index)
                 parsed = _fill_employer_identity(page, page_words, parsed)
             if _extract_is_plausible(parsed) and parsed:
+                if not parsed.get("year"):
+                    # The portal rejects a W-2 without its tax year, and the
+                    # coordinate matrix fallback does not read one.
+                    year_match = re.search(r"\b(20\d{2})\b", _combined_page_text(page, page_words))
+                    if year_match:
+                        parsed["year"] = int(year_match.group(1))
                 extracts.append(parsed)
         return extracts
     finally:

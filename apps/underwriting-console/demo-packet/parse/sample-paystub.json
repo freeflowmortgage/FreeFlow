@@ -1,0 +1,566 @@
+{
+ "classifications": {
+  "0": [
+   "Paystub"
+  ]
+ },
+ "document_id": "sha256:ece84335b990e43cc7a90459c4edf480c1b32f171b06985874b03725bd1ae3b0",
+ "extracted_page_indices": [
+  0
+ ],
+ "flags": [
+  "ocr_applied"
+ ],
+ "formExtracts": [
+  {
+   "box": {
+    "h": 0.117065,
+    "w": 0.041973,
+    "x": 0.419629,
+    "y": 0.300837
+   },
+   "boxLabel": "Current",
+   "category": "wages",
+   "componentBoxes": [
+    {
+     "h": 0.009742,
+     "w": 0.032978,
+     "x": 0.428623,
+     "y": 0.300837
+    },
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.419629,
+     "y": 0.375963
+    },
+    {
+     "h": 0.009742,
+     "w": 0.032978,
+     "x": 0.428623,
+     "y": 0.386696
+    },
+    {
+     "h": 0.009742,
+     "w": 0.032978,
+     "x": 0.428623,
+     "y": 0.397428
+    },
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.419629,
+     "y": 0.40816
+    }
+   ],
+   "entityId": "paystub-p0",
+   "fieldLabel": "Current Period Base Pay",
+   "form": "Paystub",
+   "lineNum": "Current",
+   "numericValue": 3360.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-current-base",
+   "value": "3,360.00"
+  },
+  {
+   "box": {
+    "h": 0.13853,
+    "w": 0.047969,
+    "x": 0.552848,
+    "y": 0.279372
+   },
+   "boxLabel": "YTD",
+   "category": "wages",
+   "componentBoxes": [
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.558844,
+     "y": 0.279372
+    },
+    {
+     "h": 0.009742,
+     "w": 0.032978,
+     "x": 0.567839,
+     "y": 0.290105
+    },
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.558844,
+     "y": 0.300837
+    },
+    {
+     "h": 0.009742,
+     "w": 0.032978,
+     "x": 0.567839,
+     "y": 0.333034
+    },
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.558844,
+     "y": 0.365231
+    },
+    {
+     "h": 0.009742,
+     "w": 0.047969,
+     "x": 0.552848,
+     "y": 0.386696
+    },
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.558844,
+     "y": 0.397428
+    },
+    {
+     "h": 0.009742,
+     "w": 0.041973,
+     "x": 0.558844,
+     "y": 0.40816
+    }
+   ],
+   "entityId": "paystub-p0",
+   "fieldLabel": "Base Wages YTD",
+   "form": "Paystub",
+   "lineNum": "YTD",
+   "numericValue": 82656.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-base-ytd",
+   "value": "82,656.00"
+  },
+  {
+   "box": {
+    "h": 0.020475,
+    "w": 0.026982,
+    "x": 0.573835,
+    "y": 0.343766
+   },
+   "boxLabel": "OT YTD",
+   "category": "wages",
+   "componentBoxes": [
+    {
+     "h": 0.009742,
+     "w": 0.026982,
+     "x": 0.573835,
+     "y": 0.343766
+    },
+    {
+     "h": 0.009742,
+     "w": 0.026982,
+     "x": 0.573835,
+     "y": 0.354499
+    }
+   ],
+   "entityId": "paystub-p0",
+   "fieldLabel": "Overtime Income YTD",
+   "form": "Paystub",
+   "lineNum": "OT YTD",
+   "numericValue": 36.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-ot-ytd",
+   "value": "36.00"
+  },
+  {
+   "box": {
+    "h": 0.009742,
+    "w": 0.038975,
+    "x": 0.345666,
+    "y": 0.300837
+   },
+   "boxLabel": "Rate",
+   "category": "wages",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Hourly Rate of Pay",
+   "form": "Paystub",
+   "lineNum": "Rate",
+   "numericValue": 42.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-hourly-rate",
+   "value": "42.0000"
+  },
+  {
+   "box": {
+    "h": 0.117065,
+    "w": 0.011994,
+    "x": 0.325753,
+    "y": 0.300837
+   },
+   "boxLabel": "Hours",
+   "category": "wages",
+   "componentBoxes": [
+    {
+     "h": 0.009742,
+     "w": 0.011992,
+     "x": 0.325753,
+     "y": 0.300837
+    },
+    {
+     "h": 0.009742,
+     "w": 0.011992,
+     "x": 0.325753,
+     "y": 0.375963
+    },
+    {
+     "h": 0.009742,
+     "w": 0.006,
+     "x": 0.331747,
+     "y": 0.386696
+    },
+    {
+     "h": 0.009742,
+     "w": 0.006,
+     "x": 0.331747,
+     "y": 0.397428
+    },
+    {
+     "h": 0.009742,
+     "w": 0.011992,
+     "x": 0.325753,
+     "y": 0.40816
+    }
+   ],
+   "entityId": "paystub-p0",
+   "fieldLabel": "Standard Weekly Hours",
+   "form": "Paystub",
+   "lineNum": "Hours",
+   "numericValue": 40.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-hours-week",
+   "value": "40.00"
+  },
+  {
+   "box": {
+    "h": 0.010037,
+    "w": 0.112378,
+    "x": 0.236928,
+    "y": 0.18128
+   },
+   "boxLabel": "Employer",
+   "category": "identity",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Employer Name",
+   "form": "Paystub",
+   "lineNum": "Employer",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-employer-name",
+   "value": "Example Services LLC"
+  },
+  {
+   "box": {
+    "h": 0.010037,
+    "w": 0.080277,
+    "x": 0.060458,
+    "y": 0.18128
+   },
+   "boxLabel": "Employee",
+   "category": "identity",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Employee Name",
+   "form": "Paystub",
+   "lineNum": "Employee",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-employee-name",
+   "value": "Jordan Example"
+  },
+  {
+   "box": {
+    "h": 0.010037,
+    "w": 0.0556,
+    "x": 0.690315,
+    "y": 0.18128
+   },
+   "boxLabel": "Period End",
+   "category": "identity",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Pay Period End",
+   "form": "Paystub",
+   "lineNum": "Period End",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-period-end",
+   "value": "10/22/2022"
+  },
+  {
+   "box": {
+    "h": 0.010037,
+    "w": 0.0556,
+    "x": 0.690315,
+    "y": 0.18128
+   },
+   "boxLabel": "Period Start",
+   "category": "identity",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Pay Period Start",
+   "form": "Paystub",
+   "lineNum": "Period Start",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-period-start",
+   "value": "10/09/2022"
+  },
+  {
+   "box": {
+    "h": 0.010037,
+    "w": 0.0556,
+    "x": 0.690315,
+    "y": 0.18128
+   },
+   "boxLabel": "Pay Date",
+   "category": "identity",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Pay Date",
+   "form": "Paystub",
+   "lineNum": "Pay Date",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-pay-date",
+   "value": "10/28/2022"
+  },
+  {
+   "box": {
+    "h": 0.010037,
+    "w": 0.0556,
+    "x": 0.690315,
+    "y": 0.18128
+   },
+   "boxLabel": "Frequency",
+   "category": "identity",
+   "entityId": "paystub-p0",
+   "fieldLabel": "Pay Frequency",
+   "form": "Paystub",
+   "lineNum": "Frequency",
+   "numericValue": 26.0,
+   "pageIndex": 0,
+   "reviewNotes": [
+    {
+     "message": "'COVID Limited' counted as base pay but is COVID/emergency paid leave (non-recurring, confirm before using)",
+     "severity": "warning"
+    },
+    {
+     "message": "unclassified earning 'Home Mtg Underwr' (YTD 1308.00); excluded from all income totals",
+     "severity": "warning"
+    },
+    {
+     "message": "'Overtime Premium' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    },
+    {
+     "message": "'Regular Hourly' appears as 2 separate earning codes with distinct YTD balances; all were summed",
+     "severity": "warning"
+    }
+   ],
+   "sourceFieldId": "ps-pay-frequency",
+   "value": "Biweekly"
+  }
+ ],
+ "has_business_returns": false,
+ "ocr_page_count": 1,
+ "original_filename": "paystub.pdf",
+ "pages": [
+  {
+   "flags": [
+    "numeric_form_overlay_ocr_bypass"
+   ],
+   "formIds": [
+    "Paystub"
+   ],
+   "inKeepSet": true,
+   "index": 0,
+   "isNativeText": false,
+   "meanConfidence": 98.68,
+   "skewDegrees": 0.0,
+   "words": []
+  }
+ ],
+ "pages_extracted_count": 1,
+ "scheduleEProperties": [],
+ "total_pages_scanned": 1,
+ "unresolved_statements": [],
+ "urlaBorrowers": [],
+ "w2Extracts": [],
+ "was_sandwich_applied": false
+}

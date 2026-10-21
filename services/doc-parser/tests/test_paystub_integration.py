@@ -26,6 +26,8 @@ from irs_form_extract import extract_irs_form_fields  # noqa: E402
 from paystub_fixtures import build_paystub_pdf  # noqa: E402
 from pdf_splitter import pre_split_tax_returns, select_ocr_page_indices  # noqa: E402
 
+DEMO_DOCUMENTS = ROOT.parents[1] / "apps" / "underwriting-console" / "public" / "demo-documents"
+
 CONSOLE_MIN = 0.004
 """isUsableOverlayBox in apps/underwriting-console/src/overlayBox.ts."""
 
@@ -219,3 +221,31 @@ def test_scanned_and_digital_pipelines_agree(
         assert scanned[source_id]["numericValue"] == pytest.approx(
             field["numericValue"], abs=0.01
         ), source_id
+
+
+def test_text_layer_without_labels_reads_labels_with_ocr() -> None:
+    """Amounts as text, row labels and headers drawn as vector outlines.
+
+    The text layer clears the character threshold, so the parser used to trust
+    it, find no labels, and decline; the fallback reader then took the Holiday
+    Pay amount for weekly hours and the OASDI taxable wages for base YTD.
+    """
+    pdf = (DEMO_DOCUMENTS / "paystub.pdf").read_bytes()
+
+    classifications, fields = run_pipeline(pdf)
+
+    assert classifications[0] == ["Paystub"]
+    values = {sid: field["value"] for sid, field in by_id(fields).items()}
+    assert values == {
+        "ps-employer-name": "Example Services LLC",
+        "ps-employee-name": "Jordan Example",
+        "ps-period-start": "10/09/2022",
+        "ps-period-end": "10/22/2022",
+        "ps-pay-date": "10/28/2022",
+        "ps-pay-frequency": "Biweekly",
+        "ps-hourly-rate": "42.0000",
+        "ps-hours-week": "40.00",
+        "ps-current-base": "3,360.00",
+        "ps-base-ytd": "82,656.00",
+        "ps-ot-ytd": "36.00",
+    }

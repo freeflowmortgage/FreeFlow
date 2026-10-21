@@ -546,6 +546,28 @@ def _clip_above(page: Any, hit: Any, height: float = 24.0) -> list[float]:
     ]
 
 
+def _row_band_text(page: Any, words: list[dict[str, Any]] | None, box: list[float], hit: Any) -> str:
+    """Words across ``box`` whose vertical center sits on the label's own row.
+
+    A PDF text clip keeps any glyph that touches the box, which on a tight
+    grid includes the bottom of the row above.
+    """
+    top, bottom = float(hit.y0) - 1.0, float(hit.y1) + 1.0
+    found: list[tuple[float, str]] = []
+    try:
+        native = page.get_text("words") or []
+    except Exception:
+        native = []
+    sources = [(w[0], w[1], w[2], w[3], w[4]) for w in native if len(w) >= 5]
+    if not sources and words:
+        sources = [(w["x0"], w["y0"], w["x1"], w["y1"], w["text"]) for w in words]
+    for x0, y0, x1, y1, text in sources:
+        cx, cy = (float(x0) + float(x1)) / 2, (float(y0) + float(y1)) / 2
+        if box[0] <= cx <= box[2] and top <= cy <= bottom:
+            found.append((float(x0), str(text)))
+    return " ".join(text for _x, text in sorted(found))
+
+
 def _clip_w2_column(page: Any, hit: Any) -> list[float]:
     """IRS W-2 amounts sit in the same cell, under the label, aligned with the box number.
 
@@ -1066,6 +1088,10 @@ def _extract_spec(
         # A blank "b" cell must stay blank, not borrow the "a" amount on its
         # left or the next row's amount below.
         boxes.append(_clip_right(page, hit))
+    elif spec.capture == "money_last":
+        # Schedule L rows are 12pt apart, so any clip padded past the label's
+        # row reaches the amount above or below it; a blank line stays blank.
+        pass
     else:
         boxes.extend(
             [
@@ -1077,14 +1103,17 @@ def _extract_spec(
         )
     parsed = None
     used_box = boxes[0]
-    for box in boxes:
-        raw = _clip_text(
-            page,
-            pymupdf,
-            box,
-            words,
-            money=spec.capture.startswith("money"),
-        )
+    for index, box in enumerate(boxes):
+        if spec.capture == "money_last" and index == 0:
+            raw = _row_band_text(page, words, box, hit)
+        else:
+            raw = _clip_text(
+                page,
+                pymupdf,
+                box,
+                words,
+                money=spec.capture.startswith("money"),
+            )
         if spec.capture == "text" and words:
             raw = _first_visual_line(words, box) or raw
         parsed = _parse_capture(raw, spec.capture)

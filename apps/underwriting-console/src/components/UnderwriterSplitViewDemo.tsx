@@ -3282,25 +3282,27 @@ export default function UnderwriterSplitViewDemo({
               Bring documents back
             </button>
           )}
-          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-800">
-            {parseBusy ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : <Upload className="h-4 w-4 text-emerald-600" />}
-            {parseBusy ? 'Parsing…' : 'Load live PDF'}
-            <input
-              data-testid="live-pdf-input"
-              type="file"
-              accept="application/pdf"
-              multiple
-              className="hidden"
-              disabled={parseBusy}
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                event.target.value = '';
-                if (!files.length) return;
-                if (onParseFiles) onParseFiles(files);
-                else files.forEach((file) => onParseFile?.(file));
-              }}
-            />
-          </label>
+          {onParseFiles || onParseFile ? (
+            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-800">
+              {parseBusy ? <Loader2 className="h-4 w-4 animate-spin text-emerald-600" /> : <Upload className="h-4 w-4 text-emerald-600" />}
+              {parseBusy ? 'Parsing…' : 'Load live PDF'}
+              <input
+                data-testid="live-pdf-input"
+                type="file"
+                accept="application/pdf"
+                multiple
+                className="hidden"
+                disabled={parseBusy}
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = '';
+                  if (!files.length) return;
+                  if (onParseFiles) onParseFiles(files);
+                  else files.forEach((file) => onParseFile?.(file));
+                }}
+              />
+            </label>
+          ) : null}
           {packet.length > 0 && !protectedContext ? (
             <button
               type="button"

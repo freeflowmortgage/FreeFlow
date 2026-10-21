@@ -31,7 +31,7 @@ const frameAncestors = runtimeMode === 'encompass-hosted'
 
 const root = resolve(process.cwd(), 'dist');
 const port = Number(process.env.PORT || 3000);
-const mime = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.pdf': 'application/pdf' };
+const mime = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.pdf': 'application/pdf', '.json': 'application/json; charset=utf-8' };
 
 function safePath(pathname) {
   const candidate = resolve(root, `.${normalize(pathname)}`);

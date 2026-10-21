@@ -87,7 +87,11 @@ export function rehydrateProtectedParseResponse(
   const pageForms = new Map<number, Set<string>>();
   for (const item of w2Extracts) addPageForm(pageForms, item.pageIndex, 'W-2');
   for (const item of scheduleEProperties) addPageForm(pageForms, item.pageIndex, 'Schedule E');
-  for (const item of formExtracts) addPageForm(pageForms, item.pageIndex, item.form);
+  for (const item of formExtracts) {
+    addPageForm(pageForms, item.pageIndex, item.form);
+    const label = classifierLabel(item.sourceFieldId);
+    if (label) addPageForm(pageForms, item.pageIndex, label);
+  }
   const safePageCount = Math.max(1, Math.min(150, Number.isInteger(pageCount) ? pageCount : 1));
   const pages: ParsePage[] = Array.from({ length: safePageCount }, (_, index) => ({
     index,
@@ -279,6 +283,21 @@ function addPageForm(target: Map<number, Set<string>>, pageIndex: number, form: 
   const forms = target.get(pageIndex) ?? new Set<string>();
   forms.add(form);
   target.set(pageIndex, forms);
+}
+
+/**
+ * The persisted projection keeps fields, not the classifier's page labels, yet
+ * Schedule L is attributed to a business return by the return's masthead label
+ * on an earlier page (see owningBusinessReturns). Restore the labels those
+ * fields can only have come from.
+ */
+function classifierLabel(sourceFieldId: string | undefined): string | null {
+  if (!sourceFieldId) return null;
+  if (sourceFieldId.startsWith('sch-l-')) return 'Schedule L';
+  if (sourceFieldId.startsWith('pt-return-')) return 'Form 1065 (Partnership Return)';
+  if (sourceFieldId.startsWith('scorp-return-')) return 'Form 1120S (S-Corporation Return)';
+  if (/^c1120-(name|ein|taxable|tax)$/.test(sourceFieldId)) return 'Form 1120 (C-Corporation Return)';
+  return null;
 }
 
 function definitionForm(value: string): IncomeFieldDef['form'] | null {

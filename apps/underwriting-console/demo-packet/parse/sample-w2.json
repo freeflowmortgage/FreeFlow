@@ -1,0 +1,226 @@
+{
+ "classifications": {
+  "0": [
+   "W-2"
+  ]
+ },
+ "document_id": "sha256:d2d9c6071757b9fc64db6b2086421704fbfba1e986eb5f0820eb8c9116581d93",
+ "extracted_page_indices": [
+  0
+ ],
+ "flags": [
+  "ocr_applied"
+ ],
+ "formExtracts": [
+  {
+   "box": {
+    "h": 0.017656404228168786,
+    "w": 0.3562091503267974,
+    "x": 0.24154922385620914,
+    "y": 0.11163550920356792
+   },
+   "boxLabel": "Box c",
+   "category": "identity",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Employer Name",
+   "form": "W-2",
+   "lineNum": "Box c",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-employer-name",
+   "value": "1305.00 90000.00"
+  },
+  {
+   "box": {
+    "h": 0.03156565656565657,
+    "w": 0.1628625408496732,
+    "x": 0.015573937908496732,
+    "y": 0.09097527905074941
+   },
+   "boxLabel": "Box b",
+   "category": "identity",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Employer Identification Number (EIN)",
+   "form": "W-2",
+   "lineNum": "Box b",
+   "numericValue": 0.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-employer-ein",
+   "value": "00-7654321"
+  },
+  {
+   "box": {
+    "h": 0.03156565656565657,
+    "w": 0.1804406658496732,
+    "x": 0.3150531045751634,
+    "y": 0.05619705041116813
+   },
+   "boxLabel": "Box 2",
+   "category": "withholding",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Federal Income Tax Withheld",
+   "form": "W-2",
+   "lineNum": "Box 2",
+   "numericValue": 10800.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-box2",
+   "value": "$10,800.00"
+  },
+  {
+   "box": {
+    "h": 0.03156565656565657,
+    "w": 0.14593545751633988,
+    "x": 0.16596456290849673,
+    "y": 0.07988656311062237
+   },
+   "boxLabel": "Box 3",
+   "category": "wages",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Social Security Wages",
+   "form": "W-2",
+   "lineNum": "Box 3",
+   "numericValue": 6.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-box3",
+   "value": "$6.00"
+  },
+  {
+   "box": {
+    "h": 0.03156565656565657,
+    "w": 0.17197712418300654,
+    "x": 0.3202614379084967,
+    "y": 0.07938253771171389
+   },
+   "boxLabel": "Box 4",
+   "category": "withholding",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Social Security Tax Withheld (6.2%)",
+   "form": "W-2",
+   "lineNum": "Box 4",
+   "numericValue": 5580.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-box4",
+   "value": "$5,580.00"
+  },
+  {
+   "box": {
+    "h": 0.03156565656565657,
+    "w": 0.16156045751633988,
+    "x": 0.16726664624183007,
+    "y": 0.10307205503364288
+   },
+   "boxLabel": "Box 5",
+   "category": "wages",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Medicare Wages and Tips",
+   "form": "W-2",
+   "lineNum": "Box 5",
+   "numericValue": 90000.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-box5",
+   "value": "$90,000.00"
+  },
+  {
+   "box": {
+    "h": 0.03156565656565657,
+    "w": 0.14658649918300654,
+    "x": 0.3209124795751634,
+    "y": 0.10256802038978495
+   },
+   "boxLabel": "Box 6",
+   "category": "withholding",
+   "entityId": "w-2-p0",
+   "fieldLabel": "Medicare Tax Withheld (1.45%)",
+   "form": "W-2",
+   "lineNum": "Box 6",
+   "numericValue": 1305.0,
+   "pageIndex": 0,
+   "sourceFieldId": "w2-box6",
+   "value": "$1,305.00"
+  }
+ ],
+ "has_business_returns": false,
+ "ocr_page_count": 1,
+ "original_filename": "w2.pdf",
+ "pages": [
+  {
+   "flags": [
+    "numeric_form_overlay_ocr_bypass"
+   ],
+   "formIds": [
+    "W-2"
+   ],
+   "inKeepSet": true,
+   "index": 0,
+   "isNativeText": false,
+   "meanConfidence": 97.61,
+   "skewDegrees": 0.0,
+   "words": []
+  }
+ ],
+ "pages_extracted_count": 1,
+ "scheduleEProperties": [],
+ "total_pages_scanned": 1,
+ "unresolved_statements": [],
+ "urlaBorrowers": [],
+ "w2Extracts": [
+  {
+   "box1": 86400.0,
+   "box2": 10800.0,
+   "box3": 90000.0,
+   "box4": 5580.0,
+   "box5": 90000.0,
+   "box6": 1305.0,
+   "boxes": {
+    "box1": {
+     "h": 0.012616162348275234,
+     "w": 0.06274513793147467,
+     "x": 0.2369281045751634,
+     "y": 0.057757589552137584
+    },
+    "box2": {
+     "h": 0.012616162348275234,
+     "w": 0.06274498833550347,
+     "x": 0.40032679738562094,
+     "y": 0.057757589552137584
+    },
+    "box3": {
+     "h": 0.012616167164812184,
+     "w": 0.06274513793147467,
+     "x": 0.2369281045751634,
+     "y": 0.08149494787659307
+    },
+    "box4": {
+     "h": 0.012616167164812184,
+     "w": 0.054901871026731004,
+     "x": 0.4035947712418301,
+     "y": 0.08149494787659307
+    },
+    "box5": {
+     "h": 0.012616167164812184,
+     "w": 0.06274513793147467,
+     "x": 0.2369281045751634,
+     "y": 0.1025808218753699
+    },
+    "box6": {
+     "h": 0.012616167164812184,
+     "w": 0.054901871026731004,
+     "x": 0.4035947712418301,
+     "y": 0.1025808218753699
+    },
+    "employer_name": {
+     "h": 0.02524242979107481,
+     "w": 0.15686279496336294,
+     "x": 0.042483660130718956,
+     "y": 0.12505555393719914
+    }
+   },
+   "ein": "00-7654321",
+   "employerName": "Example Services LLC",
+   "isMedicareValidated": true,
+   "pageIndex": 0,
+   "year": 2021
+  }
+ ],
+ "was_sandwich_applied": false
+}

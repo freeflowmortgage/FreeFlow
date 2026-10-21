@@ -322,9 +322,13 @@ def _open_pdf(pymupdf, pdf_input: str | Path | bytes):
 
 def _page_search_text(page: Any, words: list[dict[str, Any]] | None = None) -> str:
     text = _page_plain_text(page)
+    # A text layer can carry the amounts while the form captions are vector
+    # outlines, so OCR words the caller already has are searched as well.
+    if words:
+        return f"{text}\n{' '.join(word['text'] for word in words)}"
     if text:
         return text
-    source = words if words is not None else (ocr_page_words(page) if page_needs_ocr(page) else [])
+    source = ocr_page_words(page) if page_needs_ocr(page) else []
     return " ".join(word["text"] for word in source)
 
 

@@ -29,6 +29,7 @@ test-results/
 *.pdf
 !services/doc-parser/templates/*.pdf
 !services/encompass-connector/fixtures/morning-pack-2026-09-29/*.pdf
+!apps/underwriting-console/public/demo-documents/*.pdf
 !docs/**/*.md
 
 # OS / IDE
