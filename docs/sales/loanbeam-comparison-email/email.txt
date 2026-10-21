@@ -1,0 +1,44 @@
+Subject: Checking income on screen instead of in a workbook
+Preheader: Each figure sits next to the line on the paystub or return it came from.
+
+Hi {{first_name}},
+
+If your team calculates self-employed income with LoanBeam, you already know the calculation is the fast part. Checking it takes the time. The workbook tells you which file and page a number came from, but someone still has to open that PDF and find the line before signing off.
+
+FreeFlow is built around that check. The source PDF sits on the left and the Form 1084 inputs sit on the right. When you click a field, the value it came from is boxed on the document, so the underwriter confirms it on one screen.
+
+How the review differs
+
+Where you review
+  LoanBeam: an Excel workbook with a tab for each income stream
+  FreeFlow: one split screen, the document beside the calculation, with a two-monitor mode
+
+Tying a figure to its source
+  LoanBeam: hover a cell for the file name and page, then download the PDF to check it
+  FreeFlow: click the field and the value is boxed on the page, in the same window
+
+Wage earners
+  LoanBeam: built around federal tax returns
+  FreeFlow: paystubs and W-2s alongside the returns, with hourly, annualized, year-to-date and prior-year methods side by side
+
+Borrowers per file
+  LoanBeam: one return per application, so separate filers need separate applications
+  FreeFlow: borrower and co-borrower documents in one packet, matched to each person by name
+
+1003 cross-check
+  LoanBeam: not part of the workbook
+  FreeFlow: flags businesses on the returns that are missing from the application
+
+LoanBeam's Fannie Mae Income Calculator integration is a real strength, and FreeFlow doesn't replace it. Where FreeFlow helps is the review that comes after the calculation.
+
+We're taking on a small group of design partners now, working in a sandbox with sample packets. Would a 20-minute walkthrough on one of your typical self-employed files be useful? Reply to this email and I'll send a couple of times.
+
+Thanks,
+{{sender_name}}
+{{sender_title}}, FreeFlow Mortgage Solutions
+https://freeflowmortgage.com
+
+--
+FreeFlow Mortgage Solutions LLC, 21959 E. Bonanza Way, Queen Creek, AZ 85142.
+If you'd rather not hear from me again, reply with "unsubscribe" or use {{unsubscribe_link}} and I'll take you off the list.
+LoanBeam is a trademark of LoanLogics. This comparison is based on LoanLogics' public documentation as of October 2026.
