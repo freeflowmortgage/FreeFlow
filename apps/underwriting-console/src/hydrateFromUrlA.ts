@@ -31,6 +31,8 @@ export type HydratedW2Seed = {
   borrowerId?: string;
   /** The employee printed on the W-2 or pay stub. */
   personName?: string;
+  /** The year printed on this employer's W-2, when one was read. */
+  w2TaxYear?: number;
   patch: LiveWagePatch | null;
 };
 
@@ -106,6 +108,9 @@ function sourceDocumentIds(fields: MappedIncomeField[]): string[] {
 export function seedW2FromLocation(
   result: LocateResult,
   allFields: Parameters<typeof liveWagePatch>[0],
+  /** The tax year printed on the W-2 at a document and page, when it was read. */
+  taxYearFor: (documentId: string | undefined, pageIndex: number) => number | undefined = () =>
+    undefined,
 ): { current: HydratedW2Seed[]; previous: LivePrevW2Patch | null } {
   const leftoverWageDocs = unusedWageDocs(result, allFields);
   const current: HydratedW2Seed[] = [];
@@ -123,6 +128,7 @@ export function seedW2FromLocation(
         employerName: patch?.employerName || row.entity.name,
         ein: patch?.ein || row.entity.ein || '',
         box5Wages: patch?.w2Year1Box5,
+        taxYear: first ? taxYearFor(first.documentId, first.pageIndex) : undefined,
       };
       continue;
     }
@@ -147,6 +153,7 @@ export function seedW2FromLocation(
       located: w2Matches.length > 0 || extras.length > 0,
       borrowerId: row.entity.borrowerId ?? first?.borrowerIds?.[0],
       personName: first?.personName,
+      w2TaxYear: first ? taxYearFor(first.documentId, first.pageIndex) : undefined,
       patch,
     });
   }
@@ -172,6 +179,9 @@ export function seedW2FromLocation(
       undisclosed: true,
       borrowerId: matches.find((match) => match.borrowerIds?.length)?.borrowerIds?.[0],
       personName: matches.find((match) => match.personName)?.personName,
+      w2TaxYear: matches
+        .map((match) => taxYearFor(match.documentId, match.pageIndex))
+        .find((year) => year !== undefined),
       patch,
     });
   }

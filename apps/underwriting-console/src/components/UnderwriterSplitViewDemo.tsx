@@ -50,6 +50,7 @@ import {
   pickDocumentForTab,
   scheduleEFilings,
   tabForKinds,
+  w2TaxYearLookup,
   type DocKind,
   type InspectOverlay,
   type WorkspaceTab,
@@ -194,6 +195,8 @@ interface W2Employer {
   /** How often this employer pays its bonus; unset averages bonus over the same months as overtime. */
   bonusFrequency?: BonusFrequency;
   w2Year1Box5: number;
+  /** The year printed on the W-2 that `w2Year1Box5` was read from. */
+  w2Year1TaxYear?: number;
   w2Year1Bonus: number;
   w2Year1Ot: number;
   w2Year2Box5: number;
@@ -963,6 +966,16 @@ export default function UnderwriterSplitViewDemo({
   const activeW2Employer = w2Employers.find((entry) => entry.id === activeW2EmployerId) ?? w2Employers[0];
   const patchW2Employer = (patch: Partial<W2Employer>) =>
     setW2Employers((entries) => entries.map((entry) => (entry.id === activeW2Employer.id ? { ...entry, ...patch } : entry)));
+  // Anything that cites a W-2's year reads it off the form, and says nothing
+  // when the form carries none. Naming a year the document does not carry is
+  // worse than naming none, because the figure beside it then looks verified
+  // against a return nobody supplied. The prior-year method prefers this
+  // employer's own W-2 and falls back to the previous job's, so the year
+  // follows the same order.
+  const priorW2Year =
+    (activeW2Employer.w2Year1Box5 ? activeW2Employer.w2Year1TaxYear : prevEmployerW2.year) || undefined;
+  const priorW2YearPrefix = priorW2Year ? `${priorW2Year} ` : '';
+  const priorJobW2YearPrefix = prevEmployerW2.year ? `${prevEmployerW2.year} ` : '';
   const currentHourlyRate = activeW2Employer.hourlyRate;
   const currentWeeklyHours = activeW2Employer.weeklyHours;
   const currentPeriodBasePay = activeW2Employer.currentPeriodBasePay;
@@ -1259,7 +1272,11 @@ export default function UnderwriterSplitViewDemo({
   useEffect(() => {
     if (!isLive) return;
     const kinds = new Set(packet.flatMap((doc) => kindsOf(doc)));
-    const { current, previous } = seedW2FromLocation(locateResult, mappedFields);
+    const { current, previous } = seedW2FromLocation(
+      locateResult,
+      mappedFields,
+      w2TaxYearLookup(packet),
+    );
     const w2Rows = current.map((seed) =>
       emptyW2Employer(seed.id, {
         ...seed.patch,
@@ -1268,6 +1285,7 @@ export default function UnderwriterSplitViewDemo({
         employerName: seed.employerName,
         ein: seed.ein,
         role: seed.role,
+        w2Year1TaxYear: seed.w2TaxYear,
         wageDocSource: seed.patch?.wageDocSource ?? 'PAYSTUB',
       }),
     );
@@ -1277,7 +1295,9 @@ export default function UnderwriterSplitViewDemo({
       setPrevEmployerW2({
         employerName: previous.employerName || 'Prior employer',
         ein: previous.ein || '',
-        year: new Date().getFullYear() - 1,
+        // The year the W-2 covers, which is not always the year before this
+        // one: a 2024 W-2 can arrive during a 2026 application.
+        year: previous.taxYear ?? new Date().getFullYear() - 1,
         box5Wages: previous.box5Wages ?? 0,
         box12Bonus: 0,
         box14Overtime: 0,
@@ -1994,7 +2014,7 @@ export default function UnderwriterSplitViewDemo({
       { id: 'hourly', label: 'Hourly rate', monthly: baseWageReconciliation.hourlyMethod, formula: '(Rate × hours × 52) / 12' },
       { id: 'period', label: 'Pay period annualized', monthly: baseWageReconciliation.periodAnnualizedMethod, formula: '(Period pay × 24) / 12' },
       { id: 'ytd', label: 'YTD average', monthly: baseWageReconciliation.ytdAverageMethod, formula: `YTD base / ${formatElapsedMonths(baseWageReconciliation.ytdMonthsElapsed)} months elapsed` },
-      { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: '2025 W-2 Box 5 / 12' },
+      { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: `${priorW2YearPrefix}W-2 Box 5 / 12` },
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
     ];
     if (baseWageReconciliation.maxVariancePct > 10) {
@@ -2010,7 +2030,7 @@ export default function UnderwriterSplitViewDemo({
       recommendedId: 'period',
       reason: 'Hourly, period, and YTD are within 10%. Guideline uses Base Hourly, or Monthly salaried depending on the type, cite supported by ytd and historical earnings.',
     };
-  }, [baseWageReconciliation]);
+  }, [baseWageReconciliation, priorW2YearPrefix]);
 
   const w2VarMethods = useMemo(
     () => w2VariableMethods(activeW2Employer, w2ContextFor(activeW2Employer)),
@@ -3751,7 +3771,7 @@ export default function UnderwriterSplitViewDemo({
                   extracted={wageFieldExtracted('ps-base-ytd')}
                 />
                 <MoneyField
-                  label="Prior year W-2 Box 5"
+                  label={priorW2Year ? `${priorW2Year} W-2 Box 5` : 'Prior year W-2 Box 5'}
                   value={activeW2Employer.w2Year1Box5}
                   onChange={(value) => patchW2Employer({ w2Year1Box5: value })}
                   fieldId="w2-box5"
@@ -3925,7 +3945,7 @@ export default function UnderwriterSplitViewDemo({
                 <div className="space-y-4">
                   <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5 border-b pb-1">
                     <Link className="h-4 w-4 text-indigo-500" />
-                    Prior Job 2025 W-2 Variable Extractions
+                    Prior Job {priorJobW2YearPrefix}W-2 Variable Extractions
                   </h4>
                   <div className="flex flex-col divide-y divide-slate-100 text-xs">
                     <div data-qa-field="w2-box12-bonus" className={`cursor-pointer ${highlightFieldId === 'w2-box12-bonus' ? 'rounded-md ring-2 ring-emerald-500 p-1' : ''}`} onClick={() => handleInspectField('w2-box12-bonus')}>

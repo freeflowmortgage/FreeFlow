@@ -13,6 +13,7 @@ import {
   seedSCorpFromLocation,
   seedW2FromLocation,
 } from '../../../apps/underwriting-console/src/hydrateFromUrlA';
+import { w2TaxYearLookup } from '../../../apps/underwriting-console/src/livePacket';
 import { employmentEntitiesFromUrlA } from '../../../apps/underwriting-console/src/urlaEmploymentRoster';
 import type { MappedIncomeField, ParsePage, ParseResponse, ParseWord } from '../../../apps/underwriting-console/src/parseTypes';
 
@@ -157,6 +158,93 @@ describe('locate 1003 entities in the income packet', () => {
     expect(partnerships.find((seed) => seed.businessName?.includes('Undisclosed Side'))?.undisclosed).toBe(true);
     expect(wages.previous?.employerName).toMatch(/Digital Solutions/);
     expect(wages.previous?.box5Wages).toBe(24000);
+  });
+
+  test('the prior employer carries the year printed on its W-2, not last year', () => {
+    const roster = employmentEntitiesFromUrlA({
+      employmentType: 'W2',
+      employerName: 'Current Employer Inc',
+      previousEmployer: 'Digital Solutions Corp',
+    });
+    const pages = [
+      page(0, ['W-2'], [
+        "c Employer's name Digital Solutions Corp",
+        'b Employer identification number (EIN) 94-8765432',
+        'Box 5 Medicare wages and tips 90000.00',
+      ]),
+    ];
+    const fields = mapIncomeFields(response(pages));
+    const located = locateIncomeEntities({
+      roster,
+      fields,
+      pages: pages.map((item) => ({
+        pageIndex: item.index,
+        formIds: item.formIds,
+        text: item.words.map((word) => word.text).join(' '),
+      })),
+    });
+
+    // A 2024 W-2 handed in during a 2026 application is still a 2024 W-2.
+    const seeded = seedW2FromLocation(located, fields, () => 2024);
+    expect(seeded.previous?.taxYear).toBe(2024);
+
+    // No year on the form means no year claimed, rather than a guess.
+    expect(seedW2FromLocation(located, fields).previous?.taxYear).toBeUndefined();
+  });
+
+  test('a current employer carries the year printed on its own W-2', () => {
+    const roster = employmentEntitiesFromUrlA({
+      employmentType: 'W2',
+      employerName: 'Digital Solutions Corp',
+    });
+    const pages = [
+      page(0, ['W-2'], [
+        "c Employer's name Digital Solutions Corp",
+        'b Employer identification number (EIN) 94-8765432',
+        'Box 5 Medicare wages and tips 90000.00',
+      ]),
+    ];
+    const fields = mapIncomeFields(response(pages));
+    const located = locateIncomeEntities({
+      roster,
+      fields,
+      pages: pages.map((item) => ({
+        pageIndex: item.index,
+        formIds: item.formIds,
+        text: item.words.map((word) => word.text).join(' '),
+      })),
+    });
+
+    // The prior-year base method reads this employer's own Box 5 first, so the
+    // year beside that figure has to come from this employer's W-2.
+    const seeded = seedW2FromLocation(located, fields, (_documentId, pageIndex) =>
+      pageIndex === 0 ? 2024 : undefined,
+    );
+    expect(seeded.current).toHaveLength(1);
+    expect(seeded.current[0].w2TaxYear).toBe(2024);
+    expect(seeded.current[0].patch?.w2Year1Box5).toBe(90000);
+    expect(seedW2FromLocation(located, fields).current[0].w2TaxYear).toBeUndefined();
+  });
+
+  test('the W-2 tax year lookup reads the year the parser found on that page', () => {
+    const packet = [
+      {
+        id: 'doc-1',
+        result: {
+          ...response([page(0, ['W-2'], ["c Employer's name Digital Solutions Corp"])]),
+          w2Extracts: [
+            { pageIndex: 0, year: 2024, employerName: 'Digital Solutions Corp', ein: '94-8765432', box1: 0, box2: 0, box3: 0, box4: 0, box5: 90000, box6: 0 },
+            { pageIndex: 1, year: null, employerName: 'Unknown', ein: '', box1: 0, box2: 0, box3: 0, box4: 0, box5: 0, box6: 0 },
+          ],
+        },
+      },
+    ];
+
+    const yearFor = w2TaxYearLookup(packet as unknown as Parameters<typeof w2TaxYearLookup>[0]);
+    expect(yearFor('doc-1', 0)).toBe(2024);
+    // A page the parser read no year from, and a page from another document.
+    expect(yearFor('doc-1', 1)).toBeUndefined();
+    expect(yearFor('doc-2', 0)).toBeUndefined();
   });
 
   test('keeps a 1003 entity listed when the packet does not contain it', () => {

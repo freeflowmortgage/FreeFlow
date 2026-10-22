@@ -51,6 +51,8 @@ export type LivePrevW2Patch = {
   employerName?: string;
   ein?: string;
   box5Wages?: number;
+  /** The year printed on the W-2, not the year before the current one. */
+  taxYear?: number;
 };
 
 export type LiveSchCPatch = {
