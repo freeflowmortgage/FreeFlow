@@ -27,6 +27,8 @@ export type MappedIncomeField = {
   box: { x: number; y: number; w: number; h: number };
   /** Numeric source cells contributing to a computed aggregate. */
   componentBoxes?: OverlayBox[];
+  /** Every cell the aggregate's box covers, counted or not. */
+  componentCells?: OverlayCell[];
   /** Anything the parser flagged about the page this value came from. */
   reviewNotes?: ReviewNote[];
 };
@@ -92,6 +94,14 @@ export type ScheduleEExpenseDetermination = {
 
 export type OverlayBox = { x: number; y: number; w: number; h: number };
 
+/**
+ * One cell of a column an aggregate was read from, and whether the aggregate
+ * counts it. A column total is highlighted as the union of the rows it adds
+ * up, which also covers rows between them that it excludes, so the union alone
+ * claims more of the document than the figure came from.
+ */
+export type OverlayCell = { box: OverlayBox; included: boolean };
+
 export type W2BoxExtract = {
   pageIndex: number;
   year: number | null;
@@ -128,6 +138,7 @@ export type FormFieldExtract = {
   numericValue: number;
   box: OverlayBox;
   componentBoxes?: OverlayBox[];
+  componentCells?: OverlayCell[];
   entityId?: string;
   /** Page-level review notes, repeated on each field extracted from that page. */
   reviewNotes?: ReviewNote[];

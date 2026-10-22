@@ -29,6 +29,13 @@ export type EvidenceField = Readonly<{
   box: [number, number, number, number];
 }>;
 
+/**
+ * One cell of the column an aggregate was read from, and whether the aggregate
+ * counts it. Stored apart from the coordinate list so the aggregate still has
+ * exactly one box of its own.
+ */
+export type EvidenceCell = EvidenceField & Readonly<{ included: boolean }>;
+
 export type ConsoleContext = Readonly<{
   loan: Readonly<{ id: string; version: number; status: string; program: string; borrowerName: string | null }>;
   borrowers?: readonly ProtectedBorrower[];
@@ -61,8 +68,22 @@ export function deriveProtectedWorkflowState(
 }
 
 export function readEvidenceFields(value: unknown): EvidenceField[] {
-  if (!isRecord(value) || !Array.isArray(value.fields)) return [];
-  return value.fields.flatMap((item): EvidenceField[] => {
+  return readEvidenceList(isRecord(value) ? value.fields : undefined);
+}
+
+/** The column cells of each aggregate, absent on an extraction stored before them. */
+export function readEvidenceCells(value: unknown): EvidenceCell[] {
+  if (!isRecord(value) || !Array.isArray(value.cells)) return [];
+  return value.cells.flatMap((item): EvidenceCell[] => {
+    const [field] = readEvidenceList([item]);
+    if (!field || !isRecord(item) || typeof item.included !== 'boolean') return [];
+    return [{ ...field, included: item.included }];
+  });
+}
+
+function readEvidenceList(value: unknown): EvidenceField[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): EvidenceField[] => {
     if (!isRecord(item) || typeof item.collection !== 'string' || typeof item.field !== 'string'
       || !Number.isInteger(item.pageIndex) || !isRecord(item.box)) return [];
     const box = [item.box.x, item.box.y, item.box.w, item.box.h];

@@ -4,7 +4,7 @@ import { getDocument, GlobalWorkerOptions, Util, type PDFDocumentProxy, type Ren
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { fieldMatchesInspectId, type InspectOverlay } from '../livePacket';
 import type { MappedIncomeField, ParsePage } from '../parseTypes';
-import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
+import { isUsableOverlayBox, padOverlayBox, selectedOverlayParts } from '../overlayBox';
 import { pdfScrollTarget } from '../pdfScrollTarget';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -378,20 +378,6 @@ export default function PdfDocumentViewer({
                   />
                 ) : null,
               )}
-              {highlight && highlight.pageIndex === index && isUsableOverlayBox(highlight.box) ? (() => {
-                const box = padOverlayBox(highlight.box);
-                return (
-                  <div
-                    data-testid="pdf-highlight"
-                    data-box-id={selectedFieldId ?? 'inspect-overlay'}
-                    data-box={`${highlight.box.x},${highlight.box.y},${highlight.box.w},${highlight.box.h}`}
-                    data-overlay-visible="true"
-                    data-inspect-overlay="true"
-                    className="pointer-events-none absolute z-20 box-border rounded-sm border-2 border-emerald-600 bg-emerald-400/10"
-                    style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${Math.max(box.w * 100, 0.8)}%`, height: `${Math.max(box.h * 100, 0.7)}%` }}
-                  />
-                );
-              })() : null}
             </div>
           ))}
         </div>
@@ -471,27 +457,56 @@ function PageOverlays({
       )
     : fields.find((field) => field.id === selectedFieldId) ?? fields.find((field) => fieldMatchesInspectId(field, selectedFieldId));
 
+  // A ruled column carries its own shading, so the bracket over it stays
+  // unfilled; a wash across every row would hide which ones are counted.
+  const ruled = Boolean(selected?.componentCells?.length);
+
   return (
     <>
       {fields.filter((field) => isUsableOverlayBox(field.box)).flatMap((field) => {
         const isSelected = field === selected;
-        const boxes = isSelected && field.componentBoxes?.length ? field.componentBoxes : [field.box];
-        return boxes.map((source, componentIndex) => {
-          const box = padOverlayBox(source);
+        const parts = isSelected ? selectedOverlayParts(field) : [{ box: field.box, included: true }];
+        return parts.map((part, componentIndex) => {
+          const box = padOverlayBox(part.box);
           return (
             <button
               key={`${field.id}-${componentIndex}`}
               type="button"
               data-box-id={componentIndex === 0 ? field.id : `${field.id}--component-${componentIndex}`}
               data-overlay-visible={isSelected ? 'true' : 'false'}
-              title={`${field.boxLabel} · ${field.fieldLabel} · ${field.value}`}
-              className={`absolute box-border rounded-sm ${isSelected ? 'z-10 border-2 border-emerald-600 bg-emerald-400/10' : 'border-0 bg-transparent hover:bg-emerald-400/10'}`}
+              data-overlay-counted={isSelected ? String(part.included) : undefined}
+              title={
+                isSelected && !part.included
+                  ? `Not counted in ${field.fieldLabel}`
+                  : `${field.boxLabel} · ${field.fieldLabel} · ${field.value}`
+              }
+              className={`absolute box-border rounded-sm ${
+                !isSelected
+                  ? 'border-0 bg-transparent hover:bg-emerald-400/10'
+                  : part.included
+                    ? 'z-10 border-2 border-emerald-600 bg-emerald-400/25'
+                    : 'z-10 border border-dashed border-slate-400 bg-slate-500/5'
+              }`}
               style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${Math.max(box.w * 100, 0.8)}%`, height: `${Math.max(box.h * 100, 0.7)}%` }}
               onClick={() => onSelectField?.(field.id)}
             />
           );
         });
       })}
+      {highlight && isUsableOverlayBox(highlight) ? (() => {
+        const box = padOverlayBox(highlight);
+        return (
+          <div
+            data-testid="pdf-highlight"
+            data-box-id={selectedFieldId ?? 'inspect-overlay'}
+            data-box={`${highlight.x},${highlight.y},${highlight.w},${highlight.h}`}
+            data-overlay-visible="true"
+            data-inspect-overlay="true"
+            className={`pointer-events-none absolute z-20 box-border rounded-sm border-2 border-emerald-600 ${ruled ? '' : 'bg-emerald-400/10'}`}
+            style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${Math.max(box.w * 100, 0.8)}%`, height: `${Math.max(box.h * 100, 0.7)}%` }}
+          />
+        );
+      })() : null}
     </>
   );
 }

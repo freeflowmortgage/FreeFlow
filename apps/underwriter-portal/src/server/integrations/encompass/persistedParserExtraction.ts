@@ -70,6 +70,7 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
   const w2Records: JsonObject[] = [];
   const scheduleEProperties: JsonObject[] = [];
   const fields: JsonObject[] = [];
+  const cells: JsonObject[] = [];
 
   const rawW2Extracts = boundedArray(value.w2Extracts, 100);
   for (let index = 0; index < rawW2Extracts.length; index += 1) {
@@ -153,6 +154,23 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
     formRecordMap.set(key, record);
     const box = coordinateBox(raw.box);
     if (box) fields.push({ collection: 'formExtracts', entityId, field: sourceFieldId, pageIndex, box });
+    // An aggregate's box is the union of the rows it adds up, so it also
+    // covers rows between them that it excludes. Keeping only the union meant
+    // every rehydrated loan highlighted a block the figure was not all read
+    // from; the cells record which rows inside it are counted.
+    for (const cell of boundedArray(raw.componentCells, 60)) {
+      if (!isRecord(cell)) continue;
+      const cellBox = coordinateBox(cell.box);
+      if (!cellBox) continue;
+      cells.push({
+        collection: 'formExtracts',
+        entityId,
+        field: sourceFieldId,
+        pageIndex,
+        box: cellBox,
+        included: cell.included === true,
+      });
+    }
   }
   const formRecords = Array.from(formRecordMap.values()).map((record) => ({
     ...record,
@@ -168,7 +186,9 @@ export function selectPersistableParserExtraction(value: unknown): PersistableIn
     ...(scheduleEProperties.length ? { scheduleEProperties } : {}),
     ...(formRecords.length ? { formRecords } : {}),
   };
-  const evidence = { fields };
+  // `cells` is additive: an extraction stored before it existed simply has no
+  // grid, and the viewer falls back to the aggregate's own box.
+  const evidence = { fields, ...(cells.length ? { cells } : {}) };
   const stableWarnings = Array.from(new Set(warnings)).sort();
   return {
     schemaVersion: INCOME_EXTRACTION_SCHEMA_VERSION,

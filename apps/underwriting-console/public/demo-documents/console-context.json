@@ -285,6 +285,346 @@
         "h": 0.010037
        }
       }
+     ],
+     "cells": [
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.428623,
+        "y": 0.300837,
+        "w": 0.032978,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.440615,
+        "y": 0.322302,
+        "w": 0.020986,
+        "h": 0.009742
+       },
+       "included": false
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.419629,
+        "y": 0.375963,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.428623,
+        "y": 0.386696,
+        "w": 0.032978,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.428623,
+        "y": 0.397428,
+        "w": 0.032978,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-current-base",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.419629,
+        "y": 0.40816,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.558844,
+        "y": 0.279372,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.567839,
+        "y": 0.290105,
+        "w": 0.032978,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.558844,
+        "y": 0.300837,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.558844,
+        "y": 0.311569,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": false
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.567839,
+        "y": 0.322302,
+        "w": 0.032978,
+        "h": 0.009742
+       },
+       "included": false
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.567839,
+        "y": 0.333034,
+        "w": 0.032978,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.573835,
+        "y": 0.343766,
+        "w": 0.026982,
+        "h": 0.009742
+       },
+       "included": false
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.573835,
+        "y": 0.354499,
+        "w": 0.026982,
+        "h": 0.009742
+       },
+       "included": false
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.558844,
+        "y": 0.365231,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.552848,
+        "y": 0.386696,
+        "w": 0.047969,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.558844,
+        "y": 0.397428,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-base-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.558844,
+        "y": 0.40816,
+        "w": 0.041973,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-ot-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.573835,
+        "y": 0.343766,
+        "w": 0.026982,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-ot-ytd",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.573835,
+        "y": 0.354499,
+        "w": 0.026982,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.325753,
+        "y": 0.300837,
+        "w": 0.011992,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.331747,
+        "y": 0.322302,
+        "w": 0.006,
+        "h": 0.009742
+       },
+       "included": false
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.325753,
+        "y": 0.375963,
+        "w": 0.011992,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.331747,
+        "y": 0.386696,
+        "w": 0.006,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.331747,
+        "y": 0.397428,
+        "w": 0.006,
+        "h": 0.009742
+       },
+       "included": true
+      },
+      {
+       "collection": "formExtracts",
+       "entityId": "Paystub:paystub-p0",
+       "field": "ps-hours-week",
+       "pageIndex": 0,
+       "box": {
+        "x": 0.325753,
+        "y": 0.40816,
+        "w": 0.011992,
+        "h": 0.009742
+       },
+       "included": true
+      }
      ]
     },
     "metadataReview": {

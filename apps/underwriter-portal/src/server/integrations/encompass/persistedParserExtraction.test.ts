@@ -59,6 +59,30 @@ test('persists bounded Schedule E display metadata and nested financial box evid
   assert.equal(JSON.stringify(result).includes('never persist schedule e OCR'), false);
 });
 
+test('persists the cells an aggregate was read from, counted and not', () => {
+  const result = selectPersistableParserExtraction({
+    formExtracts: [{
+      form: 'Paystub', sourceFieldId: 'ps-base-ytd', pageIndex: 0, value: '82,656.00', numericValue: 82656,
+      box: { x: 0.55, y: 0.27, w: 0.05, h: 0.14 },
+      componentBoxes: [{ x: 0.55, y: 0.27, w: 0.05, h: 0.01 }, { x: 0.55, y: 0.4, w: 0.05, h: 0.01 }],
+      componentCells: [
+        { box: { x: 0.55, y: 0.27, w: 0.05, h: 0.01 }, included: true },
+        // The row the union covers but the total leaves out.
+        { box: { x: 0.55, y: 0.33, w: 0.05, h: 0.01 }, included: false },
+        { box: { x: 0.55, y: 0.4, w: 0.05, h: 0.01 }, included: true },
+        { box: { x: 2, y: 0.5, w: 0.05, h: 0.01 }, included: true },
+      ],
+    }],
+  });
+
+  const cells = result.evidence.cells as Array<Record<string, unknown>>;
+  // The aggregate keeps exactly one box of its own in the coordinate list.
+  const fields = result.evidence.fields as Array<Record<string, unknown>>;
+  assert.equal(fields.filter((field) => field.field === 'ps-base-ytd').length, 1);
+  assert.deepEqual(cells.map((cell) => cell.included), [true, false, true]);
+  assert.ok(cells.every((cell) => cell.field === 'ps-base-ytd' && cell.collection === 'formExtracts'));
+});
+
 test('is deterministic and fails closed for unsupported or incomplete parser output', () => {
   const input = { w2Extracts: [{ pageIndex: 1, year: 2024, employerName: 'Synthetic Employer', box1: 90000, box5: 0 }] };
   const selected = selectPersistableParserExtraction(input);

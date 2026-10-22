@@ -32,6 +32,38 @@ export function isUsableOverlayBox(box: OverlayInput): boolean {
   return rect.w > min && rect.h > min;
 }
 
+export type OverlayPart = { box: OverlayRect; included: boolean };
+
+type OverlayField = {
+  box: OverlayInput;
+  componentBoxes?: readonly OverlayInput[];
+  componentCells?: readonly { box: OverlayInput; included: boolean }[];
+};
+
+/**
+ * What to draw for a field the underwriter has selected.
+ *
+ * A figure summed from several rows is mapped to the union of those rows, and
+ * that rectangle also covers rows between them the sum leaves out — an
+ * employer-paid life premium between two base rows, an overtime premium
+ * between regular and holiday pay. Drawing the union alone claims the whole
+ * block, so the amount cannot be checked against the document without
+ * re-adding the column by hand.
+ *
+ * When the parser reports the cells its box covers, every one is returned with
+ * whether the figure counts it, so the viewer can rule the column into rows
+ * and shade only the counted ones. Otherwise this is the field's own box.
+ */
+export function selectedOverlayParts(field: OverlayField): OverlayPart[] {
+  if (field.componentCells?.length) {
+    return field.componentCells.map((cell) => ({ box: asOverlayRect(cell.box), included: cell.included }));
+  }
+  if (field.componentBoxes?.length) {
+    return field.componentBoxes.map((box) => ({ box: asOverlayRect(box), included: true }));
+  }
+  return [{ box: asOverlayRect(field.box), included: true }];
+}
+
 /** Grow a mapped box just enough for the stroke to clear the printed figure. */
 export function padOverlayBox(box: OverlayInput): OverlayRect {
   const unit = overlayUnit(box);

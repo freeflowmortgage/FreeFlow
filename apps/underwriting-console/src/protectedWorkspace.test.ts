@@ -12,6 +12,7 @@ import {
   scheduleEFilings,
   tabForKinds,
 } from './livePacket';
+import { selectedOverlayParts } from './overlayBox';
 import type { ScheduleEPropertyExtract } from './parseTypes';
 import {
   protectedWorkspaceContext,
@@ -133,6 +134,36 @@ test('preserves a live parser box through field mapping into the PDF highlight o
     pageIndex: 0,
     box: { x: 0.11, y: 0.22, w: 0.33, h: 0.044 },
   });
+});
+
+test('a rehydrated column total still knows which rows under its box it counts', () => {
+  const paystub = rehydrateProtectedParseResponse({
+    ...extraction,
+    normalizedInput: { formRecords: [{
+      entityId: 'Paystub:paystub-p0', form: 'Paystub', pageIndex: 0,
+      fields: [{ sourceFieldId: 'ps-base-ytd', value: '82,656.00', numericValue: 82656 }],
+    }] },
+    evidence: {
+      fields: [{ collection: 'formExtracts', entityId: 'Paystub:paystub-p0', field: 'ps-base-ytd', pageIndex: 0, box: { x: 0.55, y: 0.27, w: 0.05, h: 0.14 } }],
+      cells: [
+        { collection: 'formExtracts', entityId: 'Paystub:paystub-p0', field: 'ps-base-ytd', pageIndex: 0, box: { x: 0.55, y: 0.27, w: 0.05, h: 0.01 }, included: true },
+        { collection: 'formExtracts', entityId: 'Paystub:paystub-p0', field: 'ps-base-ytd', pageIndex: 0, box: { x: 0.55, y: 0.33, w: 0.05, h: 0.01 }, included: false },
+        { collection: 'formExtracts', entityId: 'Paystub:paystub-p0', field: 'ps-base-ytd', pageIndex: 0, box: { x: 0.55, y: 0.4, w: 0.05, h: 0.01 }, included: true },
+      ],
+    },
+  }, 1);
+
+  const total = mapIncomeFields(paystub).find((field) => field.sourceFieldId === 'ps-base-ytd');
+  assert.deepEqual(total?.componentCells?.map((cell) => cell.included), [true, false, true]);
+  // componentBoxes keeps its existing meaning: the cells the figure is made of.
+  assert.equal(total?.componentBoxes?.length, 2);
+  // The viewer rules the column into rows and shades only the counted ones.
+  assert.deepEqual(selectedOverlayParts(total!).map((part) => part.included), [true, false, true]);
+});
+
+test('a total with no recorded cells still highlights its own box', () => {
+  const field = { box: { x: 0.2, y: 0.3, w: 0.2, h: 0.03 } };
+  assert.deepEqual(selectedOverlayParts(field), [{ box: { x: 0.2, y: 0.3, w: 0.2, h: 0.03 }, included: true }]);
 });
 
 test('routes a rehydrated Form 1120 to the C-corp tab and keeps Form 1120-S on the S-corp tab', () => {

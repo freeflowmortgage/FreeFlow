@@ -1740,6 +1740,7 @@ function fieldsFromFormExtracts(extracts: ParseResponse['formExtracts']): Mapped
       wordIndex: 0,
       box: extract.box,
       componentBoxes: extract.componentBoxes,
+      componentCells: extract.componentCells,
       reviewNotes: extract.reviewNotes,
     });
   }
