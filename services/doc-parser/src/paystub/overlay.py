@@ -114,10 +114,18 @@ def cells(
     Reporting the individual cells, each marked included or not, lets the
     viewer rule the column into its rows and shade only the ones in the total,
     so what the figure is and is not made of is visible on the document.
+
+    Each cell keeps its row's vertical span but takes the column's full width.
+    A box drawn tightly around each figure is as wide as the digits in it, so
+    ``5,040.00`` and ``24.00`` get different edges and the column reads as a
+    ragged stack of tags rather than a ruled grid.
     """
     summed = {id(line) for line in counted}
     found = [
-        {"box": box.as_dict(), "included": id(line) in summed}
+        {
+            "box": OverlayBox(x=outer.x, y=box.y, w=outer.w, h=box.h).as_dict(),
+            "included": id(line) in summed,
+        }
         for line in lines
         if (box := box_of(line)) is not None and _covers(box, outer)
     ]

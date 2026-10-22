@@ -159,6 +159,31 @@ def test_a_column_total_reports_the_rows_its_box_covers_but_excludes() -> None:
         assert set(cell) == {"box", "included"}
 
 
+def test_column_cells_are_ruled_to_one_width() -> None:
+    """A cell per figure width reads as ragged tags, not a ruled column."""
+    result = PaystubResult(
+        lines=[
+            _ytd_row("Regular Hourly", EarningCategory.BASE_WORKED, "26000.00", 0.30),
+            _ytd_row("Group Term Life", EarningCategory.IMPUTED, "41.60", 0.32),
+            _ytd_row("Vacation Pay", EarningCategory.BASE_LEAVE, "2600.00", 0.34),
+        ],
+    )
+    # A narrower figure, as "41.60" prints against "26,000.00".
+    result.lines[1].ytd_amount_box = OverlayBox(x=0.57, y=0.32, w=0.03, h=0.01)
+    result.income.base_ytd = Decimal("28600.00")
+
+    base_ytd = next(
+        f for f in income_fields(result) if f["sourceFieldId"] == "ps-base-ytd"
+    )
+    outer = base_ytd["box"]
+    for cell in base_ytd["componentCells"]:
+        assert cell["box"]["x"] == outer["x"]
+        assert cell["box"]["w"] == outer["w"]
+    # Each cell still sits on its own row.
+    tops = [cell["box"]["y"] for cell in base_ytd["componentCells"]]
+    assert tops == sorted(tops) and len(set(tops)) == len(tops)
+
+
 def test_a_column_total_does_not_claim_cells_outside_its_box() -> None:
     """A row below the last counted row is outside the box, so not a cell of it."""
     result = PaystubResult(
