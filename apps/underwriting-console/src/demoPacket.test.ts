@@ -4,7 +4,7 @@ import test from 'node:test';
 import { loadDemoPacket } from './demoPacket';
 import { mapIncomeFields } from './incomeFieldMap';
 import { livePartnershipPatches, liveScheduleLPatch, liveWagePatch, owningBusinessReturns } from './liveHydrate';
-import { kindsOf } from './livePacket';
+import { fieldForInspection, inspectOverlayFromField, kindsOf } from './livePacket';
 
 const PUBLIC = new URL('../public', import.meta.url);
 
@@ -23,7 +23,9 @@ async function packet() {
   const fields = (id: string) => {
     const doc = byId.get(id);
     assert.ok(doc, `missing ${id}`);
-    return mapIncomeFields(doc.result);
+    // The console stamps the owning document onto every mapped field, and
+    // inspection is scoped by it, so a packet-faithful test has to do the same.
+    return mapIncomeFields(doc.result).map((field) => ({ ...field, documentId: doc.id }));
   };
   return { ...loaded, byId, fields };
 }
@@ -93,6 +95,30 @@ test('demo K-1 and Form 1065 hydrate the partnership worksheet', async () => {
   assert.equal(scheduleL?.receivables, undefined);
   assert.equal(scheduleL?.otherCurrentLiab, undefined);
   assert.equal(scheduleL?.accountsPayable, 26400);
+});
+
+test('clicking a demo Schedule L row resolves to its Form 1065 balance-sheet box', async () => {
+  const { fields } = await packet();
+  const returnFields = fields('sample-form-1065');
+
+  // The liquidity worksheet rows are keyed by ScheduleL property name; the
+  // parser reports the balance sheet under its own ids. A click has to cross
+  // that gap or the PDF never moves.
+  for (const [worksheetId, sourceId] of [
+    ['schl-cash', 'sch-l-cash'],
+    ['schl-taxExempt', 'sch-l-securities'],
+    ['schl-accountsPayable', 'sch-l-ap'],
+    ['schl-notesLt1Yr', 'sch-l-notes'],
+  ]) {
+    const hit = fieldForInspection(returnFields, worksheetId, 'sample-form-1065');
+    assert.equal(hit?.sourceFieldId, sourceId, worksheetId);
+    assert.equal(hit?.pageIndex, 5, worksheetId);
+    assert.ok(inspectOverlayFromField(hit), `${worksheetId} has no usable overlay box`);
+  }
+
+  // Lines the demo balance sheet leaves blank stay unresolved rather than
+  // snapping the viewer to an unrelated row.
+  assert.equal(fieldForInspection(returnFields, 'schl-allowance', 'sample-form-1065'), undefined);
 });
 
 test('demo borrower assignments match the reviewed metadata', async () => {

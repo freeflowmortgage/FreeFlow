@@ -28,6 +28,17 @@ const STEM: Array<[string, string]> = [
   ['form-8825-dep', 'k1-dep8825'],
   ['form-8825-dep', 'scorp-dep8825'],
   ['pt-profit-pct', 'k1-profit-pct'],
+  // Schedule L balance-sheet lines. The liquidity worksheet keys its rows off
+  // the ScheduleL field names, which do not match the parser source ids, so
+  // without these a parsed balance sheet had no box to highlight. L2b and L6
+  // are underwriter entry only — the parser reads no source for them.
+  ['sch-l-cash', 'schl-cash'],
+  ['sch-l-ar', 'schl-receivables'],
+  ['sch-l-securities', 'schl-taxExempt'],
+  ['sch-l-ap', 'schl-accountsPayable'],
+  ['sch-l-notes', 'schl-notesLt1Yr'],
+  ['sch-l-other-current', 'schl-otherCurrentLiab'],
+  ['sch-l-current-liabilities', 'schl-currentLiabilities'],
   ['c1120-taxable', 'ccorp-ti'],
   ['c1120-tax', 'ccorp-tax'],
   ['schedule-f-net', 'farm-net'],
