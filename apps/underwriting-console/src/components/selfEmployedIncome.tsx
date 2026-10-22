@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Info } from 'lucide-react';
+import { fieldSelected } from '../incomeInspect';
 
 export const MILEAGE_DEP_RATE = 0.3;
 
@@ -398,6 +399,7 @@ export function LineRow({
   hint,
   value,
   selected,
+  fieldId,
   onSelect,
   onChange,
 }: {
@@ -406,6 +408,8 @@ export function LineRow({
   hint?: string;
   value: number;
   selected?: boolean;
+  /** Inspect id, so a click on the PDF box can scroll this row into view. */
+  fieldId?: string;
   onSelect: () => void;
   onChange: (next: number) => void;
 }) {
@@ -416,6 +420,7 @@ export function LineRow({
   // card and under the neighbouring column.
   return (
     <div
+      data-qa-field={fieldId}
       className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-2.5 py-2 ${
         selected ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white'
       }`}
@@ -642,7 +647,10 @@ export function LiquidityBlock({
             line={row.line}
             label={row.label}
             value={sheet[row.id]}
-            selected={selectedId === `schl-${row.id}`}
+            fieldId={`schl-${row.id}`}
+            // A click on the PDF box selects the parser id (`sch-l-cash`), which
+            // is not the worksheet id, so the row has to match on the family.
+            selected={fieldSelected(selectedId, `schl-${row.id}`)}
             onSelect={() => onSelect(`schl-${row.id}`)}
             onChange={(next) => onChange({ ...sheet, [row.id]: next })}
           />

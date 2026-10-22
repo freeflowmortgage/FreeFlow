@@ -21,7 +21,13 @@ import pytest
 
 from paystub_fixtures import build_paystub_pdf, build_scanned_paystub_pdf
 from paystub import income_fields, parse_paystub
-from paystub.models import OverlayBox, Token
+from paystub.models import (
+    EarningCategory,
+    EarningLine,
+    OverlayBox,
+    PaystubResult,
+    Token,
+)
 from paystub.overlay import MIN_SPAN, to_overlay, union
 
 CONSOLE_MIN = 0.004
@@ -108,6 +114,98 @@ def test_aggregated_fields_carry_their_component_cells(fields: list[dict]) -> No
     assert len(base_ytd["componentBoxes"]) >= 2
     for component in base_ytd["componentBoxes"]:
         assert usable(component)
+
+
+def _ytd_row(description: str, category: EarningCategory, amount: str, y: float) -> EarningLine:
+    return EarningLine(
+        description=description,
+        category=category,
+        category_reason="test",
+        ytd_amount=Decimal(amount),
+        ytd_amount_box=OverlayBox(x=0.55, y=y, w=0.05, h=0.01),
+        variable_group="overtime" if category is EarningCategory.VARIABLE else None,
+    )
+
+
+def test_a_column_total_reports_the_rows_its_box_covers_but_excludes() -> None:
+    """The union of the base rows also covers rows the total leaves out.
+
+    On the sample stub, employer-paid life and an overtime premium print
+    between the base rows, so the box around the base YTD figures spans them
+    too. Each cell inside that box is reported with whether it is in the total,
+    so the viewer can shade only the ones that are.
+    """
+    result = PaystubResult(
+        lines=[
+            _ytd_row("Regular Hourly", EarningCategory.BASE_WORKED, "26000.00", 0.30),
+            _ytd_row("Group Term Life", EarningCategory.IMPUTED, "41.60", 0.32),
+            _ytd_row("Holiday", EarningCategory.BASE_LEAVE, "780.00", 0.34),
+            _ytd_row("Overtime", EarningCategory.VARIABLE, "1950.00", 0.36),
+            _ytd_row("Vacation Pay", EarningCategory.BASE_LEAVE, "2600.00", 0.38),
+        ],
+    )
+    result.income.base_ytd = Decimal("29380.00")
+
+    base_ytd = next(
+        f for f in income_fields(result) if f["sourceFieldId"] == "ps-base-ytd"
+    )
+    cells = base_ytd["componentCells"]
+    assert [cell["included"] for cell in cells] == [True, False, True, False, True]
+    assert len([cell for cell in cells if cell["included"]]) == len(
+        base_ytd["componentBoxes"]
+    )
+    for cell in cells:
+        assert usable(cell["box"])
+        assert set(cell) == {"box", "included"}
+
+
+def test_column_cells_are_ruled_to_one_width() -> None:
+    """A cell per figure width reads as ragged tags, not a ruled column."""
+    result = PaystubResult(
+        lines=[
+            _ytd_row("Regular Hourly", EarningCategory.BASE_WORKED, "26000.00", 0.30),
+            _ytd_row("Group Term Life", EarningCategory.IMPUTED, "41.60", 0.32),
+            _ytd_row("Vacation Pay", EarningCategory.BASE_LEAVE, "2600.00", 0.34),
+        ],
+    )
+    # A narrower figure, as "41.60" prints against "26,000.00".
+    result.lines[1].ytd_amount_box = OverlayBox(x=0.57, y=0.32, w=0.03, h=0.01)
+    result.income.base_ytd = Decimal("28600.00")
+
+    base_ytd = next(
+        f for f in income_fields(result) if f["sourceFieldId"] == "ps-base-ytd"
+    )
+    outer = base_ytd["box"]
+    for cell in base_ytd["componentCells"]:
+        assert cell["box"]["x"] == outer["x"]
+        assert cell["box"]["w"] == outer["w"]
+    # Each cell still sits on its own row.
+    tops = [cell["box"]["y"] for cell in base_ytd["componentCells"]]
+    assert tops == sorted(tops) and len(set(tops)) == len(tops)
+
+
+def test_a_column_total_does_not_claim_cells_outside_its_box() -> None:
+    """A row below the last counted row is outside the box, so not a cell of it."""
+    result = PaystubResult(
+        lines=[
+            _ytd_row("Regular Hourly", EarningCategory.BASE_WORKED, "26000.00", 0.30),
+            _ytd_row("Vacation Pay", EarningCategory.BASE_LEAVE, "2600.00", 0.32),
+            _ytd_row("Bonus", EarningCategory.VARIABLE, "3000.00", 0.40),
+        ],
+    )
+    result.income.base_ytd = Decimal("28600.00")
+
+    base_ytd = next(
+        f for f in income_fields(result) if f["sourceFieldId"] == "ps-base-ytd"
+    )
+    assert [cell["included"] for cell in base_ytd["componentCells"]] == [True, True]
+
+
+def test_a_single_cell_total_reports_no_grid(fields: list[dict]) -> None:
+    """One row is not a grid, and ruling it adds nothing to read."""
+    bonus = next(f for f in fields if f["sourceFieldId"] == "ps-bonus-ytd")
+    assert "componentCells" not in bonus
+    assert "componentBoxes" not in bonus
 
 
 def test_rate_highlights_the_rate_column_not_the_amount() -> None:

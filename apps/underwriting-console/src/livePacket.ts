@@ -416,6 +416,25 @@ export function allScheduleEExtracts(documents: LiveDocument[]): Array<ScheduleE
   );
 }
 
+/**
+ * The tax year printed on each W-2 in the packet, by document and page.
+ *
+ * The year a W-2 covers is a property of the document, not of the calendar. A
+ * 2024 W-2 handed in during 2026 is still a 2024 W-2, so anything that cites
+ * the year has to read it off the form rather than counting back from today.
+ */
+export function w2TaxYearLookup(
+  documents: LiveDocument[],
+): (documentId: string | undefined, pageIndex: number) => number | undefined {
+  const years = new Map<string, number>();
+  for (const doc of documents) {
+    for (const extract of doc.result.w2Extracts ?? []) {
+      if (extract.year) years.set(`${doc.id}:${extract.pageIndex}`, extract.year);
+    }
+  }
+  return (documentId, pageIndex) => years.get(`${documentId ?? ''}:${pageIndex}`);
+}
+
 export type ScheduleEFiling<T extends ScheduleEPropertyExtract> = { latest: T; prior?: T; ownerId?: string };
 
 /**

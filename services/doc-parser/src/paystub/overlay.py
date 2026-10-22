@@ -89,6 +89,49 @@ def _padded(x0: float, y0: float, x1: float, y1: float) -> OverlayBox:
     )
 
 
+def _covers(box: OverlayBox, outer: OverlayBox) -> bool:
+    """Whether ``box`` is one of the cells ``outer`` was drawn around."""
+    centre = box.y + box.h / 2
+    if not outer.y - 1e-9 <= centre <= outer.y + outer.h + 1e-9:
+        return False
+    return box.x < outer.x + outer.w + 1e-9 and outer.x < box.x + box.w + 1e-9
+
+
+def cells(
+    lines: list,
+    counted: list,
+    box_of,
+    outer: OverlayBox,
+) -> list[dict] | None:
+    """Every cell of one column inside ``outer``, flagged by whether it is summed.
+
+    A column total is highlighted as the union of the rows it adds up, and that
+    rectangle inevitably also covers rows between them that the total excludes
+    — employer-paid life insurance sitting between two base rows, an overtime
+    row between regular and sick pay. The union alone therefore claims more of
+    the stub than the figure was read from.
+
+    Reporting the individual cells, each marked included or not, lets the
+    viewer rule the column into its rows and shade only the ones in the total,
+    so what the figure is and is not made of is visible on the document.
+
+    Each cell keeps its row's vertical span but takes the column's full width.
+    A box drawn tightly around each figure is as wide as the digits in it, so
+    ``5,040.00`` and ``24.00`` get different edges and the column reads as a
+    ragged stack of tags rather than a ruled grid.
+    """
+    summed = {id(line) for line in counted}
+    found = [
+        {
+            "box": OverlayBox(x=outer.x, y=box.y, w=outer.w, h=box.h).as_dict(),
+            "included": id(line) in summed,
+        }
+        for line in lines
+        if (box := box_of(line)) is not None and _covers(box, outer)
+    ]
+    return found if len(found) > 1 else None
+
+
 def _record(
     *,
     page_index: int,
@@ -101,6 +144,7 @@ def _record(
     numeric: Decimal,
     box: OverlayBox,
     components: list[OverlayBox] | None = None,
+    column_cells: list[dict] | None = None,
 ) -> dict:
     record = {
         "pageIndex": page_index,
@@ -117,6 +161,8 @@ def _record(
     }
     if components and len(components) > 1:
         record["componentBoxes"] = [component.as_dict() for component in components]
+    if column_cells:
+        record["componentCells"] = column_cells
     return record
 
 
@@ -139,8 +185,8 @@ def income_fields(result: PaystubResult) -> list[dict]:
         total: Decimal,
         lines: list,
     ) -> None:
-        boxes = [l.ytd_amount_box for l in lines if l.ytd_amount_box]
-        merged = union(boxes)
+        counted = [l for l in lines if l.ytd_amount_box]
+        merged = union([l.ytd_amount_box for l in counted])
         if merged is None or total == 0:
             return
         records.append(
@@ -154,7 +200,10 @@ def income_fields(result: PaystubResult) -> list[dict]:
                 value=f"{total:,.2f}",
                 numeric=total,
                 box=merged,
-                components=boxes,
+                components=[l.ytd_amount_box for l in counted],
+                column_cells=cells(
+                    result.lines, counted, lambda l: l.ytd_amount_box, merged
+                ),
             )
         )
 
@@ -179,6 +228,9 @@ def income_fields(result: PaystubResult) -> list[dict]:
                 numeric=current_total,
                 box=merged_current,
                 components=current_boxes,
+                column_cells=cells(
+                    result.lines, current_lines, lambda l: l.amount_box, merged_current
+                ),
             )
         )
 
@@ -238,7 +290,8 @@ def income_fields(result: PaystubResult) -> list[dict]:
             )
         )
 
-    hour_boxes = [l.hours_box for l in result.lines if l.is_base and l.hours and l.hours_box]
+    hour_lines = [l for l in result.lines if l.is_base and l.hours and l.hours_box]
+    hour_boxes = [l.hours_box for l in hour_lines]
     merged_hours = union(hour_boxes)
     if merged_hours and income.weekly_hours:
         records.append(
@@ -253,6 +306,9 @@ def income_fields(result: PaystubResult) -> list[dict]:
                 numeric=income.weekly_hours,
                 box=merged_hours,
                 components=hour_boxes,
+                column_cells=cells(
+                    result.lines, hour_lines, lambda l: l.hours_box, merged_hours
+                ),
             )
         )
 

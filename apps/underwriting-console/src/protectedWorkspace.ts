@@ -9,7 +9,7 @@ import type {
   ScheduleEPropertyExtract,
   W2BoxExtract,
 } from './parseTypes';
-import { readEvidenceFields, type ConsoleContext } from './protectedWorkflow';
+import { readEvidenceCells, readEvidenceFields, type ConsoleContext } from './protectedWorkflow';
 
 export type ProtectedLocalDocument = Readonly<{
   file: File;
@@ -83,7 +83,7 @@ export function rehydrateProtectedParseResponse(
   const evidence = readEvidenceFields(extraction.evidence);
   const w2Extracts = readW2Extracts(input.w2Records, evidence);
   const scheduleEProperties = readScheduleEProperties(input.scheduleEProperties, evidence);
-  const formExtracts = readFormExtracts(input.formRecords, evidence);
+  const formExtracts = readFormExtracts(input.formRecords, evidence, readEvidenceCells(extraction.evidence));
   const pageForms = new Map<number, Set<string>>();
   for (const item of w2Extracts) addPageForm(pageForms, item.pageIndex, 'W-2');
   for (const item of scheduleEProperties) addPageForm(pageForms, item.pageIndex, 'Schedule E');
@@ -205,7 +205,11 @@ function readScheduleEProperties(
   });
 }
 
-function readFormExtracts(value: unknown, evidence: ReturnType<typeof readEvidenceFields>): FormFieldExtract[] {
+function readFormExtracts(
+  value: unknown,
+  evidence: ReturnType<typeof readEvidenceFields>,
+  cellEvidence: ReturnType<typeof readEvidenceCells>,
+): FormFieldExtract[] {
   return array(value).flatMap((item): FormFieldExtract[] => {
     const row = record(item);
     const entityId = text(row?.entityId);
@@ -222,6 +226,14 @@ function readFormExtracts(value: unknown, evidence: ReturnType<typeof readEviden
         && candidate.entityId === entityId
         && candidate.field === sourceFieldId
       )?.box;
+      const cells = cellEvidence
+        .filter((candidate) =>
+          candidate.collection === 'formExtracts'
+          && candidate.entityId === entityId
+          && candidate.field === sourceFieldId
+        )
+        .map((candidate) => ({ box: tupleBox(candidate.box), included: candidate.included }));
+      const included = cells.filter((cell) => cell.included).map((cell) => cell.box);
       return [{
         pageIndex,
         form,
@@ -233,6 +245,8 @@ function readFormExtracts(value: unknown, evidence: ReturnType<typeof readEviden
         value: text(field.value) ?? String(finiteNumber(field.numericValue) ?? ''),
         numericValue: finiteNumber(field.numericValue) ?? 0,
         box: box ? tupleBox(box) : emptyBox(),
+        ...(included.length > 1 ? { componentBoxes: included } : {}),
+        ...(cells.length > 1 ? { componentCells: cells } : {}),
         entityId,
       }];
     });

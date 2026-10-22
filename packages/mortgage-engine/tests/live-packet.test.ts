@@ -12,6 +12,7 @@ import {
   tabForKinds,
   taxReturnFingerprint,
 } from '../../../apps/underwriting-console/src/livePacket';
+import { fieldSelected } from '../../../apps/underwriting-console/src/incomeInspect';
 
 declare global {
   interface File {}
@@ -93,6 +94,38 @@ describe('live packet routing', () => {
 
     expect(fieldForInspection(fields, 'ps-emp-name', 'stub')?.pageIndex).toBe(2);
     expect(fieldForInspection(fields, 'ps-frequency', 'stub')?.sourceFieldId).toBe('ps-pay-frequency');
+  });
+
+  test('a Schedule L worksheet row resolves to the parsed balance-sheet box', () => {
+    const fields = [
+      { id: 'scorp:sch-l-cash', sourceFieldId: 'sch-l-cash', documentId: 'scorp', pageIndex: 4 },
+      { id: 'scorp:sch-l-ar', sourceFieldId: 'sch-l-ar', documentId: 'scorp', pageIndex: 4 },
+      { id: 'scorp:sch-l-securities', sourceFieldId: 'sch-l-securities', documentId: 'scorp', pageIndex: 4 },
+      { id: 'scorp:sch-l-ap', sourceFieldId: 'sch-l-ap', documentId: 'scorp', pageIndex: 4 },
+      { id: 'scorp:sch-l-notes', sourceFieldId: 'sch-l-notes', documentId: 'scorp', pageIndex: 4 },
+      { id: 'scorp:sch-l-other-current', sourceFieldId: 'sch-l-other-current', documentId: 'scorp', pageIndex: 4 },
+      { id: 'scorp:sch-l-current-liabilities', sourceFieldId: 'sch-l-current-liabilities', documentId: 'scorp', pageIndex: 4 },
+    ] as MappedIncomeField[];
+
+    const resolved = (worksheetId: string) => fieldForInspection(fields, worksheetId, 'scorp')?.sourceFieldId;
+    expect(resolved('schl-cash')).toBe('sch-l-cash');
+    expect(resolved('schl-receivables')).toBe('sch-l-ar');
+    expect(resolved('schl-taxExempt')).toBe('sch-l-securities');
+    expect(resolved('schl-accountsPayable')).toBe('sch-l-ap');
+    expect(resolved('schl-notesLt1Yr')).toBe('sch-l-notes');
+    expect(resolved('schl-otherCurrentLiab')).toBe('sch-l-other-current');
+    expect(resolved('schl-currentLiabilities')).toBe('sch-l-current-liabilities');
+    // Line 2b and Line 6 are underwriter entry; no parser field backs them.
+    expect(resolved('schl-allowance')).toBeUndefined();
+    expect(resolved('schl-otherCurrentAssets')).toBeUndefined();
+  });
+
+  test('a Schedule L PDF box selects its worksheet row, and the row selects the box', () => {
+    expect(fieldSelected('sch-l-cash', 'schl-cash')).toBe(true);
+    expect(fieldSelected('schl-currentLiabilities', 'schl-currentLiabilities')).toBe(true);
+    expect(fieldSelected('sch-l-notes', 'schl-notesLt1Yr')).toBe(true);
+    expect(fieldSelected('sch-l-cash', 'schl-accountsPayable')).toBe(false);
+    expect(fieldSelected('sch-l-current-liabilities', 'schl-otherCurrentLiab')).toBe(false);
   });
 
   test('live inspect never falls back to the generated paystub page', () => {

@@ -1,7 +1,7 @@
 """Snapshot the parser's result for each document in the public income demo.
 
     python scripts/snapshot_demo_packet.py
-    pnpm --filter underwriter-portal exec tsx scripts/build-demo-console-context.ts
+    pnpm --filter web exec tsx scripts/build-demo-console-context.ts
 
 The public demo cannot call the parser: the preview API sits behind sign-in.
 So the sample PDFs in apps/underwriting-console/public/demo-documents ship

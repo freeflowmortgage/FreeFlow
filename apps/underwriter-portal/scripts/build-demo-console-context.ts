@@ -3,7 +3,7 @@
  * signed-in loan.
  *
  *   python services/doc-parser/scripts/snapshot_demo_packet.py
- *   pnpm --filter underwriter-portal exec tsx scripts/build-demo-console-context.ts
+ *   pnpm --filter web exec tsx scripts/build-demo-console-context.ts
  *
  * Each parser snapshot goes through selectPersistableParserExtraction, the
  * projection a live upload is stored as, and every entity it yields is

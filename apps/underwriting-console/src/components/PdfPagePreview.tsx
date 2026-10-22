@@ -4,7 +4,7 @@ import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-d
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { fieldMatchesInspectId, type InspectOverlay } from '../livePacket';
 import type { MappedIncomeField } from '../parseTypes';
-import { isUsableOverlayBox, padOverlayBox } from '../overlayBox';
+import { isUsableOverlayBox, padOverlayBox, selectedOverlayParts } from '../overlayBox';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -226,20 +226,27 @@ export default function PdfPagePreview({
         <canvas ref={canvasRef} className="block" />
         {pageFields.filter((field) => isUsableOverlayBox(field.box)).flatMap((field) => {
           const selected = field === selectedField;
-          const sourceBoxes = selected && field.componentBoxes?.length ? field.componentBoxes : [field.box];
-          return sourceBoxes.map((sourceBox, componentIndex) => {
-            const box = padOverlayBox(sourceBox);
+          const parts = selected ? selectedOverlayParts(field) : [{ box: field.box, included: true }];
+          return parts.map((part, componentIndex) => {
+            const box = padOverlayBox(part.box);
             return (
             <button
               key={`${field.id}-${componentIndex}`}
               type="button"
               data-box-id={componentIndex === 0 ? field.id : `${field.id}--component-${componentIndex}`}
               data-overlay-visible={selected ? 'true' : 'false'}
-              title={`${field.boxLabel} · ${field.fieldLabel} · ${field.value}`}
+              data-overlay-counted={selected ? String(part.included) : undefined}
+              title={
+                selected && !part.included
+                  ? `Not counted in ${field.fieldLabel}`
+                  : `${field.boxLabel} · ${field.fieldLabel} · ${field.value}`
+              }
               className={`absolute box-border rounded-sm ${
-                selected
-                  ? 'z-10 border-2 border-emerald-600 bg-emerald-400/10'
-                  : 'border-0 bg-transparent'
+                !selected
+                  ? 'border-0 bg-transparent'
+                  : part.included
+                    ? 'z-10 border-2 border-emerald-600 bg-emerald-400/25'
+                    : 'z-10 border border-dashed border-slate-400 bg-slate-500/5'
               }`}
               style={{
                 left: `${box.x * 100}%`,
@@ -259,7 +266,9 @@ export default function PdfPagePreview({
             data-box-id={selectedFieldId ?? 'inspect-overlay'}
             data-overlay-visible="true"
             data-inspect-overlay="true"
-            className="pointer-events-none absolute z-20 box-border rounded-sm border-2 border-emerald-600 bg-emerald-400/10"
+            className={`pointer-events-none absolute z-20 box-border rounded-sm border-2 border-emerald-600 ${
+              selectedField?.componentCells?.length ? '' : 'bg-emerald-400/10'
+            }`}
             style={{
               left: `${box.x * 100}%`,
               top: `${box.y * 100}%`,
