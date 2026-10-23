@@ -6,14 +6,17 @@ One recipient per run, by design. freeflowmortgage.com publishes
 rejected outright unless it is signed by Purelymail -- sending this HTML from
 any other provider will bounce rather than land in spam.
 
-Credentials come from the environment, never argv, because argv is readable by
-other processes on the host:
+The password is prompted for and never taken from argv, which other processes on
+the host can read, nor written to shell history by an ``export``:
 
     export PURELYMAIL_USER='nathan@freeflowmortgage.com'
-    export PURELYMAIL_PASSWORD='...'       # an app password, not the account login
 
     python3 send.py --to uw.manager@lender.com --first-name Dana \
-        --sender-name 'Nathan Jenson' --sender-title 'Founder' --dry-run
+        --sender-name 'Nathan Jenson' --sender-title 'Founder'
+
+Use an app password rather than the account login, so revoking it does not
+change the password on the mailbox itself. ``PURELYMAIL_PASSWORD`` is still
+honoured when set, for an automated run with no terminal attached.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import ssl
 import sys
 from email.headerregistry import Address
 from email.message import EmailMessage
+from getpass import getpass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -99,12 +103,20 @@ def main() -> int:
         sys.stdout.write(message.as_string())
         return 0
 
-    password = os.environ.get('PURELYMAIL_PASSWORD', '')
+    password = os.environ.get('PURELYMAIL_PASSWORD') or getpass(f'App password for {sender}: ')
     if not password:
-        raise SystemExit('set PURELYMAIL_PASSWORD to an app password')
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context()) as smtp:
-        smtp.login(sender, password)
-        smtp.send_message(message)
+        raise SystemExit('an app password is required to send')
+    try:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context()) as smtp:
+            smtp.login(sender, password)
+            smtp.send_message(message)
+    except smtplib.SMTPAuthenticationError:
+        raise SystemExit(
+            f'{SMTP_HOST} rejected the login for {sender}. Check that the address is a real '
+            'mailbox and that the password is a current app password.'
+        ) from None
+    except (smtplib.SMTPException, OSError) as error:
+        raise SystemExit(f'{SMTP_HOST} refused the message: {error}') from None
     print(f'sent to {args.to}')
     return 0
 
