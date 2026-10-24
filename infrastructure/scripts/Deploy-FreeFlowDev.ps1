@@ -5,6 +5,10 @@ param(
 
     [string]$AwsProfile = "freeflow-dev",
     [string]$AwsRegion = "us-west-2",
+    [switch]$UseAmbientAwsCredentials,
+    [string]$TerraformStateBucket,
+    [string]$TerraformLockTable,
+    [string]$TerraformStateKey = "platform/dev.tfstate",
     [string]$ImageTag,
     [ValidateSet("protected-web", "encompass-hosted")]
     [string]$ConsoleMode = "encompass-hosted",
@@ -50,6 +54,10 @@ function Invoke-NativeCapture {
 function Invoke-WithAwsProfileCredentials {
     param([Parameter(Mandatory = $true)][scriptblock]$Operation)
 
+    if ($UseAmbientAwsCredentials) {
+        return & $Operation
+    }
+
     $credentialJson = Invoke-NativeCapture -Executable aws -ArgumentList @("configure", "export-credentials", "--profile", $AwsProfile, "--format", "process")
     $credentials = $credentialJson | ConvertFrom-Json
     $credentialEnvironment = @{
@@ -70,6 +78,13 @@ function Invoke-WithAwsProfileCredentials {
             [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
         }
     }
+}
+
+function Get-AwsProfileArguments {
+    if ($UseAmbientAwsCredentials) {
+        return @()
+    }
+    return @("--profile", $AwsProfile)
 }
 
 function Invoke-Terraform {
@@ -103,13 +118,14 @@ function Get-EcrImageDigest {
 
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $output = & aws ecr describe-images `
-        --profile $AwsProfile `
-        --region $AwsRegion `
-        --repository-name $RepositoryName `
-        --image-ids "imageTag=$Tag" `
-        --query "imageDetails[0].imageDigest" `
-        --output text 2>$null
+    $arguments = @("ecr", "describe-images") + (Get-AwsProfileArguments) + @(
+        "--region", $AwsRegion,
+        "--repository-name", $RepositoryName,
+        "--image-ids", "imageTag=$Tag",
+        "--query", "imageDetails[0].imageDigest",
+        "--output", "text"
+    )
+    $output = & aws @arguments 2>$null
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousPreference
 
@@ -151,12 +167,13 @@ function Assert-ImageScans {
             $image = $Images[$name]
             $previousPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
-            $json = & aws ecr describe-image-scan-findings `
-                --profile $AwsProfile `
-                --region $AwsRegion `
-                --repository-name $image.RepositoryName `
-                --image-id "imageDigest=$($image.Digest)" `
-                --output json 2>$null
+            $arguments = @("ecr", "describe-image-scan-findings") + (Get-AwsProfileArguments) + @(
+                "--region", $AwsRegion,
+                "--repository-name", $image.RepositoryName,
+                "--image-id", "imageDigest=$($image.Digest)",
+                "--output", "json"
+            )
+            $json = & aws @arguments 2>$null
             $exitCode = $LASTEXITCODE
             $ErrorActionPreference = $previousPreference
 
@@ -284,7 +301,8 @@ foreach ($command in @("aws", "docker", "git", "terraform")) {
         throw "Required command is unavailable: $command"
     }
 }
-if (-not (Test-Path -LiteralPath $terraformBackendConfig -PathType Leaf)) {
+if (([string]::IsNullOrWhiteSpace($TerraformStateBucket) -or [string]::IsNullOrWhiteSpace($TerraformLockTable)) -and
+    -not (Test-Path -LiteralPath $terraformBackendConfig -PathType Leaf)) {
     throw "Terraform backend configuration is missing: $terraformBackendConfig"
 }
 
@@ -298,10 +316,21 @@ if ($ImageTag -notmatch "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$") {
     throw "ImageTag is not a valid Docker/ECR tag: $ImageTag"
 }
 
-$identity = (Invoke-NativeCapture -Executable aws -ArgumentList @("sts", "get-caller-identity", "--profile", $AwsProfile, "--region", $AwsRegion, "--output", "json")) | ConvertFrom-Json
+$identityArguments = @("sts", "get-caller-identity") + (Get-AwsProfileArguments) + @("--region", $AwsRegion, "--output", "json")
+$identity = (Invoke-NativeCapture -Executable aws -ArgumentList $identityArguments) | ConvertFrom-Json
 Write-Host "AWS account: $($identity.Account); region: $AwsRegion; commit: $commit"
 
-Invoke-Terraform -ArgumentList @("-chdir=$terraformDirectory", "init", "-input=false", "-reconfigure", "-backend-config=$terraformBackendConfig")
+$terraformInitArguments = [System.Collections.Generic.List[string]]@("-chdir=$terraformDirectory", "init", "-input=false", "-reconfigure")
+if (-not [string]::IsNullOrWhiteSpace($TerraformStateBucket) -and -not [string]::IsNullOrWhiteSpace($TerraformLockTable)) {
+    $terraformInitArguments.Add("-backend-config=bucket=$TerraformStateBucket")
+    $terraformInitArguments.Add("-backend-config=key=$TerraformStateKey")
+    $terraformInitArguments.Add("-backend-config=region=$AwsRegion")
+    $terraformInitArguments.Add("-backend-config=encrypt=true")
+    $terraformInitArguments.Add("-backend-config=dynamodb_table=$TerraformLockTable")
+} else {
+    $terraformInitArguments.Add("-backend-config=$terraformBackendConfig")
+}
+Invoke-Terraform -ArgumentList $terraformInitArguments
 
 $images = @{}
 $missingServices = [System.Collections.Generic.List[string]]::new()
@@ -326,7 +355,8 @@ foreach ($name in $selectedServices) {
 if ($missingServices.Count -gt 0) {
     $registry = $images[$missingServices[0]].RepositoryUrl.Split("/")[0]
     if ($PSCmdlet.ShouldProcess($registry, "Authenticate Docker to ECR and push $($missingServices -join ', ')")) {
-        $password = Invoke-NativeCapture -Executable aws -ArgumentList @("ecr", "get-login-password", "--profile", $AwsProfile, "--region", $AwsRegion)
+        $loginArguments = @("ecr", "get-login-password") + (Get-AwsProfileArguments) + @("--region", $AwsRegion)
+        $password = Invoke-NativeCapture -Executable aws -ArgumentList $loginArguments
         try {
             $password | & docker login --username AWS --password-stdin $registry
             if ($LASTEXITCODE -ne 0) {
@@ -427,12 +457,12 @@ if ($Apply) {
         $requestedEcsServices = @($selectedServices | ForEach-Object { $serviceDefinitions[$_].EcsServices } | Select-Object -Unique)
         if ($requestedEcsServices.Count -gt 0) {
             $clusterArn = Get-TerraformOutput "ecs_cluster_arn"
-            $descriptionArguments = @("ecs", "describe-services", "--profile", $AwsProfile, "--region", $AwsRegion, "--cluster", $clusterArn, "--services") + $requestedEcsServices + @("--output", "json")
+            $descriptionArguments = @("ecs", "describe-services") + (Get-AwsProfileArguments) + @("--region", $AwsRegion, "--cluster", $clusterArn, "--services") + $requestedEcsServices + @("--output", "json")
             $descriptionJson = Invoke-NativeCapture -Executable aws -ArgumentList $descriptionArguments
             $description = $descriptionJson | ConvertFrom-Json
             $activeServices = @($description.services | Where-Object { $_.status -eq "ACTIVE" } | ForEach-Object { $_.serviceName })
             if ($activeServices.Count -gt 0) {
-                $waitArguments = @("ecs", "wait", "services-stable", "--profile", $AwsProfile, "--region", $AwsRegion, "--cluster", $clusterArn, "--services") + $activeServices
+                $waitArguments = @("ecs", "wait", "services-stable") + (Get-AwsProfileArguments) + @("--region", $AwsRegion, "--cluster", $clusterArn, "--services") + $activeServices
                 Invoke-Native -Executable aws -ArgumentList $waitArguments
                 Write-Host "ECS services are stable: $($activeServices -join ', ')"
             }

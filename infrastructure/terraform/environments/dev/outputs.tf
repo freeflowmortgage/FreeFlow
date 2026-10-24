@@ -121,3 +121,7 @@ output "operations_alert_topic_arn" {
 output "github_image_publisher_role_arn" {
   value = var.enable_github_image_publisher ? aws_iam_role.github_image_publisher[0].arn : null
 }
+
+output "github_dev_deployer_role_arn" {
+  value = var.enable_github_dev_deployer ? aws_iam_role.github_dev_deployer[0].arn : null
+}

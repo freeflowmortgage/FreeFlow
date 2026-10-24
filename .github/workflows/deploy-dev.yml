@@ -1,0 +1,166 @@
+name: Deploy development
+
+# A successful immutable-image publication is necessary but not sufficient for
+# deployment. This workflow also waits for every other workflow triggered for
+# the same main commit and refuses to deploy if any of them failed.
+on:
+  workflow_run:
+    workflows: [Publish dev images]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  id-token: write
+
+concurrency:
+  group: deploy-development
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  deploy:
+    name: Promote immutable images to development
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      vars.AWS_DEV_DEPLOY_ROLE_ARN != '' &&
+      vars.AWS_DEV_TF_STATE_BUCKET != '' &&
+      vars.AWS_DEV_TF_LOCK_TABLE != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Wait for every commit workflow to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 1200))
+          while true; do
+            runs=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${RELEASE_SHA}&per_page=100")
+            pending=$(jq --arg sha "$RELEASE_SHA" '[.workflow_runs[] |
+              select(.head_sha == $sha and .name != "Deploy development" and .status != "completed")] | length' <<<"$runs")
+            if [ "$pending" -eq 0 ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for ${pending} workflow(s) on ${RELEASE_SHA}."
+              exit 1
+            fi
+            sleep 15
+          done
+
+          failures=$(jq --arg sha "$RELEASE_SHA" '[.workflow_runs[] |
+            select(.head_sha == $sha and .name != "Deploy development" and
+              .conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral") |
+            {name, conclusion, html_url}]' <<<"$runs")
+          if [ "$(jq length <<<"$failures")" -ne 0 ]; then
+            jq -r '.[] | "::error::\(.name) concluded \(.conclusion): \(.html_url)"' <<<"$failures"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Require manual rollout for database migrations
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --name-only "${RELEASE_SHA}^" "$RELEASE_SHA" | grep -q '^packages/database/prisma/migrations/'; then
+            echo "::error::Database migration commits require the migration compatibility runbook before ECS deployment."
+            exit 1
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '~1.16.0'
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-dev-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Apply digest-pinned development rollout
+        shell: pwsh
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TF_STATE_BUCKET: ${{ vars.AWS_DEV_TF_STATE_BUCKET }}
+          TF_LOCK_TABLE: ${{ vars.AWS_DEV_TF_LOCK_TABLE }}
+        run: |
+          $services = @('portal', 'parser', 'console', 'migration', 'connector')
+          ./infrastructure/scripts/Deploy-FreeFlowDev.ps1 `
+            -Service $services `
+            -ImageTag $env:RELEASE_SHA `
+            -UseAmbientAwsCredentials `
+            -TerraformStateBucket $env:TF_STATE_BUCKET `
+            -TerraformLockTable $env:TF_LOCK_TABLE `
+            -Apply `
+            -Confirm:$false
+
+      - name: Record deployed image digests
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          account=$(aws sts get-caller-identity --query Account --output text)
+          registry="${account}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          digest() {
+            aws ecr describe-images \
+              --repository-name "$1" \
+              --image-ids "imageTag=${RELEASE_SHA}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text
+          }
+          portal="${registry}/mortgage-api@$(digest mortgage-api)"
+          parser="${registry}/mortgage-income-parser@$(digest mortgage-income-parser)"
+          console="${registry}/mortgage-underwriting-console@$(digest mortgage-underwriting-console)"
+          migration="${registry}/mortgage-database-migrations@$(digest mortgage-database-migrations)"
+          connector="${registry}/mortgage-encompass-connector@$(digest mortgage-encompass-connector)"
+          pins=infrastructure/terraform/environments/dev/freeflow-dev.pins.auto.tfvars.json
+          temporary=$(mktemp)
+          jq \
+            --arg note "Live freeflow-dev image digests (source commit ${RELEASE_SHA}); updated automatically after ECS stability." \
+            --arg portal "$portal" \
+            --arg parser "$parser" \
+            --arg console "$console" \
+            --arg migration "$migration" \
+            --arg connector "$connector" \
+            '."//" = $note |
+             .portal_image = $portal |
+             .connector_worker_image = $portal |
+             .parser_image = $parser |
+             .console_image = $console |
+             .migration_image = $migration |
+             .connector_image = $connector' \
+            "$pins" > "$temporary"
+          mv "$temporary" "$pins"
+          git add "$pins"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name freeflow-deploy[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "chore(deploy): record dev ${RELEASE_SHA:0:12} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Record deployed commit
+        run: |
+          {
+            echo '### Development deployment complete'
+            echo
+            echo "Commit: \`${{ github.event.workflow_run.head_sha }}\`"
+            echo
+            echo 'Portal, parser, console, connector, document-pull worker, and sync worker reached ECS stability; migration task definition and digest pins were updated.'
+          } >> "$GITHUB_STEP_SUMMARY"

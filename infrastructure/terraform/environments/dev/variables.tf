@@ -429,9 +429,60 @@ variable "enable_github_image_publisher" {
   default     = false
 }
 
+variable "enable_github_dev_deployer" {
+  type        = bool
+  description = "Creates the GitHub Actions OIDC role that may apply scoped immutable image updates to development ECS services."
+  default     = false
+}
+
+variable "github_dev_terraform_state_bucket_arn" {
+  type        = string
+  description = "ARN of the S3 bucket holding the development Terraform state. Required when the GitHub dev deployer is enabled."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = !var.enable_github_dev_deployer || (
+      var.github_dev_terraform_state_bucket_arn != null &&
+      can(regex("^arn:[^:]+:s3:::[A-Za-z0-9.-]+$", var.github_dev_terraform_state_bucket_arn))
+    )
+    error_message = "github_dev_terraform_state_bucket_arn must be a valid S3 bucket ARN when the GitHub dev deployer is enabled."
+  }
+}
+
+variable "github_dev_terraform_lock_table_arn" {
+  type        = string
+  description = "ARN of the DynamoDB table used to lock development Terraform state. Required when the GitHub dev deployer is enabled."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = !var.enable_github_dev_deployer || (
+      var.github_dev_terraform_lock_table_arn != null &&
+      can(regex("^arn:[^:]+:dynamodb:[^:]+:[0-9]{12}:table/[A-Za-z0-9_.-]+$", var.github_dev_terraform_lock_table_arn))
+    )
+    error_message = "github_dev_terraform_lock_table_arn must be a valid DynamoDB table ARN when the GitHub dev deployer is enabled."
+  }
+}
+
+variable "github_dev_terraform_state_kms_key_arn" {
+  type        = string
+  description = "ARN of the KMS key encrypting the development Terraform state bucket. Required when the GitHub dev deployer is enabled."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = !var.enable_github_dev_deployer || (
+      var.github_dev_terraform_state_kms_key_arn != null &&
+      can(regex("^arn:[^:]+:kms:[^:]+:[0-9]{12}:key/[A-Za-z0-9-]+$", var.github_dev_terraform_state_kms_key_arn))
+    )
+    error_message = "github_dev_terraform_state_kms_key_arn must be a valid KMS key ARN when the GitHub dev deployer is enabled."
+  }
+}
+
 variable "github_repository" {
   type        = string
-  description = "GitHub owner/name allowed to assume the image publisher role from its main branch."
+  description = "GitHub owner/name allowed to assume the image publisher and development deployer roles from its main branch."
   default     = "freeflowmortgage/FreeFlow"
 
   validation {

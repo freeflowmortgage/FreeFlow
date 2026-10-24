@@ -118,3 +118,37 @@ See the [domain and user-access runbook](../../docs/deployment-readiness/DOMAIN-
 See [`docs/deployment-readiness/AWS-ECS-DEPLOYMENT-SPEC.md`](../../docs/deployment-readiness/AWS-ECS-DEPLOYMENT-SPEC.md)
 and [`docs/deployment-readiness/RUNBOOKS.md`](../../docs/deployment-readiness/RUNBOOKS.md)
 for the production acceptance criteria.
+
+## Automatic development deployments
+
+Merges to `main` can be delivered to development without long-lived AWS keys:
+
+1. `publish-dev-images.yml` builds each runtime image once, tags it with the
+   full Git commit, waits for its ECR scan, and records the immutable digest.
+2. `deploy-dev.yml` starts only after image publication succeeds, waits for all
+   other workflows for the same commit, and stops if any check failed.
+3. The workflow assumes a separate development deployer role through GitHub
+   OIDC. It runs `Deploy-FreeFlowDev.ps1`, whose saved Terraform plan rejects
+   changes outside the selected ECS task definitions and services.
+4. ECS stability is required before the workflow reports success. Commits that
+   add database migrations stop for the migration compatibility runbook.
+5. After stability, the workflow commits the deployed digests back to
+   `freeflow-dev.pins.auto.tfvars.json` with `[skip ci]`, preserving Terraform's
+   audited source of truth without starting a deployment loop.
+
+Bootstrap this once with an approved development administrator:
+
+- set `enable_github_image_publisher = true` and
+  `enable_github_dev_deployer = true` in the untracked development tfvars;
+- set `github_dev_terraform_state_bucket_arn` and
+  `github_dev_terraform_lock_table_arn` to the existing protected backend, and
+  `github_dev_terraform_state_kms_key_arn` to its encryption key;
+- review and apply the Terraform plan locally;
+- set repository variables `AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN` and
+  `AWS_DEV_DEPLOY_ROLE_ARN` from the Terraform outputs;
+- set `AWS_DEV_TF_STATE_BUCKET` and `AWS_DEV_TF_LOCK_TABLE` to the backend
+  resource names (not ARNs).
+
+The deployer can read deployment context, manage only the development state
+object and lock, register ECS task definitions, update ECS services, and pass
+only the development task roles. It cannot push images or deploy production.

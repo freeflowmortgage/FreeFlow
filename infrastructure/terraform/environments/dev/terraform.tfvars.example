@@ -48,5 +48,11 @@ connector_service_token_rotation_epoch = ""
 # Set the role ARN output as the AWS_DEV_IMAGE_PUBLISHER_ROLE_ARN repository
 # variable. Supply github_oidc_provider_arn if the account already has one.
 enable_github_image_publisher = false
+enable_github_dev_deployer    = false
 github_repository             = "freeflowmortgage/FreeFlow"
 github_oidc_provider_arn      = null
+# Required only when enable_github_dev_deployer is true. These are resource
+# identifiers, not credentials; GitHub receives short-lived credentials via OIDC.
+github_dev_terraform_state_bucket_arn = null
+github_dev_terraform_lock_table_arn   = null
+github_dev_terraform_state_kms_key_arn = null
