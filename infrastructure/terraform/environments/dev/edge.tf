@@ -388,6 +388,43 @@ resource "aws_lb_listener_rule" "console_workspace_https" {
   }
 }
 
+# The software hostname must never fall through to the public console default.
+# Match the host before path-specific rules so every route, including `/`, is
+# authenticated while the separate sales/demo hostname can retain its intended
+# public landing behavior.
+resource "aws_lb_listener_rule" "console_app_hostname_https" {
+  count        = var.enable_edge && var.enable_cognito_edge && var.enable_console && length(local.portal_extra_hostnames) > 0 ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 80
+
+  action {
+    order = 1
+    type  = "authenticate-cognito"
+
+    authenticate_cognito {
+      user_pool_arn              = aws_cognito_user_pool.live_test[0].arn
+      user_pool_client_id        = aws_cognito_user_pool_client.alb[0].id
+      user_pool_domain           = aws_cognito_user_pool_domain.live_test[0].domain
+      on_unauthenticated_request = "authenticate"
+      scope                      = "openid email profile"
+      session_cookie_name        = "FreeFlowDevAuth"
+      session_timeout            = 3600
+    }
+  }
+
+  action {
+    order            = 2
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.console[0].arn
+  }
+
+  condition {
+    host_header {
+      values = local.portal_extra_hostnames
+    }
+  }
+}
+
 # Keep the legacy portal/API target group attached to the authenticated ALB
 # while the underwriting console is the HTTPS default.  This permits ECS to
 # maintain the portal service and makes any future /api/* route subject to the
