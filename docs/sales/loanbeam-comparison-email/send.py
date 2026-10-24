@@ -17,15 +17,23 @@ the host can read, nor written to shell history by an ``export``:
 Use an app password rather than the account login, so revoking it does not
 change the password on the mailbox itself. ``PURELYMAIL_PASSWORD`` is still
 honoured when set, for an automated run with no terminal attached.
+
+``--draft`` files the message in the mailbox over IMAP instead of sending it.
+Purelymail's webmail composes in rich text with no way to paste HTML source, so
+a draft is the only route to this template from a phone: seed one from a
+desktop, then open Drafts in webmail, set the recipient, and send.
 """
 
 from __future__ import annotations
 
 import argparse
+import imaplib
 import os
+import re
 import smtplib
 import ssl
 import sys
+import time
 from email.headerregistry import Address
 from email.message import EmailMessage
 from getpass import getpass
@@ -34,6 +42,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SMTP_HOST = 'smtp.purelymail.com'
 SMTP_PORT = 465
+IMAP_HOST = 'imap.purelymail.com'
+IMAP_PORT = 993
+LIST_LINE = re.compile(rb'\((?P<flags>[^)]*)\) "(?P<delimiter>[^"]*)" (?P<name>.+)')
 
 
 def load_text() -> tuple[str, str]:
@@ -85,6 +96,43 @@ def build(args: argparse.Namespace, sender: str) -> EmailMessage:
     return message
 
 
+def drafts_folder(listing: list[bytes]) -> str:
+    """Return the mailbox the server flags \\Drafts, falling back to 'Drafts'.
+
+    Only the flag is trustworthy. Purelymail answers in English today, but a
+    server is free to localise the name, and the delimiter differs between
+    servers too, so the name is read back out of the LIST line rather than
+    assumed.
+    """
+    for line in listing or []:
+        parsed = LIST_LINE.match(line or b'')
+        if not parsed:
+            continue
+        # Compared as whole tokens: a substring test also matches \DraftsArchive.
+        flags = parsed.group('flags').decode('latin-1').split()
+        if any(flag.lower() == r'\drafts' for flag in flags):
+            return parsed.group('name').decode().strip().strip('"')
+    return 'Drafts'
+
+
+def file_draft(message: EmailMessage, sender: str, password: str) -> str:
+    imap = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, ssl_context=ssl.create_default_context())
+    try:
+        imap.login(sender, password)
+        folder = drafts_folder(imap.list()[1])
+        status, detail = imap.append(
+            f'"{folder}"', r'(\Draft)', imaplib.Time2Internaldate(time.time()), message.as_bytes()
+        )
+        if status != 'OK':
+            raise SystemExit(f'{IMAP_HOST} refused the draft: {detail}')
+        return folder
+    finally:
+        try:
+            imap.logout()
+        except OSError:
+            pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--to', required=True)
@@ -92,6 +140,7 @@ def main() -> int:
     parser.add_argument('--sender-name', required=True)
     parser.add_argument('--sender-title', required=True)
     parser.add_argument('--dry-run', action='store_true', help='print the message instead of sending')
+    parser.add_argument('--draft', action='store_true', help='file the message in Drafts instead of sending')
     args = parser.parse_args()
 
     sender = os.environ.get('PURELYMAIL_USER', '')
@@ -106,6 +155,19 @@ def main() -> int:
     password = os.environ.get('PURELYMAIL_PASSWORD') or getpass(f'App password for {sender}: ')
     if not password:
         raise SystemExit('an app password is required to send')
+
+    if args.draft:
+        try:
+            folder = file_draft(message, sender, password)
+        except imaplib.IMAP4.error as error:
+            raise SystemExit(
+                f'{IMAP_HOST} rejected the login or the draft for {sender}: {error}'
+            ) from None
+        except OSError as error:
+            raise SystemExit(f'{IMAP_HOST} was unreachable: {error}') from None
+        print(f'filed a draft in {folder}; open it in webmail, set the recipient, and send')
+        return 0
+
     try:
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context()) as smtp:
             smtp.login(sender, password)
