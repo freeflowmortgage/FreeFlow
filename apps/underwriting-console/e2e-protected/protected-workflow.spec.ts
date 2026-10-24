@@ -166,6 +166,32 @@ test('Income demo is isolated from protected APIs and can return to the product 
   await expect(page.getByTestId('enter-income-demo')).toHaveCount(0);
 });
 
+test('the demo pay stub annualizes and cites its own biweekly frequency', async ({ page }) => {
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
+    status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } },
+  }));
+
+  await page.goto('/workspace?demo=income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await page.getByRole('button', { name: 'Wages', exact: true }).click();
+
+  // The stub parses as biweekly, but the formula used to read "(Period pay ×
+  // 24) / 12" regardless, so a correct figure looked like it had been
+  // annualized at 24 semi-monthly periods.
+  const periodCard = page.locator('button', { hasText: 'Pay period annualized' }).first();
+  await periodCard.scrollIntoViewIfNeeded();
+  await expect(page.getByLabel('Pay frequency')).toHaveValue('BIWEEKLY');
+  await expect(periodCard).toContainText('(Biweekly pay × 26) / 12');
+  await expect(periodCard).toContainText('$7,280.00');
+
+  // 3360 is two weeks of scheduled hours (42 × 40 × 2), so the period and
+  // hourly methods agree at 26 periods. Switching to 24 has to move the
+  // figure, or the card would just be echoing the hourly method.
+  await page.getByLabel('Pay frequency').selectOption('SEMIMONTHLY');
+  await expect(periodCard).toContainText('(Semi-monthly pay × 24) / 12');
+  await expect(periodCard).toContainText('$6,720.00');
+});
+
 test('the scroll wheel never edits a rental amount in the protected build', async ({ page }) => {
   await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
     status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } },

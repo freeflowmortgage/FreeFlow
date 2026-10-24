@@ -5,6 +5,7 @@ import { loadDemoPacket } from './demoPacket';
 import { mapIncomeFields } from './incomeFieldMap';
 import { livePartnershipPatches, liveScheduleLPatch, liveWagePatch, owningBusinessReturns } from './liveHydrate';
 import { fieldForInspection, inspectOverlayFromField, kindsOf } from './livePacket';
+import { w2BaseMethods } from '../../../packages/mortgage-engine/src/w2-income-methods';
 
 const PUBLIC = new URL('../public', import.meta.url);
 
@@ -64,6 +65,31 @@ test('demo pay stub and W-2 hydrate the wage worksheet like a live upload', asyn
   assert.equal(wages?.payDate, '10/28/2022');
   assert.equal(wages?.w2Year1Box5, 90000);
   assert.equal(wages?.ein, '00-7654321');
+});
+
+test('the demo stub annualizes at its own 26 biweekly periods, not 24 semi-monthly ones', async () => {
+  const { fields } = await packet();
+  const wages = liveWagePatch([...fields('sample-paystub')]);
+  const employer = {
+    id: 'w2-live', wageDocSource: 'PAYSTUB' as const, monthsAtJob: 12, wvoeMonths: 12,
+    bonusYtd: 0, overtimeYtd: 0, tipsYtd: 0, commissionYtd: 0, wvoeBonus: 0, wvoeOvertime: 0, w2Year1Box5: 0,
+    payFrequency: wages!.payFrequency!, hourlyRate: wages!.hourlyRate!,
+    weeklyHours: wages!.weeklyHours!, currentPeriodBasePay: wages!.currentPeriodBasePay!, baseYtd: wages!.baseYtd!,
+  };
+  const monthly = (id: string) =>
+    w2BaseMethods(employer, { ownedByPrimary: true }).options.find((option) => option.id === id)?.monthly;
+
+  // The hourly and period methods agree here because the stub pays two weeks
+  // of scheduled hours (3360 = 42 x 40 x 2) and 26 biweekly periods is 52
+  // weeks. Matching figures are the arithmetic working, not the period method
+  // falling back to the hourly one, so pin what 24 periods would have paid.
+  assert.equal(monthly('hourly'), 7280);
+  assert.equal(monthly('period'), 7280);
+  assert.equal(
+    w2BaseMethods({ ...employer, payFrequency: 'SEMIMONTHLY' }, { ownedByPrimary: true })
+      .options.find((option) => option.id === 'period')?.monthly,
+    6720,
+  );
 });
 
 test('demo Schedule E carries all five rental properties', async () => {

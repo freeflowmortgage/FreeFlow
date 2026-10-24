@@ -133,6 +133,8 @@ import {
   bonusFrequencyLabel,
   bonusMonthsCovered,
   isBonusFrequency,
+  payFrequencyLabel,
+  payPeriodsPerYear,
   type BonusFrequency,
   type Form1084BorrowerIncome,
   type W2MethodContext,
@@ -2010,9 +2012,13 @@ export default function UnderwriterSplitViewDemo({
   }, [rentalFlow, rentalProperties, twoYearRental, borrowerMetadata.loanProgram]);
 
   const w2BasePicks = useMemo(() => {
+    // The annualization already follows the pay frequency the parser read off
+    // the stub. The cited formula has to name the same one, or a biweekly file
+    // reads as though it had been annualized at 24 semi-monthly periods.
+    const payFrequency = activeW2Employer.payFrequency;
     const options = [
       { id: 'hourly', label: 'Hourly rate', monthly: baseWageReconciliation.hourlyMethod, formula: '(Rate × hours × 52) / 12' },
-      { id: 'period', label: 'Pay period annualized', monthly: baseWageReconciliation.periodAnnualizedMethod, formula: '(Period pay × 24) / 12' },
+      { id: 'period', label: 'Pay period annualized', monthly: baseWageReconciliation.periodAnnualizedMethod, formula: `(${payFrequencyLabel(payFrequency)} pay × ${payPeriodsPerYear(payFrequency)}) / 12` },
       { id: 'ytd', label: 'YTD average', monthly: baseWageReconciliation.ytdAverageMethod, formula: `YTD base / ${formatElapsedMonths(baseWageReconciliation.ytdMonthsElapsed)} months elapsed` },
       { id: 'prior', label: 'Prior year W-2', monthly: baseWageReconciliation.priorYearW2Average, formula: `${priorW2YearPrefix}W-2 Box 5 / 12` },
       { id: 'not_used', label: 'Not used', monthly: 0, formula: 'Underwriter elected to exclude' },
@@ -2030,7 +2036,7 @@ export default function UnderwriterSplitViewDemo({
       recommendedId: 'period',
       reason: 'Hourly, period, and YTD are within 10%. Guideline uses Base Hourly, or Monthly salaried depending on the type, cite supported by ytd and historical earnings.',
     };
-  }, [baseWageReconciliation, priorW2YearPrefix]);
+  }, [baseWageReconciliation, priorW2YearPrefix, activeW2Employer.payFrequency]);
 
   const w2VarMethods = useMemo(
     () => w2VariableMethods(activeW2Employer, w2ContextFor(activeW2Employer)),
@@ -3700,10 +3706,11 @@ export default function UnderwriterSplitViewDemo({
                     onChange={(event) => patchW2Employer({ payFrequency: event.target.value as W2Employer['payFrequency'] })}
                     className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-slate-900"
                   >
-                    <option value="WEEKLY">Weekly</option>
-                    <option value="BIWEEKLY">Biweekly</option>
-                    <option value="SEMIMONTHLY">Semi-monthly</option>
-                    <option value="MONTHLY">Monthly</option>
+                    {(['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY'] as const).map((frequency) => (
+                      <option key={frequency} value={frequency}>
+                        {payFrequencyLabel(frequency)} · {payPeriodsPerYear(frequency)} pays/yr
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="font-bold text-slate-500 md:col-span-2">
