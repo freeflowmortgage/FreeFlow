@@ -12,8 +12,8 @@ import { useEffect } from 'react';
  * scrolling normally. Cancelling instead would trap the scroll whenever the
  * cursor passed over a focused input.
  *
- * Mounted once at the app shell so it covers every number input, including
- * ones added later.
+ * Mounted once in `main.tsx`, above the runtime app, so it covers every number
+ * input in every build mode, including inputs added later.
  */
 export function useNumberInputWheelGuard(): void {
   useEffect(() => {

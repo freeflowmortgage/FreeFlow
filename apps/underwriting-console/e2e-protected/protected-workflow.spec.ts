@@ -166,6 +166,39 @@ test('Income demo is isolated from protected APIs and can return to the product 
   await expect(page.getByTestId('enter-income-demo')).toHaveCount(0);
 });
 
+test('the scroll wheel never edits a rental amount in the protected build', async ({ page }) => {
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
+    status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } },
+  }));
+
+  await page.goto('/workspace?demo=income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await page.getByRole('button', { name: 'Rental', exact: true }).click();
+
+  // The guard used to be mounted inside the demo-runtime app only, so every
+  // protected build stepped each of these by one on a single wheel tick.
+  for (const label of ['Rents received', 'Insurance', 'Mortgage interest', 'Taxes', 'Depreciation', 'HOA dues', 'Total expenses', 'Fair rental days']) {
+    const amount = page.locator('div')
+      .filter({ hasText: new RegExp(`^Line \\d+${label}$`) })
+      .first()
+      .locator('input[type="number"]')
+      .first();
+    await amount.scrollIntoViewIfNeeded();
+    const before = await amount.inputValue();
+    await amount.click();
+    await amount.hover();
+    await page.mouse.wheel(0, -120);
+    await expect(amount, `${label} stepped on a wheel tick`).toHaveValue(before);
+    await page.mouse.wheel(0, 120);
+    await expect(amount, `${label} stepped on a wheel tick`).toHaveValue(before);
+  }
+
+  // Typing still reaches the field, so only stepping is blocked.
+  const rents = page.locator('div').filter({ hasText: /^Line \d+Rents received$/ }).first().locator('input[type="number"]').first();
+  await rents.fill('31500');
+  await expect(rents).toHaveValue('31500');
+});
+
 test('Income comparison accepts a private PDF preview and highlights its parser box', async ({ page }) => {
   const previewCalls: Array<{ path: string; contentType: string | undefined }> = [];
   await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
