@@ -1,6 +1,27 @@
-import { annualizePaystub, parsePayFrequency, payPeriodsPerYear } from '../src/paystubAnnualization';
+import {
+  annualizePaystub,
+  parsePayFrequency,
+  payFrequencyLabel,
+  payPeriodsPerYear,
+  type PayFrequency,
+} from '../src/paystubAnnualization';
 
 describe('paystub annualization ported from UnderwriterSplitViewDemo', () => {
+  // A cited formula names the frequency it annualized at, so a biweekly stub
+  // must never read as "(Semi-monthly pay × 24) / 12".
+  test.each<[PayFrequency, string, number, number]>([
+    ['WEEKLY', 'Weekly', 52, 11266.67],
+    ['BIWEEKLY', 'Biweekly', 26, 5633.33],
+    ['SEMIMONTHLY', 'Semi-monthly', 24, 5200],
+    ['MONTHLY', 'Monthly', 12, 2600],
+  ])('the %s period method annualizes at its own pays per year', (frequency, label, periods, monthly) => {
+    expect(payFrequencyLabel(frequency)).toBe(label);
+    expect(payPeriodsPerYear(frequency)).toBe(periods);
+    expect(
+      annualizePaystub({ currentPeriodBasePay: 2600, payFrequency: frequency, baseMethod: 'period' }).methods.period,
+    ).toBeCloseTo(monthly, 2);
+  });
+
   test('uses the console pay-period counts', () => {
     expect(payPeriodsPerYear('WEEKLY')).toBe(52);
     expect(payPeriodsPerYear('BIWEEKLY')).toBe(26);

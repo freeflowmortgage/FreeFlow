@@ -166,6 +166,79 @@ test('Income demo is isolated from protected APIs and can return to the product 
   await expect(page.getByTestId('enter-income-demo')).toHaveCount(0);
 });
 
+test('the demo pay stub annualizes and cites its own biweekly frequency', async ({ page }) => {
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
+    status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } },
+  }));
+
+  await page.goto('/workspace?demo=income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await page.getByRole('button', { name: 'Wages', exact: true }).click();
+
+  // The stub parses as biweekly, but the formula used to read "(Period pay ×
+  // 24) / 12" regardless, so a correct figure looked like it had been
+  // annualized at 24 semi-monthly periods.
+  const periodCard = page.locator('button', { hasText: 'Pay period annualized' }).first();
+  await periodCard.scrollIntoViewIfNeeded();
+  await expect(page.getByLabel('Pay frequency')).toHaveValue('BIWEEKLY');
+  await expect(periodCard).toContainText('(Biweekly pay × 26) / 12');
+  await expect(periodCard).toContainText('$7,280.00');
+
+  // 3360 is two weeks of scheduled hours (42 × 40 × 2), so the period and
+  // hourly methods agree at 26 periods. Switching to 24 has to move the
+  // figure, or the card would just be echoing the hourly method.
+  await page.getByLabel('Pay frequency').selectOption('SEMIMONTHLY');
+  await expect(periodCard).toContainText('(Semi-monthly pay × 24) / 12');
+  await expect(periodCard).toContainText('$6,720.00');
+});
+
+test('no rental amount steps on a wheel tick or an arrow key in the protected build', async ({ page }) => {
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
+    status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } },
+  }));
+
+  await page.goto('/workspace?demo=income');
+  await expect(page.getByTestId('protected-income-demo')).toBeVisible();
+  await page.getByRole('button', { name: 'Rental', exact: true }).click();
+
+  const rentalAmount = (label: string) => page.locator('div')
+    .filter({ hasText: new RegExp(`^Line \\d+${label}$`) })
+    .first()
+    .locator('input[type="number"]')
+    .first();
+
+  // Every one of these stepped by one on a single wheel tick, and again on
+  // Up/Down, because a number input treats both as a spinner step.
+  for (const label of ['Rents received', 'Insurance', 'Mortgage interest', 'Taxes', 'Depreciation', 'HOA dues', 'Total expenses', 'Fair rental days']) {
+    const amount = rentalAmount(label);
+    await amount.scrollIntoViewIfNeeded();
+    const before = await amount.inputValue();
+    await amount.click();
+    await amount.hover();
+    await page.mouse.wheel(0, -120);
+    await expect(amount, `${label} stepped on a wheel tick`).toHaveValue(before);
+    await page.mouse.wheel(0, 120);
+    await expect(amount, `${label} stepped on a wheel tick`).toHaveValue(before);
+
+    await amount.click();
+    await page.keyboard.press('ArrowUp');
+    await expect(amount, `${label} stepped on ArrowUp`).toHaveValue(before);
+    await page.keyboard.press('ArrowDown');
+    await expect(amount, `${label} stepped on ArrowDown`).toHaveValue(before);
+  }
+
+  // Only the stepping affordances are taken: typing still reaches the field
+  // and Left/Right still move the caret, so 315900 is 31500 with a 9 typed in.
+  const rents = rentalAmount('Rents received');
+  await rents.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('31500');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('9');
+  await expect(rents).toHaveValue('315900');
+});
+
 test('Income comparison accepts a private PDF preview and highlights its parser box', async ({ page }) => {
   const previewCalls: Array<{ path: string; contentType: string | undefined }> = [];
   await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {

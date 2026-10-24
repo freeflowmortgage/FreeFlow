@@ -102,6 +102,18 @@ export function payPeriodsPerYear(frequency: PayFrequency): number {
   return 24;
 }
 
+const PAY_FREQUENCY_LABELS: Record<PayFrequency, string> = {
+  WEEKLY: 'Weekly',
+  BIWEEKLY: 'Biweekly',
+  SEMIMONTHLY: 'Semi-monthly',
+  MONTHLY: 'Monthly',
+};
+
+/** How the frequency reads on screen, so a cited formula names the one in use. */
+export function payFrequencyLabel(frequency: PayFrequency): string {
+  return PAY_FREQUENCY_LABELS[frequency];
+}
+
 export function parsePayFrequency(value: string | undefined): PayFrequency | undefined {
   if (!value) return undefined;
   const normalized = value.toUpperCase();

@@ -17,7 +17,6 @@ import type { ConsoleView, LegalSlug, SourceMode, Surface } from './appTypes';
 import type { LiveDocument } from './parseTypes';
 import { postParsePdf } from '@console-document-loader';
 import { findDuplicate } from './livePacket';
-import { useNumberInputWheelGuard } from './hooks/useNumberInputWheelGuard';
 import { consoleRuntime } from './runtimeMode';
 
 const NAV: { id: ConsoleView; label: string; icon: typeof ShieldCheck }[] = [
@@ -91,10 +90,6 @@ async function sha256File(file: File): Promise<string> {
 }
 
 export default function App() {
-  // A focused number input treats the wheel as a spinner, so scrolling the page
-  // would silently rewrite an income figure.
-  useNumberInputWheelGuard();
-
   // Dedicated popped-out document pane windows (dual-monitor mode)
   const [docPaneKind] = useState<'income' | 'appraisal' | null>(() => {
     const hash = window.location.hash.replace(/^#/, '');
