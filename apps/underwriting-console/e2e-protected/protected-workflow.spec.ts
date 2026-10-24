@@ -192,7 +192,7 @@ test('the demo pay stub annualizes and cites its own biweekly frequency', async 
   await expect(periodCard).toContainText('$6,720.00');
 });
 
-test('the scroll wheel never edits a rental amount in the protected build', async ({ page }) => {
+test('no rental amount steps on a wheel tick or an arrow key in the protected build', async ({ page }) => {
   await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
     status: 500, json: { error: { code: 'DEMO_MUST_NOT_CALL_PROTECTED_API' } },
   }));
@@ -201,14 +201,16 @@ test('the scroll wheel never edits a rental amount in the protected build', asyn
   await expect(page.getByTestId('protected-income-demo')).toBeVisible();
   await page.getByRole('button', { name: 'Rental', exact: true }).click();
 
-  // The guard used to be mounted inside the demo-runtime app only, so every
-  // protected build stepped each of these by one on a single wheel tick.
+  const rentalAmount = (label: string) => page.locator('div')
+    .filter({ hasText: new RegExp(`^Line \\d+${label}$`) })
+    .first()
+    .locator('input[type="number"]')
+    .first();
+
+  // Every one of these stepped by one on a single wheel tick, and again on
+  // Up/Down, because a number input treats both as a spinner step.
   for (const label of ['Rents received', 'Insurance', 'Mortgage interest', 'Taxes', 'Depreciation', 'HOA dues', 'Total expenses', 'Fair rental days']) {
-    const amount = page.locator('div')
-      .filter({ hasText: new RegExp(`^Line \\d+${label}$`) })
-      .first()
-      .locator('input[type="number"]')
-      .first();
+    const amount = rentalAmount(label);
     await amount.scrollIntoViewIfNeeded();
     const before = await amount.inputValue();
     await amount.click();
@@ -217,12 +219,24 @@ test('the scroll wheel never edits a rental amount in the protected build', asyn
     await expect(amount, `${label} stepped on a wheel tick`).toHaveValue(before);
     await page.mouse.wheel(0, 120);
     await expect(amount, `${label} stepped on a wheel tick`).toHaveValue(before);
+
+    await amount.click();
+    await page.keyboard.press('ArrowUp');
+    await expect(amount, `${label} stepped on ArrowUp`).toHaveValue(before);
+    await page.keyboard.press('ArrowDown');
+    await expect(amount, `${label} stepped on ArrowDown`).toHaveValue(before);
   }
 
-  // Typing still reaches the field, so only stepping is blocked.
-  const rents = page.locator('div').filter({ hasText: /^Line \d+Rents received$/ }).first().locator('input[type="number"]').first();
-  await rents.fill('31500');
-  await expect(rents).toHaveValue('31500');
+  // Only the stepping affordances are taken: typing still reaches the field
+  // and Left/Right still move the caret, so 315900 is 31500 with a 9 typed in.
+  const rents = rentalAmount('Rents received');
+  await rents.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('31500');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('9');
+  await expect(rents).toHaveValue('315900');
 });
 
 test('Income comparison accepts a private PDF preview and highlights its parser box', async ({ page }) => {

@@ -41,8 +41,8 @@ body {
  * The number spinner turns a stray scroll or a mis-aimed click into a silent
  * edit of a borrower's income, and the arrows sit right where the value is.
  * The control keeps type="number" for numeric keyboards and validation; only
- * the stepper affordance is removed. Wheel edits are blocked separately in
- * useNumberInputWheelGuard.
+ * the stepper affordance is removed. Wheel and arrow-key steps are blocked
+ * separately in useNumberInputStepGuard.
  */
 input[type='number']::-webkit-outer-spin-button,
 input[type='number']::-webkit-inner-spin-button {
