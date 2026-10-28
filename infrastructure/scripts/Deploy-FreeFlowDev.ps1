@@ -245,12 +245,15 @@ $serviceDefinitions = @{
             "aws_ecs_task_definition.document_pull_worker[0]",
             "aws_ecs_service.document_pull_worker[0]",
             "aws_ecs_task_definition.encompass_sync_worker[0]",
-            "aws_ecs_service.encompass_sync_worker[0]"
+            "aws_ecs_service.encompass_sync_worker[0]",
+            "aws_ecs_task_definition.outbound_webhook_worker[0]",
+            "aws_ecs_service.outbound_webhook_worker[0]"
         )
         EcsServices = @(
             "freeflow-dev-portal",
             "freeflow-dev-document-pull-worker",
-            "freeflow-dev-encompass-sync-worker"
+            "freeflow-dev-encompass-sync-worker",
+            "freeflow-dev-outbound-webhook-worker"
         )
     }
     parser = @{

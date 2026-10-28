@@ -167,7 +167,7 @@ resource "aws_security_group_rule" "parser_from_console" {
 # path for every task in the VPC, so the portal application group must also be
 # admitted while the endpoints exist.
 resource "aws_security_group" "console_aws_endpoints" {
-  count       = var.enable_console || var.enable_encompass_connector ? 1 : 0
+  count       = local.private_aws_endpoints_enabled ? 1 : 0
   name        = "${local.name_prefix}-console-aws-endpoints-sg"
   description = "Private AWS API endpoints reachable from the underwriting console"
   vpc_id      = data.aws_vpc.existing.id
@@ -181,6 +181,7 @@ resource "aws_security_group" "console_aws_endpoints" {
       [var.app_security_group_id, aws_security_group.parser.id],
       var.enable_console ? [aws_security_group.console[0].id] : [],
       var.enable_encompass_connector ? [aws_security_group.connector[0].id] : [],
+      var.enable_outbound_webhook_worker ? [aws_security_group.outbound_webhook_worker[0].id] : [],
     )
   }
 }
@@ -214,7 +215,7 @@ locals {
 }
 
 resource "aws_vpc_endpoint" "console_ecr_api" {
-  count               = var.enable_console || var.enable_encompass_connector ? 1 : 0
+  count               = local.private_aws_endpoints_enabled ? 1 : 0
   vpc_id              = data.aws_vpc.existing.id
   service_name        = "com.amazonaws.${var.aws_region}.ecr.api"
   vpc_endpoint_type   = "Interface"
@@ -224,7 +225,7 @@ resource "aws_vpc_endpoint" "console_ecr_api" {
 }
 
 resource "aws_vpc_endpoint" "console_ecr_dkr" {
-  count               = var.enable_console || var.enable_encompass_connector ? 1 : 0
+  count               = local.private_aws_endpoints_enabled ? 1 : 0
   vpc_id              = data.aws_vpc.existing.id
   service_name        = "com.amazonaws.${var.aws_region}.ecr.dkr"
   vpc_endpoint_type   = "Interface"
@@ -234,7 +235,7 @@ resource "aws_vpc_endpoint" "console_ecr_dkr" {
 }
 
 resource "aws_vpc_endpoint" "console_logs" {
-  count               = var.enable_console || var.enable_encompass_connector ? 1 : 0
+  count               = local.private_aws_endpoints_enabled ? 1 : 0
   vpc_id              = data.aws_vpc.existing.id
   service_name        = "com.amazonaws.${var.aws_region}.logs"
   vpc_endpoint_type   = "Interface"
@@ -244,7 +245,7 @@ resource "aws_vpc_endpoint" "console_logs" {
 }
 
 resource "aws_vpc_endpoint" "connector_secretsmanager" {
-  count               = var.enable_encompass_connector ? 1 : 0
+  count               = var.enable_encompass_connector || var.enable_outbound_webhook_worker ? 1 : 0
   vpc_id              = data.aws_vpc.existing.id
   service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
   vpc_endpoint_type   = "Interface"
@@ -294,4 +295,92 @@ resource "aws_service_discovery_service" "connector" {
   health_check_custom_config {
     failure_threshold = 1
   }
+}
+
+# The webhook worker is the only task that sends tenant data to customer
+# systems, so it gets its own group whose internet egress is limited to the
+# customer receiver ranges. The application-layer allowlist and DNS pinning
+# still apply on top of this.
+resource "aws_security_group" "outbound_webhook_worker" {
+  count       = var.enable_outbound_webhook_worker ? 1 : 0
+  name        = "${local.name_prefix}-outbound-webhook-worker-sg"
+  description = "Outbound income webhook worker with customer-scoped HTTPS egress"
+  vpc_id      = data.aws_vpc.existing.id
+}
+
+resource "aws_security_group_rule" "outbound_webhook_worker_to_customers" {
+  count             = var.enable_outbound_webhook_worker ? 1 : 0
+  type              = "egress"
+  description       = "HTTPS to approved customer webhook receivers through NAT"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.outbound_webhook_worker[0].id
+  cidr_blocks       = var.outbound_webhook_egress_cidrs
+}
+
+resource "aws_security_group_rule" "outbound_webhook_worker_to_aws_endpoints" {
+  count                    = var.enable_outbound_webhook_worker ? 1 : 0
+  type                     = "egress"
+  description              = "HTTPS to private ECR, Logs, and Secrets Manager endpoints"
+  protocol                 = "tcp"
+  from_port                = 443
+  to_port                  = 443
+  security_group_id        = aws_security_group.outbound_webhook_worker[0].id
+  source_security_group_id = aws_security_group.console_aws_endpoints[0].id
+}
+
+resource "aws_security_group_rule" "outbound_webhook_worker_to_s3_image_layers" {
+  count             = var.enable_outbound_webhook_worker ? 1 : 0
+  type              = "egress"
+  description       = "HTTPS to private S3 image layers"
+  protocol          = "tcp"
+  from_port         = 443
+  to_port           = 443
+  security_group_id = aws_security_group.outbound_webhook_worker[0].id
+  prefix_list_ids   = [data.aws_prefix_list.s3.id]
+}
+
+resource "aws_security_group_rule" "outbound_webhook_worker_dns_udp" {
+  count             = var.enable_outbound_webhook_worker ? 1 : 0
+  type              = "egress"
+  description       = "DNS over UDP to the VPC resolver"
+  protocol          = "udp"
+  from_port         = 53
+  to_port           = 53
+  security_group_id = aws_security_group.outbound_webhook_worker[0].id
+  cidr_blocks       = ["${cidrhost(data.aws_vpc.existing.cidr_block, 2)}/32"]
+}
+
+resource "aws_security_group_rule" "outbound_webhook_worker_dns_tcp" {
+  count             = var.enable_outbound_webhook_worker ? 1 : 0
+  type              = "egress"
+  description       = "DNS over TCP to the VPC resolver"
+  protocol          = "tcp"
+  from_port         = 53
+  to_port           = 53
+  security_group_id = aws_security_group.outbound_webhook_worker[0].id
+  cidr_blocks       = ["${cidrhost(data.aws_vpc.existing.cidr_block, 2)}/32"]
+}
+
+resource "aws_security_group_rule" "outbound_webhook_worker_to_database" {
+  for_each                 = var.enable_outbound_webhook_worker ? toset(data.aws_db_instance.existing.vpc_security_groups) : toset([])
+  type                     = "egress"
+  description              = "Webhook worker login to PostgreSQL"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  security_group_id        = aws_security_group.outbound_webhook_worker[0].id
+  source_security_group_id = each.value
+}
+
+resource "aws_security_group_rule" "database_from_outbound_webhook_worker" {
+  for_each                 = var.enable_outbound_webhook_worker ? toset(data.aws_db_instance.existing.vpc_security_groups) : toset([])
+  type                     = "ingress"
+  description              = "PostgreSQL from the outbound webhook worker"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  security_group_id        = each.value
+  source_security_group_id = aws_security_group.outbound_webhook_worker[0].id
 }

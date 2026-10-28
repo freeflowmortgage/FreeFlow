@@ -106,6 +106,7 @@ locals {
     aws_iam_role.migration_task.arn,
     try(aws_iam_role.document_pull_worker_task[0].arn, null),
     try(aws_iam_role.encompass_sync_worker_task[0].arn, null),
+    try(aws_iam_role.outbound_webhook_worker_task[0].arn, null),
   ])
 }
 

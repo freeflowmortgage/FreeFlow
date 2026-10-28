@@ -17,6 +17,9 @@ locals {
     var.enable_monitoring && var.enable_encompass_sync_worker ? {
       sync_worker = aws_ecs_service.encompass_sync_worker[0].name
     } : {},
+    var.enable_monitoring && var.enable_outbound_webhook_worker ? {
+      outbound_webhook_worker = aws_ecs_service.outbound_webhook_worker[0].name
+    } : {},
   )
 
   worker_cpu_alarm_services = merge(
@@ -28,6 +31,9 @@ locals {
     } : {},
     var.enable_monitoring && var.enable_encompass_sync_worker ? {
       sync_worker = aws_ecs_service.encompass_sync_worker[0].name
+    } : {},
+    var.enable_monitoring && var.enable_outbound_webhook_worker ? {
+      outbound_webhook_worker = aws_ecs_service.outbound_webhook_worker[0].name
     } : {},
   )
 
@@ -71,6 +77,18 @@ locals {
         log_group   = aws_cloudwatch_log_group.encompass_sync_worker[0].name
         pattern     = "{ $.event = \"sync_retry\" || $.event = \"sync_reconciliation\" }"
         metric_name = "SyncRetryOrReconciliation"
+      }
+    } : {},
+    var.enable_monitoring && var.enable_outbound_webhook_worker ? {
+      webhook_delivery_failure = {
+        log_group   = aws_cloudwatch_log_group.outbound_webhook_worker[0].name
+        pattern     = "{ $.event = \"webhook_delivery_failure\" }"
+        metric_name = "WebhookDeliveryFailure"
+      }
+      webhook_delivery_retry = {
+        log_group   = aws_cloudwatch_log_group.outbound_webhook_worker[0].name
+        pattern     = "{ $.event = \"webhook_delivery_retry\" }"
+        metric_name = "WebhookDeliveryRetry"
       }
     } : {},
     var.enable_monitoring && var.enable_encompass_connector ? {

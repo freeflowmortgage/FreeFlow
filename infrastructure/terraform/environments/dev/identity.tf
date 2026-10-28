@@ -23,7 +23,7 @@ data "aws_iam_policy_document" "task_execution_secrets" {
   statement {
     sid     = "ReadRuntimeSecrets"
     actions = ["secretsmanager:GetSecretValue"]
-    resources = concat(
+    resources = distinct(concat(
       [
         aws_secretsmanager_secret.database_app.arn,
         aws_secretsmanager_secret.field_encryption.arn,
@@ -32,7 +32,8 @@ data "aws_iam_policy_document" "task_execution_secrets" {
         aws_secretsmanager_secret.database_connector.arn,
         aws_secretsmanager_secret.connector_service_signing_key[0].arn,
       ] : [],
-    )
+      var.enable_outbound_webhook_worker ? [aws_secretsmanager_secret.database_connector.arn] : [],
+    ))
   }
 }
 
@@ -92,6 +93,57 @@ data "aws_iam_policy_document" "portal_task" {
       resources = [aws_sqs_queue.document_pull[0].arn]
     }
   }
+
+  # Admins create and rotate signing secrets; the portal never reads them back.
+  dynamic "statement" {
+    for_each = var.enable_outbound_webhook_worker ? [1] : []
+
+    content {
+      sid = "ManageOutboundWebhookSigningSecrets"
+      actions = [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:TagResource",
+        "secretsmanager:DescribeSecret",
+      ]
+      resources = [local.outbound_webhook_secret_arn_pattern]
+    }
+  }
+}
+
+resource "aws_iam_role" "outbound_webhook_worker_task" {
+  count = var.enable_outbound_webhook_worker ? 1 : 0
+
+  name               = "${local.name_prefix}-outbound-webhook-worker-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+data "aws_iam_policy_document" "outbound_webhook_worker_task" {
+  count = var.enable_outbound_webhook_worker ? 1 : 0
+
+  statement {
+    sid = "ReadOutboundWebhookSigningSecrets"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [local.outbound_webhook_secret_arn_pattern]
+  }
+}
+
+resource "aws_iam_role_policy" "outbound_webhook_worker_task" {
+  count = var.enable_outbound_webhook_worker ? 1 : 0
+
+  name   = "outbound-webhook-worker-runtime"
+  role   = aws_iam_role.outbound_webhook_worker_task[0].id
+  policy = data.aws_iam_policy_document.outbound_webhook_worker_task[0].json
+}
+
+resource "aws_cloudwatch_log_group" "outbound_webhook_worker" {
+  count = var.enable_outbound_webhook_worker ? 1 : 0
+
+  name              = "/ecs/${local.name_prefix}/outbound-webhook-worker"
+  retention_in_days = 30
 }
 
 resource "aws_iam_role" "connector_execution" {
