@@ -7,7 +7,10 @@ export type OperationalEvent =
   | 'document_pull_success'
   | 'sync_failure'
   | 'sync_retry'
-  | 'sync_reconciliation';
+  | 'sync_reconciliation'
+  | 'webhook_delivery_success'
+  | 'webhook_delivery_retry'
+  | 'webhook_delivery_failure';
 
 const SAFE_CODE = /^[A-Z][A-Z0-9_]{0,99}$/;
 

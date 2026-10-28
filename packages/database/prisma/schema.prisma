@@ -88,6 +88,15 @@ enum EncompassHostWriteStatus {
   FAILED
 }
 
+enum OutboundWebhookDeliveryStatus {
+  PENDING
+  IN_PROGRESS
+  RETRYABLE_FAILURE
+  SUCCEEDED
+  FAILED
+  SUPERSEDED
+}
+
 enum IncomeExtractionStatus {
   ACTIVE
   SUPERSEDED
@@ -143,6 +152,9 @@ model Tenant {
   incomeMetadataReviews     IncomeExtractionMetadataReview[]
   loanBorrowers             LoanBorrower[]
   encompassConnectorBinding EncompassConnectorBinding?
+  outboundWebhookEndpoint   OutboundWebhookEndpoint?
+  outboundWebhookDeliveries OutboundWebhookDelivery[]
+  outboundWebhookAudits     OutboundWebhookEndpointAuditEvent[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -210,14 +222,18 @@ model User {
   nmlsNumber   String?  @db.VarChar(50)
 
   // Audit Relations
-  verifiedAudits               Form1084Audit[]                  @relation("VerifiedByUser")
-  verifiedAppraisals           AppraisalAudit[]                 @relation("AppraisalVerifiedByUser")
-  clearedAppraisalActions      AppraisalActionItem[]            @relation("ActionItemClearedByUser")
+  verifiedAudits               Form1084Audit[]                     @relation("VerifiedByUser")
+  verifiedAppraisals           AppraisalAudit[]                    @relation("AppraisalVerifiedByUser")
+  clearedAppraisalActions      AppraisalActionItem[]               @relation("ActionItemClearedByUser")
   auditEvents                  AuditEvent[]
-  requestedDocumentPulls       EncompassDocumentPullJob[]       @relation("DocumentPullRequestedBy")
-  requestedEncompassSyncs      EncompassSyncJob[]               @relation("SyncRequestedBy")
-  requestedEncompassHostWrites EncompassHostWrite[]             @relation("HostWriteRequestedBy")
-  incomeMetadataReviews        IncomeExtractionMetadataReview[] @relation("MetadataReviewedBy")
+  requestedDocumentPulls       EncompassDocumentPullJob[]          @relation("DocumentPullRequestedBy")
+  requestedEncompassSyncs      EncompassSyncJob[]                  @relation("SyncRequestedBy")
+  requestedEncompassHostWrites EncompassHostWrite[]                @relation("HostWriteRequestedBy")
+  incomeMetadataReviews        IncomeExtractionMetadataReview[]    @relation("MetadataReviewedBy")
+  createdWebhookEndpoints      OutboundWebhookEndpoint[]           @relation("WebhookEndpointCreatedBy")
+  updatedWebhookEndpoints      OutboundWebhookEndpoint[]           @relation("WebhookEndpointUpdatedBy")
+  requestedWebhookDeliveries   OutboundWebhookDelivery[]           @relation("WebhookDeliveryRequestedBy")
+  webhookEndpointAudits        OutboundWebhookEndpointAuditEvent[] @relation("WebhookEndpointAuditActor")
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -259,6 +275,7 @@ model LoanApplication {
   calculationExtractions    IncomeCalculationExtraction[]
   incomeMetadataReviews     IncomeExtractionMetadataReview[]
   loanBorrowers             LoanBorrower[]
+  outboundWebhookDeliveries OutboundWebhookDelivery[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -504,15 +521,16 @@ model IncomeCalculationExtraction {
 // bodies, borrower identifiers, or provider secrets. The database migration
 // grants INSERT/SELECT only and rejects every UPDATE/DELETE attempt.
 model AuditEvent {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId            String               @db.Uuid
-  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  loanId              String               @db.Uuid
-  loanApplication     LoanApplication      @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
-  actorUserId         String               @db.Uuid
-  actorUser           User                 @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
-  encompassSyncJobs   EncompassSyncJob[]   @relation("SyncApprovalEvent")
-  encompassHostWrites EncompassHostWrite[] @relation("HostWriteApprovalEvent")
+  id                  String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String                    @db.Uuid
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  loanId              String                    @db.Uuid
+  loanApplication     LoanApplication           @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict)
+  actorUserId         String                    @db.Uuid
+  actorUser           User                      @relation(fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict)
+  encompassSyncJobs   EncompassSyncJob[]        @relation("SyncApprovalEvent")
+  encompassHostWrites EncompassHostWrite[]      @relation("HostWriteApprovalEvent")
+  webhookDeliveries   OutboundWebhookDelivery[] @relation("WebhookDeliveryApprovalEvent")
 
   action              String   @db.VarChar(100)
   entityType          String   @db.VarChar(100)
@@ -605,42 +623,42 @@ model EncompassDocumentPullJob {
 // Durable approved-result outbox and execution state. The row is the database
 // authority; SQS carries only its identifiers and can be replayed safely.
 model EncompassSyncJob {
-  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId            String              @db.Uuid
-  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "encompass_sync_jobs_tenant_fkey")
-  loanId              String              @db.Uuid
-  loanApplication     LoanApplication     @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_loan_fkey")
-  approvalEventId     String              @db.Uuid
-  approvalEvent       AuditEvent          @relation("SyncApprovalEvent", fields: [tenantId, approvalEventId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_approval_fkey")
-  requestedByUserId   String              @db.Uuid
-  requestedByUser     User                @relation("SyncRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_requester_fkey")
-  expectedLoanVersion Int
-  idempotencyKey      String              @db.VarChar(128)
-  correlationId       String              @db.VarChar(100)
-  status              EncompassSyncStatus @default(QUEUED)
-  attemptCount        Int                 @default(0)
-  reconciliationCount Int                 @default(0)
-  safeErrorCode       String?             @db.VarChar(100)
-  providerRevision    String?             @db.VarChar(100)
+  id                         String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId                   String                    @db.Uuid
+  tenant                     Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "encompass_sync_jobs_tenant_fkey")
+  loanId                     String                    @db.Uuid
+  loanApplication            LoanApplication           @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_loan_fkey")
+  approvalEventId            String                    @db.Uuid
+  approvalEvent              AuditEvent                @relation("SyncApprovalEvent", fields: [tenantId, approvalEventId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_approval_fkey")
+  requestedByUserId          String                    @db.Uuid
+  requestedByUser            User                      @relation("SyncRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "encompass_sync_jobs_requester_fkey")
+  expectedLoanVersion        Int
+  idempotencyKey             String                    @db.VarChar(128)
+  correlationId              String                    @db.VarChar(100)
+  status                     EncompassSyncStatus       @default(QUEUED)
+  attemptCount               Int                       @default(0)
+  reconciliationCount        Int                       @default(0)
+  safeErrorCode              String?                   @db.VarChar(100)
+  providerRevision           String?                   @db.VarChar(100)
   // Immutable reviewer-confirmed write snapshot. Existing pre-migration jobs
   // remain nullable and fail closed in the worker because they cannot prove an
   // exact field-level approval.
-  writePreviewSchemaVersion String?        @db.VarChar(64)
-  writePreviewHash          String?        @db.Char(64)
-  writePreviewFields        Json?
+  writePreviewSchemaVersion  String?                   @db.VarChar(64)
+  writePreviewHash           String?                   @db.Char(64)
+  writePreviewFields         Json?
   // Exact server-authoritative target approved with the v2 preview. Legacy v1
   // rows remain null and are rejected by the worker rather than retargeted.
   writeTargetIntegrationMode EncompassIntegrationMode?
-  writeTargetLenderId        String?        @db.VarChar(255)
-  writeTargetDeploymentId    String?        @db.VarChar(255)
-  writeTargetEncompassGuid   String?        @db.VarChar(255)
+  writeTargetLenderId        String?                   @db.VarChar(255)
+  writeTargetDeploymentId    String?                   @db.VarChar(255)
+  writeTargetEncompassGuid   String?                   @db.VarChar(255)
   // Allowlisted field IDs and closed status/reason codes only; no field values or value-derived hashes.
   // Raw LOS field values and provider messages are forbidden.
-  fieldReadback       Json?
-  startedAt           DateTime?           @db.Timestamptz
-  completedAt         DateTime?           @db.Timestamptz
-  createdAt           DateTime            @default(now()) @db.Timestamptz
-  updatedAt           DateTime            @updatedAt @db.Timestamptz
+  fieldReadback              Json?
+  startedAt                  DateTime?                 @db.Timestamptz
+  completedAt                DateTime?                 @db.Timestamptz
+  createdAt                  DateTime                  @default(now()) @db.Timestamptz
+  updatedAt                  DateTime                  @updatedAt @db.Timestamptz
 
   @@unique([tenantId, id], map: "encompass_sync_jobs_tenant_id_key")
   @@unique([tenantId, idempotencyKey], map: "encompass_sync_jobs_tenant_idempotency_key")
@@ -677,6 +695,95 @@ model EncompassHostWrite {
   @@unique([tenantId, approvalEventId], map: "encompass_host_writes_tenant_approval_key")
   @@index([tenantId, loanId, createdAt], map: "encompass_host_writes_tenant_loan_created_idx")
   @@map("encompass_host_writes")
+}
+
+// One tenant destination for approved standalone income. The signing secret
+// lives in Secrets Manager; only its reference and rotation counter are kept here.
+model OutboundWebhookEndpoint {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId               String    @unique(map: "outbound_webhook_endpoints_tenant_key") @db.Uuid
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "outbound_webhook_endpoints_tenant_fkey")
+  url                    String    @db.VarChar(2048)
+  isEnabled              Boolean   @default(true)
+  signingSecretRef       String    @db.VarChar(512)
+  signingSecretVersion   Int       @default(1)
+  signingSecretRotatedAt DateTime? @db.Timestamptz
+  version                Int       @default(1)
+  createdByUserId        String    @db.Uuid
+  createdByUser          User      @relation("WebhookEndpointCreatedBy", fields: [tenantId, createdByUserId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_endpoints_creator_fkey")
+  updatedByUserId        String    @db.Uuid
+  updatedByUser          User      @relation("WebhookEndpointUpdatedBy", fields: [tenantId, updatedByUserId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_endpoints_updater_fkey")
+  createdAt              DateTime  @default(now()) @db.Timestamptz
+  updatedAt              DateTime  @updatedAt @db.Timestamptz
+
+  deliveries  OutboundWebhookDelivery[]
+  auditEvents OutboundWebhookEndpointAuditEvent[]
+
+  @@unique([tenantId, id], map: "outbound_webhook_endpoints_tenant_id_key")
+  @@map("outbound_webhook_endpoints")
+}
+
+// Delivery outbox committed with the approval. Identifiers and safe status
+// only: the payload is rebuilt from the approved snapshot at send time and is
+// never stored, queued, or logged.
+model OutboundWebhookDelivery {
+  id                    String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String                        @db.Uuid
+  tenant                Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "outbound_webhook_deliveries_tenant_fkey")
+  loanId                String                        @db.Uuid
+  loanApplication       LoanApplication               @relation(fields: [tenantId, loanId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_deliveries_loan_fkey")
+  endpointId            String                        @db.Uuid
+  endpoint              OutboundWebhookEndpoint       @relation(fields: [tenantId, endpointId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_deliveries_endpoint_fkey")
+  approvalEventId       String                        @db.Uuid
+  approvalEvent         AuditEvent                    @relation("WebhookDeliveryApprovalEvent", fields: [tenantId, approvalEventId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_deliveries_approval_fkey")
+  requestedByUserId     String                        @db.Uuid
+  requestedByUser       User                          @relation("WebhookDeliveryRequestedBy", fields: [tenantId, requestedByUserId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_deliveries_requester_fkey")
+  eventType             String                        @db.VarChar(64)
+  approvedLoanVersion   Int
+  correlationId         String                        @db.VarChar(100)
+  status                OutboundWebhookDeliveryStatus @default(PENDING)
+  attemptCount          Int                           @default(0)
+  nextAttemptAt         DateTime                      @default(now()) @db.Timestamptz
+  claimToken            String?                       @db.Uuid
+  startedAt             DateTime?                     @db.Timestamptz
+  lastAttemptAt         DateTime?                     @db.Timestamptz
+  lastResponseStatus    Int?
+  safeErrorCode         String?                       @db.VarChar(100)
+  deliveredSnapshotHash String?                       @db.Char(64)
+  completedAt           DateTime?                     @db.Timestamptz
+  createdAt             DateTime                      @default(now()) @db.Timestamptz
+  updatedAt             DateTime                      @updatedAt @db.Timestamptz
+
+  @@unique([tenantId, id], map: "outbound_webhook_deliveries_tenant_id_key")
+  @@unique([tenantId, endpointId, approvalEventId], map: "outbound_webhook_deliveries_tenant_endpoint_approval_key")
+  @@index([tenantId, createdAt, id], map: "outbound_webhook_deliveries_tenant_created_idx")
+  @@index([tenantId, loanId, createdAt], map: "outbound_webhook_deliveries_tenant_loan_created_idx")
+  @@index([status, nextAttemptAt], map: "outbound_webhook_deliveries_status_due_idx")
+  @@map("outbound_webhook_deliveries")
+}
+
+// Append-only record of endpoint configuration changes. Stores the URL host
+// and a hash of the full URL, never the secret.
+model OutboundWebhookEndpointAuditEvent {
+  id                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId             String                  @db.Uuid
+  tenant               Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "outbound_webhook_endpoint_audits_tenant_fkey")
+  endpointId           String                  @db.Uuid
+  endpoint             OutboundWebhookEndpoint @relation(fields: [tenantId, endpointId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_endpoint_audits_endpoint_fkey")
+  actorUserId          String                  @db.Uuid
+  actorUser            User                    @relation("WebhookEndpointAuditActor", fields: [tenantId, actorUserId], references: [tenantId, id], onDelete: Restrict, map: "outbound_webhook_endpoint_audits_actor_fkey")
+  action               String                  @db.VarChar(64)
+  endpointVersion      Int
+  urlHost              String                  @db.VarChar(255)
+  urlHash              String                  @db.Char(64)
+  isEnabled            Boolean
+  signingSecretVersion Int
+  requestId            String                  @db.VarChar(100)
+  authTime             DateTime                @db.Timestamptz
+  occurredAt           DateTime                @default(now()) @db.Timestamptz
+
+  @@index([tenantId, endpointId, occurredAt], map: "outbound_webhook_endpoint_audits_tenant_endpoint_idx")
+  @@map("outbound_webhook_endpoint_audit_events")
 }
 
 // 9. LOAN CONDITIONS (Encompass Checklist Integration)

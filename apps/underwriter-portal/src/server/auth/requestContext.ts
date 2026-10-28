@@ -17,6 +17,7 @@ export type RequestContext = Readonly<{
   membershipId: string;
   permissions: readonly Permission[];
   authTime: Date;
+  authTimeAsserted?: boolean;
 }>;
 
 export type ActiveMembership = {
@@ -217,7 +218,14 @@ export async function createRequestContext(
     throw new RequestAuthenticationError(403, 'MEMBERSHIP_REQUIRED', 'An active tenant membership is required.');
   }
 
-  return buildAuthorizedContext(requestId, identity.subject, identity.authTime, membership, requiredPermission);
+  return buildAuthorizedContext(
+    requestId,
+    identity.subject,
+    identity.authTime,
+    membership,
+    requiredPermission,
+    identity.authTimeAsserted === true,
+  );
 }
 
 function defaultDependencies(): RequestContextDependencies {
@@ -283,6 +291,7 @@ function buildAuthorizedContext(
   authTime: Date,
   membership: ActiveMembership,
   requiredPermission: Permission,
+  authTimeAsserted = false,
 ): RequestContext {
   const permissions = permissionsForRole(membership.role);
   if (!permissions.includes(requiredPermission)) {
@@ -295,6 +304,7 @@ function buildAuthorizedContext(
     membershipId: membership.id,
     permissions,
     authTime: new Date(authTime),
+    authTimeAsserted,
   });
 }
 
