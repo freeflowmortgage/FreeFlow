@@ -101,6 +101,37 @@ test('standalone create/import is versioned, idempotent, and same-origin', async
   }
 });
 
+test('webhook settings use same-origin admin routes with idempotency keys on every mutation', async () => {
+  const originalFetch = globalThis.fetch;
+  const received: { path: string; method: string; body: unknown; key: string | null }[] = [];
+  globalThis.fetch = (async (input, init) => {
+    received.push({
+      path: String(input),
+      method: String(init?.method),
+      body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+      key: new Headers(init?.headers).get('idempotency-key'),
+    });
+    assert.equal(init?.credentials, 'same-origin');
+    return Response.json({ endpoint: { configured: false }, signingSecret: null, replayed: false, deliveries: [], nextCursor: null });
+  }) as typeof fetch;
+  try {
+    await portalClient.getWebhookEndpoint();
+    await portalClient.saveWebhookEndpoint({ url: 'https://hooks.example/x', isEnabled: true, expectedVersion: null }, 'webhook-save-0001');
+    await portalClient.rotateWebhookSecret({ expectedVersion: 2 }, 'webhook-rotate-0001');
+    await portalClient.listWebhookDeliveries('cursor/1');
+    await portalClient.redeliverWebhook('delivery/1', 'webhook-redeliver-0001');
+    assert.deepEqual(received, [
+      { path: '/api/v1/webhooks/endpoint', method: 'GET', body: undefined, key: null },
+      { path: '/api/v1/webhooks/endpoint', method: 'PUT', body: { url: 'https://hooks.example/x', isEnabled: true, expectedVersion: null }, key: 'webhook-save-0001' },
+      { path: '/api/v1/webhooks/endpoint/rotate-secret', method: 'POST', body: { expectedVersion: 2 }, key: 'webhook-rotate-0001' },
+      { path: '/api/v1/webhooks/deliveries?cursor=cursor%2F1', method: 'GET', body: undefined, key: null },
+      { path: '/api/v1/webhooks/deliveries/delivery%2F1/redeliver', method: 'POST', body: undefined, key: 'webhook-redeliver-0001' },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('comparison preview uses the authenticated memory-only route', async () => {
   const originalFetch = globalThis.fetch;
   let received: { path: string; init: RequestInit | undefined } | undefined;
