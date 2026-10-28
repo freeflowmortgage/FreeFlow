@@ -207,6 +207,48 @@ variable "enable_encompass_sync_worker" {
   }
 }
 
+variable "enable_outbound_webhook_worker" {
+  type        = bool
+  description = "Runs the outbound income webhook worker that delivers approved income for standalone (non-Encompass) loans to tenant-configured HTTPS endpoints."
+  default     = false
+
+  validation {
+    condition     = !var.enable_outbound_webhook_worker || (var.enable_edge && var.enable_services)
+    error_message = "The outbound webhook worker requires edge and services."
+  }
+}
+
+variable "outbound_webhook_allowed_hosts" {
+  type        = list(string)
+  description = "Customer webhook hostnames that tenants may configure. Entries are exact hostnames or *.domain wildcards. An empty list blocks every endpoint."
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for host in var.outbound_webhook_allowed_hosts : can(regex("^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", host))
+    ])
+    error_message = "outbound_webhook_allowed_hosts entries must be lowercase hostnames, optionally prefixed with *."
+  }
+}
+
+variable "outbound_webhook_egress_cidrs" {
+  type        = list(string)
+  description = "IPv4 CIDRs the webhook worker may reach on TCP 443 through NAT. Restrict these to the customer receivers' published ranges."
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for cidr in var.outbound_webhook_egress_cidrs : can(cidrhost(cidr, 0)) && !can(regex(":", cidr))
+    ])
+    error_message = "outbound_webhook_egress_cidrs must contain valid IPv4 CIDRs."
+  }
+
+  validation {
+    condition     = !var.enable_outbound_webhook_worker || length(var.outbound_webhook_egress_cidrs) > 0
+    error_message = "The outbound webhook worker requires at least one customer egress CIDR."
+  }
+}
+
 variable "enable_encompass_connector" {
   type        = bool
   description = "Runs the internal-only custom Encompass connector foundation without LOS credentials or document retrieval."

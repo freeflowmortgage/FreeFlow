@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import type { ApprovedIncomeSnapshot } from './approvedIncomeSnapshot';
 
-export const APPROVED_INCOME_JSON_PROFILE = 'freeflow-approved-income-json-v1' as const;
+export { APPROVED_INCOME_JSON_PROFILE, serializeApprovedIncomeJson } from './approvedIncomeJson';
 export const MISMO_REFERENCE_MODEL_IDENTIFIER = '3.4.0' as const;
 export const MISMO_APPROVED_INCOME_PROFILE = 'freeflow-approved-income-mismo-3.4-profile-v1' as const;
 export const MISMO_OFFICIAL_XSD_VALIDATION_STATUS = 'NOT_PERFORMED_OFFICIAL_XSD_NOT_BUNDLED' as const;
@@ -12,10 +12,6 @@ export type MismoProfileValidation = Readonly<{
   referenceModelIdentifier: typeof MISMO_REFERENCE_MODEL_IDENTIFIER;
   officialXsdValidation: typeof MISMO_OFFICIAL_XSD_VALIDATION_STATUS;
 }>;
-
-export function serializeApprovedIncomeJson(snapshot: ApprovedIncomeSnapshot): string {
-  return `${JSON.stringify({ exportProfile: APPROVED_INCOME_JSON_PROFILE, ...snapshot }, null, 2)}\n`;
-}
 
 /**
  * Generates a narrow FreeFlow implementation profile carried in a MISMO 3.4

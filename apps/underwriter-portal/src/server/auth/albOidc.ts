@@ -31,6 +31,8 @@ export type AlbOidcConfig = {
 export type VerifiedAlbIdentity = {
   subject: string;
   authTime: Date;
+  /** False when the identity provider omitted auth_time and authTime is the verification time. */
+  authTimeAsserted?: boolean;
   expiresAt: Date;
 };
 
@@ -109,6 +111,7 @@ export async function verifyAlbOidcToken(
   return Object.freeze({
     subject: claims.sub,
     authTime: new Date(authTimeSeconds === undefined ? nowMs : authTimeSeconds * 1000),
+    authTimeAsserted: authTimeSeconds !== undefined,
     expiresAt: new Date(expiresAtSeconds * 1000),
   });
 }

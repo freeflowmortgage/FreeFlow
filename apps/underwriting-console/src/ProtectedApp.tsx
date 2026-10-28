@@ -9,6 +9,7 @@ import Conversational1003 from './components/Conversational1003';
 import AppraisalReviewWorkspace from './components/AppraisalReviewWorkspace';
 import SplitDocPane from './components/SplitDocPane';
 import UnderwriterSplitViewDemo from './components/UnderwriterSplitViewDemo';
+import WebhookSettings from './components/WebhookSettings';
 import PdfCoordinateCanvas, { type SpatialCoordinates } from './components/PdfCoordinateCanvas';
 import { portalClient } from './api/portalClient';
 import { EncompassHostError, type EncompassHostBridge } from './encompass-host/bridge';
@@ -80,6 +81,10 @@ export default function ProtectedApp() {
 
   if (window.location.hash === '#split-doc') return <SplitDocPane />;
   if (legalSlug) return <LegalPage slug={legalSlug} onHome={() => { window.location.hash = ''; }} />;
+  if (window.location.pathname.startsWith('/workspace')
+    && new URLSearchParams(window.location.search).get('product') === 'webhooks') {
+    return <WebhookSettings onBack={() => window.location.assign('/')} />;
+  }
 
   return <ProtectedWorkflowApp />;
 }
@@ -359,6 +364,7 @@ function ProtectedWorkflowApp() {
           <div className="flex items-center gap-3"><BrandLogo compact /><div><span className="text-sm font-bold text-slate-900">Income</span><p className="text-[11px] text-slate-500">Authoritative protected workflow</p></div></div>
           <div className="flex items-center gap-2">
             <button data-testid="back-to-products" type="button" onClick={backToProducts} className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-emerald-400 hover:text-emerald-700">Back to products</button>
+            {!consoleRuntime.hosted ? <button data-testid="open-webhook-settings" type="button" onClick={() => window.location.assign('/workspace?product=webhooks')} className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-emerald-400 hover:text-emerald-700">Webhooks</button> : null}
             <button data-testid="logout" type="button" onClick={() => window.location.assign('/logout')} className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-red-300 hover:text-red-700">Logout</button>
             <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Protected</span>
             <span data-testid="workflow-state" className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">{workflowState.replace(/_/g, ' ')}</span>

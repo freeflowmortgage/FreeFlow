@@ -9,6 +9,7 @@ export const PERMISSIONS = [
   'billing:admin',
   'appraisal:review',
   'share:create',
+  'webhooks:manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

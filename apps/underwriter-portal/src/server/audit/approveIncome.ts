@@ -4,6 +4,7 @@ import { ApiError } from '../http/apiError';
 import { hashCanonical } from '../http/canonical';
 import { hasCurrentCalculationExtractions } from '../income/extractionFreshness';
 import { readBorrowerIncome } from '../income/loanBorrowerRoster';
+import { enqueueApprovedIncomeWebhook } from '../integrations/webhooks/enqueue';
 import {
   AUDIT_ACTIONS,
   AUDIT_REASON_CODES,
@@ -321,6 +322,12 @@ export async function approveIncomeCalculation(
       'The loan changed since it was loaded. Reload and retry the approval.',
     );
   }
+
+  await enqueueApprovedIncomeWebhook(transaction, context, {
+    loanId: loan.id,
+    approvalEventId: event.id,
+    approvedLoanVersion: input.expectedLoanVersion,
+  });
 
   const result: IncomeApprovalResult = {
     auditEventId: event.id,

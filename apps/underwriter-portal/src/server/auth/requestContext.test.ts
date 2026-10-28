@@ -97,7 +97,22 @@ test('uses the verified membership and ignores caller tenant and role headers', 
   assert.equal(context.tenantId, 'trusted-tenant');
   assert.equal(context.membershipId, 'membership-1');
   assert.ok(context.permissions.includes('income:calculate'));
+  assert.equal(context.authTimeAsserted, false);
   assert.ok(Object.isFrozen(context));
+});
+
+test('carries a provider-asserted auth time into the request context', async () => {
+  const context = await createRequestContext(
+    protectedPost({ 'x-amzn-oidc-data': 'signed-token' }),
+    'request-auth-time',
+    'loan:read',
+    {
+      verifyToken: async () => ({ ...identity, authTimeAsserted: true }),
+      resolveMembership: async () => ({ id: 'membership-1', tenantId: 'trusted-tenant', role: 'UNDERWRITER' }),
+    },
+  );
+  assert.equal(context.authTimeAsserted, true);
+  assert.equal(context.authTime.toISOString(), '2026-09-05T12:59:00.000Z');
 });
 
 test('rejects an unsafe request with no Origin header before the handler runs', async () => {
