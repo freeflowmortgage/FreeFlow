@@ -32,9 +32,9 @@ CREATE TABLE "outbound_webhook_endpoints" (
   CONSTRAINT "outbound_webhook_endpoints_updater_fkey"
     FOREIGN KEY ("tenantId", "updatedByUserId") REFERENCES "users"("tenantId", "id") ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "outbound_webhook_endpoints_https_url"
-    CHECK ("url" ~ '^https://[^[:space:]@#?]{1,2040}$'),
+    CHECK (char_length("url") <= 2048 AND "url" ~ '^https://[^[:space:]@#?]+$'),
   CONSTRAINT "outbound_webhook_endpoints_secret_reference_format"
-    CHECK ("signingSecretRef" ~ '^(arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]{1,400}|local-dev:[0-9a-f-]{36}/[0-9a-f-]{36})$'),
+    CHECK ("signingSecretRef" ~ '^(arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+|local-dev:[0-9a-f-]{36}/[0-9a-f-]{36})$'),
   CONSTRAINT "outbound_webhook_endpoints_versions_positive"
     CHECK ("version" > 0 AND "signingSecretVersion" > 0)
 );

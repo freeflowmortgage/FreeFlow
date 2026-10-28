@@ -90,8 +90,9 @@ async function deliverOne(
   const claim = await dependencies.claim(due);
   if (claim.kind === 'skipped') return 'skipped';
   if (claim.kind === 'finished') {
+    if (claim.status === 'SUPERSEDED') return 'superseded';
     emitOperationalEvent('webhook_delivery_failure', claim.safeErrorCode);
-    return claim.status === 'SUPERSEDED' ? 'superseded' : 'failed';
+    return 'failed';
   }
 
   let result: WebhookSendResult;
