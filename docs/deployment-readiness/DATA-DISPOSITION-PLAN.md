@@ -33,9 +33,17 @@ Original documents remain in Encompass.
    markers that resemble a PDF, OCR line, and raw XML value.
 3. Search database columns, application logs, queues/DLQs, cache, object stores,
    trace exports, crash artifacts, and CI artifacts. The markers must be absent.
-4. Confirm the audit ledger and calculation results still work with only the
+   This includes the `outbound_webhook_*` tables and the outbound webhook
+   worker log group: the outbox stores IDs only and the payload is rebuilt at
+   send time, so a marker there is a defect.
+4. Outbound webhooks transfer the approved-income export to a
+   customer-controlled receiver. That copy is governed by the customer's
+   retention policy, not FreeFlow's; record the receiver hosts in the evidence
+   and confirm the payload contains only the allowlisted approved-income export
+   (no document bytes, OCR text, or file names).
+5. Confirm the audit ledger and calculation results still work with only the
    allowlisted metadata.
-5. Record evidence links, reviewer approval, backup-expiry handling, and the
+6. Record evidence links, reviewer approval, backup-expiry handling, and the
    date on which any pre-migration recoverable copies age out under the approved
    retention policy.
 

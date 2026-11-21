@@ -106,7 +106,10 @@ BEGIN
     'public.income_extractions'::regclass,
     'public.income_extraction_metadata_reviews'::regclass,
     'public.income_calculation_extractions'::regclass,
-    'public.loan_borrowers'::regclass
+    'public.loan_borrowers'::regclass,
+    'public.outbound_webhook_endpoints'::regclass,
+    'public.outbound_webhook_deliveries'::regclass,
+    'public.outbound_webhook_endpoint_audit_events'::regclass
   ) AND (NOT relrowsecurity OR NOT relforcerowsecurity);
   IF unprotected_tables <> 0 THEN
     RAISE EXCEPTION 'One or more tenant tables do not force row-level security';

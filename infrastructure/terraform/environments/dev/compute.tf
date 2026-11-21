@@ -120,7 +120,7 @@ resource "aws_ecs_task_definition" "portal" {
         { name = "APPRAISAL_PARSER_URL", value = "http://appraisal-parser-disabled.freeflow.local:8081" },
         { name = "SYNC_QUEUE_URL", value = aws_sqs_queue.sync.url },
         { name = "SYNC_DLQ_URL", value = aws_sqs_queue.sync_dlq.url },
-        ], length(local.portal_extra_hostnames) > 0 ? [
+        ], var.enable_outbound_webhook_worker ? local.outbound_webhook_environment : [], length(local.portal_extra_hostnames) > 0 ? [
         { name = "TRUSTED_ORIGINS", value = join(" ", [for host in local.portal_extra_hostnames : "https://${host}"]) },
         ] : [], var.enable_encompass_document_pull_worker ? [
         { name = "DOCUMENT_PULL_QUEUE_URL", value = aws_sqs_queue.document_pull[0].url },
@@ -397,6 +397,49 @@ resource "aws_ecs_task_definition" "encompass_sync_worker" {
       logDriver = "awslogs"
       options = {
         awslogs-group         = aws_cloudwatch_log_group.encompass_sync_worker[0].name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "ecs"
+      }
+    }
+  }])
+}
+
+resource "aws_ecs_task_definition" "outbound_webhook_worker" {
+  count = var.enable_outbound_webhook_worker ? 1 : 0
+
+  family                   = "${local.name_prefix}-outbound-webhook-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.outbound_webhook_worker_task[0].arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([{
+    name                   = "outbound-webhook-worker"
+    image                  = var.portal_image
+    essential              = true
+    readonlyRootFilesystem = true
+    user                   = "1001"
+    linuxParameters = {
+      initProcessEnabled = true
+      capabilities       = { add = [], drop = ["ALL"] }
+    }
+    workingDirectory = "/app/apps/underwriter-portal"
+    command          = ["node", "/app/apps/underwriter-portal/workers/outbound-webhook-worker.cjs"]
+    environment      = concat(local.common_environment, local.outbound_webhook_environment)
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.database_connector.arn}:url::" },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.outbound_webhook_worker[0].name
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "ecs"
       }
@@ -753,6 +796,36 @@ resource "aws_ecs_service" "encompass_sync_worker" {
   }
 
   depends_on = [aws_ecs_service.connector, aws_route.app_default]
+}
+
+resource "aws_ecs_service" "outbound_webhook_worker" {
+  count = var.enable_outbound_webhook_worker ? 1 : 0
+
+  name             = "${local.name_prefix}-outbound-webhook-worker"
+  cluster          = data.aws_ecs_cluster.existing.arn
+  task_definition  = aws_ecs_task_definition.outbound_webhook_worker[0].arn
+  desired_count    = 1
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = var.app_private_subnet_ids
+    security_groups  = [aws_security_group.outbound_webhook_worker[0].id]
+    assign_public_ip = false
+  }
+
+  depends_on = [
+    aws_route.app_default,
+    aws_vpc_endpoint.console_ecr_api,
+    aws_vpc_endpoint.console_ecr_dkr,
+    aws_vpc_endpoint.console_logs,
+    aws_vpc_endpoint.connector_secretsmanager,
+  ]
 }
 
 resource "aws_lb_target_group" "console" {

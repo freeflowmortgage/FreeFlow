@@ -46,7 +46,15 @@ test('accepts an authentic, unexpired ALB identity assertion', async () => {
   const identity = await verifyAlbOidcToken(token(), config, keyProvider, nowMs);
   assert.equal(identity.subject, 'provider-subject-123');
   assert.equal(identity.expiresAt.getTime(), nowMs + 300_000);
+  assert.equal(identity.authTime.getTime(), nowMs - 30_000);
+  assert.equal(identity.authTimeAsserted, true);
   assert.ok(Object.isFrozen(identity));
+});
+
+test('marks auth time as unasserted when the provider omits auth_time', async () => {
+  const identity = await verifyAlbOidcToken(token({}, { auth_time: undefined }), config, keyProvider, nowMs);
+  assert.equal(identity.authTime.getTime(), nowMs);
+  assert.equal(identity.authTimeAsserted, false);
 });
 
 for (const [name, overrides, code] of [

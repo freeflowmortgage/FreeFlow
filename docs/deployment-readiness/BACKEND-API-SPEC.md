@@ -99,6 +99,11 @@ exception messages.
 | `POST /api/v1/appraisals/audits` | `appraisal:review` | Strict PDF extraction plus versioned rules; domain-isolated storage |
 | `POST /api/v1/share-links` | `share:create` | Generate purpose-bound, expiring token; store only hash |
 | `POST /api/v1/webhooks/stripe` | Provider signature | Verify signature over raw body, claim event once, reconcile authoritative amount/currency/tenant, then acknowledge |
+| `GET /api/v1/webhooks/endpoint` | `webhooks:manage` | Return the tenant's outbound income webhook endpoint (URL, enabled flag, version, secret version); never the secret |
+| `PUT /api/v1/webhooks/endpoint` | `webhooks:manage` + recent sign-in | Create or update the endpoint with `expectedVersion` and `Idempotency-Key`; first creation returns the signing secret once |
+| `POST /api/v1/webhooks/endpoint/rotate-secret` | `webhooks:manage` + recent sign-in | Rotate the signing secret; returns the new secret once |
+| `GET /api/v1/webhooks/deliveries` | `webhooks:manage` | Cursor-paged delivery outbox (50 per page): status, attempts, last response status, safe error code |
+| `POST /api/v1/webhooks/deliveries/{deliveryId}/redeliver` | `webhooks:manage` + recent sign-in | Requeue a `SUCCEEDED` or `FAILED` delivery with `Idempotency-Key`; returns 202 |
 | `GET /health/live` | Internal health check | Process liveness only, no sensitive detail |
 | `GET /health/ready` | ALB/orchestrator | Schema compatibility and required dependencies; generic 200/503 only |
 
@@ -241,6 +246,78 @@ classified base or variable-income rows.
   encrypted DLQ and contain safe codes only.
 - External success and local audit completion must be reconcilable. A scheduled
   reconciliation job detects unknown outcomes without blindly repeating writes.
+
+## Outbound income webhooks (standalone loans)
+
+Standalone loans (`integrationMode = NONE`) have no LOS to sync to, so a tenant
+may register one HTTPS endpoint that receives each approved income result.
+Encompass-linked loans are never queued; they continue through the Encompass
+sync worker above.
+
+`APPROVED -> PENDING -> IN_PROGRESS -> SUCCEEDED | RETRYABLE_FAILURE | FAILED | SUPERSEDED`
+
+- **Enqueue.** The approval transaction inserts an outbox row holding only IDs
+  (tenant, loan, approval event, approved loan version, endpoint) plus an
+  `OUTBOUND_WEBHOOK_QUEUED` audit event. No payload is stored.
+- **Send.** The worker claims due rows with a conditional update fenced by a
+  claim token, then rebuilds the payload from the approved calculation at send
+  time. If the loan has been re-approved or edited since, the row becomes
+  `SUPERSEDED` and nothing is sent; the newer approval has its own delivery.
+- **Retries.** 408, 425, 429, 5xx, timeouts, and network/TLS errors are retried
+  after 30s, 1m, 2m, 5m, 15m, 30m, 1h, then 2h (each ±20% jitter). After 8
+  attempts the row is `FAILED` (dead letter) and an
+  `OUTBOUND_WEBHOOK_FAILED` audit event is written. Redirects and other 4xx
+  responses fail immediately. A claim abandoned for 2 minutes is reclaimed.
+- **Egress.** URLs must be `https`, with no credentials, query, or fragment. In
+  protected runtimes the host must appear in `OUTBOUND_WEBHOOK_ALLOWED_HOSTS`,
+  the port must be 443, and IP literals are refused. The worker resolves DNS,
+  rejects the target if any answer is private, loopback, link-local, CGNAT,
+  multicast, or metadata space, and connects to the vetted address while still
+  verifying the certificate for the hostname. Response bodies are not read.
+- **Secrets.** Each endpoint's signing secret is stored in AWS Secrets Manager
+  at `{OUTBOUND_WEBHOOK_SECRET_PREFIX}/{tenantId}/{endpointId}`. The database
+  holds only the ARN. The portal can create and rotate; only the worker can read.
+- **Admin controls.** Mutations require `webhooks:manage` (super admin and broker owner),
+  an `Idempotency-Key`, the expected version, and in protected runtimes an
+  asserted IdP `auth_time` no older than 15 minutes
+  (`403 REAUTHENTICATION_REQUIRED` otherwise). Endpoint changes are written to
+  the append-only `outbound_webhook_endpoint_audit_events` table; queueing,
+  delivery, failure, supersession, and redelivery requests are written to the
+  hash-chained `audit_events` ledger.
+- **Logs.** Only safe codes and HTTP status: `webhook_delivery_success`,
+  `webhook_delivery_retry`, `webhook_delivery_failure`. Never URLs, bodies,
+  borrower data, or secrets.
+
+### Receiver contract
+
+Each delivery is `POST` with `Content-Type: application/json` and:
+
+| Header | Value |
+|---|---|
+| `FreeFlow-Webhook-Id` | Delivery UUID. Stable across retries and manual redelivery; use it to deduplicate |
+| `FreeFlow-Webhook-Timestamp` | Unix seconds when this attempt was signed |
+| `FreeFlow-Webhook-Signature` | `v1=<hex>`; during the 24 hours after a rotation, two space-separated `v1=` values (new and previous secret) |
+| `FreeFlow-Event-Type` | `income.approved` |
+
+Body:
+
+```json
+{
+  "id": "<delivery id>",
+  "type": "income.approved",
+  "apiVersion": "freeflow-webhook-v1",
+  "createdAt": "<ISO-8601>",
+  "data": { "...": "the approved-income JSON export for the loan" }
+}
+```
+
+To verify, compute `HMAC-SHA256(secret, "{id}.{timestamp}.{rawBody}")` as
+lowercase hex, where `secret` is the full `whsec_...` string, and compare it in
+constant time against each `v1=` value. Reject when no value matches or when
+the timestamp is more than 300 seconds from the receiver's clock. Respond with
+any 2xx within 10 seconds; do work asynchronously. Deliveries for different
+approvals may arrive out of order, so compare `data` versions before
+overwriting.
 
 ## Observability contract
 

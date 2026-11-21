@@ -4,7 +4,39 @@ export class PortalApiError extends Error {
   }
 }
 
-type RequestOptions = Readonly<{ method?: 'GET' | 'POST'; body?: unknown; idempotencyKey?: string }>;
+type RequestOptions = Readonly<{ method?: 'GET' | 'POST' | 'PUT'; body?: unknown; idempotencyKey?: string }>;
+
+export type WebhookEndpoint =
+  | Readonly<{
+    configured: true;
+    id: string;
+    url: string;
+    isEnabled: boolean;
+    version: number;
+    signingSecretVersion: number;
+    signingSecretRotatedAt: string | null;
+    updatedAt: string;
+  }>
+  | Readonly<{ configured: false }>;
+
+export type WebhookDeliveryStatus = 'PENDING' | 'IN_PROGRESS' | 'RETRYABLE_FAILURE' | 'SUCCEEDED' | 'FAILED' | 'SUPERSEDED';
+
+export type WebhookDelivery = Readonly<{
+  id: string;
+  loanId: string;
+  approvalEventId: string;
+  eventType: string;
+  status: WebhookDeliveryStatus;
+  attemptCount: number;
+  nextAttemptAt: string | null;
+  lastAttemptAt: string | null;
+  lastResponseStatus: number | null;
+  safeErrorCode: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}>;
+
+type WebhookEndpointMutation = Readonly<{ endpoint: WebhookEndpoint; signingSecret: string | null; replayed: boolean }>;
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetch(path, {
@@ -75,4 +107,18 @@ export const portalClient = {
   getSync: (jobId: string) => request<{ id: string; status: string }>(`/api/v1/encompass-syncs/${encodeURIComponent(jobId)}`),
   approvedIncomeExportUrl: (loanId: string, format: 'json' | 'mismo' | 'summary') =>
     `/api/v1/loans/${encodeURIComponent(loanId)}/approved-income-exports/${format}`,
+  getWebhookEndpoint: () => request<{ endpoint: WebhookEndpoint }>('/api/v1/webhooks/endpoint'),
+  saveWebhookEndpoint: (body: { url: string; isEnabled: boolean; expectedVersion: number | null }, idempotencyKey: string) =>
+    request<WebhookEndpointMutation>('/api/v1/webhooks/endpoint', { method: 'PUT', body, idempotencyKey }),
+  rotateWebhookSecret: (body: { expectedVersion: number }, idempotencyKey: string) =>
+    request<WebhookEndpointMutation>('/api/v1/webhooks/endpoint/rotate-secret', { method: 'POST', body, idempotencyKey }),
+  listWebhookDeliveries: (cursor?: string) =>
+    request<{ deliveries: WebhookDelivery[]; nextCursor: string | null }>(
+      `/api/v1/webhooks/deliveries${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+    ),
+  redeliverWebhook: (deliveryId: string, idempotencyKey: string) =>
+    request<{ deliveryId: string; status: WebhookDeliveryStatus }>(
+      `/api/v1/webhooks/deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
+      { method: 'POST', idempotencyKey },
+    ),
 };

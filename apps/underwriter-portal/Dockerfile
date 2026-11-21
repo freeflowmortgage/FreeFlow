@@ -48,7 +48,12 @@ RUN mkdir -p apps/underwriter-portal/.next/workers \
         apps/underwriter-portal/scripts/encompass-sync-worker.ts \
         --bundle --platform=node --target=node22 --format=cjs \
         --external:@prisma/client \
-        --outfile=apps/underwriter-portal/.next/workers/encompass-sync-worker.cjs
+        --outfile=apps/underwriter-portal/.next/workers/encompass-sync-worker.cjs \
+    && ./services/encompass-connector/node_modules/.bin/esbuild \
+        apps/underwriter-portal/scripts/outbound-webhook-worker.ts \
+        --bundle --platform=node --target=node22 --format=cjs \
+        --external:@prisma/client \
+        --outfile=apps/underwriter-portal/.next/workers/outbound-webhook-worker.cjs
 
 # 3. Production runner stage
 FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS runner

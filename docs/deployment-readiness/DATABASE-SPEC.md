@@ -69,6 +69,18 @@ monotonic `version` for optimistic concurrency.
 | `webhook_events` | Provider, event ID, received/processed state, payload hash; unique `(provider, event_id)`; do not retain full payload by default |
 | `billing_ledger` | Tenant/loan/provider references, integer amount/currency/product, immutable entry type; unique provider transaction keys |
 | `integration_configs` | Non-secret settings and Secrets Manager ARN references only; no client secret/password value |
+| `outbound_webhook_endpoints` | One per tenant: HTTPS URL, enabled flag, `version`, Secrets Manager ARN reference (`signingSecretRef`) and `signingSecretVersion`; the reference is immutable and versions only advance by one |
+| `outbound_webhook_deliveries` | Outbox of IDs only: tenant, loan, approval event, approved loan version, endpoint, status, attempt count, next attempt, claim token, last response status, safe error code; unique `(tenantId, endpointId, approvalEventId)`; no payload |
+| `outbound_webhook_endpoint_audit_events` | Append-only endpoint configuration history (action, actor, URL hash, versions); update/delete rejected by trigger |
+
+The three outbound webhook tables force RLS with the standard
+`tenant_isolation` policy. The application role may insert deliveries only in
+`PENDING` and may move only `SUCCEEDED`/`FAILED` rows back to `PENDING`
+(redelivery). The worker role may update delivery outcome columns and has one
+extra `SELECT` policy, `worker_due_delivery_discovery`, that applies only when
+the transaction sets `app.outbound_webhook_dispatch_scan = 'on'` and only to
+rows in `PENDING`, `RETRYABLE_FAILURE`, or `IN_PROGRESS`. Each discovered row is
+then claimed and processed under its own tenant context.
 
 Every child table has `tenant_id` and uses a composite foreign key such as
 `(tenant_id, loan_id) -> loans(tenant_id, id)`. This makes an accidental

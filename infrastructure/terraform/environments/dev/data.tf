@@ -64,6 +64,15 @@ locals {
     split(" ", trimspace(var.encompass_frame_ancestors)),
     [for host in local.portal_extra_hostnames : "https://${host}"],
   )))
+  outbound_webhook_secret_prefix      = "${local.name_prefix}/outbound-webhooks"
+  outbound_webhook_secret_arn_pattern = "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.outbound_webhook_secret_prefix}/*"
+  outbound_webhook_environment = [
+    { name = "OUTBOUND_WEBHOOK_SECRET_PREFIX", value = local.outbound_webhook_secret_prefix },
+    { name = "OUTBOUND_WEBHOOK_ALLOWED_HOSTS", value = join(",", var.outbound_webhook_allowed_hosts) },
+  ]
+  # Interface endpoints are created when any private-egress task needs them.
+  private_aws_endpoints_enabled = var.enable_console || var.enable_encompass_connector || var.enable_outbound_webhook_worker
+
   common_environment = [
     { name = "NODE_ENV", value = "production" },
     { name = "FREEFLOW_RUNTIME_ENV", value = var.enable_cognito_edge ? "staging" : "development" },
