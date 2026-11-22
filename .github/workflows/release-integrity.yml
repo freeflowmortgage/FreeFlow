@@ -71,6 +71,9 @@ jobs:
           - name: migration
             dockerfile: packages/database/Dockerfile.migrate
             context: .
+          - name: console
+            dockerfile: apps/underwriting-console/Dockerfile
+            context: .
           - name: connector
             dockerfile: services/encompass-connector/Dockerfile
             context: .

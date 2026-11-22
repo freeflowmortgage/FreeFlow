@@ -60,13 +60,28 @@ test('staging accepts disabled integrations without placeholder credentials', ()
   assert.deepEqual(validateProductionConfig(env), []);
 });
 
-test('production continues to require integration credentials', () => {
+test('production accepts disabled billing without Stripe credentials', () => {
+  const env = validProductionEnv();
+  delete env.STRIPE_SECRET_KEY;
+  delete env.STRIPE_WEBHOOK_SECRET;
+
+  assert.deepEqual(validateProductionConfig(env), []);
+});
+
+test('partially configured Stripe billing fails closed', () => {
+  const env = validProductionEnv();
+  delete env.STRIPE_WEBHOOK_SECRET;
+
+  const errors = validateProductionConfig(env);
+  assert.ok(errors.includes('STRIPE_WEBHOOK_SECRET is required when Stripe billing is configured.'));
+});
+
+test('Stripe webhook configuration requires the live secret key', () => {
   const env = validProductionEnv();
   delete env.STRIPE_SECRET_KEY;
 
   const errors = validateProductionConfig(env);
-  assert.ok(errors.includes('STRIPE_SECRET_KEY is required.'));
-  assert.ok(errors.includes('STRIPE_SECRET_KEY must be a Stripe live-mode secret key.'));
+  assert.ok(errors.includes('STRIPE_SECRET_KEY is required when Stripe billing is configured.'));
 });
 
 test('missing values and placeholders fail closed without exposing values', () => {
