@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1
-FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
+FROM cgr.dev/chainguard/node@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527 AS base
 
+USER root
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN apk add --no-cache openssl=3.6.5-r6 \
+    && corepack enable
 
 WORKDIR /app
 
@@ -51,34 +53,37 @@ RUN cp -R apps/underwriting-console/node_modules/pdfkit/js/data \
         apps/underwriting-console/dist/server/data
 
 # 3. Static protected runtime. Parser and fixture middleware are demo/QA-only.
-# Reuse the scan-clean pinned Node Alpine runtime used by the portal rather
-# than carrying an RPM package manager and unused curl/PCRE libraries.
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS runner
+# The shell is retained for the production ECS volume-init container.
+FROM cgr.dev/chainguard/wolfi-base@sha256:be019c1c74fe69204a42c4e10bc4d886a49bf5403ffa74374ef7baa408fc9a26 AS runner
 WORKDIR /app
+
+RUN apk add --no-cache \
+        nodejs-26=26.13.1-r1 \
+        openssl=3.6.5-r6 \
+    && ldconfig \
+    && addgroup -S -g 1001 nodejs \
+    && adduser -S -D -h /home/console -s /bin/false -G nodejs -u 1001 console \
+    && mkdir -p /home/console /tmp/freeflow \
+    && chown -R console:nodejs /home/console /tmp/freeflow
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV VITE_CACHE_DIR=/tmp/freeflow/vite
+ENV HOME=/home/console
 
-RUN apk upgrade --no-cache zlib \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
-    && mkdir -p /tmp/freeflow \
-    && chown node:node /tmp/freeflow
-
-COPY --from=builder --chown=node:node /app/apps/underwriting-console/dist ./dist
-COPY --from=builder --chown=node:node /app/services/doc-parser/templates ./forms
+COPY --from=builder --chown=console:nodejs /app/apps/underwriting-console/dist ./dist
+COPY --from=builder --chown=console:nodejs /app/services/doc-parser/templates ./forms
 # serve-production.mjs loads sibling scripts at startup. Keep every local import beside it.
-COPY --from=builder --chown=node:node /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
-COPY --from=builder --chown=node:node /app/apps/underwriting-console/scripts/portal-hosts.mjs ./portal-hosts.mjs
+COPY --from=builder --chown=console:nodejs /app/apps/underwriting-console/scripts/serve-production.mjs ./serve-production.mjs
+COPY --from=builder --chown=console:nodejs /app/apps/underwriting-console/scripts/portal-hosts.mjs ./portal-hosts.mjs
 
-USER node
+USER console
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["node", "-e", "require('http').get('http://127.0.0.1:3000/health', (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
+    CMD ["/usr/bin/node", "-e", "require('http').get('http://127.0.0.1:3000/health', (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
-CMD ["node", "/app/serve-production.mjs"]
+ENTRYPOINT []
+CMD ["/usr/bin/node", "/app/serve-production.mjs"]

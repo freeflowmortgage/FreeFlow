@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS base
+FROM cgr.dev/chainguard/node@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527 AS base
 
+USER root
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN apk add --no-cache openssl \
+RUN apk add --no-cache openssl=3.6.5-r6 \
     && corepack enable
 
 WORKDIR /app
@@ -54,40 +55,43 @@ RUN mkdir -p apps/underwriter-portal/.next/workers \
         --bundle --platform=node --target=node22 --format=cjs \
         --external:@prisma/client \
         --outfile=apps/underwriter-portal/.next/workers/outbound-webhook-worker.cjs
+RUN rm -rf apps/underwriter-portal/.next/standalone/apps/underwriter-portal/src \
+        apps/underwriter-portal/.next/standalone/node_modules/typescript \
+        apps/underwriter-portal/.next/standalone/node_modules/.pnpm/typescript@* \
+    && find apps/underwriter-portal/.next/standalone -type d -name .cache -prune -exec rm -rf '{}' +
 
 # 3. Production runner stage
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS runner
+FROM cgr.dev/chainguard/wolfi-base@sha256:be019c1c74fe69204a42c4e10bc4d886a49bf5403ffa74374ef7baa408fc9a26 AS runner
 WORKDIR /app
+
+RUN apk add --no-cache \
+        nodejs-26=26.13.1-r1 \
+        openssl=3.6.5-r6 \
+    && ldconfig \
+    && addgroup -S -g 1001 nodejs \
+    && adduser -S -D -h /home/nextjs -s /bin/false -G nodejs -u 1001 nextjs \
+    && mkdir -p /home/nextjs \
+    && chown nextjs:nodejs /home/nextjs
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
-
-RUN apk upgrade --no-cache zlib \
-    && apk add --no-cache openssl \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
-
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 --ingroup nodejs nextjs
+ENV HOME="/home/nextjs"
 
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/static ./apps/underwriter-portal/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/public ./apps/underwriter-portal/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/scripts/start.mjs /app/apps/underwriter-portal/scripts/production-config.mjs ./apps/underwriter-portal/scripts/
 COPY --from=builder --chown=nextjs:nodejs /app/apps/underwriter-portal/.next/workers ./apps/underwriter-portal/workers
-RUN rm -rf /app/apps/underwriter-portal/src /app/node_modules/typescript \
-        /app/node_modules/.pnpm/typescript@* /opt/yarn-v* \
-    && find /app -type d -name .cache -prune -exec rm -rf '{}' +
 
 USER nextjs
 
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["node", "-e", "require('http').get('http://127.0.0.1:' + (process.env.PORT || '3001'), (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
+    CMD ["/usr/bin/node", "-e", "require('http').get('http://127.0.0.1:' + (process.env.PORT || '3001'), (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
 WORKDIR /app/apps/underwriter-portal
-CMD ["node", "scripts/start.mjs"]
+ENTRYPOINT []
+CMD ["/usr/bin/node", "scripts/start.mjs"]

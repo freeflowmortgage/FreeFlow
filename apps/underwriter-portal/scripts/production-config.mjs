@@ -20,6 +20,8 @@ const CORE_REQUIRED_VARIABLES = [
 ];
 const PRODUCTION_INTEGRATION_VARIABLES = [
   'REDIS_URL',
+];
+const OPTIONAL_PRODUCTION_INTEGRATION_VARIABLES = [
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
 ];
@@ -105,10 +107,17 @@ export function validateProductionConfig(env) {
       errors.push(`${name} contains a placeholder or mock value.`);
     }
   }
-  for (const name of PRODUCTION_INTEGRATION_VARIABLES) {
+  for (const name of [...PRODUCTION_INTEGRATION_VARIABLES, ...OPTIONAL_PRODUCTION_INTEGRATION_VARIABLES]) {
     const raw = value(env, name);
     if (raw && PLACEHOLDER_PATTERN.test(raw)) {
       errors.push(`${name} contains a placeholder or mock value.`);
+    }
+  }
+
+  const stripeConfigured = OPTIONAL_PRODUCTION_INTEGRATION_VARIABLES.some((name) => value(env, name));
+  if (stripeConfigured) {
+    for (const name of OPTIONAL_PRODUCTION_INTEGRATION_VARIABLES) {
+      if (!value(env, name)) errors.push(`${name} is required when Stripe billing is configured.`);
     }
   }
 
@@ -168,10 +177,10 @@ export function validateProductionConfig(env) {
   if (value(env, 'OIDC_CLIENT_ID') && value(env, 'OIDC_AUDIENCE') !== value(env, 'OIDC_CLIENT_ID')) {
     errors.push('OIDC_AUDIENCE must match OIDC_CLIENT_ID for ALB-signed user claims.');
   }
-  if ((runtimeMode === 'production' || value(env, 'STRIPE_SECRET_KEY')) && !value(env, 'STRIPE_SECRET_KEY').startsWith('sk_live_')) {
+  if (value(env, 'STRIPE_SECRET_KEY') && !value(env, 'STRIPE_SECRET_KEY').startsWith('sk_live_')) {
     errors.push('STRIPE_SECRET_KEY must be a Stripe live-mode secret key.');
   }
-  if ((runtimeMode === 'production' || value(env, 'STRIPE_WEBHOOK_SECRET')) && !value(env, 'STRIPE_WEBHOOK_SECRET').startsWith('whsec_')) {
+  if (value(env, 'STRIPE_WEBHOOK_SECRET') && !value(env, 'STRIPE_WEBHOOK_SECRET').startsWith('whsec_')) {
     errors.push('STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.');
   }
   if (value(env, 'FIELD_ENCRYPTION_KEY').length < 32) {

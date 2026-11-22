@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8
+FROM cgr.dev/chainguard/node@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527 AS builder
 
+USER root
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
-RUN apk upgrade --no-cache zlib \
-    && apk add --no-cache openssl postgresql-client \
+RUN apk add --no-cache openssl=3.6.5-r6 \
     && corepack enable
 
 WORKDIR /app
@@ -23,17 +23,24 @@ COPY packages/database/scripts/migrate-live-test.sh /usr/local/bin/freeflow-migr
 RUN sed -i 's/\r$//' /usr/local/bin/freeflow-migrate
 
 RUN pnpm --filter @mortgage-pos/database prisma:generate \
-    && addgroup --system --gid 1001 nodejs \
-    && adduser --system --uid 1001 --ingroup nodejs --shell /bin/false appuser \
-    && mkdir -p /tmp/freeflow \
-    && chown -R appuser:nodejs /app /tmp/freeflow \
     && chmod 0555 /usr/local/bin/freeflow-migrate
 
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /root/.cache/node/corepack /pnpm \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+FROM cgr.dev/chainguard/wolfi-base@sha256:be019c1c74fe69204a42c4e10bc4d886a49bf5403ffa74374ef7baa408fc9a26 AS runner
 
-ENV HOME="/tmp/freeflow"
+RUN apk add --no-cache \
+        nodejs-26=26.13.1-r1 \
+        openssl=3.6.5-r6 \
+        postgresql-19-client=19.0-r0 \
+    && ldconfig \
+    && addgroup -S -g 1001 nodejs \
+    && adduser -S -D -h /home/appuser -s /bin/false -G nodejs -u 1001 appuser \
+    && mkdir -p /home/appuser /tmp/freeflow \
+    && chown -R appuser:nodejs /home/appuser /tmp/freeflow
+
+COPY --from=builder --chown=appuser:nodejs /app /app
+COPY --from=builder /usr/local/bin/freeflow-migrate /usr/local/bin/freeflow-migrate
+
+ENV HOME="/home/appuser"
 ENV TMPDIR="/tmp/freeflow"
 
 USER appuser

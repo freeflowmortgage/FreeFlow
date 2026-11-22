@@ -1,13 +1,15 @@
 # syntax=docker/dockerfile:1
 # Internal-only foundation image. It contains no LOS credentials or PDF persistence.
 
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS base
+FROM cgr.dev/chainguard/node@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527 AS base
 
+USER root
 ENV PNPM_HOME="/pnpm"
 ENV COREPACK_HOME="/pnpm/corepack"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN mkdir -p "$COREPACK_HOME" && corepack enable
-RUN apk add --no-cache openssl
+RUN mkdir -p "$COREPACK_HOME" \
+    && apk add --no-cache openssl=3.6.5-r6 \
+    && corepack enable
 
 WORKDIR /app
 
@@ -39,36 +41,37 @@ RUN pnpm --filter @mortgage-pos/encompass-connector --prod deploy /runtime \
     && cd /runtime \
     && /app/packages/database/node_modules/.bin/prisma generate --schema prisma/schema.prisma \
     && rm -rf /runtime/prisma
-
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS runner
-
-RUN apk upgrade --no-cache zlib \
-    && apk add --no-cache openssl \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-        /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+FROM cgr.dev/chainguard/wolfi-base@sha256:be019c1c74fe69204a42c4e10bc4d886a49bf5403ffa74374ef7baa408fc9a26 AS runner
 
 WORKDIR /app
 
-COPY --from=build /runtime ./
+RUN apk add --no-cache \
+        nodejs-26=26.13.1-r1 \
+        openssl=3.6.5-r6 \
+    && ldconfig \
+    && addgroup -S -g 1001 connector \
+    && adduser -S -D -h /home/connector -s /bin/false -G connector -u 1001 connector \
+    && mkdir -p /home/connector \
+    && chown connector:connector /home/connector
+
+COPY --from=build --chown=connector:connector /runtime ./
 # Read-only synthetic freeflow-dev morning-pack fixtures. Real LOS mode never reads them.
-COPY --from=build /app/services/encompass-connector/fixtures/morning-pack-2026-09-29 ./fixtures/morning-pack-2026-09-29
+COPY --from=build --chown=connector:connector /app/services/encompass-connector/fixtures/morning-pack-2026-09-29 ./fixtures/morning-pack-2026-09-29
 
 ENV NODE_ENV=production
 ENV PORT=8080
+ENV HOME=/home/connector
 # Boot refuses the NON-PROD Bearer stub when NODE_ENV=production. The isolated
 # freeflow-dev foundation explicitly runs in development mode until real S2S
 # authentication is implemented.
-
-RUN addgroup --system --gid 1001 connector \
-    && adduser --system --uid 1001 --ingroup connector connector
 
 USER connector
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["node", "-e", "require('http').get('http://127.0.0.1:' + (process.env.PORT || '8080') + '/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"]
+    CMD ["/usr/bin/node", "-e", "require('http').get('http://127.0.0.1:' + (process.env.PORT || '8080') + '/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"]
 
 WORKDIR /app
-CMD ["node", "dist/index.js"]
+ENTRYPOINT []
+CMD ["/usr/bin/node", "dist/index.js"]
