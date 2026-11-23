@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/assert-runtime-mode.mjs && tsc -b && vite build",
+    "build": "node scripts/assert-runtime-mode.mjs && tsc -b && vite build && node scripts/write-runtime-mode-manifest.mjs",
     "start:production": "node scripts/serve-production.mjs",
     "test:runtime": "tsx --test src/pdfScrollTarget.test.ts src/salesHost.test.ts src/runtimeMode.test.ts src/protectedWorkflow.test.ts src/protectedWorkspace.test.ts src/demoPacket.test.ts src/retirementIncome.test.ts src/corpDistributionSupport.test.ts src/legalRoute.test.ts src/api/portalClient.test.ts src/encompass-host/bridge.test.ts src/encompass-host/runtimeHost.test.ts src/encompass-host/testHost.test.ts && node scripts/serve-production.test.mjs",
     "preview": "vite preview",

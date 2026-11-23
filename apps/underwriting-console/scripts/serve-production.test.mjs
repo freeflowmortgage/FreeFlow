@@ -14,11 +14,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const writeCompiledMode = (mode) => execFileSync(
+  process.execPath,
+  [resolve(appRoot, 'scripts/write-runtime-mode-manifest.mjs')],
+  {
+    cwd: appRoot,
+    env: { ...process.env, NODE_ENV: 'production', VITE_FREEFLOW_RUNTIME_MODE: mode },
+    stdio: 'ignore',
+  },
+);
 execFileSync(process.execPath, [resolve(appRoot, 'node_modules/vite/bin/vite.js'), 'build'], {
   cwd: appRoot,
-  env: { ...process.env, VITE_FREEFLOW_RUNTIME_MODE: 'encompass-hosted' },
+  env: { ...process.env, VITE_FREEFLOW_RUNTIME_MODE: 'protected-web' },
   stdio: 'ignore',
 });
+writeCompiledMode('protected-web');
 const { buildSync } = await import(pathToFileURL(resolve(
   appRoot,
   '../../services/encompass-connector/node_modules/esbuild/lib/main.js',
@@ -68,6 +78,15 @@ try {
   child.kill();
   await once(child, 'exit');
 }
+
+writeCompiledMode('encompass-hosted');
+const mismatched = spawn(process.execPath, ['scripts/serve-production.mjs'], {
+  cwd: appRoot,
+  env: { ...process.env, FREEFLOW_RUNTIME_MODE: 'protected-web', PORT: '3114' },
+  stdio: 'ignore',
+});
+const [mismatchedExit] = await once(mismatched, 'exit');
+assert.notEqual(mismatchedExit, 0);
 
 const hostedPort = 3110;
 const hosted = spawn(process.execPath, ['scripts/serve-production.mjs'], {
@@ -128,6 +147,7 @@ try {
   await once(qualification, 'exit');
 }
 
+writeCompiledMode('protected-web');
 const productionFlagPort = 3113;
 const productionFlag = spawn(process.execPath, ['scripts/serve-production.mjs'], {
   cwd: new URL('..', import.meta.url),
@@ -150,6 +170,7 @@ try {
   await once(productionFlag, 'exit');
 }
 
+writeCompiledMode('encompass-hosted');
 const forbidden = spawn(process.execPath, ['scripts/serve-production.mjs'], {
   cwd: new URL('..', import.meta.url),
   env: {

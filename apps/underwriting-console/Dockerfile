@@ -39,7 +39,10 @@ COPY --from=deps /app/services/encompass-connector/node_modules ./services/encom
 
 COPY . .
 
-ARG FREEFLOW_CONSOLE_MODE=encompass-hosted
+# The public production entry point is standalone/protected-web. Hosted builds
+# must opt in explicitly so an omitted build argument cannot ship an Encompass
+# bundle to the standalone application.
+ARG FREEFLOW_CONSOLE_MODE=protected-web
 ENV NODE_ENV=production
 ENV VITE_FREEFLOW_RUNTIME_MODE=$FREEFLOW_CONSOLE_MODE
 
