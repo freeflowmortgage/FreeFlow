@@ -1,13 +1,18 @@
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { frameAncestorsForDevPortal } from './portal-hosts.mjs';
 
+const root = resolve(process.cwd(), 'dist');
 const runtimeMode = process.env.FREEFLOW_RUNTIME_MODE || '';
 if (!['protected-web', 'encompass-hosted'].includes(runtimeMode)) {
   throw new Error('FREEFLOW_CONSOLE_PROTECTED_RUNTIME_REQUIRED');
+}
+const compiledRuntimeMode = readCompiledRuntimeMode(root);
+if (compiledRuntimeMode !== runtimeMode) {
+  throw new Error('FREEFLOW_CONSOLE_RUNTIME_MODE_MISMATCH');
 }
 
 const testHostRequested = process.env.ENCOMPASS_TEST_HOST_ENABLED === 'true';
@@ -29,9 +34,21 @@ const frameAncestors = runtimeMode === 'encompass-hosted'
   ? frameAncestorsForDevPortal(parseFrameAncestors(process.env.ENCOMPASS_FRAME_ANCESTORS))
   : "'none'";
 
-const root = resolve(process.cwd(), 'dist');
 const port = Number(process.env.PORT || 3000);
 const mime = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.pdf': 'application/pdf', '.json': 'application/json; charset=utf-8' };
+
+function readCompiledRuntimeMode(distRoot) {
+  let value;
+  try {
+    value = readFileSync(join(distRoot, '.freeflow-runtime-mode'), 'utf8').trim();
+  } catch {
+    throw new Error('FREEFLOW_CONSOLE_BUILD_MODE_MISSING');
+  }
+  if (!['protected-web', 'encompass-hosted'].includes(value)) {
+    throw new Error('FREEFLOW_CONSOLE_BUILD_MODE_INVALID');
+  }
+  return value;
+}
 
 function safePath(pathname) {
   const candidate = resolve(root, `.${normalize(pathname)}`);

@@ -82,6 +82,7 @@ jobs:
       - name: Build immutable commit image
         run: >-
           docker build
+          ${{ matrix.name == 'console' && '--build-arg FREEFLOW_CONSOLE_MODE=protected-web' || '' }}
           --file "${{ matrix.dockerfile }}"
           --tag "freeflow/${{ matrix.name }}:${{ github.sha }}"
           "${{ matrix.context }}"
@@ -114,7 +115,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build console image
-        run: docker build --file apps/underwriting-console/Dockerfile --tag freeflow/console:ci .
+        run: >-
+          docker build
+          --build-arg FREEFLOW_CONSOLE_MODE=protected-web
+          --file apps/underwriting-console/Dockerfile
+          --tag freeflow/console:ci
+          .
       - name: Load serve-production and require a healthy response
         # `node --check` parses one file and does not resolve ESM imports, so it
         # would still pass if portal-hosts.mjs were missing from the image.
